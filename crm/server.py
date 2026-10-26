@@ -16,14 +16,25 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import ai, callstats, coaches, comms, db, services as sv, tasks
+from . import ai, callstats, coaches, comms, db, money, schedule, services as sv, sources, tasks
 from .services import ApiError
 
 
 class Raw:
-    """Ответ файлом (запись звонка, фото из мессенджера)."""
-    def __init__(self, data: bytes, ctype: str):
-        self.data, self.ctype = data, ctype
+    """Ответ файлом (запись звонка, фото из мессенджера, выгрузка)."""
+    def __init__(self, data: bytes, ctype: str, filename: str | None = None):
+        self.data, self.ctype, self.filename = data, ctype, filename
+
+
+def csv_raw(rows: list[list], filename: str) -> "Raw":
+    """Таблица для Excel: точка с запятой, UTF-8 с BOM, чтобы кириллица открылась без танцев."""
+    import csv
+    import io
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    for r in rows:
+        w.writerow(r)
+    return Raw(("\ufeff" + buf.getvalue()).encode("utf-8"), "text/csv; charset=utf-8", filename)
 
 
 def cx(fn, *a, **kw):
@@ -123,6 +134,14 @@ def users_list(con, h, user, body, q):
 
 @route("PATCH", "/api/users/{uid}", role="admin")
 def users_patch(con, h, user, body, q, uid):
+    if "active" in body:
+        if int(uid) == user["id"] and not body["active"]:
+            raise ApiError("Нельзя отправить в архив самого себя")
+        con.execute("UPDATE users SET active=? WHERE id=?", (1 if body["active"] else 0, int(uid)))
+        if not body["active"]:
+            con.execute("DELETE FROM sessions WHERE user_id=?", (int(uid),))
+            con.execute("UPDATE groups SET coach_id=NULL WHERE coach_id=?", (int(uid),))
+        sv.audit(con, user, "user.active", f"{uid}:{body['active']}")
     if "sip_number" in body:
         sip = "".join(ch for ch in str(body["sip_number"] or "") if ch.isdigit())[:10]
         con.execute("UPDATE users SET sip_number=? WHERE id=?", (sip, int(uid)))
@@ -233,7 +252,7 @@ def workdesk(con, h, user, body, q):
     reds.sort(key=lambda x: x["ts"] or "", reverse=True)
     rest = [x for x in items if x["level"] != "red"]
     rest.sort(key=lambda x: x["ts"] or "", reverse=True)
-    return {"urgent": reds + rest, "board": board, **comms.counts(con)}
+    return {"urgent": reds + rest, "board": board, "birthdays": sv.birthdays(con), **comms.counts(con)}
 
 
 @route("GET", "/api/board/members", role="operator")
@@ -254,7 +273,7 @@ def move(con, h, user, body, q, sid):
 
 @route("GET", "/api/students", role="operator")
 def students(con, h, user, body, q):
-    return sv.search_students(con, q.get("q", ""))
+    return sv.search_students(con, q.get("q", ""), q.get("archived") == "1")
 
 
 @route("GET", "/api/check-phone", role="operator")
@@ -312,12 +331,12 @@ def vacation_del(con, h, user, body, q, vid):
 
 @route("GET", "/api/students/{sid}/quote", role="operator")
 def quote(con, h, user, body, q, sid):
-    return sv.quote_for(con, int(sid), q.get("month"), q.get("enrollment_id"))
+    return sv.quote_for(con, int(sid), q.get("month"), q.get("enrollment_id"), q.get("discount_id"))
 
 
 @route("POST", "/api/students/{sid}/invoice", role="operator")
 def invoice(con, h, user, body, q, sid):
-    return sv.create_invoice(con, int(sid), body.get("month"), user, body.get("enrollment_id"))
+    return sv.create_invoice(con, int(sid), body.get("month"), user, body.get("enrollment_id"), body.get("discount_id"))
 
 
 @route("POST", "/api/students/{sid}/enrollments", role="operator")
@@ -334,7 +353,194 @@ def enrollment_patch(con, h, user, body, q, eid):
 
 @route("POST", "/api/subscriptions/{sub}/pay", role="operator")
 def pay(con, h, user, body, q, sub):
-    sv.pay_subscription(con, int(sub), user)
+    sv.pay_subscription(con, int(sub), user, body.get("method") or "cash", body.get("amount"))
+    return {"ok": True}
+
+
+def mx(fn, *a, **kw):
+    try:
+        return fn(*a, **kw)
+    except ValueError as e:
+        raise ApiError(str(e))
+
+
+@route("POST", "/api/students/{sid}/payments", role="operator")
+def payment_add(con, h, user, body, q, sid):
+    sv.get_student_row(con, int(sid))
+    return {"id": mx(money.add_payment, con, int(sid), int(body.get("amount") or 0), body.get("method") or "", user,
+                     comment=body.get("comment") or "")}
+
+
+@route("POST", "/api/students/{sid}/single", role="operator")
+def single_sell(con, h, user, body, q, sid):
+    sv.get_student_row(con, int(sid))
+    return {"id": mx(money.sell_single, con, int(sid), user)}
+
+
+@route("POST", "/api/payments/{pid}/cancel", role="admin")
+def payment_cancel(con, h, user, body, q, pid):
+    mx(money.cancel_payment, con, int(pid), user)
+    return {"ok": True}
+
+
+@route("POST", "/api/payments/{pid}/confirm", role="admin")
+def payment_confirm(con, h, user, body, q, pid):
+    money.confirm_payment(con, int(pid), user)
+    return {"ok": True}
+
+
+@route("GET", "/api/payments", role="admin")
+def payments_list(con, h, user, body, q):
+    from datetime import date as _d
+    start = q.get("from") or _d.today().replace(day=1).isoformat()
+    end = q.get("to") or _d.today().isoformat()
+    r = money.registry(con, start, end, q.get("method", ""), q.get("unconfirmed") == "1")
+    r["debtors"] = money.debtors(con)
+    if q.get("csv") == "1":
+        rows = [["Дата", "Ученик", "Семья", "Группа", "Сумма", "Способ", "Комментарий", "Принял", "Подтверждён", "Отменён"]]
+        rows += [[x["paid_at"].replace("T", " "), x["student"], x["family"], x["group_name"] or "", x["amount"], x["method_label"],
+                  x["comment"], x["user_name"], "да" if x["confirmed"] else "нет", "да" if x["cancelled"] else ""] for x in r["rows"]]
+        return csv_raw(rows, f"oplaty-{start}-{end}.csv")
+    return r
+
+
+def sx(fn, *a, **kw):
+    try:
+        return fn(*a, **kw)
+    except schedule.SchedError as e:
+        raise ApiError(str(e))
+
+
+@route("GET", "/api/structure", role="operator")
+def structure(con, h, user, body, q):
+    return schedule.structure(con)
+
+
+@route("POST", "/api/branches", role="admin")
+def branch_add(con, h, user, body, q):
+    return {"id": sx(schedule.save_branch, con, body)}
+
+
+@route("PUT", "/api/branches/{bid}", role="admin")
+def branch_edit(con, h, user, body, q, bid):
+    return {"id": sx(schedule.save_branch, con, body, int(bid))}
+
+
+@route("POST", "/api/branches/{bid}/archive", role="admin")
+def branch_archive(con, h, user, body, q, bid):
+    sx(schedule.set_branch_active, con, int(bid), bool(body.get("active")))
+    return {"ok": True}
+
+
+@route("POST", "/api/groups", role="admin")
+def group_add(con, h, user, body, q):
+    gid = sx(schedule.save_group, con, body)
+    sv.audit(con, user, "group.create", str(gid))
+    return {"id": gid}
+
+
+@route("PUT", "/api/groups/{gid}", role="admin")
+def group_edit(con, h, user, body, q, gid):
+    sx(schedule.save_group, con, body, int(gid))
+    sv.audit(con, user, "group.edit", str(gid))
+    return {"ok": True}
+
+
+@route("POST", "/api/groups/{gid}/archive", role="admin")
+def group_archive(con, h, user, body, q, gid):
+    sx(schedule.set_group_active, con, int(gid), bool(body.get("active")))
+    return {"ok": True}
+
+
+@route("GET", "/api/groups/{gid}/export", role="operator")
+def group_export(con, h, user, body, q, gid):
+    name, rows = sx(schedule.group_export, con, int(gid))
+    return csv_raw(rows, name)
+
+
+@route("POST", "/api/shifts", role="admin")
+def shift_add(con, h, user, body, q):
+    return {"id": sx(schedule.save_shift, con, body)}
+
+
+@route("PUT", "/api/shifts/{shid}", role="admin")
+def shift_edit(con, h, user, body, q, shid):
+    return {"id": sx(schedule.save_shift, con, body, int(shid))}
+
+
+@route("DELETE", "/api/shifts/{shid}", role="admin")
+def shift_del(con, h, user, body, q, shid):
+    schedule.remove_shift(con, int(shid))
+    return {"ok": True}
+
+
+@route("GET", "/api/schedule/day")
+def schedule_day(con, h, user, body, q):
+    from datetime import date as _d
+    return schedule.day(con, _d.fromisoformat(q["date"]) if q.get("date") else _d.today())
+
+
+@route("GET", "/api/schedule/week")
+def schedule_week(con, h, user, body, q):
+    return schedule.week(con)
+
+
+@route("POST", "/api/students/{sid}/archive", role="operator")
+def student_archive(con, h, user, body, q, sid):
+    sv.get_student_row(con, int(sid))
+    schedule.set_student_archived(con, int(sid), bool(body.get("archived")), user)
+    return {"ok": True}
+
+
+@route("GET", "/api/archive", role="admin")
+def archive(con, h, user, body, q):
+    return schedule.archive_list(con)
+
+
+@route("GET", "/api/sources", role="operator")
+def sources_list(con, h, user, body, q):
+    return sources.listing(con, active_only=q.get("all") != "1")
+
+
+@route("POST", "/api/sources", role="admin")
+def sources_add(con, h, user, body, q):
+    if not (body.get("name") or "").strip():
+        raise ApiError("Укажите название источника")
+    return {"id": sources.ensure_source(con, body.get("channel") or "Другое", body["name"])}
+
+
+@route("POST", "/api/sources/import", role="admin")
+def sources_import(con, h, user, body, q):
+    return {"added": sources.import_text(con, body.get("text") or "")}
+
+
+@route("POST", "/api/sources/{sid}/archive", role="admin")
+def sources_archive(con, h, user, body, q, sid):
+    sources.set_active(con, int(sid), bool(body.get("active")))
+    return {"ok": True}
+
+
+@route("GET", "/api/reports/sources", role="admin")
+def sources_report(con, h, user, body, q):
+    from datetime import date as _d
+    start = q.get("from") or _d.today().replace(day=1).isoformat()
+    return sources.report(con, start, q.get("to") or _d.today().isoformat()) | {"from": start}
+
+
+@route("GET", "/api/discounts", role="operator")
+def discounts_list(con, h, user, body, q):
+    return money.discounts(con, active_only=q.get("all") != "1")
+
+
+@route("POST", "/api/discounts", role="admin")
+def discounts_save(con, h, user, body, q):
+    mx(money.save_discount, con, body)
+    return {"ok": True}
+
+
+@route("POST", "/api/discounts/{did}/archive", role="admin")
+def discounts_archive(con, h, user, body, q, did):
+    money.archive_discount(con, int(did), bool(body.get("active")))
     return {"ok": True}
 
 
@@ -409,6 +615,7 @@ def demo_reset(con, h, user, body, q):
     con.execute("BEGIN")
     comms.seed_demo(con)
     coaches.seed_demo_coaches(con)
+    money.init(con)
     ai.seed_demo(con)
     tasks.seed_demo(con)
     return {"ok": True}
@@ -647,6 +854,9 @@ class Handler(BaseHTTPRequestHandler):
         data, status = r.data, 200
         rng = re.match(r"bytes=(\d*)-(\d*)", self.headers.get("Range") or "")
         extra = [("Accept-Ranges", "bytes"), ("Cache-Control", "private, max-age=3600")]
+        if getattr(r, "filename", None):
+            from urllib.parse import quote as _q
+            extra.append(("Content-Disposition", f"attachment; filename*=UTF-8''{_q(r.filename)}"))
         if rng and (rng.group(1) or rng.group(2)):
             total = len(data)
             if rng.group(1):
@@ -757,6 +967,7 @@ def main():
     if os.environ.get("CRM_DEMO", "1") == "1":
         db.seed_demo(con)
         coaches.seed_demo_coaches(con)
+        money.init(con)
         if not comms.status(con)["telegram"] and not comms.status(con)["sipuni"]:
             comms.seed_demo(con)
         ai.seed_demo(con)

@@ -59,6 +59,15 @@ function wireTasks(root) {
   });
 }
 
+const yearsWord = (n) => n % 10 === 1 && n % 100 !== 11 ? "год" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "года" : "лет";
+
+function birthdaysBox(list) {
+  if (!list || !list.length) return "";
+  return `<section class="now bday-box" style="margin-bottom:14px"><div class="now-head"><h3>🎂 Дни рождения</h3></div>
+    <div class="chips">${list.map((b) => `<button class="chip" data-open="${b.id}">${b.when === "today" ? "Сегодня" : "Вчера"}: <b>${esc(b.name)}</b>, ${b.age} ${yearsWord(b.age)}${b.group ? ` · ${esc(b.group)}` : ""}</button>`).join("")}</div>
+    <div class="small muted" style="margin-top:6px">Поздравьте в мессенджере, а тренер поздравит на тренировке</div></section>`;
+}
+
 /* ---------- стол тренера ---------- */
 async function renderCoachToday(page) {
   const d = await api("GET", "/api/coach/today");
@@ -77,6 +86,7 @@ async function renderCoachToday(page) {
         <div class="today-name">${esc(g.name)}</div>
         <div class="small muted">${esc(g.branch)}${g.age ? `, ${esc(g.age)} лет` : ""}</div>
         <div class="today-facts"><span>🧒 ${g.kids} ${kidsWord(g.kids)}</span>${g.trials ? `<span>🎯 пробных: ${g.trials}</span>` : ""}</div>
+        ${(g.birthdays || []).map((b) => `<div class="bday">🎂 <b>${esc(b.name)}</b>: ${b.when === "today" ? "сегодня" : "вчера был"} день рождения, ${b.age} ${yearsWord(b.age)}. Поздравь всей командой!</div>`).join("")}
         <div class="bar"><i style="width:${all ? Math.round(100 * done / all) : 0}%"></i></div>
         <div class="small">${all ? (done >= all ? "Все отмечены 👍" : `Отмечено ${done} из ${all}. Нажми, чтобы отметить`) : "В группе пока нет детей"}</div>
       </button>`; }).join("")}</div>` : `<div class="panel center" style="padding:30px">Сегодня тренировок нет. Отдыхай 😎</div>`}

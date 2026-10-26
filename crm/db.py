@@ -168,6 +168,7 @@ DEFAULT_SETTINGS = {
     "late_fee_percent": "10",
     "renewal_deadline_day": "25",
     "trial_minutes": "60",
+    "price_single": "",
 }
 
 _local = threading.local()
@@ -255,7 +256,10 @@ def init_db(con: sqlite3.Connection):
             ALTER TABLE subscriptions_new RENAME TO subscriptions;
         """)
     sync_enrollments(con)
-    from . import ai, comms, tasks
+    from . import ai, comms, money, schedule, sources, tasks
+    schedule.init(con)
+    sources.init(con)
+    money.init(con)
     comms.init(con)
     ai.init(con)
     tasks.init(con)
@@ -288,7 +292,7 @@ def settings(con) -> dict:
     return {r["key"]: r["value"] for r in con.execute("SELECT key, value FROM settings")}
 
 
-DATA_TABLES = ["tasks", "auto_messages", "messages", "conversations", "calls", "lead_imports", "hook_log", "history", "makeups", "subscriptions", "vacations", "attendance", "students", "parents",
+DATA_TABLES = ["shifts", "payments", "tasks", "auto_messages", "messages", "conversations", "calls", "lead_imports", "hook_log", "history", "makeups", "subscriptions", "vacations", "attendance", "students", "parents",
                "families", "groups", "branches", "audit"]
 
 

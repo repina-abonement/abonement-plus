@@ -12,6 +12,7 @@ const monthLabel = (ym) => { const [y, m] = ym.split("-").map(Number); return `$
 const dShort = (iso) => { if (!iso) return ""; const [y, m, d] = iso.slice(0, 10).split("-"); return `${d}.${m}`; };
 const dtShort = (iso) => iso ? `${dShort(iso)} ${iso.slice(11, 16)}` : "";
 const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+const PAY_METHODS = { cash: "Наличные", card: "Картой", sbp: "СБП", online: "Онлайн-оплата", transfer: "Перевод", unknown: "Перенесено" };
 
 async function api(method, url, body) {
   const opt = { method, headers: {}, credentials: "same-origin" };
@@ -58,17 +59,19 @@ function renderLogin() {
 /* ---------- каркас ---------- */
 const VIEWS = [
   ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["members", "Ученики"], ["skips", "Пропуски"],
-  ["journal", "Журнал"], ["coaches", "Тренеры"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["settings", "Настройки"],
+  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["payments", "Оплаты"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
   sales: '<path d="M4 5h16v14H4z"/><path d="M9 5v14M15 5v14"/>',
   today: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  schedule: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4M8 14h3M13 14h3M8 17h3"/>',
   inbox: '<path d="M4 6h16v10H8l-4 3z"/><path d="M8 10h8M8 13h5"/>',
   members: '<circle cx="9" cy="8" r="3"/><path d="M3.5 19c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5"/><circle cx="17" cy="9" r="2.3"/><path d="M16 14.6c2.2.2 3.7 1.6 4.4 4.4"/>',
   skips: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4M10 14l4 4M14 14l-4 4"/>',
   journal: '<rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 9l1.5 1.5L13 8M9 14.5l1.5 1.5L13 13.5M15 9.5h1M15 15h1"/>',
   coaches: '<path d="M8 4h8v4a4 4 0 0 1-8 0z"/><path d="M8 5H5v1.5A3 3 0 0 0 8 9.5M16 5h3v1.5a3 3 0 0 1-3 3M12 12v4M9 20h6M10 16h4v4h-4z"/>',
   dashboard: '<path d="M4 19V10M10 19V5M16 19v-7M21 19H3"/>',
+  payments: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h3"/>',
   search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>',
   more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
@@ -78,7 +81,7 @@ const navIcon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 const isCoach = () => S.user && S.user.role === "coach";
 const COACH_VIEWS = ["today", "journal", "coaches", "settings"];
 const visibleViews = () => isCoach() ? VIEWS.filter(([k]) => COACH_VIEWS.includes(k)).map(([k, t]) => [k, k === "coaches" ? "Мои результаты" : t])
-  : VIEWS.filter(([k]) => k !== "today" && (S.user.role === "admin" || k !== "dashboard"));
+  : VIEWS.filter(([k]) => k !== "today" && (S.user.role === "admin" || !["dashboard", "payments"].includes(k)));
 const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
 function isCoachShort() { return "Результаты"; }
 const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></span>` : "";
@@ -119,6 +122,8 @@ async function render() {
   try {
     if (S.view === "sales") return await renderWorkdesk(page);
     if (S.view === "today") return await renderCoachToday(page);
+    if (S.view === "payments") return await renderPayments(page);
+    if (S.view === "schedule") return await renderSchedule(page);
     if (["members", "skips"].includes(S.view)) return await renderBoard(page, S.view);
     if (S.view === "dashboard") return await renderDashboard(page);
     if (S.view === "inbox") return await renderInbox(page);
@@ -253,6 +258,8 @@ async function renderDashboard(page) {
   $("#dash-month").onchange = (e) => { S.dashMonth = e.target.value; render(); };
   $("#dash-branch").onchange = (e) => { S.dashBranch = e.target.value; render(); };
   page.querySelectorAll("[data-seg]").forEach((b) => (b.onclick = () => { S.dashSeg = b.dataset.seg; render(); }));
+  page.insertAdjacentHTML("beforeend", `<div id="src-report"></div>`);
+  renderSourceReport($("#src-report"), S.dashMonth).catch(() => {});
 }
 
 /* ---------- воронки ---------- */
@@ -292,12 +299,15 @@ const ago = (iso) => {
 };
 
 async function renderWorkdesk(page) {
-  const [d, tasksHtml] = await Promise.all([api("GET", "/api/workdesk"), tasksSection()]);
+  const [d, tasksHtml, schedHtml] = await Promise.all([api("GET", "/api/workdesk"), tasksSection(), scheduleWidget().catch(() => "")]);
+  const wasOpen = page.querySelector(".sched-widget") ? page.querySelector(".sched-widget").open : null;
   const u = d.urgent, reds = u.filter((x) => x.level === "red").length;
   const scroll = page.querySelector(".board") ? page.querySelector(".board").scrollLeft : 0;
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Рабочий стол</h2>
       <span class="muted small">Обновляется сам каждые 20 секунд</span></div>
+    ${schedHtml}
+    ${birthdaysBox(d.birthdays)}
     ${tasksHtml}
     <section class="now ${u.length ? "" : "calm"}" style="margin-top:14px">
       <div class="now-head"><h3>${u.length ? (reds ? `Горит прямо сейчас: ${reds}` : "Ждут ответа") : "Всё обработано"}</h3>
@@ -319,6 +329,8 @@ async function renderWorkdesk(page) {
   if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
   wireBoard(page, "sales", d.board);
   wireTasks(page);
+  if (page.querySelector(".sched-widget")) { if (wasOpen === false) page.querySelector(".sched-widget").open = false; wireSchedule(page.querySelector(".sched-widget"), S.meta.today); }
+  page.querySelectorAll(".bday-box [data-open]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.open)));
   page.querySelectorAll("[data-u]").forEach((b) => (b.onclick = async () => {
     const x = u[+b.dataset.u];
     if (x.kind === "missed_call") { await dial(x.phone); if (x.student_id) openStudent(x.student_id); else openNewClient({ phone: x.phone }); }
@@ -394,6 +406,7 @@ async function openStudent(id) {
     </div>
     ${!isMember ? `<div class="field"><label>Группа для пробного</label><select id="f-group"><option value="">— не выбрана —</option>${groups.map((x) => `<option value="${x.id}" ${x.id === s.group_id ? "selected" : ""}>${esc(x.name)} · ${esc(x.age)} лет</option>`).join("")}</select></div>
     <div class="field"><label>Пробное занятие</label><input id="f-trial" type="datetime-local" value="${esc(s.trial_at || "")}"></div>` : ""}
+    <div class="field"><label>Откуда узнали</label>${sourceSelect("f-source", s.source_id, s.source)}</div>
   </div>
 
   <div class="section">
@@ -429,7 +442,8 @@ async function openStudent(id) {
   <div class="section">
     <h3>${isMember ? "Группы и абонементы" : "Абонемент"}</h3>
     ${isMember ? `
-      <div class="row"><div class="field"><label>Месяц абонемента</label><select id="q-month">${[d.cur_month, d.next_month].map((m) => `<option value="${m}" ${m === d.next_month ? "selected" : ""}>${monthLabel(m)}</option>`).join("")}</select></div></div>
+      <div class="row"><div class="field"><label>Месяц абонемента</label><select id="q-month">${[d.cur_month, d.next_month].map((m) => `<option value="${m}" ${m === d.next_month ? "selected" : ""}>${monthLabel(m)}</option>`).join("")}</select></div>
+        <div class="field"><label>Скидка</label><select id="q-disc"><option value="">Без скидки (или по правилу)</option>${(d.discounts || []).map((x) => `<option value="${x.id}">${esc(x.name)}, ${x.percent}%</option>`).join("")}</select></div></div>
       ${d.enrollments.length ? d.enrollments.map((e) => `
         <div class="enr">
           <div class="enr-head"><b>${esc(e.group_name)}</b><span class="muted small">${esc(e.group_age)} лет</span>
@@ -446,9 +460,24 @@ async function openStudent(id) {
       <button class="btn sm" id="en-add">+ Добавить группу</button>
       <div class="small muted" style="margin-top:6px">Дни можно снять, если ребёнок ходит в группу не во все её дни: цена посчитается только за выбранные.</div>`
     : `<div class="muted small">Абонемент выставляется, когда клиент переходит в этап «Купил абонемент».</div>`}
-    ${d.subscriptions.length ? `<ul class="history" style="margin-top:10px">${d.subscriptions.map((x) => `<li><b>${monthLabel(x.month)}</b>${x.group_name ? " · " + esc(x.group_name) : ""} · ${rub(x.price)} · ${x.lessons} зан.${x.credit_lessons ? ` · перерасчёт ${x.credit_lessons}` : ""}${x.late_fee ? ` · наценка ${rub(x.late_fee)}` : ""}
-      <span class="pill ${x.status === "paid" ? "green" : x.status === "cancelled" ? "" : "yellow"}">${{ paid: "оплачен", invoiced: "ждёт оплаты", cancelled: "отменён" }[x.status]}</span>
-      ${x.status === "invoiced" ? `<button class="btn sm" data-pay="${x.id}">Оплачен</button> <button class="btn sm danger" data-cancel="${x.id}">Отменить</button>` : ""}</li>`).join("")}</ul>` : ""}
+    ${d.subscriptions.length ? `<ul class="history" style="margin-top:10px">${d.subscriptions.map((x) => { const cov = (d.balance.covered || {})[x.id] || 0; return `<li><b>${x.kind === "single" ? "Разовое занятие" : monthLabel(x.month)}</b>${x.group_name ? " · " + esc(x.group_name) : ""} · ${rub(x.price)}${x.kind === "single" ? "" : ` · ${x.lessons} зан.`}${x.credit_lessons ? ` · перерасчёт ${x.credit_lessons}` : ""}${x.late_fee ? ` · наценка ${rub(x.late_fee)}` : ""}${x.discount_amount ? ` · скидка ${rub(x.discount_amount)}` : ""}
+      <span class="pill ${x.status === "paid" ? "green" : x.status === "cancelled" ? "" : "yellow"}">${x.status === "invoiced" && cov ? `оплачено ${rub(cov)} из ${rub(x.price)}` : { paid: "оплачен", invoiced: "ждёт оплаты", cancelled: "отменён" }[x.status]}</span>
+      ${x.status === "invoiced" ? `<button class="btn sm primary" data-pay="${x.id}" data-left="${x.price - cov}">Принять оплату</button> <button class="btn sm danger" data-cancel="${x.id}">Отменить</button>` : ""}</li>`; }).join("")}</ul>` : ""}
+  </div>
+
+  <div class="section">
+    <h3>Баланс и оплаты</h3>
+    <div class="chips">
+      <span class="pill ${d.balance.debt ? "red" : "green"}">${d.balance.debt ? `Долг ${rub(d.balance.debt)}` : "Долга нет"}</span>
+      ${d.balance.upcoming ? `<span class="pill yellow">К оплате за следующий месяц ${rub(d.balance.upcoming)}</span>` : ""}
+      ${d.balance.deposit ? `<span class="pill green">Депозит ${rub(d.balance.deposit)}</span>` : ""}
+    </div>
+    <div class="row" style="margin-top:10px"><button class="btn sm" id="pay-free" style="flex:0">+ Принять оплату</button><button class="btn sm" id="sell-single" style="flex:0">Разовое занятие</button></div>
+    <div id="pay-form"></div>
+    ${d.payments.length ? `<ul class="history pay-list ${d.payments.length > 4 ? "folded" : ""}" style="margin-top:10px">${d.payments.map((p) => `<li class="${p.cancelled ? "struck" : ""}"><b>${rub(p.amount)}</b> · ${esc(PAY_METHODS[p.method] || p.method)} · ${dtShort(p.paid_at)}${p.comment ? " · " + esc(p.comment) : ""}
+      <div class="when">${esc(p.user_name)}${p.cancelled ? ` · отменён (${esc(p.cancelled_by)})` : p.confirmed ? "" : " · ждёт подтверждения"}</div>
+      ${S.user.role === "admin" && !p.cancelled && p.method !== "unknown" ? `${p.confirmed ? "" : `<button class="btn sm" data-pconf="${p.id}">Подтвердить</button> `}<button class="btn sm danger" data-pcancel="${p.id}">Отменить платёж</button>` : ""}</li>`).join("")}</ul>
+      ${d.payments.length > 4 ? `<button class="linkish small" id="pay-more">Показать все платежи (${d.payments.length})</button>` : ""}` : ""}
   </div>
 
   <div class="section">
@@ -466,7 +495,8 @@ async function openStudent(id) {
     <h3>История</h3>
     <div class="row" style="margin-bottom:10px"><input id="note" placeholder="Комментарий, итог звонка…"><button class="btn sm" id="note-add" style="flex:0">Добавить</button></div>
     <ul class="history">${d.history.map((h) => `<li><div class="when">${dtShort(h.ts)} · ${esc(h.user_name)}</div>${esc(h.text)}</li>`).join("")}</ul>
-  </div>`;
+  </div>
+  <div style="margin-top:14px"><button class="btn sm ${s.archived ? "" : "danger"}" id="s-arch">${s.archived ? "Вернуть из архива" : "Перенести в архив"}</button></div>`;
   openDrawer(html);
   const body = $("#drawer-body");
   const reload = () => { openStudent(id); render(); };
@@ -491,6 +521,7 @@ async function openStudent(id) {
     try { await api("POST", `/api/students/${id}/enrollments`, { group_id: +$("#en-group").value, tariff: $("#en-tariff").value }); toast("Группа добавлена"); reload(); } catch (e) { fail(e); }
   };
   if ($("#f-trial")) $("#f-trial").onchange = (e) => patch({ trial_at: e.target.value });
+  $("#f-source").onchange = (e) => patch({ source_id: e.target.value ? +e.target.value : "" });
   body.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.open)));
   $("#add-sibling").onclick = () => openNewClient({ family_id: s.family_id, family_name: d.family.name });
   loadFamilyComms(s.family_id, d.parents, id);
@@ -505,22 +536,38 @@ async function openStudent(id) {
   const loadQuotes = () => body.querySelectorAll("[data-quote]").forEach(async (box) => {
     const eid = box.dataset.quote;
     try {
-      const q = await api("GET", `/api/students/${id}/quote?month=${$("#q-month").value}&enrollment_id=${eid}`);
+      const q = await api("GET", `/api/students/${id}/quote?month=${$("#q-month").value}&enrollment_id=${eid}${$("#q-disc").value ? "&discount_id=" + $("#q-disc").value : ""}`);
       box.classList.remove("muted");
       box.innerHTML = `<div class="total">${rub(q.total)}</div>
         <div class="small">${q.lessons_paid} занятий × ${rub(q.per_lesson)} = ${rub(q.base)}${q.days_label ? ` · только ${esc(q.days_label)}` : ""}${q.vacation_lessons ? ` · отпуск: −${q.vacation_lessons} зан.` : ""}</div>
         ${q.credit_lessons ? `<div class="small">Перерасчёт пропусков (${q.credit_absence_dates.map(dShort).join(", ")}): −${rub(q.credit)}</div>` : ""}
         ${q.late_fee ? `<div class="small">Наценка за оплату после ${S.meta.settings.renewal_deadline_day} числа: +${rub(q.late_fee)}</div>` : ""}
+        ${q.discount ? `<div class="small">Скидка «${esc(q.discount.name)}» ${q.discount.percent}%: −${rub(q.discount.amount)}${q.discount.auto ? ". Действует при оплате сегодня" : ""}</div>` : ""}
         <div class="small muted">Даты: ${q.dates.map(dShort).join(", ")}</div>`;
     } catch (e) { box.textContent = e.message; }
   });
-  if ($("#q-month")) { $("#q-month").onchange = loadQuotes; loadQuotes(); }
+  if ($("#q-month")) { $("#q-month").onchange = loadQuotes; $("#q-disc").onchange = loadQuotes; loadQuotes(); }
   body.querySelectorAll("[data-inv]").forEach((b) => (b.onclick = async () => {
-    try { const r = await api("POST", `/api/students/${id}/invoice`, { month: $("#q-month").value, enrollment_id: +b.dataset.inv }); toast(`Счёт выставлен: ${rub(r.quote.total)}`); reload(); } catch (e) { fail(e); }
+    try { const r = await api("POST", `/api/students/${id}/invoice`, { month: $("#q-month").value, enrollment_id: +b.dataset.inv, discount_id: $("#q-disc").value || null }); toast(`Счёт выставлен: ${rub(r.quote.total)}`); reload(); } catch (e) { fail(e); }
   }));
-  body.querySelectorAll("[data-pay]").forEach((b) => (b.onclick = async () => {
-    try { await api("POST", `/api/subscriptions/${b.dataset.pay}/pay`, {}); toast("Оплата отмечена"); reload(); } catch (e) { fail(e); }
-  }));
+  const payForm = (title, amount, onSubmit) => {
+    $("#pay-form").innerHTML = `<div class="quote" style="margin-top:10px"><b>${esc(title)}</b>
+      <div class="row" style="margin-top:8px"><div class="field"><label>Сумма, ₽</label><input id="pf-sum" type="number" min="1" value="${amount || ""}"></div>
+        <div class="field"><label>Способ</label><select id="pf-m">${Object.entries(PAY_METHODS).filter(([k]) => k !== "unknown").map(([k, t]) => `<option value="${k}">${t}</option>`).join("")}</select></div></div>
+      <div class="field"><label>Комментарий</label><input id="pf-c" placeholder="Необязательно"></div>
+      <button class="btn primary sm" id="pf-ok">Принять ${amount ? rub(amount) : "оплату"}</button></div>`;
+    $("#pf-sum").oninput = () => { $("#pf-ok").textContent = "Принять " + rub($("#pf-sum").value); };
+    $("#pf-ok").onclick = async () => { try { await onSubmit(+$("#pf-sum").value, $("#pf-m").value, $("#pf-c").value); toast("Оплата принята"); reload(); } catch (e) { fail(e); } };
+    $("#pay-form").scrollIntoView({ block: "center", behavior: "smooth" });
+  };
+  body.querySelectorAll("[data-pay]").forEach((b) => (b.onclick = () => payForm("Оплата счёта", +b.dataset.left,
+    (amount, method) => api("POST", `/api/subscriptions/${b.dataset.pay}/pay`, { amount, method }))));
+  if ($("#pay-more")) $("#pay-more").onclick = (e) => { body.querySelector(".pay-list").classList.remove("folded"); e.target.remove(); };
+  $("#pay-free").onclick = () => payForm("Оплата на депозит", d.balance.debt || 0,
+    (amount, method, comment) => api("POST", `/api/students/${id}/payments`, { amount, method, comment }));
+  $("#sell-single").onclick = async () => { try { await api("POST", `/api/students/${id}/single`, {}); toast("Разовое занятие выставлено"); reload(); } catch (e) { fail(e); } };
+  body.querySelectorAll("[data-pconf]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/payments/${b.dataset.pconf}/confirm`, {}); reload(); } catch (e) { fail(e); } }));
+  body.querySelectorAll("[data-pcancel]").forEach((b) => (b.onclick = async () => { if (!confirm("Отменить платёж? Он останется в реестре как отменённый.")) return; try { await api("POST", `/api/payments/${b.dataset.pcancel}/cancel`, {}); reload(); } catch (e) { fail(e); } }));
   body.querySelectorAll("[data-cancel]").forEach((b) => (b.onclick = async () => {
     if (!confirm("Отменить счёт? Пропуски из перерасчёта вернутся.")) return;
     try { await api("POST", `/api/subscriptions/${b.dataset.cancel}/cancel`, {}); reload(); } catch (e) { fail(e); }
@@ -532,6 +579,10 @@ async function openStudent(id) {
   body.querySelectorAll("[data-vdel]").forEach((b) => (b.onclick = async () => {
     try { await api("DELETE", `/api/vacations/${b.dataset.vdel}`); reload(); } catch (e) { fail(e); }
   }));
+  $("#s-arch").onclick = async () => {
+    if (!s.archived && !confirm("Перенести карточку в архив? Она пропадёт из воронок, вернуть можно в любой момент")) return;
+    try { await api("POST", `/api/students/${id}/archive`, { archived: !s.archived }); toast(s.archived ? "Карточка возвращена" : "Карточка в архиве"); closeDrawer(); render(); } catch (e) { fail(e); }
+  };
   $("#note-add").onclick = async () => {
     const t = $("#note").value.trim(); if (!t) return;
     try { await api("POST", `/api/students/${id}/note`, { text: t }); openStudent(id); } catch (e) { fail(e); }
@@ -572,7 +623,7 @@ function openNewClient(preset = {}) {
     <div class="field"><label>Группа</label><select name="group_id"><option value="">— позже —</option>${groups.map((x) => `<option value="${x.id}">${esc(x.name)} · ${esc(x.age)} лет</option>`).join("")}</select></div>
     <div class="row">
       <div class="field"><label>Тариф</label><select name="tariff"><option value="fixed">Негибкий</option><option value="flex">Гибкий</option></select></div>
-      <div class="field"><label>Источник</label><input name="source" placeholder="Сайт, промоутер…"></div>
+      <div class="field"><label>Откуда узнали</label>${sourceSelect("source_id", null)}</div>
     </div>
     <button class="btn primary">Создать</button>
   </form>`);
@@ -592,6 +643,7 @@ function openNewClient(preset = {}) {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(form));
     if (f.group_id) f.group_id = +f.group_id;
+    if (f.source_id) f.source_id = +f.source_id; else delete f.source_id;
     if (familyId) f.family_id = familyId;
     if (preset.conversation_id) f.conversation_id = preset.conversation_id;
     try { const r = await api("POST", "/api/students", f); toast("Клиент создан"); render(); openStudent(r.id); }
@@ -654,10 +706,11 @@ function makeupRow(r) {
 async function renderSearch(page) {
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Все клиенты</h2>
-      <input class="search" id="q" placeholder="Имя, фамилия или телефон" value="${esc(S.search)}"></div>
+      <input class="search" id="q" placeholder="Имя, фамилия или телефон" value="${esc(S.search)}">
+      <button class="btn sm ${S.searchArch ? "primary" : ""}" id="q-arch">Архив</button></div>
     <div id="results" class="list"></div>`;
   const load = async () => {
-    const rows = await api("GET", "/api/students?q=" + encodeURIComponent(S.search));
+    const rows = await api("GET", "/api/students?q=" + encodeURIComponent(S.search) + (S.searchArch ? "&archived=1" : ""));
     $("#results").innerHTML = rows.length ? rows.map((r) => `
       <div class="list-row click" data-who="${r.id}"><div class="grow"><b>${esc(r.name)}</b>
         <div class="small muted">${esc([r.parent, r.phone, r.group].filter(Boolean).join(" · "))}</div></div>
@@ -666,16 +719,17 @@ async function renderSearch(page) {
     $("#results").querySelectorAll("[data-who]").forEach((el) => (el.onclick = () => openStudent(+el.dataset.who)));
   };
   let t; $("#q").oninput = (e) => { S.search = e.target.value; clearTimeout(t); t = setTimeout(load, 250); };
+  $("#q-arch").onclick = () => { S.searchArch = !S.searchArch; render(); };
   load();
 }
 
 /* ---------- настройки ---------- */
 async function renderSettings(page) {
   const st = S.meta.settings || {}, admin = S.user.role === "admin";
-  const users = admin ? await api("GET", "/api/users") : [];
+  const users = admin ? (await api("GET", "/api/users")).filter((u) => u.active) : [];
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Настройки</h2><button class="btn sm" id="logout">Выйти</button></div>
-    <div style="max-width:560px">
+    <div style="max-width:780px">
     ${admin ? `
     <form class="section" id="set">
       <h3>Цены и правила</h3>
@@ -683,6 +737,7 @@ async function renderSettings(page) {
         <div class="field"><label>Негибкий, ₽ за занятие</label><input name="price_fixed" type="number" value="${esc(st.price_fixed)}"></div>
         <div class="field"><label>Гибкий, ₽ за занятие</label><input name="price_flex" type="number" value="${esc(st.price_flex)}"></div>
       </div>
+      <div class="row"><div class="field"><label>Разовое занятие, ₽</label><input name="price_single" type="number" value="${esc(st.price_single || "")}" placeholder="Уточнить цену"></div><div></div></div>
       <div class="row">
         <div class="field"><label>Продлить до числа</label><input name="renewal_deadline_day" type="number" min="1" max="28" value="${esc(st.renewal_deadline_day)}"></div>
         <div class="field"><label>Длительность пробного, мин</label><input name="trial_minutes" type="number" value="${esc(st.trial_minutes)}"></div>
@@ -697,7 +752,8 @@ async function renderSettings(page) {
       <h3>Сотрудники</h3>
       <div class="list" style="box-shadow:none;margin-bottom:10px">${users.map((u) => `<div class="list-row"><div class="grow">${esc(u.name)} <span class="muted small">${esc(u.login)}</span></div>
         ${u.role === "coach" ? "" : `<input data-sip="${u.id}" value="${esc(u.sip_number || "")}" placeholder="вн. номер" title="Внутренний номер Sipuni: на него придёт звонок из карточки" inputmode="numeric" style="flex:0 0 96px;padding:5px 8px">`}
-        <span class="pill">${{ admin: "админ", operator: "оператор", coach: "тренер" }[u.role]}</span></div>`).join("")}</div>
+        <span class="pill">${{ admin: "админ", operator: "оператор", coach: "тренер" }[u.role]}</span>
+        ${u.id !== S.user.id ? `<button class="icon-btn" data-uarch="${u.id}" title="В архив">🗄</button>` : ""}</div>`).join("")}</div>
       <div class="small muted" style="margin:-4px 0 10px">Внутренний номер Sipuni нужен, чтобы звонить клиенту прямо из карточки</div>
       <form id="nu">
         <div class="row"><div class="field"><label>Имя</label><input name="name" required></div><div class="field"><label>Логин</label><input name="login" required></div></div>
@@ -706,13 +762,10 @@ async function renderSettings(page) {
         <button class="btn sm">Добавить сотрудника</button>
       </form>
     </div>
-    <div class="section">
-      <h3>Группы: тренеры и места</h3>
-      <div class="small muted" style="margin-bottom:8px">Тренер видит и отмечает в журнале только свои группы. Число мест нужно для заполненности на дашборде.</div>
-      ${S.meta.groups.map((g) => `<div class="row" style="align-items:center;margin-bottom:8px"><div>${esc(g.name)}</div>
-        ${g.is_makeup ? "" : `<input type="number" min="0" max="200" data-cap="${g.id}" value="${g.capacity ?? 12}" title="Мест в группе" style="flex:0 0 74px">`}
-        <select data-gc="${g.id}" style="flex:0 0 190px"><option value="">— без тренера —</option>${users.filter((u) => u.role === "coach").map((u) => `<option value="${u.id}" ${u.id === g.coach_id ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select></div>`).join("")}
+    <div class="section" id="structure-settings"><h3>Филиалы, группы и смены</h3><div class="muted small">Загружаю…</div></div>
+    <div class="section" id="archive-settings"><h3>Архив</h3><div class="muted small">Загружаю…</div></div>
     </div>` : ""}
+    ${admin ? `<div class="section" id="source-settings"><h3>Рекламные каналы и источники</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="task-settings"><h3>Задачи и автосообщения по пробным</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="comms-settings"><h3>Связь с клиентами</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin && S.meta.demo ? `<div class="section"><h3>Тестовые данные</h3>
@@ -737,6 +790,13 @@ async function renderSettings(page) {
   };
   if ($("#comms-settings")) renderCommsSettings($("#comms-settings"), users).catch(fail);
   if ($("#task-settings")) renderTaskSettings($("#task-settings"), users).catch(fail);
+  if ($("#source-settings")) renderSourceSettings($("#source-settings")).catch(fail);
+  if ($("#structure-settings")) renderStructure($("#structure-settings"), users).catch(fail);
+  if ($("#archive-settings")) renderArchive($("#archive-settings")).catch(fail);
+  page.querySelectorAll("[data-uarch]").forEach((b) => (b.onclick = async () => {
+    if (!confirm("Перенести сотрудника в архив? Он больше не сможет войти, вернуть можно в Архиве")) return;
+    try { await api("PATCH", `/api/users/${b.dataset.uarch}`, { active: false }); toast("Сотрудник в архиве"); render(); } catch (e) { fail(e); }
+  }));
   page.querySelectorAll("[data-sip]").forEach((inp) => (inp.onchange = async () => {
     try { await api("PATCH", `/api/users/${inp.dataset.sip}`, { sip_number: inp.value }); toast("Внутренний номер сохранён"); S.meta = await api("GET", "/api/meta"); S.user = S.meta.user; } catch (err) { fail(err); }
   }));

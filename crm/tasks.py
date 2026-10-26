@@ -185,7 +185,7 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     trial_min = int((con.execute("SELECT value FROM settings WHERE key='trial_minutes'").fetchone() or ["60"])[0])
     made = sent = 0
     rows = [dict(r) for r in con.execute(
-        """SELECT * FROM students WHERE funnel='sales' AND trial_at IS NOT NULL
+        """SELECT * FROM students WHERE funnel='sales' AND trial_at IS NOT NULL AND archived=0
            AND stage NOT IN ('bought','refused') AND trial_at >= ?""", (_iso(now - timedelta(days=3)),))]
     for s in rows:
         t = datetime.fromisoformat(s["trial_at"])

@@ -182,7 +182,13 @@ def coach_today(con, coach_id: int, today=None) -> dict:
             kids = [r for r in j["rows"] if r.get("status") != "trial"] if not g["is_makeup"] else j["rows"]
             trials = [r for r in j["rows"] if r.get("status") == "trial"]
             marked = sum(1 for r in kids if r.get("status") in ("present", "absent", "vacation", "done", "missed"))
-            out_today.append({"id": g["id"], "name": g["name"], "time": g["time"], "branch": g["branch"], "age": g["age"],
+            bdays = []
+            for r in kids:
+                b = con.execute("SELECT birth FROM students WHERE id=?", (r["id"],)).fetchone()
+                info = sv.birthday_info(b[0], today) if b and b[0] else None
+                if info:
+                    bdays.append({"name": r["name"], **info})
+            out_today.append({"birthdays": bdays, "id": g["id"], "name": g["name"], "time": g["time"], "branch": g["branch"], "age": g["age"],
                               "is_makeup": g["is_makeup"], "kids": len(kids), "marked": marked, "trials": len(trials),
                               "trials_marked": sum(1 for r in trials if r.get("trial_came") is not None)})
         for back in range(1, 8):

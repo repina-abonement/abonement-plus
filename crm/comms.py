@@ -799,7 +799,9 @@ def lead_hook(con, data: dict, create_student) -> dict:
             _lead_note(con, sid, "Повторная заявка с сайта", details)
     if not sid:
         child = (data.get("child") or "").strip() or "Ребёнок (заявка с сайта)"
-        body = {"name": child, "source": "Сайт", "funnel": "sales"}
+        site = con.execute("""SELECT s.id FROM ad_sources s JOIN ad_channels c ON c.id=s.channel_id
+                              WHERE c.name='Сайт' AND s.active=1 ORDER BY s.id LIMIT 1""").fetchone()
+        body = {"name": child, "source": "Сайт", "funnel": "sales", "source_id": site[0] if site else None}
         if fam:
             body["family_id"] = fam
         else:

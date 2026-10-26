@@ -231,7 +231,7 @@ def _pick_enrollment(con, sid: int, enrollment_id) -> dict:
     return ens[0]
 
 
-def quote_for(con, sid: int, ym: str, enrollment_id=None) -> dict:
+def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None) -> dict:
     get_student_row(con, sid)
     e = _pick_enrollment(con, sid, enrollment_id)
     st = settings(con)
@@ -245,6 +245,16 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None) -> dict:
                                       percent=float(st["late_fee_percent"]), today=today(), target_month=ym,
                                       deadline_day=int(st["renewal_deadline_day"]))
     q["late_fee"] = fee
+    from . import money
+    disc = None
+    if discount_id:
+        r = con.execute("SELECT * FROM discounts WHERE id=? AND active=1", (int(discount_id),)).fetchone()
+        disc = dict(r) if r else None
+    else:
+        disc = money.auto_discount(con, sid)
+    total, off = money.apply_discount(total, disc)
+    q["discount"] = {"id": disc["id"], "name": disc["name"], "percent": disc["percent"], "amount": off,
+                     "auto": disc["rule"] != "manual"} if disc else None
     q["total"] = total
     q["tariff"] = e["tariff"]
     q["group"] = e["group_name"]
@@ -253,36 +263,38 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None) -> dict:
     return q
 
 
-def create_invoice(con, sid: int, ym: str, user, enrollment_id=None) -> dict:
+def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id=None) -> dict:
     e = _pick_enrollment(con, sid, enrollment_id)
     existing = con.execute("SELECT 1 FROM subscriptions WHERE enrollment_id=? AND month=? AND status != 'cancelled'",
                            (e["id"], ym)).fetchone()
     if existing:
         raise ApiError(f"На {logic.month_label(ym)} в группу {e['group_name']} уже есть абонемент")
-    q = quote_for(con, sid, ym, e["id"])
+    q = quote_for(con, sid, ym, e["id"], discount_id)
     con.execute("DELETE FROM subscriptions WHERE enrollment_id=? AND month=? AND status='cancelled'", (e["id"], ym))
+    d = q.get("discount") or {}
     sub_id = con.execute(
         """INSERT INTO subscriptions(student_id, enrollment_id, month, tariff, lessons, per_lesson, credit_lessons,
-           late_fee, price, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,'invoiced',?)""",
+           late_fee, price, status, created_at, discount_name, discount_amount) VALUES (?,?,?,?,?,?,?,?,?,'invoiced',?,?,?)""",
         (sid, e["id"], ym, q["tariff"], q["lessons_paid"], q["per_lesson"], q["credit_lessons"], q["late_fee"],
-         q["total"], now_iso())).lastrowid
+         q["total"], now_iso(), d.get("name", ""), d.get("amount", 0))).lastrowid
+    from . import money
+    money.reconcile(con, sid)  # депозит сам закрывает новый счёт
     for aid in q["credit_absence_ids"]:
         con.execute("UPDATE attendance SET resolved='credit', resolved_month=? WHERE id=?", (ym, aid))
     extra = f", перерасчёт {q['credit_lessons']} пропуск(а) −{q['credit']} ₽" if q["credit_lessons"] else ""
+    if d:
+        extra += f", скидка «{d['name']}» −{d['amount']} ₽"
     log(con, sid, f"Выставлен счёт на {q['month_label']}, {e['group_name']}: {q['total']} ₽ ({q['lessons_paid']} занятий{extra})",
         user, "payment")
     return {"id": sub_id, "quote": q}
 
 
-def pay_subscription(con, sub_id: int, user) -> None:
-    sub = con.execute("SELECT * FROM subscriptions WHERE id = ?", (sub_id,)).fetchone()
-    if not sub:
-        raise ApiError("Абонемент не найден", 404)
-    if sub["status"] != "invoiced":
-        raise ApiError("Этот счёт уже оплачен или отменён")
-    con.execute("UPDATE subscriptions SET status='paid', paid_at=? WHERE id=?", (now_iso(), sub_id))
-    log(con, sub["student_id"], f"Оплачен абонемент на {logic.month_label(sub['month'])}: {sub['price']} ₽",
-        user, "payment")
+def pay_subscription(con, sub_id: int, user, method: str = "cash", amount=None) -> None:
+    from . import money
+    try:
+        money.pay_subscription(con, sub_id, method, user, int(amount) if amount else None)
+    except ValueError as e:
+        raise ApiError(str(e))
 
 
 def cancel_subscription(con, sub_id: int, user) -> None:
@@ -294,8 +306,10 @@ def cancel_subscription(con, sub_id: int, user) -> None:
                    WHERE student_id=? AND resolved='credit' AND resolved_month=?
                      AND (? IS NULL OR group_id = (SELECT group_id FROM enrollments WHERE id = ?))""",
                 (sub["student_id"], sub["month"], sub["enrollment_id"], sub["enrollment_id"]))
-    log(con, sub["student_id"], f"Счёт на {logic.month_label(sub['month'])} отменён, пропуски возвращены",
-        user, "payment")
+    from . import money
+    money.reconcile(con, sub["student_id"])
+    log(con, sub["student_id"], f"Счёт на {logic.month_label(sub['month'])} отменён, пропуски возвращены"
+        + (" (оплата осталась на депозите)" if sub["status"] == "paid" else ""), user, "payment")
 
 
 # ---------- карточки ----------
@@ -340,7 +354,7 @@ def board(con, funnel: str) -> dict:
         from .comms import missed_by_family
         missed = missed_by_family(con)
         cols = {k: {"key": k, "title": t, "cards": [], "auto": k in AUTO_SALES} for k, t in SALES_STAGES}
-        for s in _rows(con.execute("SELECT * FROM students WHERE funnel='sales' ORDER BY stage_changed_at DESC")):
+        for s in _rows(con.execute("SELECT * FROM students WHERE funnel='sales' AND archived=0 ORDER BY stage_changed_at DESC")):
             stage, color, mins = effective_sales_stage(s, st, ref)
             card = card_summary(con, s, st)
             card["color"] = color
@@ -377,7 +391,7 @@ def board(con, funnel: str) -> dict:
             {"key": "left", "title": "Ушёл", "cards": []},
         ]
         by = {c["key"]: c for c in cols}
-        for s in _rows(con.execute("SELECT * FROM students WHERE funnel='members' ORDER BY name")):
+        for s in _rows(con.execute("SELECT * FROM students WHERE funnel='members' AND archived=0 ORDER BY name")):
             card = card_summary(con, s, st)
             ens = [e["id"] for e in enrollments_of(con, s["id"])]
             st_by = {(r["enrollment_id"], r["month"]): r["status"] for r in con.execute(
@@ -414,7 +428,7 @@ def board(con, funnel: str) -> dict:
             {"key": "refused", "title": "Отказ от отработки", "cards": []},
         ]
         by = {c["key"]: c for c in cols}
-        for s in _rows(con.execute("SELECT * FROM students WHERE funnel='members' AND stage != 'left' ORDER BY name")):
+        for s in _rows(con.execute("SELECT * FROM students WHERE funnel='members' AND stage != 'left' AND archived=0 ORDER BY name")):
             c = absence_counters(con, s["id"])
             if not c["available"] and not c["booked"]:
                 continue
@@ -489,9 +503,19 @@ def student_detail(con, sid: int) -> dict:
         "student": s, "family": fam, "parents": parents, "siblings": siblings, "group": grp,
         "subscriptions": subs, "vacations": vacs, "enrollments": enrollments_of(con, sid), "makeups": makeups, "history": hist,
         "counters": absence_counters(con, sid) if s["funnel"] == "members" else None,
+        "balance": _balance_out(con, sid),
+        "payments": _rows(con.execute("SELECT * FROM payments WHERE student_id=? ORDER BY paid_at DESC, id DESC LIMIT 30", (sid,))),
+        "discounts": _rows(con.execute("SELECT id, name, percent, rule FROM discounts WHERE active=1 AND rule='manual' ORDER BY name")),
         "stage_label": stage_label,
         "next_month": logic.shift_month(cur, 1), "cur_month": cur,
     }
+
+
+def _balance_out(con, sid: int) -> dict:
+    from . import money
+    b = money.balance(con, sid)
+    b["covered"] = {str(k): v for k, v in b["covered"].items()}
+    return b
 
 
 def find_families_by_phone(con, phone: str) -> list[dict]:
@@ -528,11 +552,14 @@ def create_student(con, data: dict, user) -> int:
     funnel = "members" if data.get("funnel") == "members" else "sales"
     tariff = "flex" if data.get("tariff") == "flex" else "fixed"
     stage = "active" if funnel == "members" else "lead"
+    from . import sources as _src
+    source_id = int(data["source_id"]) if data.get("source_id") else None
+    source_txt = _src.label(con, source_id) if source_id else (data.get("source") or "")
     sid = con.execute(
         """INSERT INTO students(family_id, name, birth, group_id, tariff, funnel, stage, stage_changed_at,
-           source, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+           source, source_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
         (family_id, name, data.get("birth") or "", data.get("group_id") or None, tariff, funnel, stage,
-         now_iso(), data.get("source") or "", now_iso())).lastrowid
+         now_iso(), source_txt, source_id, now_iso())).lastrowid
     if funnel == "members" and data.get("group_id"):
         con.execute("INSERT INTO enrollments(student_id, group_id, weekdays, tariff, created_at) VALUES (?,?,?,?,?)",
                     (sid, data["group_id"], "", tariff, now_iso()))
@@ -541,7 +568,7 @@ def create_student(con, data: dict, user) -> int:
     return sid
 
 
-UPDATABLE = {"name", "birth", "group_id", "tariff", "trial_at", "source", "refusal_reason"}
+UPDATABLE = {"name", "birth", "group_id", "tariff", "trial_at", "source", "source_id", "refusal_reason"}
 
 
 def update_student(con, sid: int, data: dict, user) -> None:
@@ -562,6 +589,9 @@ def update_student(con, sid: int, data: dict, user) -> None:
         if s.get(k) != v:
             con.execute(f"UPDATE students SET {k} = ? WHERE id = ?", (v, sid))
             changes.append(k)
+    if "source_id" in changes:
+        from . import sources as _src
+        con.execute("UPDATE students SET source=? WHERE id=?", (_src.label(con, data.get("source_id")), sid))
     if "trial_at" in changes:
         con.execute("UPDATE students SET contacted_after_trial = 0, trial_came = NULL WHERE id=?", (sid,))
         if data.get("trial_at"):
@@ -569,7 +599,7 @@ def update_student(con, sid: int, data: dict, user) -> None:
         if data.get("trial_at") and s["stage"] in ("lead", "no_answer"):
             con.execute("UPDATE students SET stage='trial_booked', stage_changed_at=? WHERE id=?", (now_iso(), sid))
     names = {"name": "имя", "birth": "дата рождения", "group_id": "группа", "tariff": "тариф",
-             "trial_at": "пробное", "source": "источник", "refusal_reason": "причина отказа"}
+             "trial_at": "пробное", "source": "источник", "source_id": "источник", "refusal_reason": "причина отказа"}
     if changes:
         log(con, sid, "Изменено: " + ", ".join(names[c] for c in changes), user, "system")
 
@@ -609,7 +639,7 @@ def journal(con, group_id: int, day: str) -> dict:
             rows.append(dict(m))
     else:
         for s in con.execute("""SELECT s.id, s.name, e.weekdays FROM enrollments e JOIN students s ON s.id = e.student_id
-                                WHERE e.group_id=? AND e.active=1 AND s.funnel='members' AND s.stage != 'left'
+                                WHERE e.group_id=? AND e.active=1 AND s.funnel='members' AND s.stage != 'left' AND s.archived=0
                                 ORDER BY s.name""", (group_id,)).fetchall():
             if s["weekdays"] and d.weekday() not in logic.parse_weekdays(s["weekdays"]):
                 continue
@@ -619,7 +649,7 @@ def journal(con, group_id: int, day: str) -> dict:
             rows.append({"id": s["id"], "name": s["name"], "status": "vacation" if vac else (a["status"] if a else None),
                          "resolved": a["resolved"] if a else None})
         # пробные на этот день
-        for s in con.execute("""SELECT id, name, trial_at FROM students WHERE funnel='sales' AND group_id=?
+        for s in con.execute("""SELECT id, name, trial_at FROM students WHERE funnel='sales' AND group_id=? AND archived=0
                                 AND substr(trial_at,1,10)=?""", (group_id, day)):
             came = con.execute("SELECT trial_came FROM students WHERE id=?", (s["id"],)).fetchone()[0]
             rows.append({"id": s["id"], "name": s["name"], "status": "trial", "trial_at": s["trial_at"], "trial_came": came})
@@ -671,26 +701,27 @@ def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -
 
 def meta(con) -> dict:
     return {
-        "branches": _rows(con.execute("SELECT * FROM branches ORDER BY id")),
+        "branches": _rows(con.execute("SELECT * FROM branches WHERE active=1 ORDER BY id")),
         "groups": _rows(con.execute("""SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id
                                       WHERE g.active=1 ORDER BY g.is_makeup, b.id, g.name""")),
         "sales_stages": [{"key": k, "title": t, "auto": k in AUTO_SALES} for k, t in SALES_STAGES],
+        "ad": __import__("crm.sources", fromlist=["listing"]).listing(con),
         "settings": settings(con),
         "today": today().isoformat(),
     }
 
 
-def search_students(con, q: str) -> list[dict]:
+def search_students(con, q: str, archived: bool = False) -> list[dict]:
     st = settings(con)
     like = f"%{q.strip().lower()}%"
     p = normalize_phone(q)
     rows = _rows(con.execute(
         """SELECT DISTINCT s.* FROM students s JOIN families f ON f.id=s.family_id
            LEFT JOIN parents p ON p.family_id=f.id
-           WHERE ulower(s.name) LIKE ? OR ulower(f.name) LIKE ? OR ulower(p.name) LIKE ?
-              OR (? != '' AND p.phone_norm LIKE ?)
-           ORDER BY s.name LIMIT 100""", (like, like, like, p, f"%{p}%")))
-    return [card_summary(con, s, st) | {"funnel": s["funnel"]} for s in rows]
+           WHERE (ulower(s.name) LIKE ? OR ulower(f.name) LIKE ? OR ulower(p.name) LIKE ?
+              OR (? != '' AND p.phone_norm LIKE ?)) AND s.archived = ?
+           ORDER BY s.name LIMIT 100""", (like, like, like, p, f"%{p}%", 1 if archived else 0)))
+    return [card_summary(con, s, st) | {"funnel": s["funnel"], "archived": s.get("archived", 0)} for s in rows]
 
 
 # ---------- дашборд ----------
@@ -821,3 +852,39 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None) -> dict:
         "segments": {"count": {k: v[0] for k, v in seg.items()}, "revenue": {k: v[1] for k, v in seg.items()}},
         "makeups": {"can_make_up": can_make_up, "at_risk_rub": at_risk},
     }
+
+
+# ---------- дни рождения ----------
+
+def _bday_this_year(birth: str, year: int) -> date | None:
+    try:
+        b = date.fromisoformat(birth[:10])
+    except (TypeError, ValueError):
+        return None
+    try:
+        return b.replace(year=year)
+    except ValueError:  # 29 февраля в невисокосный год — празднуем 28-го
+        return date(year, 2, 28)
+
+
+def birthday_info(birth: str, ref: date) -> dict | None:
+    """Сегодня или вчера был день рождения. Возвращает сколько исполнилось."""
+    for delta, when in ((0, "today"), (1, "yesterday")):
+        d = ref - timedelta(days=delta)
+        bd = _bday_this_year(birth, d.year)
+        if bd == d:
+            return {"when": when, "age": d.year - int(birth[:4])}
+    return None
+
+
+def birthdays(con, ref: date | None = None, days_ahead: int = 0) -> list[dict]:
+    """Ученики, у кого день рождения сегодня (и вчера), для рабочего стола админа."""
+    ref = ref or today()
+    out = []
+    for s in con.execute("""SELECT s.id, s.name, s.birth, s.group_id, s.family_id, g.name AS group_name FROM students s
+                            LEFT JOIN groups g ON g.id=s.group_id
+                            WHERE s.funnel='members' AND s.stage != 'left' AND s.archived=0 AND s.birth != ''"""):
+        info = birthday_info(s["birth"], ref)
+        if info:
+            out.append({"id": s["id"], "name": s["name"], "group": s["group_name"] or "", **info})
+    return sorted(out, key=lambda x: (x["when"] != "today", x["name"]))
