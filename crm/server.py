@@ -522,7 +522,7 @@ def handle_hook(h, method: str, source: str, token: str, url) -> None:
     if source not in HOOKS or not secrets.compare_digest(token, comms.get(con, "hook_token") or "-"):
         return h._send(403, {"error": "forbidden"})
     payload = (params | body) if isinstance(body, dict) else {"items": body, **params}
-    result = {"ok": True}
+    result = {"ok": True, "success": True}  # Sipuni требует поле success
     con.execute("BEGIN IMMEDIATE")
     try:
         if source == "sipuni":
@@ -550,7 +550,8 @@ def handle_hook(h, method: str, source: str, token: str, url) -> None:
         except Exception:  # noqa: BLE001
             pass
         if source == "lead":
-            return h._send(400, {"ok": False, "error": str(e)})
+            return h._send(400, {"ok": False, "success": False, "error": str(e)})
+        # остальным сервисам отвечаем «принято»: ошибку видно в журнале событий, а Sipuni не отключит отправку
     return h._send(200, result)
 
 

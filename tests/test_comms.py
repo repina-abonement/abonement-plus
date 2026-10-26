@@ -111,10 +111,21 @@ def main():
     call("GET", sip_url + "?event=3&call_id=C1&src_num=79123456789&src_type=1&dst_num=201&dst_type=2&timestamp=1793000010")
     call("GET", sip_url + "?event=2&call_id=C1&src_num=79123456789&src_type=1&dst_num=201&dst_type=2&status=ANSWER"
          "&timestamp=1793000070&call_record_link=https%3A%2F%2Fsipuni.com%2Frec%2F1")
+    r = call("GET", sip_url + "?event=1&call_id=C9&src_num=79001112233&src_type=1&dst_num=84999999999&dst_type=1&timestamp=1793000000")
+    check(r.get("success") is True, "Sipuni получает ответ {\"success\": true}")
+    call("GET", sip_url + "?event=1&is_inner_call=1&call_id=C9&src_num=79001112233&src_type=1&dst_num=077804202"
+         "&short_dst_num=202&dst_type=2&timestamp=1793000002")
+    call("GET", sip_url + "?event=3&call_id=C9&src_num=79001112233&src_type=1&dst_num=077804202&short_dst_num=202"
+         "&dst_type=2&timestamp=1793000005")
+    call("GET", sip_url + "?event=2&call_id=C9&src_num=79001112233&src_type=1&dst_num=077804202&short_dst_num=202"
+         "&dst_type=2&call_start_timestamp=1793000000&call_answer_timestamp=1793000005&timestamp=1793000035&status=ANSWER")
     c = call("GET", "/api/calls")
     c1 = [x for x in c if x["external_id"] == "C1"][0]
     check(c1["status"] == "answered" and c1["talk"] == 60 and c1["has_record"], "Входящий звонок: принят, 60 сек, есть запись")
     check(c1["family_id"] is not None, "Звонок сам привязался к семье по телефону")
+    c9 = [x for x in c if x["external_id"] == "C9"][0]
+    check(c9["operator"] == "202" and c9["talk"] == 30 and c9["phone"] == "79001112233",
+          "Звонок по примеру из PDF Sipuni: ответил 202, разговор 30 сек")
     audio = call("GET", f"/api/calls/{c1['id']}/record", raw=True, headers={"Range": "bytes=0-9"}, expect=206)
     check(audio == b"0123456789", "Запись звонка отдаётся кусками (для iPhone)")
     call("POST", sip_url, {"event": "2", "call_id": "C2", "src_num": "79990001122", "src_type": "1",

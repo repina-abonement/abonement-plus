@@ -709,7 +709,9 @@ def sipuni_hook(con, p: dict) -> None:
     call_id = str(p.get("call_id") or p.get("callId") or p.get("id") or "")
     if not call_id or ev not in ("1", "2", "3"):
         return
-    src, dst = str(p.get("src_num") or ""), str(p.get("dst_num") or "")
+    # внутренние номера приходят логином «кабинет+короткий» (077804201), короткий номер — в short_*
+    src = str(p.get("short_src_num") or p.get("src_num") or "").strip()
+    dst = str(p.get("short_dst_num") or p.get("dst_num") or "").strip()
     st, dt = str(p.get("src_type") or ""), str(p.get("dst_type") or "")
     if st == "2" and dt == "2":
         return  # звонок между сотрудниками
