@@ -417,11 +417,28 @@ def tg_hook(con, upd: dict, headers) -> None:
         return  # в бизнес-аккаунте бот сам ничего не отвечает
     try:
         if text.startswith("/start"):
-            _tg_send_raw(con, cid, chat["id"], get(con, "bot_greeting") or DEFAULT_GREETING, keyboard="contact")
+            _tg_send_raw(con, cid, chat["id"], greeting(con), keyboard="contact")
         elif kind == "contact" and phone:
+            consent_from_bot(con, cid)
             _tg_send_raw(con, cid, chat["id"], "Спасибо, номер получили", keyboard="remove")
     except CommsError as e:
         log_hook(con, "telegram", {"reply_failed": str(e)}, str(e))
+
+
+def greeting(con) -> str:
+    g = get(con, "bot_greeting") or DEFAULT_GREETING
+    url = get(con, "public_url")
+    if url and "/legal/" not in g:
+        g += f"\n\nНажимая «Поделиться номером», вы соглашаетесь на обработку персональных данных: {url}/legal/consent"
+    return g
+
+
+def consent_from_bot(con, cid: int):
+    """Родитель сам поделился номером после приветствия со ссылкой на согласие — фиксируем согласие в семье."""
+    r = con.execute("SELECT family_id FROM conversations WHERE id=?", (cid,)).fetchone()
+    if r and r[0] and get(con, "public_url"):
+        con.execute("UPDATE families SET consent_pd_at=COALESCE(consent_pd_at, ?), consent_pd_how=CASE WHEN consent_pd_at IS NULL THEN 'bot' ELSE consent_pd_how END WHERE id=?",
+                    (ts_now()[:16], r[0]))
 
 
 def _tg_send_raw(con, cid, chat_id, text, *, biz=None, keyboard=None) -> str:
@@ -497,7 +514,7 @@ def max_hook(con, upd: dict, headers) -> None:
         cid = upsert_conversation(con, "max", upd.get("chat_id"), title=_max_user_name(u),
                                   username=u.get("username") or "", meta={"user_id": u.get("user_id")})
         try:
-            _max_send_raw(con, cid, upd.get("chat_id"), get(con, "bot_greeting") or DEFAULT_GREETING, contact_button=True)
+            _max_send_raw(con, cid, upd.get("chat_id"), greeting(con), contact_button=True)
         except CommsError as e:
             log_hook(con, "max", {"reply_failed": str(e)}, str(e))
         return
@@ -531,6 +548,7 @@ def max_hook(con, upd: dict, headers) -> None:
     new = add_message(con, cid, "in", text, kind=kind, media=media, external_id=body.get("mid"),
                       ts=_ts_from_unix(msg.get("timestamp")))
     if new and kind == "contact" and phone:
+        consent_from_bot(con, cid)
         try:
             _max_send_raw(con, cid, chat_id, "Спасибо, номер получили")
         except CommsError:

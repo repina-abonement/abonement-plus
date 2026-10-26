@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import ai, callstats, coaches, comms, db, money, schedule, services as sv, sources, tasks
+from . import ai, callstats, coaches, comms, db, legal, money, schedule, services as sv, sources, tasks
 from .services import ApiError
 
 
@@ -732,7 +732,27 @@ def call_record(con, h, user, body, q, cid):
 
 @route("GET", "/api/integrations", role="admin")
 def integrations_get(con, h, user, body, q):
+    comms.put(con, "public_url", base_url(h))
     return comms.admin_view(con, base_url(h))
+
+
+@route("GET", "/api/legal", role="admin")
+def legal_get(con, h, user, body, q):
+    comms.put(con, "public_url", base_url(h))
+    return legal.admin_view(con, base_url(h))
+
+
+@route("PUT", "/api/legal", role="admin")
+def legal_put(con, h, user, body, q):
+    legal.save(con, body)
+    sv.audit(con, user, "legal.update", ",".join(sorted(body)))
+    return legal.admin_view(con, base_url(h))
+
+
+@route("POST", "/api/families/{fid}/consent", role="operator")
+def family_consent(con, h, user, body, q, fid):
+    mx(legal.set_consent, con, int(fid), body.get("kind") or "", bool(body.get("value")), body.get("how") or "", user)
+    return {"ok": True}
 
 
 @route("PUT", "/api/integrations", role="admin")
@@ -893,6 +913,10 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
                 return self._send(500, {"error": "Ошибка сервера"})
+        lm = re.match(r"^/legal(?:/([a-z]+))?/?$", url.path)
+        if lm and method in ("GET", "HEAD"):
+            con = db.get_conn()
+            return self._send(200, legal.page(con, lm.group(1) or "", base_url(self)).encode(), "text/html; charset=utf-8")
         if not url.path.startswith("/api/"):
             if method in ("GET", "HEAD"):
                 return self._static(url.path)

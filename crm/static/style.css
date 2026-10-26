@@ -493,3 +493,4 @@ h2.sub { font-size: 17px; }
 @media (max-width: 760px) { .week { grid-template-columns: repeat(7, 78vw); } .sched-day { grid-template-columns: 1fr; } }
 .pay-list.folded li:nth-child(n+5) { display: none; }
 .sched-l > .small { white-space: nowrap; }
+.consents { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; } .consents > div { flex-basis: 100%; } .ledit { padding: 8px 0 12px; }

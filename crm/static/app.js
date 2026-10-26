@@ -47,6 +47,7 @@ function renderLogin() {
       <button class="btn primary" style="width:100%">Войти</button>
       <div class="error" id="login-err"></div>
     </form>
+    <div class="login-sub small" style="margin-top:14px"><a href="/legal" style="color:#7fe0ad">Документы и политика конфиденциальности</a></div>
   </div></div>`;
   $("#login-form").onsubmit = async (e) => {
     e.preventDefault();
@@ -411,6 +412,7 @@ async function openStudent(id) {
 
   <div class="section">
     <h3>Семья ${esc(d.family.name)}</h3>
+    ${consentHtml(d.family)}
     <dl class="kv">${d.parents.map((p) => `<dt>${esc(p.name)}</dt><dd><a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}</dd>`).join("")}</dl>
     ${d.siblings.length ? `<div style="margin-top:10px" class="chips">${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}</div>` : ""}
     <button class="btn sm" style="margin-top:10px" id="add-sibling">+ Брат или сестра</button>
@@ -525,6 +527,7 @@ async function openStudent(id) {
   body.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.open)));
   $("#add-sibling").onclick = () => openNewClient({ family_id: s.family_id, family_name: d.family.name });
   loadFamilyComms(s.family_id, d.parents, id);
+  wireConsent(d.family, reload);
 
   if ($("#mk-book")) $("#mk-book").onclick = async () => {
     try { await api("POST", `/api/students/${id}/makeups`, { group_id: +$("#mk-group").value, date: $("#mk-date").value }); toast("Записан на отработку"); reload(); } catch (e) { fail(e); }
@@ -765,6 +768,7 @@ async function renderSettings(page) {
     <div class="section" id="structure-settings"><h3>Филиалы, группы и смены</h3><div class="muted small">Загружаю…</div></div>
     <div class="section" id="archive-settings"><h3>Архив</h3><div class="muted small">Загружаю…</div></div>
     </div>` : ""}
+    ${admin ? `<div class="section" id="legal-settings"><h3>Юридические документы</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="source-settings"><h3>Рекламные каналы и источники</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="task-settings"><h3>Задачи и автосообщения по пробным</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="comms-settings"><h3>Связь с клиентами</h3><div class="muted small">Загружаю…</div></div>` : ""}
@@ -791,6 +795,7 @@ async function renderSettings(page) {
   if ($("#comms-settings")) renderCommsSettings($("#comms-settings"), users).catch(fail);
   if ($("#task-settings")) renderTaskSettings($("#task-settings"), users).catch(fail);
   if ($("#source-settings")) renderSourceSettings($("#source-settings")).catch(fail);
+  if ($("#legal-settings")) renderLegalSettings($("#legal-settings")).catch(fail);
   if ($("#structure-settings")) renderStructure($("#structure-settings"), users).catch(fail);
   if ($("#archive-settings")) renderArchive($("#archive-settings")).catch(fail);
   page.querySelectorAll("[data-uarch]").forEach((b) => (b.onclick = async () => {
