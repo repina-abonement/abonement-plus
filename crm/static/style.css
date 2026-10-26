@@ -1,10 +1,10 @@
 :root {
-  --bg: #f6f5f1;
+  --bg: #eef4ee;
   --surface: #ffffff;
-  --surface-2: #efede7;
+  --surface-2: #e8efe8;
   --ink: #1b1d1a;
   --ink-2: #62665f;
-  --line: #e2dfd7;
+  --line: #dce6dc;
   --accent: #1f7a4d;
   --accent-ink: #ffffff;
   --accent-soft: #e3f1e9;
@@ -154,12 +154,13 @@ label { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 4px
 }
 
 /* dashboard — по образцу ERP */
-:root { --dash-blue: #42a5f5; --dash-blue-soft: rgba(66,165,245,.35); --dash-pink: #f8a5b8; --dash-pink-soft: rgba(248,165,184,.25);
-  --up: #7cb342; --down: #e53935; }
+:root { --dash-blue: #1f7a4d; --dash-blue-soft: rgba(31,122,77,.18); --dash-pink: #d9a441; --dash-pink-soft: rgba(217,164,65,.14);
+  --up: #2e8b57; --down: #d64541; --dash-head-2: #6aab86; }
+@media (prefers-color-scheme: dark) { :root { --dash-blue: #3fb37a; --dash-blue-soft: rgba(63,179,122,.22); --dash-head-2: #2b5e43; } }
 .dash-filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 .dash-filters select { width: auto; min-width: 170px; }
 .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-.kpi, .panel { background: var(--surface); border-radius: 6px; box-shadow: var(--shadow); padding: 18px 20px; }
+.kpi, .panel { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 20px; }
 .kpi-head { display: flex; align-items: center; gap: 12px; font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; color: var(--ink); }
 .kpi-icon { width: 34px; height: 34px; color: var(--dash-blue); flex: none; }
 .kpi-body { display: flex; align-items: center; gap: 16px; margin-top: 14px; }
@@ -177,9 +178,9 @@ label { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 4px
 .day-table td:first-child { text-align: right; color: var(--ink-2); }
 .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
 .chart-grid .panel { padding: 0 0 14px; overflow: hidden; }
-.panel-head { background: var(--dash-blue); color: #fff; padding: 14px 18px; font-size: 15px; margin-bottom: 12px; }
+.panel-head { background: var(--dash-blue); color: var(--accent-ink, #fff); padding: 14px 18px; font-size: 15px; margin-bottom: 12px; }
 .panel-tabs { display: flex; margin-bottom: 12px; }
-.panel-tabs button { flex: 1; border: 0; padding: 14px 18px; text-align: left; font-weight: 600; background: #90caf9; color: #fff; cursor: pointer; }
+.panel-tabs button { flex: 1; border: 0; padding: 14px 18px; text-align: left; font-weight: 600; background: var(--dash-head-2); color: #fff; cursor: pointer; }
 .panel-tabs button.active { background: var(--dash-blue); }
 .chart-legend { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
 .lg { display: inline-block; width: 34px; height: 11px; border-radius: 2px; margin-left: 10px; }
@@ -208,3 +209,14 @@ label { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 4px
   .donut-wrap { flex-direction: column; } .fn-row { grid-template-columns: 1fr; gap: 4px; }
   .dash-filters select { flex: 1; min-width: 0; }
 }
+
+.enr { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 10px; }
+.enr-head { display: flex; align-items: center; gap: 8px; }
+.enr-head b { flex: 1; }
+.chip.day { min-width: 40px; text-align: center; color: var(--ink-2); }
+.chip.day.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.chips select { font-size: 13px; }
+
+.fill2 { display: flex; gap: 18px; }
+.fill2 > span { display: flex; flex-direction: column; }
+.fill2 em { font-style: normal; font-size: 12px; color: var(--ink-2); font-weight: 400; }

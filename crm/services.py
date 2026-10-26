@@ -91,14 +91,88 @@ def absence_counters(con, sid: int, ref: date | None = None) -> dict:
     return c
 
 
-def unresolved_absences_in_month(con, sid: int, ym: str) -> list[dict]:
+def unresolved_absences_in_month(con, sid: int, ym: str, group_id: int | None = None) -> list[dict]:
     start, end = logic.month_bounds(ym)
+    extra, args = ("AND a.group_id = ?", (group_id,)) if group_id else ("", ())
     return _rows(con.execute(
-        """SELECT a.id, a.date FROM attendance a
+        f"""SELECT a.id, a.date FROM attendance a
            WHERE a.student_id = ? AND a.status = 'absent' AND a.resolved IS NULL
-             AND a.date BETWEEN ? AND ?
+             AND a.date BETWEEN ? AND ? {extra}
              AND NOT EXISTS (SELECT 1 FROM makeups m WHERE m.absence_id = a.id AND m.status = 'booked')
-           ORDER BY a.date""", (sid, start.isoformat(), end.isoformat())))
+           ORDER BY a.date""", (sid, start.isoformat(), end.isoformat(), *args)))
+
+
+# ---------- группы ученика ----------
+
+def enrollments_of(con, sid: int, active_only: bool = True) -> list[dict]:
+    q = """SELECT e.*, g.name AS group_name, g.weekdays AS group_weekdays, g.time AS group_time, g.age AS group_age
+           FROM enrollments e JOIN groups g ON g.id = e.group_id WHERE e.student_id = ?"""
+    if active_only:
+        q += " AND e.active = 1"
+    return _rows(con.execute(q + " ORDER BY e.id", (sid,)))
+
+
+def enrollment_days(e: dict) -> list[int]:
+    group_days = logic.parse_weekdays(e["group_weekdays"])
+    own = logic.parse_weekdays(e["weekdays"] or "")
+    return [d for d in group_days if d in own] if own else group_days
+
+
+def sync_primary(con, sid: int):
+    """students.group_id/tariff = первая активная группа (для поиска, карточек, тренера)."""
+    e = con.execute("SELECT group_id, tariff FROM enrollments WHERE student_id=? AND active=1 ORDER BY id LIMIT 1",
+                    (sid,)).fetchone()
+    if e:
+        con.execute("UPDATE students SET group_id=?, tariff=? WHERE id=?", (e[0], e[1], sid))
+
+
+def add_enrollment(con, sid: int, group_id: int, weekdays: list[int] | None, tariff: str, user) -> int:
+    get_student_row(con, sid)
+    g = con.execute("SELECT * FROM groups WHERE id=? AND is_makeup=0", (group_id,)).fetchone()
+    if not g:
+        raise ApiError("Группа не найдена")
+    if con.execute("SELECT 1 FROM enrollments WHERE student_id=? AND group_id=? AND active=1", (sid, group_id)).fetchone():
+        raise ApiError("Ученик уже ходит в эту группу")
+    days = _clean_days(weekdays, g["weekdays"])
+    eid = con.execute("INSERT INTO enrollments(student_id, group_id, weekdays, tariff, created_at) VALUES (?,?,?,?,?)",
+                      (sid, group_id, days, "flex" if tariff == "flex" else "fixed", now_iso())).lastrowid
+    sync_primary(con, sid)
+    log(con, sid, f"Добавлена группа {g['name']}" + (f" ({_days_label(days)})" if days else ""), user, "system")
+    return eid
+
+
+def _clean_days(weekdays, group_weekdays: str) -> str:
+    if not weekdays:
+        return ""
+    allowed = logic.parse_weekdays(group_weekdays)
+    days = sorted({int(d) for d in weekdays if int(d) in allowed})
+    if not days:
+        raise ApiError("Выберите хотя бы один день группы")
+    return "" if days == sorted(allowed) else ",".join(map(str, days))
+
+
+def _days_label(days: str) -> str:
+    return ", ".join(logic.WEEKDAY_NAMES[d] for d in logic.parse_weekdays(days))
+
+
+def update_enrollment(con, eid: int, data: dict, user) -> None:
+    e = con.execute("SELECT e.*, g.name, g.weekdays AS gw FROM enrollments e JOIN groups g ON g.id=e.group_id WHERE e.id=?",
+                    (eid,)).fetchone()
+    if not e:
+        raise ApiError("Группа ученика не найдена", 404)
+    if "weekdays" in data:
+        days = _clean_days(data["weekdays"], e["gw"])
+        con.execute("UPDATE enrollments SET weekdays=? WHERE id=?", (days, eid))
+        log(con, e["student_id"], f"{e['name']}: дни — {_days_label(days) if days else 'все дни группы'}", user, "system")
+    if "tariff" in data:
+        if data["tariff"] not in ("fixed", "flex"):
+            raise ApiError("Неизвестный тариф")
+        con.execute("UPDATE enrollments SET tariff=? WHERE id=?", (data["tariff"], eid))
+        log(con, e["student_id"], f"{e['name']}: тариф {'гибкий' if data['tariff'] == 'flex' else 'негибкий'}", user, "system")
+    if "active" in data and not data["active"]:
+        con.execute("UPDATE enrollments SET active=0 WHERE id=?", (eid,))
+        log(con, e["student_id"], f"Больше не ходит в группу {e['name']}", user, "system")
+    sync_primary(con, e["student_id"])
 
 
 def book_makeup(con, sid: int, group_id: int, day: str, absence_id: int | None, user) -> dict:
@@ -148,15 +222,22 @@ def set_makeup_status(con, mid: int, status: str, user) -> None:
 
 # ---------- абонементы ----------
 
-def quote_for(con, sid: int, ym: str) -> dict:
-    s = get_student_row(con, sid)
-    if not s["group_id"]:
+def _pick_enrollment(con, sid: int, enrollment_id) -> dict:
+    ens = enrollments_of(con, sid)
+    if enrollment_id:
+        ens = [e for e in ens if e["id"] == int(enrollment_id)]
+    if not ens:
         raise ApiError("У ученика не выбрана группа")
-    g = con.execute("SELECT * FROM groups WHERE id = ?", (s["group_id"],)).fetchone()
+    return ens[0]
+
+
+def quote_for(con, sid: int, ym: str, enrollment_id=None) -> dict:
+    get_student_row(con, sid)
+    e = _pick_enrollment(con, sid, enrollment_id)
     st = settings(con)
     prices = {"fixed": st["price_fixed"], "flex": st["price_flex"]}
-    prev_abs = unresolved_absences_in_month(con, sid, logic.shift_month(ym, -1))
-    q = logic.quote(weekdays=logic.parse_weekdays(g["weekdays"]), ym=ym, tariff=s["tariff"], prices=prices,
+    prev_abs = unresolved_absences_in_month(con, sid, logic.shift_month(ym, -1), e["group_id"])
+    q = logic.quote(weekdays=enrollment_days(e), ym=ym, tariff=e["tariff"], prices=prices,
                     vacations=vacations_of(con, sid), prev_unresolved_absences=len(prev_abs))
     q["credit_absence_ids"] = [a["id"] for a in prev_abs[:q["credit_lessons"]]]
     q["credit_absence_dates"] = [a["date"] for a in prev_abs[:q["credit_lessons"]]]
@@ -165,27 +246,30 @@ def quote_for(con, sid: int, ym: str) -> dict:
                                       deadline_day=int(st["renewal_deadline_day"]))
     q["late_fee"] = fee
     q["total"] = total
-    q["tariff"] = s["tariff"]
-    q["group"] = g["name"]
+    q["tariff"] = e["tariff"]
+    q["group"] = e["group_name"]
+    q["enrollment_id"] = e["id"]
+    q["days_label"] = _days_label(e["weekdays"]) if e["weekdays"] else ""
     return q
 
 
-def create_invoice(con, sid: int, ym: str, user) -> dict:
-    existing = con.execute("SELECT * FROM subscriptions WHERE student_id=? AND month=? AND status != 'cancelled'",
-                           (sid, ym)).fetchone()
+def create_invoice(con, sid: int, ym: str, user, enrollment_id=None) -> dict:
+    e = _pick_enrollment(con, sid, enrollment_id)
+    existing = con.execute("SELECT 1 FROM subscriptions WHERE enrollment_id=? AND month=? AND status != 'cancelled'",
+                           (e["id"], ym)).fetchone()
     if existing:
-        raise ApiError(f"На {logic.month_label(ym)} уже есть абонемент")
-    q = quote_for(con, sid, ym)
-    con.execute("DELETE FROM subscriptions WHERE student_id=? AND month=? AND status='cancelled'", (sid, ym))
+        raise ApiError(f"На {logic.month_label(ym)} в группу {e['group_name']} уже есть абонемент")
+    q = quote_for(con, sid, ym, e["id"])
+    con.execute("DELETE FROM subscriptions WHERE enrollment_id=? AND month=? AND status='cancelled'", (e["id"], ym))
     sub_id = con.execute(
-        """INSERT INTO subscriptions(student_id, month, tariff, lessons, per_lesson, credit_lessons, late_fee,
-           price, status, created_at) VALUES (?,?,?,?,?,?,?,?,'invoiced',?)""",
-        (sid, ym, q["tariff"], q["lessons_paid"], q["per_lesson"], q["credit_lessons"], q["late_fee"],
+        """INSERT INTO subscriptions(student_id, enrollment_id, month, tariff, lessons, per_lesson, credit_lessons,
+           late_fee, price, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,'invoiced',?)""",
+        (sid, e["id"], ym, q["tariff"], q["lessons_paid"], q["per_lesson"], q["credit_lessons"], q["late_fee"],
          q["total"], now_iso())).lastrowid
     for aid in q["credit_absence_ids"]:
         con.execute("UPDATE attendance SET resolved='credit', resolved_month=? WHERE id=?", (ym, aid))
     extra = f", перерасчёт {q['credit_lessons']} пропуск(а) −{q['credit']} ₽" if q["credit_lessons"] else ""
-    log(con, sid, f"Выставлен счёт на {q['month_label']}: {q['total']} ₽ ({q['lessons_paid']} занятий{extra})",
+    log(con, sid, f"Выставлен счёт на {q['month_label']}, {e['group_name']}: {q['total']} ₽ ({q['lessons_paid']} занятий{extra})",
         user, "payment")
     return {"id": sub_id, "quote": q}
 
@@ -207,8 +291,9 @@ def cancel_subscription(con, sub_id: int, user) -> None:
         raise ApiError("Абонемент не найден", 404)
     con.execute("UPDATE subscriptions SET status='cancelled' WHERE id=?", (sub_id,))
     con.execute("""UPDATE attendance SET resolved=NULL, resolved_month=NULL
-                   WHERE student_id=? AND resolved='credit' AND resolved_month=?""",
-                (sub["student_id"], sub["month"]))
+                   WHERE student_id=? AND resolved='credit' AND resolved_month=?
+                     AND (? IS NULL OR group_id = (SELECT group_id FROM enrollments WHERE id = ?))""",
+                (sub["student_id"], sub["month"], sub["enrollment_id"], sub["enrollment_id"]))
     log(con, sub["student_id"], f"Счёт на {logic.month_label(sub['month'])} отменён, пропуски возвращены",
         user, "payment")
 
@@ -224,7 +309,10 @@ def card_summary(con, s: dict, st: dict) -> dict:
     fam = con.execute("SELECT name FROM families WHERE id=?", (s["family_id"],)).fetchone()
     parent = con.execute("SELECT name, phone FROM parents WHERE family_id=? ORDER BY id LIMIT 1",
                          (s["family_id"],)).fetchone()
-    grp = con.execute("SELECT name FROM groups WHERE id=?", (s["group_id"],)).fetchone() if s["group_id"] else None
+    ens = con.execute("""SELECT g.name FROM enrollments e JOIN groups g ON g.id=e.group_id
+                         WHERE e.student_id=? AND e.active=1 ORDER BY e.id""", (s["id"],)).fetchall()
+    grp = {"name": " + ".join(r[0] for r in ens)} if ens else (
+        con.execute("SELECT name FROM groups WHERE id=?", (s["group_id"],)).fetchone() if s["group_id"] else None)
     sib = con.execute("SELECT COUNT(*) FROM students WHERE family_id=? AND id != ?",
                       (s["family_id"], s["id"])).fetchone()[0]
     return {
@@ -276,16 +364,20 @@ def board(con, funnel: str) -> dict:
         by = {c["key"]: c for c in cols}
         for s in _rows(con.execute("SELECT * FROM students WHERE funnel='members' ORDER BY name")):
             card = card_summary(con, s, st)
-            subs = {r["month"]: r["status"] for r in con.execute(
-                "SELECT month, status FROM subscriptions WHERE student_id=? AND status != 'cancelled'", (s["id"],))}
+            ens = [e["id"] for e in enrollments_of(con, s["id"])]
+            st_by = {(r["enrollment_id"], r["month"]): r["status"] for r in con.execute(
+                "SELECT enrollment_id, month, status FROM subscriptions WHERE student_id=? AND status != 'cancelled'",
+                (s["id"],))}
+            month_state = lambda m: ("paid" if ens and all(st_by.get((e, m)) == "paid" for e in ens) else
+                                     "invoiced" if ens and all(st_by.get((e, m)) for e in ens) else None)
             if s["stage"] == "left":
                 key = "left"
-            elif subs.get(cur) != "paid":
+            elif month_state(cur) != "paid":
                 key = "unpaid_cur"
                 card["color"] = "red"
-            elif subs.get(nxt) == "paid":
+            elif month_state(nxt) == "paid":
                 key = "paid_next"
-            elif subs.get(nxt) == "invoiced":
+            elif month_state(nxt) == "invoiced":
                 key = "invoiced"
                 card["color"] = "yellow" if late else None
             else:
@@ -326,6 +418,9 @@ def move_card(con, sid: int, funnel: str, stage: str, user) -> None:
         if stage == "bought":
             con.execute("""UPDATE students SET funnel='members', stage='active', stage_changed_at=?,
                            converted_at=COALESCE(converted_at, ?) WHERE id=?""", (now_iso(), now_iso(), sid))
+            if s["group_id"] and not enrollments_of(con, sid):
+                con.execute("INSERT INTO enrollments(student_id, group_id, weekdays, tariff, created_at) VALUES (?,?,?,?,?)",
+                            (sid, s["group_id"], "", s["tariff"], now_iso()))
             log(con, sid, "Купил абонемент — переведён в учеников", user, "stage")
             return
         contacted = 1 if stage in ("how_was", "refused") else s["contacted_after_trial"]
@@ -355,7 +450,9 @@ def student_detail(con, sid: int) -> dict:
     siblings = _rows(con.execute("SELECT id, name, birth FROM students WHERE family_id=? AND id != ?",
                                  (s["family_id"], sid)))
     grp = dict(con.execute("SELECT * FROM groups WHERE id=?", (s["group_id"],)).fetchone()) if s["group_id"] else None
-    subs = _rows(con.execute("SELECT * FROM subscriptions WHERE student_id=? ORDER BY month DESC", (sid,)))
+    subs = _rows(con.execute("""SELECT x.*, g.name AS group_name FROM subscriptions x
+                                LEFT JOIN enrollments e ON e.id = x.enrollment_id LEFT JOIN groups g ON g.id = e.group_id
+                                WHERE x.student_id=? ORDER BY x.month DESC, x.id""", (sid,)))
     vacs = _rows(con.execute("SELECT * FROM vacations WHERE student_id=? ORDER BY start DESC", (sid,)))
     makeups = _rows(con.execute(
         """SELECT m.*, g.name AS group_name, a.date AS absence_date FROM makeups m
@@ -372,7 +469,7 @@ def student_detail(con, sid: int) -> dict:
     cur = logic.month_of(today())
     return {
         "student": s, "family": fam, "parents": parents, "siblings": siblings, "group": grp,
-        "subscriptions": subs, "vacations": vacs, "makeups": makeups, "history": hist,
+        "subscriptions": subs, "vacations": vacs, "enrollments": enrollments_of(con, sid), "makeups": makeups, "history": hist,
         "counters": absence_counters(con, sid) if s["funnel"] == "members" else None,
         "stage_label": stage_label,
         "next_month": logic.shift_month(cur, 1), "cur_month": cur,
@@ -418,6 +515,9 @@ def create_student(con, data: dict, user) -> int:
            source, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
         (family_id, name, data.get("birth") or "", data.get("group_id") or None, tariff, funnel, stage,
          now_iso(), data.get("source") or "", now_iso())).lastrowid
+    if funnel == "members" and data.get("group_id"):
+        con.execute("INSERT INTO enrollments(student_id, group_id, weekdays, tariff, created_at) VALUES (?,?,?,?,?)",
+                    (sid, data["group_id"], "", tariff, now_iso()))
     log(con, sid, "Карточка создана", user, "system")
     audit(con, user, "student.create", str(sid))
     return sid
@@ -490,8 +590,11 @@ def journal(con, group_id: int, day: str) -> dict:
                 (group_id, day)):
             rows.append(dict(m))
     else:
-        for s in con.execute("""SELECT id, name FROM students WHERE group_id=? AND funnel='members'
-                                AND stage != 'left' ORDER BY name""", (group_id,)):
+        for s in con.execute("""SELECT s.id, s.name, e.weekdays FROM enrollments e JOIN students s ON s.id = e.student_id
+                                WHERE e.group_id=? AND e.active=1 AND s.funnel='members' AND s.stage != 'left'
+                                ORDER BY s.name""", (group_id,)).fetchall():
+            if s["weekdays"] and d.weekday() not in logic.parse_weekdays(s["weekdays"]):
+                continue
             a = con.execute("SELECT status, resolved FROM attendance WHERE student_id=? AND date=? AND group_id=?",
                             (s["id"], day, group_id)).fetchone()
             vac = logic.in_vacation(d, vacations_of(con, s["id"]))
@@ -591,9 +694,15 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None) -> dict:
     br_arg = (branch_id,) if branch_id else ()
 
     def holders(m):
-        return {r[0]: r[1] for r in con.execute(
-            "SELECT s.id, x.price FROM subscriptions x JOIN students s ON s.id = x.student_id "
-            "WHERE x.month = ? AND x.status = 'paid'" + br_sql, (m, *br_arg))}
+        out = {}
+        for sid_, price in con.execute(
+                "SELECT s.id, x.price FROM subscriptions x JOIN students s ON s.id = x.student_id "
+                "LEFT JOIN enrollments e ON e.id = x.enrollment_id "
+                "WHERE x.month = ? AND x.status = 'paid'"
+                + (" AND COALESCE(e.group_id, s.group_id) IN (SELECT id FROM groups WHERE branch_id = ?)" if branch_id else ""),
+                (m, *br_arg)):
+            out.setdefault(sid_, []).append(price)
+        return out
 
     first_paid = {r[0]: r[1] for r in con.execute(
         "SELECT student_id, MIN(month) FROM subscriptions WHERE status='paid' GROUP BY student_id")}
@@ -604,9 +713,11 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None) -> dict:
             return cache[m]
         h = holders(m)
         prev = holders(logic.shift_month(m, -1))
-        revenue = sum(h.values())
-        st = {"revenue": revenue, "holders": len(h), "avg": round(revenue / len(h)) if h else 0,
-              "conversion": _pct(len(set(h) & set(prev)), len(prev)), "ids": set(h), "prices": h}
+        revenue = sum(sum(v) for v in h.values())
+        n_subs = sum(len(v) for v in h.values())
+        st = {"revenue": revenue, "holders": len(h), "subs": n_subs, "avg": round(revenue / n_subs) if n_subs else 0,
+              "conversion": _pct(len(set(h) & set(prev)), len(prev)), "ids": set(h),
+              "prices": {k: sum(v) for k, v in h.items()}}
         cache[m] = st
         return st
 
@@ -620,6 +731,7 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None) -> dict:
 
     fill = _pct(c["holders"], seats)
     fill_m1 = _pct(m1["holders"], seats)
+    fill_subs = _pct(c["subs"], seats)
 
     # новые / постоянные / вернувшиеся
     prev_ids = month_stats(logic.shift_month(cur, -1))["ids"]
@@ -677,7 +789,8 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None) -> dict:
         "month": cur, "month_label": logic.month_label(cur),
         "kpi": {"revenue": kpi("revenue"), "holders": kpi("holders"), "avg": kpi("avg"),
                 "conversion": kpi("conversion"),
-                "fill": {"value": fill, "vs_month": (fill - fill_m1) if fill is not None and fill_m1 is not None else None},
+                "fill": {"value": fill, "subs": fill_subs, "subs_count": c["subs"],
+                         "vs_month": (fill - fill_m1) if fill is not None and fill_m1 is not None else None},
                 "seats": seats},
         "days": {"yesterday": day_stats(t - timedelta(days=1)), "today": day_stats(t)},
         "future_trials": future_trials,

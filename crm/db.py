@@ -115,9 +115,22 @@ CREATE TABLE IF NOT EXISTS makeups (
     status TEXT NOT NULL DEFAULT 'booked'     -- booked | done | missed | cancelled
 );
 
+-- Ученик может ходить в несколько групп: на каждую группу свой абонемент.
+-- weekdays — дни, в которые ученик ходит в эту группу ('' = все дни группы).
+CREATE TABLE IF NOT EXISTS enrollments (
+    id INTEGER PRIMARY KEY,
+    student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    group_id INTEGER NOT NULL REFERENCES groups(id),
+    weekdays TEXT NOT NULL DEFAULT '',
+    tariff TEXT NOT NULL DEFAULT 'fixed',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS subscriptions (
     id INTEGER PRIMARY KEY,
     student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    enrollment_id INTEGER REFERENCES enrollments(id) ON DELETE CASCADE,
     month TEXT NOT NULL,
     tariff TEXT NOT NULL,
     lessons INTEGER NOT NULL,
@@ -127,8 +140,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     price INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'invoiced',  -- invoiced | paid | cancelled
     created_at TEXT NOT NULL,
-    paid_at TEXT,
-    UNIQUE(student_id, month)
+    paid_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS history (
@@ -224,6 +236,26 @@ def init_db(con: sqlite3.Connection):
             con.execute(f"ALTER TABLE students ADD COLUMN {col}")
     if "capacity" not in cols:
         con.execute("ALTER TABLE groups ADD COLUMN capacity INTEGER NOT NULL DEFAULT 12")
+    subcols = {r[1] for r in con.execute("PRAGMA table_info(subscriptions)")}
+    if "enrollment_id" not in subcols:
+        # старая схема: один абонемент на ученика в месяц → абонемент на каждую группу
+        con.executescript("""
+            CREATE TABLE subscriptions_new (
+                id INTEGER PRIMARY KEY,
+                student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+                enrollment_id INTEGER REFERENCES enrollments(id) ON DELETE CASCADE,
+                month TEXT NOT NULL, tariff TEXT NOT NULL, lessons INTEGER NOT NULL, per_lesson INTEGER NOT NULL,
+                credit_lessons INTEGER NOT NULL DEFAULT 0, late_fee INTEGER NOT NULL DEFAULT 0, price INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'invoiced', created_at TEXT NOT NULL, paid_at TEXT);
+            INSERT INTO subscriptions_new(id, student_id, month, tariff, lessons, per_lesson, credit_lessons, late_fee,
+                price, status, created_at, paid_at)
+              SELECT id, student_id, month, tariff, lessons, per_lesson, credit_lessons, late_fee, price, status,
+                created_at, paid_at FROM subscriptions;
+            DROP TABLE subscriptions;
+            ALTER TABLE subscriptions_new RENAME TO subscriptions;
+        """)
+    sync_enrollments(con)
+    con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sub_enr_month ON subscriptions(enrollment_id, month)")
     for k, v in DEFAULT_SETTINGS.items():
         con.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
     login = os.environ.get("CRM_ADMIN_LOGIN", "admin")
@@ -235,6 +267,17 @@ def init_db(con: sqlite3.Connection):
             print(f"\n*** Создан администратор: логин '{login}', пароль '{pw}' — смените его! ***\n", flush=True)
         con.execute("INSERT INTO users(login, name, role, pw_hash) VALUES (?, ?, 'admin', ?)",
                     (login, "Администратор", hash_password(pw)))
+
+
+def sync_enrollments(con):
+    """Каждому ученику с группой — запись о группе; абонементам без группы — основная группа ученика."""
+    con.execute("""INSERT INTO enrollments(student_id, group_id, weekdays, tariff, created_at)
+                   SELECT s.id, s.group_id, '', s.tariff, s.created_at FROM students s
+                   WHERE s.group_id IS NOT NULL AND s.funnel = 'members'
+                     AND NOT EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id = s.id)""")
+    con.execute("""UPDATE subscriptions SET enrollment_id =
+                     (SELECT MIN(e.id) FROM enrollments e WHERE e.student_id = subscriptions.student_id)
+                   WHERE enrollment_id IS NULL""")
 
 
 def settings(con) -> dict:
@@ -361,6 +404,13 @@ def seed_demo(con: sqlite3.Connection, today: date | None = None):
     con.execute("UPDATE students SET trial_booked_at=created_at WHERE trial_at IS NOT NULL")
     con.execute("UPDATE students SET trial_came=1 WHERE trial_at < ?", (now,))
     con.execute("UPDATE groups SET capacity=12 WHERE is_makeup=0")
+
+    sync_enrollments(con)
+    # Миша ходит в две группы: Пн/Чт — только по понедельникам, Вт/Пт — только по пятницам
+    e1 = con.execute("SELECT id FROM enrollments WHERE student_id=?", (s1,)).fetchone()[0]
+    con.execute("UPDATE enrollments SET weekdays='0' WHERE id=?", (e1,))
+    con.execute("INSERT INTO enrollments(student_id, group_id, weekdays, tariff, created_at) VALUES (?,?,?,?,?)",
+                (s1, g["Небо Вт/Пт 18:00"], "4", "flex", now))
 
     # тестовый тренер для групп Небо
     coach = con.execute("INSERT OR IGNORE INTO users(login, name, role, pw_hash) VALUES (?,?,?,?)",

@@ -142,7 +142,7 @@ function lineChart(labels, cur, prev, fmt) {
 
 function funnelChart(rows) {
   const top = Math.max(1, rows[0][1]);
-  const colors = ["#5fb3d9", "#6b73d8", "#a463d8", "#d063c7"];
+  const colors = ["#8cc9a4", "#4fa576", "#2a8a58", "#1b6b42"];
   return `<div class="funnel2">${rows.map(([l, v], i) => {
     const w = Math.max(6, Math.round((v / top) * 100));
     const p = i === 0 ? 100 : Math.round((v / Math.max(1, rows[i - 1][1])) * 100);
@@ -169,7 +169,7 @@ async function renderDashboard(page) {
   for (let i = 0; i < 18; i++) { const dt = new Date(S.meta.today); dt.setDate(1); dt.setMonth(dt.getMonth() - i); months.push(isoDate(dt).slice(0, 7)); }
   const k = d.kpi, sr = d.series;
   const kRub = (t) => t >= 1e6 ? (t / 1e6).toFixed(1).replace(".0", "") + " млн" : t >= 1000 ? Math.round(t / 1000) + " тыс" : fmtNum(t);
-  const segColors = { new: "#42a5f5", regular: "#4cc0b9", returned: "#f5a23d" };
+  const segColors = { new: "#8cc9a4", regular: "#1f7a4d", returned: "#d9a441" };
   const seg = d.segments[S.dashSeg];
   page.innerHTML = `
     <div class="dash-filters">
@@ -179,9 +179,9 @@ async function renderDashboard(page) {
 
     <div class="kpis">
       ${kpiCard("wallet", "Выручка", `${fmtNum(k.revenue.value)} <small>₽</small>`, k.revenue)}
-      ${kpiCard("cart", "Уникальных держателей абонементов", fmtNum(k.holders.value), k.holders)}
-      ${kpiCard("calc", "Средний чек", `${fmtNum(k.avg.value)} <small>₽</small>`, k.avg)}
-      ${kpiCard("pie", "Заполненность", `${k.fill.value ?? "—"} <small>%</small>`, { vs_month: k.fill.vs_month }, `<div class="kpi-note">учеников с абонементом от числа мест</div>`)}
+      ${kpiCard("cart", "Уникальных держателей абонементов", fmtNum(k.holders.value), k.holders, `<div class="kpi-note">ребёнок с абонементами в две группы считается один раз</div>`)}
+      ${kpiCard("calc", "Средний чек", `${fmtNum(k.avg.value)} <small>₽</small>`, k.avg, `<div class="kpi-note">средняя сумма одного абонемента</div>`)}
+      ${kpiCard("pie", "Заполненность", `<span class="fill2"><span><em>по абонементам</em>${k.fill.subs ?? "—"} <small>%</small></span><span><em>по уникальным</em>${k.fill.value ?? "—"} <small>%</small></span></span>`, { vs_month: k.fill.vs_month }, `<div class="kpi-note">${k.fill.subs_count} абонементов и ${k.holders.value} учеников на ${k.seats} мест</div>`)}
       ${kpiCard("trend", "Конверсия из месяца в месяц", `${k.conversion.value ?? "—"} <small>%</small>`, k.conversion, `<div class="kpi-note">продлили из тех, кто занимался в прошлом месяце</div>`)}
       ${kpiCard("user", "Количество мест", `${fmtNum(k.seats)} <small>шт.</small>`, null, `<div class="kpi-note">сумма мест во всех группах</div>`)}
     </div>
@@ -300,10 +300,10 @@ async function openStudent(id) {
   <div class="section">
     <div class="row">
       <div class="field"><label>Этап</label><select id="f-stage">${stageOpts.map(([k, t]) => `<option value="${k}" ${k === s.stage ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
-      <div class="field"><label>Тариф</label><select id="f-tariff"><option value="fixed" ${s.tariff === "fixed" ? "selected" : ""}>Негибкий</option><option value="flex" ${s.tariff === "flex" ? "selected" : ""}>Гибкий</option></select></div>
+      ${!isMember ? `<div class="field"><label>Тариф</label><select id="f-tariff"><option value="fixed" ${s.tariff === "fixed" ? "selected" : ""}>Негибкий</option><option value="flex" ${s.tariff === "flex" ? "selected" : ""}>Гибкий</option></select></div>` : ""}
     </div>
-    <div class="field"><label>Группа</label><select id="f-group"><option value="">— не выбрана —</option>${groups.map((x) => `<option value="${x.id}" ${x.id === s.group_id ? "selected" : ""}>${esc(x.name)} · ${esc(x.age)} лет</option>`).join("")}</select></div>
-    ${!isMember ? `<div class="field"><label>Пробное занятие</label><input id="f-trial" type="datetime-local" value="${esc(s.trial_at || "")}"></div>` : ""}
+    ${!isMember ? `<div class="field"><label>Группа для пробного</label><select id="f-group"><option value="">— не выбрана —</option>${groups.map((x) => `<option value="${x.id}" ${x.id === s.group_id ? "selected" : ""}>${esc(x.name)} · ${esc(x.age)} лет</option>`).join("")}</select></div>
+    <div class="field"><label>Пробное занятие</label><input id="f-trial" type="datetime-local" value="${esc(s.trial_at || "")}"></div>` : ""}
   </div>
 
   <div class="section">
@@ -335,12 +335,26 @@ async function openStudent(id) {
   </div>` : ""}
 
   <div class="section">
-    <h3>Абонемент</h3>
-    ${s.group_id ? `
-      <div class="row"><div class="field"><label>Месяц</label><select id="q-month">${[d.cur_month, d.next_month].map((m) => `<option value="${m}" ${m === d.next_month ? "selected" : ""}>${monthLabel(m)}</option>`).join("")}</select></div></div>
-      <div id="quote" class="quote muted">Считаю…</div>
-      <button class="btn primary sm" id="invoice">Выставить счёт</button>` : `<div class="muted small">Выберите группу, чтобы посчитать цену.</div>`}
-    ${d.subscriptions.length ? `<ul class="history" style="margin-top:10px">${d.subscriptions.map((x) => `<li><b>${monthLabel(x.month)}</b> · ${rub(x.price)} · ${x.lessons} зан.${x.credit_lessons ? ` · перерасчёт ${x.credit_lessons}` : ""}${x.late_fee ? ` · наценка ${rub(x.late_fee)}` : ""}
+    <h3>${isMember ? "Группы и абонементы" : "Абонемент"}</h3>
+    ${isMember ? `
+      <div class="row"><div class="field"><label>Месяц абонемента</label><select id="q-month">${[d.cur_month, d.next_month].map((m) => `<option value="${m}" ${m === d.next_month ? "selected" : ""}>${monthLabel(m)}</option>`).join("")}</select></div></div>
+      ${d.enrollments.length ? d.enrollments.map((e) => `
+        <div class="enr">
+          <div class="enr-head"><b>${esc(e.group_name)}</b><span class="muted small">${esc(e.group_age)} лет</span>
+            <button class="icon-btn" data-enoff="${e.id}" title="Больше не ходит в эту группу">✕</button></div>
+          <div class="chips" style="margin:6px 0 8px">${e.group_weekdays.split(",").map((wd) => { const on = !e.weekdays || e.weekdays.split(",").includes(wd); return `<button class="chip day ${on ? "on" : ""}" data-enday="${e.id}" data-wd="${wd}">${WD[+wd]}</button>`; }).join("")}
+            <select data-entar="${e.id}" style="width:auto;padding:4px 8px"><option value="fixed" ${e.tariff === "fixed" ? "selected" : ""}>Негибкий</option><option value="flex" ${e.tariff === "flex" ? "selected" : ""}>Гибкий</option></select></div>
+          <div class="quote muted" data-quote="${e.id}">Считаю…</div>
+          <button class="btn primary sm" data-inv="${e.id}">Выставить счёт</button>
+        </div>`).join("") : `<div class="muted small">Ученик пока не ходит ни в одну группу.</div>`}
+      <div class="row" style="margin-top:12px">
+        <div class="field"><label>Добавить группу</label><select id="en-group"><option value="">— выберите —</option>${groups.filter((x) => !d.enrollments.some((e) => e.group_id === x.id)).map((x) => `<option value="${x.id}">${esc(x.name)} · ${esc(x.age)} лет</option>`).join("")}</select></div>
+        <div class="field" style="flex:0 0 130px"><label>Тариф</label><select id="en-tariff"><option value="fixed">Негибкий</option><option value="flex">Гибкий</option></select></div>
+      </div>
+      <button class="btn sm" id="en-add">+ Добавить группу</button>
+      <div class="small muted" style="margin-top:6px">Дни можно снять, если ребёнок ходит в группу не во все её дни: цена посчитается только за выбранные.</div>`
+    : `<div class="muted small">Абонемент выставляется, когда клиент переходит в этап «Купил абонемент».</div>`}
+    ${d.subscriptions.length ? `<ul class="history" style="margin-top:10px">${d.subscriptions.map((x) => `<li><b>${monthLabel(x.month)}</b>${x.group_name ? " · " + esc(x.group_name) : ""} · ${rub(x.price)} · ${x.lessons} зан.${x.credit_lessons ? ` · перерасчёт ${x.credit_lessons}` : ""}${x.late_fee ? ` · наценка ${rub(x.late_fee)}` : ""}
       <span class="pill ${x.status === "paid" ? "green" : x.status === "cancelled" ? "" : "yellow"}">${{ paid: "оплачен", invoiced: "ждёт оплаты", cancelled: "отменён" }[x.status]}</span>
       ${x.status === "invoiced" ? `<button class="btn sm" data-pay="${x.id}">Оплачен</button> <button class="btn sm danger" data-cancel="${x.id}">Отменить</button>` : ""}</li>`).join("")}</ul>` : ""}
   </div>
@@ -369,8 +383,21 @@ async function openStudent(id) {
   $("#f-stage").onchange = async (e) => {
     try { await api("POST", `/api/students/${id}/move`, { funnel: s.funnel, stage: e.target.value }); reload(); } catch (err) { fail(err); }
   };
-  $("#f-tariff").onchange = (e) => patch({ tariff: e.target.value });
-  $("#f-group").onchange = (e) => patch({ group_id: e.target.value ? +e.target.value : "" });
+  if ($("#f-tariff")) $("#f-tariff").onchange = (e) => patch({ tariff: e.target.value });
+  if ($("#f-group")) $("#f-group").onchange = (e) => patch({ group_id: e.target.value ? +e.target.value : "" });
+  const enPatch = async (eid, data) => { try { await api("PATCH", `/api/enrollments/${eid}`, data); reload(); } catch (e) { fail(e); } };
+  body.querySelectorAll("[data-enday]").forEach((b) => (b.onclick = () => {
+    const eid = +b.dataset.enday;
+    const days = [...body.querySelectorAll(`[data-enday="${eid}"]`)].filter((x) => (x === b ? !x.classList.contains("on") : x.classList.contains("on"))).map((x) => +x.dataset.wd);
+    if (!days.length) return toast("Оставьте хотя бы один день", true);
+    enPatch(eid, { weekdays: days });
+  }));
+  body.querySelectorAll("[data-entar]").forEach((sel) => (sel.onchange = () => enPatch(+sel.dataset.entar, { tariff: sel.value })));
+  body.querySelectorAll("[data-enoff]").forEach((b) => (b.onclick = () => { if (confirm("Ученик больше не ходит в эту группу?")) enPatch(+b.dataset.enoff, { active: false }); }));
+  if ($("#en-add")) $("#en-add").onclick = async () => {
+    if (!$("#en-group").value) return toast("Выберите группу", true);
+    try { await api("POST", `/api/students/${id}/enrollments`, { group_id: +$("#en-group").value, tariff: $("#en-tariff").value }); toast("Группа добавлена"); reload(); } catch (e) { fail(e); }
+  };
   if ($("#f-trial")) $("#f-trial").onchange = (e) => patch({ trial_at: e.target.value });
   body.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.open)));
   $("#add-sibling").onclick = () => openNewClient({ family_id: s.family_id, family_name: d.family.name });
@@ -382,22 +409,22 @@ async function openStudent(id) {
     try { await api("POST", `/api/makeups/${b.dataset.mk}/status`, { status: b.dataset.st }); reload(); } catch (e) { fail(e); }
   }));
 
-  const loadQuote = async () => {
-    const box = $("#quote"); if (!box) return;
+  const loadQuotes = () => body.querySelectorAll("[data-quote]").forEach(async (box) => {
+    const eid = box.dataset.quote;
     try {
-      const q = await api("GET", `/api/students/${id}/quote?month=${$("#q-month").value}`);
+      const q = await api("GET", `/api/students/${id}/quote?month=${$("#q-month").value}&enrollment_id=${eid}`);
       box.classList.remove("muted");
       box.innerHTML = `<div class="total">${rub(q.total)}</div>
-        <div class="small">${q.lessons_paid} занятий × ${rub(q.per_lesson)} = ${rub(q.base)}${q.vacation_lessons ? ` · отпуск: −${q.vacation_lessons} зан.` : ""}</div>
+        <div class="small">${q.lessons_paid} занятий × ${rub(q.per_lesson)} = ${rub(q.base)}${q.days_label ? ` · только ${esc(q.days_label)}` : ""}${q.vacation_lessons ? ` · отпуск: −${q.vacation_lessons} зан.` : ""}</div>
         ${q.credit_lessons ? `<div class="small">Перерасчёт пропусков (${q.credit_absence_dates.map(dShort).join(", ")}): −${rub(q.credit)}</div>` : ""}
         ${q.late_fee ? `<div class="small">Наценка за оплату после ${S.meta.settings.renewal_deadline_day} числа: +${rub(q.late_fee)}</div>` : ""}
         <div class="small muted">Даты: ${q.dates.map(dShort).join(", ")}</div>`;
     } catch (e) { box.textContent = e.message; }
-  };
-  if ($("#q-month")) { $("#q-month").onchange = loadQuote; loadQuote(); }
-  if ($("#invoice")) $("#invoice").onclick = async () => {
-    try { const r = await api("POST", `/api/students/${id}/invoice`, { month: $("#q-month").value }); toast(`Счёт выставлен: ${rub(r.quote.total)}`); reload(); } catch (e) { fail(e); }
-  };
+  });
+  if ($("#q-month")) { $("#q-month").onchange = loadQuotes; loadQuotes(); }
+  body.querySelectorAll("[data-inv]").forEach((b) => (b.onclick = async () => {
+    try { const r = await api("POST", `/api/students/${id}/invoice`, { month: $("#q-month").value, enrollment_id: +b.dataset.inv }); toast(`Счёт выставлен: ${rub(r.quote.total)}`); reload(); } catch (e) { fail(e); }
+  }));
   body.querySelectorAll("[data-pay]").forEach((b) => (b.onclick = async () => {
     try { await api("POST", `/api/subscriptions/${b.dataset.pay}/pay`, {}); toast("Оплата отмечена"); reload(); } catch (e) { fail(e); }
   }));

@@ -229,12 +229,24 @@ def vacation_del(con, h, user, body, q, vid):
 
 @route("GET", "/api/students/{sid}/quote", role="operator")
 def quote(con, h, user, body, q, sid):
-    return sv.quote_for(con, int(sid), q.get("month"))
+    return sv.quote_for(con, int(sid), q.get("month"), q.get("enrollment_id"))
 
 
 @route("POST", "/api/students/{sid}/invoice", role="operator")
 def invoice(con, h, user, body, q, sid):
-    return sv.create_invoice(con, int(sid), body.get("month"), user)
+    return sv.create_invoice(con, int(sid), body.get("month"), user, body.get("enrollment_id"))
+
+
+@route("POST", "/api/students/{sid}/enrollments", role="operator")
+def enrollment_add(con, h, user, body, q, sid):
+    return {"id": sv.add_enrollment(con, int(sid), int(body.get("group_id") or 0), body.get("weekdays"),
+                                    body.get("tariff") or "fixed", user)}
+
+
+@route("PATCH", "/api/enrollments/{eid}", role="operator")
+def enrollment_patch(con, h, user, body, q, eid):
+    sv.update_enrollment(con, int(eid), body, user)
+    return {"ok": True}
 
 
 @route("POST", "/api/subscriptions/{sub}/pay", role="operator")

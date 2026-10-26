@@ -79,6 +79,28 @@ def test_flow():
     c = sv.absence_counters(con, sid)
     check(c["available"] == 3, "Отмена счёта возвращает пропуски")
 
+    print("Две группы")
+    g2 = con.execute("INSERT INTO groups(branch_id,name,weekdays) VALUES (?, 'Вт/Пт', '1,4')", (br,)).lastrowid
+    sid2 = sv.create_student(con, {"name": "Катя", "parent_name": "Ольга", "phone": "+7 900 222-33-44",
+                                   "funnel": "members", "tariff": "fixed", "group_id": g}, USER)
+    e1 = sv.enrollments_of(con, sid2)[0]["id"]
+    sv.update_enrollment(con, e1, {"weekdays": [0]}, USER)
+    e2 = sv.add_enrollment(con, sid2, g2, [4], "fixed", USER)
+    q1, q2 = sv.quote_for(con, sid2, "2026-11", e1), sv.quote_for(con, sid2, "2026-11", e2)
+    check(q1["lessons_paid"] == 5 and q2["lessons_paid"] == 4, "Пн/Чт только Пн: 5 занятий; Вт/Пт только Пт: 4 занятия в ноябре")
+    sv.create_invoice(con, sid2, "2026-11", USER, e1)
+    sv.create_invoice(con, sid2, "2026-11", USER, e2)
+    for (sub,) in con.execute("SELECT id FROM subscriptions WHERE student_id=?", (sid2,)).fetchall():
+        sv.pay_subscription(con, sub, USER)
+    dash = sv.dashboard(con, "2026-11")
+    check(dash["kpi"]["holders"]["value"] == 1 and dash["kpi"]["fill"]["subs_count"] == 2,
+          "Дашборд: 2 абонемента, но 1 уникальный держатель")
+    check(dash["kpi"]["revenue"]["value"] == 9 * 1350, "Выручка = сумма обоих абонементов (5 + 4 занятия)")
+    j = sv.journal(con, g, "2026-11-05")
+    check(all(r["id"] != sid2 for r in j["rows"]), "В четверг Катя не в журнале Пн/Чт")
+    j = sv.journal(con, g, "2026-11-02")
+    check(any(r["id"] == sid2 for r in j["rows"]), "В понедельник Катя в журнале Пн/Чт")
+
     print("Устаревшие пропуски")
     sv.today = lambda: date(2026, 12, 2)
     c = sv.absence_counters(con, sid)
