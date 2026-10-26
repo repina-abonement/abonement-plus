@@ -36,13 +36,15 @@ python3 -m tests.test_crm      # проверка правил абонемен�
 
 ## Запуск на сервере
 
-Нужен сервер Ubuntu и домен (например `crm.ваш-домен.ru`), направленный на IP сервера.
+Ubuntu 24.04. В консоли сервера под root:
 
 ```
-CRM_REPO=https://github.com/<логин>/abonement-plus.git bash install.sh crm.ваш-домен.ru
+curl -fsSL https://raw.githubusercontent.com/repina-abonement/abonement-plus/main/deploy/install.sh | bash
 ```
 
-Скрипт ставит Docker, запускает CRM, резервные копии и HTTPS-сертификат (Caddy).
+Скрипт ставит Python, nginx и сертификат Let's Encrypt, запускает CRM и ежедневные
+резервные копии как службы. Без своего домена используется адрес `<ip-через-дефисы>.sslip.io`.
+Свой домен: `... | bash -s crm.ваш-домен.ru`. Повторный запуск того же скрипта обновляет код.
 
 ## Важно про персональные данные
 
