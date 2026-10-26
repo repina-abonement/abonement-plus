@@ -535,3 +535,6 @@ h2.sub { font-size: 17px; }
 .cfacts { display: flex; flex-wrap: wrap; gap: 8px; }
 .merch-form .row { flex-wrap: wrap; }
 .merch-form [data-msave] { flex: 1 1 auto !important; }
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 44px; width: 100%; }
+.pw-eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); border: 0; background: transparent; font-size: 18px; padding: 6px 8px; cursor: pointer; line-height: 1; }

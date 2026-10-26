@@ -43,7 +43,8 @@ function renderLogin() {
     <div class="login-sub">Вход для сотрудников школы</div>
     <form id="login-form">
       <div class="field"><label>Логин</label><input name="login" autocomplete="username" required></div>
-      <div class="field"><label>Пароль</label><input name="password" type="password" autocomplete="current-password" required></div>
+      <div class="field"><label>Пароль</label><div class="pw-wrap"><input name="password" type="password" autocomplete="current-password" required>
+        <button type="button" class="pw-eye" aria-label="Показать пароль" title="Показать пароль">👁</button></div></div>
       <button class="btn primary" style="width:100%">Войти</button>
       <div class="error" id="login-err"></div>
     </form>
@@ -420,6 +421,16 @@ function openDrawer(html) { $("#drawer-body").innerHTML = html; $("#drawer").hid
 function closeDrawer() { const d = $("#drawer"); if (d) d.hidden = true; document.body.style.overflow = ""; }
 document.addEventListener("click", (e) => { if (e.target.closest("[data-close]")) { closeDrawer(); } });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+/* глазик в поле пароля: показать или скрыть, что вводишь */
+document.addEventListener("click", (e) => {
+  const b = e.target.closest(".pw-eye");
+  if (!b) return;
+  const i = b.previousElementSibling, show = i.type === "password";
+  i.type = show ? "text" : "password";
+  b.textContent = show ? "🙈" : "👁";
+  b.setAttribute("aria-label", show ? "Скрыть пароль" : "Показать пароль");
+  i.focus();
+});
 
 async function openStudent(id) {
   let d;
@@ -801,7 +812,7 @@ async function renderSettings(page) {
       <div class="small muted" style="margin:-4px 0 10px">Внутренний номер Sipuni нужен, чтобы звонить клиенту прямо из карточки</div>
       <form id="nu">
         <div class="row"><div class="field"><label>Имя</label><input name="name" required></div><div class="field"><label>Логин</label><input name="login" required></div></div>
-        <div class="row"><div class="field"><label>Пароль (от 8 символов)</label><input name="password" type="password" minlength="8" required></div>
+        <div class="row"><div class="field"><label>Пароль (от 8 символов)</label><div class="pw-wrap"><input name="password" type="password" minlength="8" required><button type="button" class="pw-eye" aria-label="Показать пароль">👁</button></div></div>
           <div class="field"><label>Роль</label><select name="role"><option value="operator">Оператор</option><option value="coach">Тренер</option><option value="admin">Админ</option></select></div></div>
         <button class="btn sm">Добавить сотрудника</button>
       </form>
