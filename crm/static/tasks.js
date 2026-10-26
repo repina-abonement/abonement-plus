@@ -92,6 +92,8 @@ async function renderCoachToday(page, coachId, viewBar = "") {
     <div class="muted" style="margin:-6px 0 14px">${line}</div>
     ${d.today.length ? `<section class="now coach-sum"><div class="now-head"><h3>Сегодня ${d.today.length} ${d.today.length === 1 ? "тренировка" : d.today.length < 5 ? "тренировки" : "тренировок"}, ждём ${t.total} ${kidsWord(t.total)}</h3></div>
       <div class="cfacts">${fact(t.paid, "по абонементу", "green")}${fact(t.trials, "на пробном", "blue")}${fact(t.single, "разовое")}${fact(t.makeups, "на отработке")}${fact(t.unpaid, "без оплаты", "yellow")}${fact(t.vacation, "в отпуске, не придут")}</div></section>` : ""}
+    ${checkinBox(d, !!coachId)}
+    ${d.away ? `<section class="now calm"><div class="now-head"><h3>🏖 Ты сейчас отдыхаешь до ${dShort(d.away.date_to)}</h3></div><div class="small">Тренировки на эти дни передаём другим тренерам</div></section>` : ""}
     ${d.replaced.length ? `<section class="now calm" style="margin-top:12px"><div class="now-head"><h3>Сегодня тебя заменяют</h3></div>
       ${d.replaced.map((r) => `<div class="small">🔁 ${esc(r.time || "")} ${esc(r.name)}, ${esc(r.branch)}: вместо тебя <b>${esc(r.by)}</b></div>`).join("")}</section>` : ""}
     ${d.missing.length ? `<section class="now" style="margin-top:12px"><div class="now-head"><h3>Не отмечено с прошлых тренировок</h3></div>
@@ -102,7 +104,9 @@ async function renderCoachToday(page, coachId, viewBar = "") {
     ${d.today.length ? `<div class="today-grid">${d.today.map((g) => {
       const all = g.kids + g.trials, done = g.marked + g.trials_marked, c = g.counts;
       return `<div class="today-card ${done >= all && all ? "ok" : ""} ${g.sub_for ? "is-sub" : ""}">
-        ${g.sub_for ? `<div class="sub-flag">🔁 Замена: ты вместо ${esc(g.sub_for.instead || "другого тренера")}${g.sub_for.note ? `. ${esc(g.sub_for.note)}` : ""}</div>` : ""}
+        ${g.sub_for ? `<div class="sub-flag">🔁 Замена: ты ${g.sub_for.role === "assistant" ? "помощник " : ""}вместо ${esc(g.sub_for.instead || "другого тренера")}${g.sub_for.note ? `. ${esc(g.sub_for.note)}` : ""}</div>` : ""}
+        ${!g.sub_for && g.role === "assistant" ? `<div class="small muted">Ты помощник${g.partner ? `, главный: ${esc(g.partner)}` : ""}</div>` : ""}
+        ${!g.sub_for && g.role === "main" && g.partner ? `<div class="small muted">Помощник: ${esc(g.partner)}</div>` : ""}
         <div class="today-time">${esc(g.time || "")}</div>
         <div class="today-name">${esc(g.name)}</div>
         <div class="small muted">${esc(g.branch)}${g.age ? `, ${esc(g.age)} лет` : ""}</div>
@@ -111,6 +115,7 @@ async function renderCoachToday(page, coachId, viewBar = "") {
           .filter(([, n]) => n).map(([k, n]) => `<span class="pill ${KID_TAG[k][0]}">${KID_TAG[k][1]}: ${n}</span>`).join("")}</div>
         ${(g.birthdays || []).map((b) => `<div class="bday">🎂 <b>${esc(b.name)}</b>: ${b.when === "today" ? "сегодня" : "вчера был"} день рождения, ${b.age} ${yearsWord(b.age)}. Поздравь всей командой!</div>`).join("")}
         ${g.list.length ? `<details class="kid-list"><summary class="small">Кто придёт</summary>${g.list.map((k) => `<div class="kid-row"><span class="grow">${esc(k.name)}</span>${k.note ? `<span class="small muted">${esc(k.note)}</span>` : ""}<span class="pill ${KID_TAG[k.tag][0]}">${KID_TAG[k.tag][1]}</span></div>`).join("")}</details>` : ""}
+        ${g.staff && g.time && (d.date < S.meta.today || (new Date().toTimeString().slice(0, 5) >= g.time)) ? staffPicker(g.staff, d.coaches, "c" + g.id) : ""}
         <div class="bar"><i style="width:${all ? Math.round(100 * done / all) : 0}%"></i></div>
         <div class="row" style="align-items:center;margin-top:6px"><div class="small grow">${all ? (done >= all ? "Все отмечены 👍" : `Отмечено ${done} из ${all}`) : "В группе пока нет детей"}</div>
           ${all ? `<button class="btn sm primary" data-j="${g.id}" data-d="${d.date}" style="flex:0">Отметить</button>` : ""}</div>
@@ -120,6 +125,8 @@ async function renderCoachToday(page, coachId, viewBar = "") {
       ${up.covered.map((x) => `<div class="small muted">↪ ${dShort(x.date)}, ${wd(x.date)}, ${esc(x.time || "")}: ${esc(x.group_name)} ведёт ${esc(x.sub_name)}, у тебя выходной</div>`).join("")}</section>` : ""}
     <div class="small muted" style="margin-top:14px">Отмечай детей сразу после тренировки: от этого зависят отработки, перерасчёт абонементов и твоё место в таблице тренеров</div>`;
   page.querySelectorAll("[data-j]").forEach((b) => (b.onclick = () => { S.journal.group = +b.dataset.j; S.journal.date = b.dataset.d; go("journal"); }));
+  wireCheckin(page);
+  d.today.forEach((g) => wireStaffPicker(page, "c" + g.id, g.id, d.date, render));
 }
 
 /* ---------- настройки задач (админ) ---------- */

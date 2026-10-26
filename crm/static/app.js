@@ -336,6 +336,8 @@ async function renderWorkdesk(page) {
     ${bar}
     <div class="page-head"><h2 class="grow">Рабочий стол${S.viewAs ? `: ${esc(S.viewAs.name)}` : ""}</h2>
       <span class="muted small">Обновляется сам каждые 20 секунд</span></div>
+    ${checkinReport(d.checkins)}
+    ${needsSubsBox(d)}
     ${schedHtml}
     ${birthdaysBox(d.birthdays)}
     ${tasksHtml}
@@ -360,6 +362,8 @@ async function renderWorkdesk(page) {
   wireBoard(page, "sales", d.board);
   wireTasks(page);
   wireViewAs(page);
+  wireNeedsSubs(page, d);
+  wireCheckinReport(page);
   if (page.querySelector(".sched-widget")) { if (wasOpen === false) page.querySelector(".sched-widget").open = false; wireSchedule(page.querySelector(".sched-widget"), S.meta.today); }
   page.querySelectorAll(".bday-box [data-open]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.open)));
   page.querySelectorAll("[data-u]").forEach((b) => (b.onclick = async () => {
@@ -692,6 +696,7 @@ async function renderJournal(page) {
   if (!S.journal.date) S.journal.date = S.meta.today;
   const j = await api("GET", `/api/journal?group_id=${S.journal.group}&date=${S.journal.date}`);
   const g = j.group;
+  const st = j.has_lesson && S.journal.date <= S.meta.today ? await api("GET", `/api/lessons/staff?group_id=${g.id}&date=${S.journal.date}`).catch(() => null) : null;
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Журнал посещений</h2></div>
     <div class="row" style="max-width:640px;margin-bottom:14px">
@@ -699,7 +704,9 @@ async function renderJournal(page) {
       <div class="field" style="flex:0 0 170px"><label>Дата</label><input id="j-date" type="date" value="${S.journal.date}"></div>
     </div>
     <div class="note">${esc(g.branch)} · ${g.weekdays.split(",").map((x) => WD[+x]).join(", ")} ${esc(g.time)} · ${esc(g.age)} лет${j.has_lesson ? "" : " · <b>в этот день у группы нет занятия</b>"}</div>
+    ${st ? `<div class="panel" style="padding:12px 14px;margin-bottom:12px">${staffPicker(st, st.coaches, "j")}</div>` : ""}
     <div class="list">${j.rows.length ? j.rows.map((r) => g.is_makeup ? makeupRow(r) : journalRow(r)).join("") : `<div class="list-row muted">${g.is_makeup ? "На эту дату никто не записан на отработку" : "В группе пока нет учеников"}</div>`}</div>`;
+  if (st) wireStaffPicker(page, "j", g.id, S.journal.date, render);
   $("#j-group").onchange = (e) => { S.journal.group = +e.target.value; render(); };
   $("#j-date").onchange = (e) => { S.journal.date = e.target.value; render(); };
   if (!isCoach()) page.querySelectorAll("[data-who]").forEach((el) => (el.onclick = () => openStudent(+el.dataset.who)));
@@ -800,6 +807,7 @@ async function renderSettings(page) {
     </div>` : ""}
     ${admin ? `<div class="section" id="legal-settings"><h3>Юридические документы</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="source-settings"><h3>Рекламные каналы и источники</h3><div class="muted small">Загружаю…</div></div>` : ""}
+    ${admin ? `<div class="section" id="staff-settings"><h3>Тренеры: приход и оплата</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="task-settings"><h3>Задачи и автосообщения по пробным</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="comms-settings"><h3>Связь с клиентами</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin && S.meta.demo ? `<div class="section"><h3>Тестовые данные</h3>
@@ -824,6 +832,7 @@ async function renderSettings(page) {
   };
   if ($("#comms-settings")) renderCommsSettings($("#comms-settings"), users).catch(fail);
   if ($("#task-settings")) renderTaskSettings($("#task-settings"), users).catch(fail);
+  if ($("#staff-settings")) renderStaffSettings($("#staff-settings"), users).catch(fail);
   if ($("#source-settings")) renderSourceSettings($("#source-settings")).catch(fail);
   if ($("#legal-settings")) renderLegalSettings($("#legal-settings")).catch(fail);
   if ($("#structure-settings")) renderStructure($("#structure-settings"), users).catch(fail);

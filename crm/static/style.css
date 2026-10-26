@@ -521,3 +521,9 @@ h2.sub { font-size: 17px; }
 .sub-form .row > .field { flex: 1 1 100%; min-width: 0; margin-bottom: 4px; }
 .sched-lw .sub-btn { padding: 4px 7px; border-color: transparent; background: transparent; opacity: .55; }
 .sched-lw .sub-btn:hover { opacity: 1; border-color: var(--line); }
+.checkin-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.checkin-row:last-child { border-bottom: 0; }
+.staff-pick { margin: 8px 0; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
+.staff-pick .field { min-width: 130px; margin-bottom: 0; }
+.sched-l .pill { white-space: normal; display: inline-block; margin-top: 3px; }
+.chip input[type=checkbox] { margin: 0 4px 0 0; vertical-align: -2px; }

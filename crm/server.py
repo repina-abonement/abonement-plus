@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import ai, callstats, coaches, comms, db, legal, money, schedule, services as sv, sources, tasks
+from . import ai, callstats, coaches, comms, db, legal, money, schedule, services as sv, sources, staff, tasks
 from .services import ApiError
 
 
@@ -256,7 +256,11 @@ def workdesk(con, h, user, body, q):
     reds.sort(key=lambda x: x["ts"] or "", reverse=True)
     rest = [x for x in items if x["level"] != "red"]
     rest.sort(key=lambda x: x["ts"] or "", reverse=True)
-    return {"urgent": reds + rest, "board": board, "birthdays": sv.birthdays(con), **comms.counts(con)}
+    return {"urgent": reds + rest, "board": board, "birthdays": sv.birthdays(con), "needs_subs": schedule.needs_subs(con),
+            "checkins": staff.day_report(con) if checkin_reviewer(con, user) else None,
+            "absences": schedule.absences(con),
+            "coaches": [dict(r) for r in con.execute("SELECT id, name FROM users WHERE role='coach' AND active=1 ORDER BY name")],
+            **comms.counts(con)}
 
 
 @route("GET", "/api/board/members", role="operator")
@@ -495,6 +499,94 @@ def sub_delete(con, h, user, body, q, sid):
     return {"ok": True}
 
 
+@route("POST", "/api/schedule/import", role="admin")
+def schedule_import(con, h, user, body, q):
+    r = sx(schedule.import_schedule, con, body)
+    sv.audit(con, user, "schedule.import", f"{r['groups_new']} новых, {r['groups_updated']} обновлено")
+    return r
+
+
+@route("GET", "/api/absences", role="operator")
+def absences_list(con, h, user, body, q):
+    return {"items": schedule.absences(con), "needs": schedule.needs_subs(con)}
+
+
+@route("POST", "/api/absences", role="operator")
+def absence_add(con, h, user, body, q):
+    return {"id": sx(schedule.save_absence, con, body, user)}
+
+
+@route("DELETE", "/api/absences/{aid}", role="operator")
+def absence_delete(con, h, user, body, q, aid):
+    schedule.remove_absence(con, int(aid))
+    return {"ok": True}
+
+
+def stx(fn, *a, **kw):
+    try:
+        return fn(*a, **kw)
+    except staff.StaffError as e:
+        raise ApiError(str(e))
+
+
+@route("POST", "/api/checkin", role="coach")
+def checkin(con, h, user, body, q):
+    f = lambda k: float(body[k]) if body.get(k) not in (None, "") else None
+    return stx(staff.checkin, con, user, int(body.get("branch_id") or 0), f("lat"), f("lng"), f("accuracy"))
+
+
+def checkin_reviewer(con, user):
+    if user["role"] == "admin":
+        return True
+    return str(user["id"]) == staff.setting(con, "checkin_reviewer")
+
+
+@route("GET", "/api/checkins", role="operator")
+def checkins_day(con, h, user, body, q):
+    from datetime import date as _d
+    if not checkin_reviewer(con, user):
+        raise ApiError("Приходы тренеров проверяет назначенный сотрудник", 403)
+    return staff.day_report(con, _d.fromisoformat(q["date"]) if q.get("date") else None)
+
+
+@route("POST", "/api/checkins/{cid}/review", role="operator")
+def checkin_review(con, h, user, body, q, cid):
+    if not checkin_reviewer(con, user):
+        raise ApiError("Приходы тренеров проверяет назначенный сотрудник", 403)
+    stx(staff.review, con, int(cid), body.get("action") or "", user, body.get("note") or "")
+    return {"ok": True}
+
+
+@route("GET", "/api/staff/settings", role="admin")
+def staff_settings(con, h, user, body, q):
+    return {k: staff.setting(con, k) for k in staff.DEFAULTS}
+
+
+@route("PUT", "/api/staff/settings", role="admin")
+def staff_settings_put(con, h, user, body, q):
+    for k in staff.DEFAULTS:
+        if k in body:
+            comms.put(con, k, str(body[k]).strip())
+    return {k: staff.setting(con, k) for k in staff.DEFAULTS}
+
+
+@route("GET", "/api/lessons/staff")
+def lesson_staff_get(con, h, user, body, q):
+    gid = int(q.get("group_id") or 0)
+    coach_guard(con, user, gid)
+    coaches_ = [dict(r) for r in con.execute("SELECT id, name FROM users WHERE role='coach' AND active=1 ORDER BY name")]
+    return staff.lesson_staff(con, gid, q.get("date") or "") | {"coaches": coaches_}
+
+
+@route("POST", "/api/lessons/staff")
+def lesson_staff_set(con, h, user, body, q):
+    gid = int(body.get("group_id") or 0)
+    coach_guard(con, user, gid)
+    stx(staff.set_lesson_staff, con, gid, body.get("date") or "", int(body.get("main_id") or 0),
+        int(body["assistant_id"]) if body.get("assistant_id") else None, user)
+    return {"ok": True}
+
+
 @route("GET", "/api/schedule/week")
 def schedule_week(con, h, user, body, q):
     return schedule.week(con)
@@ -597,7 +689,12 @@ def attendance(con, h, user, body, q):
 @route("GET", "/api/coach/today")
 def coach_today(con, h, user, body, q):
     cid = user["id"] if user["role"] == "coach" else int(q.get("coach_id") or 0)
-    return coaches.coach_today(con, cid)
+    out = coaches.coach_today(con, cid)
+    out["checkins"] = staff.my_day(con, cid)
+    for les in out["today"]:
+        les["staff"] = staff.lesson_staff(con, les["id"], out["date"])
+    out["coaches"] = [dict(r) for r in con.execute("SELECT id, name FROM users WHERE role='coach' AND active=1 ORDER BY name")]
+    return out
 
 
 @route("GET", "/api/coaches/board")

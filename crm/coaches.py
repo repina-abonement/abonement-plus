@@ -1,6 +1,8 @@
 """Результаты тренеров: турнирная таблица и номинации месяца. Без денег — только дети, группы, пробные."""
 from __future__ import annotations
 
+from datetime import date
+
 from . import logic
 
 FILL_PHRASES = [
@@ -207,7 +209,7 @@ def _lesson(con, g, day, today, sub=None, replaced=None) -> dict:
               "vacation": sum(k["tag"] == "vacation" for k in kids), "makeups": sum(k["tag"] == "makeup" for k in kids),
               "trials": len(trials)}
     marked = sum(1 for r in come if r.get("status") in ("present", "absent", "done", "missed"))
-    out = {"id": g["id"], "name": g["name"], "time": g["time"], "branch": g["branch"], "age": g["age"],
+    out = {"id": g["id"], "name": g["name"], "time": logic.group_time(g, date.fromisoformat(day).weekday()), "branch": g["branch"], "age": g["age"],
            "is_makeup": g["is_makeup"], "kids": len(come), "marked": marked, "trials": len(trials), "capacity": g["capacity"],
            "trials_marked": sum(1 for r in trials if r.get("status") is not None), "counts": counts, "birthdays": bdays,
            "list": come + trials, "regular": len(regular)}
@@ -226,37 +228,49 @@ def coach_today(con, coach_id: int, today=None) -> dict:
     day = today.isoformat()
     me = con.execute("SELECT id, name FROM users WHERE id=?", (coach_id,)).fetchone()
     own = [dict(r) for r in con.execute(
-        """SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id
-           WHERE g.coach_id=? AND g.active=1 ORDER BY g.time""", (coach_id,))]
+        """SELECT g.*, b.name AS branch, u.name AS coach_name, a.name AS assistant_name FROM groups g
+           JOIN branches b ON b.id=g.branch_id LEFT JOIN users u ON u.id=g.coach_id LEFT JOIN users a ON a.id=g.assistant_id
+           WHERE (g.coach_id=? OR g.assistant_id=?) AND g.active=1 ORDER BY g.time""", (coach_id, coach_id))]
     out_today, missing, replaced = [], [], []
     for g in own:
+        role = "main" if g["coach_id"] == coach_id else "assistant"
+        partner = g["assistant_name"] if role == "main" else g["coach_name"]
         days = logic.parse_weekdays(g["weekdays"])
         if today.weekday() in days:
-            sub = schedule.sub_on(con, g["id"], day)
+            sub = schedule.sub_on(con, g["id"], day, role)
             if sub:
-                replaced.append({"group_id": g["id"], "name": g["name"], "time": g["time"], "branch": g["branch"], "by": sub["coach_name"]})
+                replaced.append({"group_id": g["id"], "name": g["name"], "time": logic.group_time(g, today.weekday()),
+                                 "branch": g["branch"], "by": sub["coach_name"]})
             else:
-                out_today.append(_lesson(con, g, day, today))
+                les = _lesson(con, g, day, today)
+                les["role"] = role
+                les["partner"] = partner or ""
+                out_today.append(les)
+        if role != "main":
+            continue  # отмечает детей главный тренер
         for back in range(1, 8):
             d = today - _td(days=back)
             if d.weekday() not in days or g["is_makeup"]:
                 continue
-            s2 = schedule.sub_on(con, g["id"], d.isoformat())
+            s2 = schedule.sub_on(con, g["id"], d.isoformat(), "main")
             if s2 and s2["coach_id"] != coach_id:
                 continue
             j = sv.journal(con, g["id"], d.isoformat())
             left = sum(1 for r in j["rows"] if r.get("status") is None or (r.get("status") == "trial" and r.get("trial_came") is None))
             if left:
                 missing.append({"group_id": g["id"], "name": g["name"], "date": d.isoformat(), "left": left})
-    for s in con.execute("""SELECT s.*, g.coach_id AS own_id FROM substitutions s JOIN groups g ON g.id=s.group_id
-                            WHERE s.coach_id=? AND s.date BETWEEN ? AND ?""",
+    for s in con.execute("""SELECT s.*, g.coach_id AS own_main, g.assistant_id AS own_asst FROM substitutions s
+                            JOIN groups g ON g.id=s.group_id WHERE s.coach_id=? AND s.date BETWEEN ? AND ?""",
                          (coach_id, (today - _td(days=7)).isoformat(), day)):
         g = dict(con.execute("SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.id=?",
                              (s["group_id"],)).fetchone())
-        own_name = (con.execute("SELECT name FROM users WHERE id=?", (s["own_id"],)).fetchone() or [""])[0]
+        own_id = s["own_main"] if s["role"] == "main" else s["own_asst"]
+        own_name = (con.execute("SELECT name FROM users WHERE id=?", (own_id,)).fetchone() or [""])[0]
         if s["date"] == day:
-            out_today.append(_lesson(con, g, day, today, sub={"instead": own_name, "note": s["note"]}))
-        else:
+            les = _lesson(con, g, day, today, sub={"instead": own_name, "note": s["note"], "role": s["role"]})
+            les["role"] = s["role"]
+            out_today.append(les)
+        elif s["role"] == "main":
             j = sv.journal(con, g["id"], s["date"])
             left = sum(1 for r in j["rows"] if r.get("status") is None or (r.get("status") == "trial" and r.get("trial_came") is None))
             if left:
@@ -264,5 +278,7 @@ def coach_today(con, coach_id: int, today=None) -> dict:
     out_today.sort(key=lambda x: x["time"] or "")
     tot = {k: sum(l["counts"][k] for l in out_today) for k in ("total", "paid", "single", "unpaid", "vacation", "makeups", "trials")}
     week = schedule.coach_subs(con, coach_id, (today + _td(days=1)).isoformat(), (today + _td(days=14)).isoformat())
+    away = schedule.absent_on(con, coach_id, day)
     return {"today": out_today, "missing": missing, "date": day, "replaced": replaced, "totals": tot, "upcoming": week,
+            "away": dict(away) if away else None,
             "coach": {"id": me["id"], "name": me["name"]} if me else None}

@@ -256,9 +256,10 @@ def init_db(con: sqlite3.Connection):
             ALTER TABLE subscriptions_new RENAME TO subscriptions;
         """)
     sync_enrollments(con)
-    from . import ai, comms, legal, money, schedule, sources, tasks
+    from . import ai, comms, legal, money, schedule, sources, staff, tasks
     legal.init(con)
     schedule.init(con)
+    staff.init(con)
     sources.init(con)
     money.init(con)
     comms.init(con)

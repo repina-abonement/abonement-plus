@@ -55,6 +55,23 @@ def parse_weekdays(s: str) -> list[int]:
     return [int(x) for x in s.split(",") if x.strip() != ""]
 
 
+def parse_day_times(s: str) -> dict[int, str]:
+    """«5=11:30,6=10:00» → {5: "11:30", 6: "10:00"}: у группы в разные дни разное время."""
+    out = {}
+    for part in (s or "").split(","):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            if k.strip().isdigit() and v.strip():
+                out[int(k)] = v.strip()
+    return out
+
+
+def group_time(g, weekday: int) -> str:
+    keys = g.keys() if hasattr(g, "keys") else []
+    dt = parse_day_times(g["day_times"]) if "day_times" in keys else {}
+    return dt.get(weekday) or g["time"] or ""
+
+
 def lesson_dates(weekdays: list[int], ym: str) -> list[date]:
     start, end = month_bounds(ym)
     out, d = [], start
