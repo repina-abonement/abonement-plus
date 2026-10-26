@@ -56,7 +56,7 @@ function renderLogin() {
 
 /* ---------- каркас ---------- */
 const VIEWS = [
-  ["dashboard", "Дашборд"], ["sales", "Продажи"], ["members", "Ученики"], ["skips", "Пропуски"],
+  ["dashboard", "Дашборд"], ["sales", "Продажи"], ["inbox", "Чаты и звонки"], ["members", "Ученики"], ["skips", "Пропуски"],
   ["journal", "Журнал"], ["search", "Все клиенты"], ["settings", "Настройки"],
 ];
 
@@ -69,7 +69,7 @@ function shell() {
   app.innerHTML = `
   <header class="topbar">
     <div class="brand">Абонемент <span>Плюс</span></div>
-    <nav class="nav">${visibleViews().map(([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${t}</button>`).join("")}</nav>
+    <nav class="nav">${visibleViews().map(([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${t}${k === "inbox" ? `<span class="nbadge" id="inbox-badge" hidden></span>` : ""}</button>`).join("")}</nav>
     ${isCoach() ? "" : `<button class="btn sm" id="new-client">+ Клиент</button>`}
   </header>
   <main class="page" id="page"></main>`;
@@ -90,6 +90,7 @@ async function render() {
   try {
     if (["sales", "members", "skips"].includes(S.view)) return await renderBoard(page, S.view);
     if (S.view === "dashboard") return await renderDashboard(page);
+    if (S.view === "inbox") return await renderInbox(page);
     if (S.view === "journal") return await renderJournal(page);
     if (S.view === "search") return await renderSearch(page);
     if (S.view === "settings") return await renderSettings(page);
@@ -296,6 +297,7 @@ async function openStudent(id) {
   const html = `
   <h2>${esc(s.name)}</h2>
   <div class="muted small" style="margin-top:4px">${esc(d.stage_label)}${s.birth ? " · " + esc(ageText(s.birth)) : ""}</div>
+  ${s.priority ? `<div class="alert">Заявка с сайта, обработать в первую очередь. Карточка перестанет быть красной, когда вы смените этап или добавите комментарий с итогом звонка</div>` : ""}
 
   <div class="section">
     <div class="row">
@@ -312,6 +314,8 @@ async function openStudent(id) {
     ${d.siblings.length ? `<div style="margin-top:10px" class="chips">${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}</div>` : ""}
     <button class="btn sm" style="margin-top:10px" id="add-sibling">+ Брат или сестра</button>
   </div>
+
+  <div class="section" id="comms-box"><h3>Связь с семьёй</h3><div class="muted small">Загружаю переписку…</div></div>
 
   ${isMember ? `
   <div class="section">
@@ -401,6 +405,7 @@ async function openStudent(id) {
   if ($("#f-trial")) $("#f-trial").onchange = (e) => patch({ trial_at: e.target.value });
   body.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.open)));
   $("#add-sibling").onclick = () => openNewClient({ family_id: s.family_id, family_name: d.family.name });
+  loadFamilyComms(s.family_id, d.parents, id);
 
   if ($("#mk-book")) $("#mk-book").onclick = async () => {
     try { await api("POST", `/api/students/${id}/makeups`, { group_id: +$("#mk-group").value, date: $("#mk-date").value }); toast("Записан на отработку"); reload(); } catch (e) { fail(e); }
@@ -467,9 +472,9 @@ function openNewClient(preset = {}) {
   <h2>${preset.family_id ? "Ребёнок в семью " + esc(preset.family_name) : "Новый клиент"}</h2>
   <form id="nc" class="section">
     ${preset.family_id ? "" : `
-      <div class="field"><label>Телефон родителя</label><input name="phone" type="tel" required placeholder="+7 900 000-00-00"></div>
+      <div class="field"><label>Телефон родителя</label><input name="phone" type="tel" required placeholder="+7 900 000-00-00" value="${esc(preset.phone || "")}"></div>
       <div id="dup"></div>
-      <div class="field"><label>Имя родителя</label><input name="parent_name" required></div>
+      <div class="field"><label>Имя родителя</label><input name="parent_name" required value="${esc(preset.parent_name || "")}"></div>
       <div class="field"><label>Мессенджер</label><select name="messenger"><option>WhatsApp</option><option>Telegram</option><option>MAX</option><option value="">—</option></select></div>`}
     <div class="field"><label>Имя ребёнка</label><input name="name" required></div>
     <div class="row">
@@ -500,6 +505,7 @@ function openNewClient(preset = {}) {
     const f = Object.fromEntries(new FormData(form));
     if (f.group_id) f.group_id = +f.group_id;
     if (familyId) f.family_id = familyId;
+    if (preset.conversation_id) f.conversation_id = preset.conversation_id;
     try { const r = await api("POST", "/api/students", f); toast("Клиент создан"); render(); openStudent(r.id); }
     catch (err) { fail(err); }
   };
@@ -601,7 +607,10 @@ async function renderSettings(page) {
     </form>
     <div class="section">
       <h3>Сотрудники</h3>
-      <div class="list" style="box-shadow:none;margin-bottom:10px">${users.map((u) => `<div class="list-row"><div class="grow">${esc(u.name)} <span class="muted small">${esc(u.login)}</span></div><span class="pill">${{ admin: "админ", operator: "оператор", coach: "тренер" }[u.role]}</span></div>`).join("")}</div>
+      <div class="list" style="box-shadow:none;margin-bottom:10px">${users.map((u) => `<div class="list-row"><div class="grow">${esc(u.name)} <span class="muted small">${esc(u.login)}</span></div>
+        ${u.role === "coach" ? "" : `<input data-sip="${u.id}" value="${esc(u.sip_number || "")}" placeholder="вн. номер" title="Внутренний номер Sipuni: на него придёт звонок из карточки" inputmode="numeric" style="flex:0 0 96px;padding:5px 8px">`}
+        <span class="pill">${{ admin: "админ", operator: "оператор", coach: "тренер" }[u.role]}</span></div>`).join("")}</div>
+      <div class="small muted" style="margin:-4px 0 10px">Внутренний номер Sipuni нужен, чтобы звонить клиенту прямо из карточки</div>
       <form id="nu">
         <div class="row"><div class="field"><label>Имя</label><input name="name" required></div><div class="field"><label>Логин</label><input name="login" required></div></div>
         <div class="row"><div class="field"><label>Пароль (от 8 символов)</label><input name="password" type="password" minlength="8" required></div>
@@ -616,6 +625,7 @@ async function renderSettings(page) {
         ${g.is_makeup ? "" : `<input type="number" min="0" max="200" data-cap="${g.id}" value="${g.capacity ?? 12}" title="Мест в группе" style="flex:0 0 74px">`}
         <select data-gc="${g.id}" style="flex:0 0 190px"><option value="">— без тренера —</option>${users.filter((u) => u.role === "coach").map((u) => `<option value="${u.id}" ${u.id === g.coach_id ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select></div>`).join("")}
     </div>` : ""}
+    ${admin ? `<div class="section" id="comms-settings"><h3>Связь с клиентами</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin && S.meta.demo ? `<div class="section"><h3>Тестовые данные</h3>
       <div class="small muted" style="margin-bottom:8px">Сейчас включён тестовый режим. Кнопка сотрёт всех клиентов и создаст выдуманных заново. Сотрудники и настройки сохранятся.</div>
       <button class="btn sm danger" id="demo-reset">Пересоздать тестовые данные</button></div>` : ""}
@@ -625,7 +635,7 @@ async function renderSettings(page) {
       <div class="field"><label>Новый пароль</label><input name="new" type="password" minlength="8" required></div>
       <button class="btn sm">Сменить пароль</button>
     </form>
-    <div class="small muted" style="margin-top:12px">Вы вошли как ${esc(S.user.name)}. Версия 0.1, тестовая.</div>
+    <div class="small muted" style="margin-top:12px">Вы вошли как ${esc(S.user.name)}. Версия 0.2, тестовая.</div>
     </div>`;
   $("#logout").onclick = async () => { await api("POST", "/api/logout", {}).catch(() => {}); renderLogin(); };
   if ($("#set")) $("#set").onsubmit = async (e) => {
@@ -636,6 +646,10 @@ async function renderSettings(page) {
     e.preventDefault();
     try { await api("POST", "/api/users", Object.fromEntries(new FormData(e.target))); toast("Сотрудник добавлен"); render(); } catch (err) { fail(err); }
   };
+  if ($("#comms-settings")) renderCommsSettings($("#comms-settings"), users).catch(fail);
+  page.querySelectorAll("[data-sip]").forEach((inp) => (inp.onchange = async () => {
+    try { await api("PATCH", `/api/users/${inp.dataset.sip}`, { sip_number: inp.value }); toast("Внутренний номер сохранён"); S.meta = await api("GET", "/api/meta"); S.user = S.meta.user; } catch (err) { fail(err); }
+  }));
   page.querySelectorAll("[data-cap]").forEach((inp) => (inp.onchange = async () => {
     try { await api("PATCH", `/api/groups/${inp.dataset.cap}`, { capacity: +inp.value }); S.meta.groups.find((g) => g.id === +inp.dataset.cap).capacity = +inp.value; toast("Мест: " + inp.value); } catch (err) { fail(err); }
   }));
@@ -667,5 +681,6 @@ async function boot() {
   shell();
   render();
   setInterval(() => { if ($("#drawer").hidden && ["sales", "members", "skips"].includes(S.view)) render(); }, 60000);
+  if (!isCoach()) { pollCounts(); setInterval(pollCounts, 20000); }
 }
 boot();

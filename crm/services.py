@@ -320,6 +320,7 @@ def card_summary(con, s: dict, st: dict) -> dict:
         "parent": parent["name"] if parent else "", "phone": parent["phone"] if parent else "",
         "group": grp["name"] if grp else "", "tariff": s["tariff"], "siblings": sib,
         "stage": s["stage"], "stage_changed_at": s["stage_changed_at"], "trial_at": s["trial_at"],
+        "priority": s.get("priority", 0),
     }
 
 
@@ -346,7 +347,13 @@ def board(con, funnel: str) -> dict:
                 card["badge"] = f"{mins} мин после пробного"
             elif s["trial_at"] and stage in ("trial_booked", "trial_reminder", "on_trial"):
                 card["badge"] = "Пробное " + datetime.fromisoformat(s["trial_at"]).strftime("%d.%m %H:%M")
+            if s.get("priority"):
+                card["color"] = "red"
+                mins = int((ref - datetime.fromisoformat(s["stage_changed_at"][:16])).total_seconds() // 60)
+                card["badge"] = "Заявка с сайта · " + (f"{mins} мин назад" if mins < 120 else f"{mins // 60} ч назад")
             cols.get(stage, cols["lead"])["cards"].append(card)
+        for c in cols.values():
+            c["cards"].sort(key=lambda k: not k.get("priority"))
         return {"funnel": "sales", "columns": list(cols.values()), "draggable": True}
 
     if funnel == "members":
@@ -416,7 +423,7 @@ def move_card(con, sid: int, funnel: str, stage: str, user) -> None:
         if stage not in SALES_LABELS or stage in AUTO_SALES:
             raise ApiError("В этот этап карточка попадает сама")
         if stage == "bought":
-            con.execute("""UPDATE students SET funnel='members', stage='active', stage_changed_at=?,
+            con.execute("""UPDATE students SET funnel='members', stage='active', stage_changed_at=?, priority=0,
                            converted_at=COALESCE(converted_at, ?) WHERE id=?""", (now_iso(), now_iso(), sid))
             if s["group_id"] and not enrollments_of(con, sid):
                 con.execute("INSERT INTO enrollments(student_id, group_id, weekdays, tariff, created_at) VALUES (?,?,?,?,?)",
@@ -424,7 +431,7 @@ def move_card(con, sid: int, funnel: str, stage: str, user) -> None:
             log(con, sid, "Купил абонемент — переведён в учеников", user, "stage")
             return
         contacted = 1 if stage in ("how_was", "refused") else s["contacted_after_trial"]
-        con.execute("UPDATE students SET stage=?, stage_changed_at=?, contacted_after_trial=? WHERE id=?",
+        con.execute("UPDATE students SET stage=?, stage_changed_at=?, contacted_after_trial=?, priority=0 WHERE id=?",
                     (stage, now_iso(), contacted, sid))
         log(con, sid, f"Этап: {SALES_LABELS[stage]}", user, "stage")
     elif funnel == "skips":
