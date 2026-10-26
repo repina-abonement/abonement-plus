@@ -169,8 +169,7 @@ def users_create(con, h, user, body, q):
 def coach_guard(con, user, group_id: int):
     if user["role"] != "coach":
         return
-    g = con.execute("SELECT coach_id FROM groups WHERE id=?", (group_id,)).fetchone()
-    if not g or g["coach_id"] != user["id"]:
+    if not schedule.coach_may(con, user["id"], group_id):
         raise ApiError("Это не ваша группа", 403)
 
 
@@ -179,7 +178,7 @@ def meta(con, h, user, body, q):
     m = sv.meta(con) | {"user": user, "demo": os.environ.get("CRM_DEMO", "1") == "1", "comms": comms.status(con)}
     user["sip_number"] = con.execute("SELECT sip_number FROM users WHERE id=?", (user["id"],)).fetchone()[0]
     if user["role"] == "coach":
-        m["groups"] = [g for g in m["groups"] if g["coach_id"] == user["id"]]
+        m["groups"] = [g for g in m["groups"] if schedule.coach_may(con, user["id"], g["id"])]
         m["settings"] = {}
     return m
 
@@ -208,6 +207,11 @@ def board_sales(con, h, user, body, q):
 
 @route("GET", "/api/tasks", role="operator")
 def tasks_list(con, h, user, body, q):
+    if q.get("as_user") and user["role"] == "admin":  # «Смотреть как»: стол глазами сотрудника
+        u = con.execute("SELECT id, name, role FROM users WHERE id=?", (int(q["as_user"]),)).fetchone()
+        if not u:
+            raise ApiError("Сотрудник не найден", 404)
+        return tasks.my_tasks(con, dict(u) | {"role": "operator"}, "mine")
     return tasks.my_tasks(con, user, q.get("scope", "mine"))
 
 
@@ -478,6 +482,17 @@ def shift_del(con, h, user, body, q, shid):
 def schedule_day(con, h, user, body, q):
     from datetime import date as _d
     return schedule.day(con, _d.fromisoformat(q["date"]) if q.get("date") else _d.today())
+
+
+@route("POST", "/api/substitutions", role="operator")
+def sub_save(con, h, user, body, q):
+    return {"id": sx(schedule.save_sub, con, body, user)}
+
+
+@route("DELETE", "/api/substitutions/{sid}", role="operator")
+def sub_delete(con, h, user, body, q, sid):
+    schedule.remove_sub(con, int(sid))
+    return {"ok": True}
 
 
 @route("GET", "/api/schedule/week")

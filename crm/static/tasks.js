@@ -27,13 +27,14 @@ function taskRow(t) {
 }
 
 async function tasksSection() {
-  const d = await api("GET", "/api/tasks?scope=" + S.tasks.scope);
+  const as = S.viewAs && S.viewAs.id !== S.user.id ? S.viewAs : null;
+  const d = await api("GET", as ? "/api/tasks?as_user=" + as.id : "/api/tasks?scope=" + S.tasks.scope);
   const g = d.groups, total = g.overdue.length + g.today.length;
   const block = (title, list, cls = "") => list.length ? `<div class="task-group ${cls}"><h4>${title} · ${list.length}</h4>${list.map(taskRow).join("")}</div>` : "";
   return `<section class="now tasks-box">
-    <div class="now-head"><h3>${S.tasks.scope === "all" ? "Задачи команды" : "Мои задачи"}: ${total ? `на сегодня ${total}` : "на сегодня всё сделано 🎉"}</h3>
+    <div class="now-head"><h3>${as ? `Задачи: ${esc(as.name)}` : S.tasks.scope === "all" ? "Задачи команды" : "Мои задачи"}: ${total ? `на сегодня ${total}` : "на сегодня всё сделано 🎉"}</h3>
       <span class="small muted">Выполнено сегодня: ${d.done_today}</span>
-      ${S.user.role === "admin" ? `<div class="seg" style="margin-left:auto"><button data-scope="mine" class="${S.tasks.scope === "mine" ? "active" : ""}">Мои</button><button data-scope="all" class="${S.tasks.scope === "all" ? "active" : ""}">Все сотрудники</button></div>` : ""}
+      ${S.user.role === "admin" && !as ? `<div class="seg" style="margin-left:auto"><button data-scope="mine" class="${S.tasks.scope === "mine" ? "active" : ""}">Мои</button><button data-scope="all" class="${S.tasks.scope === "all" ? "active" : ""}">Все сотрудники</button></div>` : ""}
     </div>
     ${d.team.length && S.tasks.scope === "all" ? `<div class="chips" style="margin-bottom:10px">${d.team.map((u) => `<span class="pill ${u.overdue ? "red" : u.open ? "yellow" : "green"}">${esc(u.name)}: ${u.open} на сегодня${u.overdue ? `, просрочено ${u.overdue}` : ""}</span>`).join("")}</div>` : ""}
     ${block("Просрочено", g.overdue, "late")}${block("Сегодня", g.today)}${block("Завтра", g.tomorrow, "later")}
@@ -69,27 +70,54 @@ function birthdaysBox(list) {
 }
 
 /* ---------- стол тренера ---------- */
-async function renderCoachToday(page) {
-  const d = await api("GET", "/api/coach/today");
-  const first = firstName(S.user.name);
-  page.innerHTML = `
-    <div class="page-head"><h2 class="grow">Привет, ${esc(first)}!</h2><span class="muted small">${dShort(d.date)}, ${["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"][(new Date(d.date + "T00:00").getDay() + 6) % 7]}</span></div>
-    ${d.missing.length ? `<section class="now"><div class="now-head"><h3>Не отмечено с прошлых тренировок</h3></div>
+const KID_TAG = {
+  paid: ["green", "абонемент"], single: ["", "разовое"], unpaid: ["yellow", "без оплаты"], vacation: ["", "в отпуске"],
+  makeup: ["", "отработка"], trial: ["blue", "пробное"],
+};
+const COACH_LINES = [
+  "Сегодня твоя команда, тренер. Погнали ⚽", "Сначала разминка, потом магия", "Свисток на шею, улыбку на лицо",
+  "Хорошая тренировка начинается с отметки в журнале 😉", "Каждый ребёнок сегодня должен уйти с победой, даже маленькой",
+];
+const WD_LOW = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"];
+
+async function renderCoachToday(page, coachId, viewBar = "") {
+  const d = await api("GET", "/api/coach/today" + (coachId ? "?coach_id=" + coachId : ""));
+  const first = firstName((d.coach && d.coach.name) || S.user.name);
+  const t = d.totals, wd = (iso) => WD_LOW[(new Date(iso + "T00:00").getDay() + 6) % 7];
+  const line = COACH_LINES[new Date(d.date + "T00:00").getDate() % COACH_LINES.length];
+  const up = d.upcoming || { covering: [], covered: [] };
+  const fact = (n, label, cls = "") => n ? `<div class="cfact ${cls}"><b>${n}</b><span>${label}</span></div>` : "";
+  page.innerHTML = `${viewBar}
+    <div class="page-head"><h2 class="grow">Привет, ${esc(first)}!</h2><span class="muted small">${dShort(d.date)}, ${wd(d.date)}</span></div>
+    <div class="muted" style="margin:-6px 0 14px">${line}</div>
+    ${d.today.length ? `<section class="now coach-sum"><div class="now-head"><h3>Сегодня ${d.today.length} ${d.today.length === 1 ? "тренировка" : d.today.length < 5 ? "тренировки" : "тренировок"}, ждём ${t.total} ${kidsWord(t.total)}</h3></div>
+      <div class="cfacts">${fact(t.paid, "по абонементу", "green")}${fact(t.trials, "на пробном", "blue")}${fact(t.single, "разовое")}${fact(t.makeups, "на отработке")}${fact(t.unpaid, "без оплаты", "yellow")}${fact(t.vacation, "в отпуске, не придут")}</div></section>` : ""}
+    ${d.replaced.length ? `<section class="now calm" style="margin-top:12px"><div class="now-head"><h3>Сегодня тебя заменяют</h3></div>
+      ${d.replaced.map((r) => `<div class="small">🔁 ${esc(r.time || "")} ${esc(r.name)}, ${esc(r.branch)}: вместо тебя <b>${esc(r.by)}</b></div>`).join("")}</section>` : ""}
+    ${d.missing.length ? `<section class="now" style="margin-top:12px"><div class="now-head"><h3>Не отмечено с прошлых тренировок</h3></div>
       <div class="now-list">${d.missing.map((m) => `<div class="now-item red"><span class="ref-card red"></span>
         <div class="grow"><b>${esc(m.name)}</b><div class="small">${dShort(m.date)}: не отмечено ${m.left}</div></div>
         <div class="now-act"><button class="btn sm primary" data-j="${m.group_id}" data-d="${m.date}">Отметить</button></div></div>`).join("")}</div></section>` : ""}
     <h3 style="margin:18px 0 10px">Тренировки сегодня</h3>
     ${d.today.length ? `<div class="today-grid">${d.today.map((g) => {
-      const all = g.kids + g.trials, done = g.marked + g.trials_marked;
-      return `<button class="today-card ${done >= all && all ? "ok" : ""}" data-j="${g.id}" data-d="${d.date}">
+      const all = g.kids + g.trials, done = g.marked + g.trials_marked, c = g.counts;
+      return `<div class="today-card ${done >= all && all ? "ok" : ""} ${g.sub_for ? "is-sub" : ""}">
+        ${g.sub_for ? `<div class="sub-flag">🔁 Замена: ты вместо ${esc(g.sub_for.instead || "другого тренера")}${g.sub_for.note ? `. ${esc(g.sub_for.note)}` : ""}</div>` : ""}
         <div class="today-time">${esc(g.time || "")}</div>
         <div class="today-name">${esc(g.name)}</div>
         <div class="small muted">${esc(g.branch)}${g.age ? `, ${esc(g.age)} лет` : ""}</div>
-        <div class="today-facts"><span>🧒 ${g.kids} ${kidsWord(g.kids)}</span>${g.trials ? `<span>🎯 пробных: ${g.trials}</span>` : ""}</div>
+        <div class="today-facts"><span>🧒 придут ${all} ${kidsWord(all)}${g.is_makeup ? "" : ` из ${g.capacity}`}</span></div>
+        <div class="chips" style="margin:6px 0">${[["paid", c.paid], ["trial", c.trials], ["single", c.single], ["makeup", c.makeups], ["unpaid", c.unpaid], ["vacation", c.vacation]]
+          .filter(([, n]) => n).map(([k, n]) => `<span class="pill ${KID_TAG[k][0]}">${KID_TAG[k][1]}: ${n}</span>`).join("")}</div>
         ${(g.birthdays || []).map((b) => `<div class="bday">🎂 <b>${esc(b.name)}</b>: ${b.when === "today" ? "сегодня" : "вчера был"} день рождения, ${b.age} ${yearsWord(b.age)}. Поздравь всей командой!</div>`).join("")}
+        ${g.list.length ? `<details class="kid-list"><summary class="small">Кто придёт</summary>${g.list.map((k) => `<div class="kid-row"><span class="grow">${esc(k.name)}</span>${k.note ? `<span class="small muted">${esc(k.note)}</span>` : ""}<span class="pill ${KID_TAG[k.tag][0]}">${KID_TAG[k.tag][1]}</span></div>`).join("")}</details>` : ""}
         <div class="bar"><i style="width:${all ? Math.round(100 * done / all) : 0}%"></i></div>
-        <div class="small">${all ? (done >= all ? "Все отмечены 👍" : `Отмечено ${done} из ${all}. Нажми, чтобы отметить`) : "В группе пока нет детей"}</div>
-      </button>`; }).join("")}</div>` : `<div class="panel center" style="padding:30px">Сегодня тренировок нет. Отдыхай 😎</div>`}
+        <div class="row" style="align-items:center;margin-top:6px"><div class="small grow">${all ? (done >= all ? "Все отмечены 👍" : `Отмечено ${done} из ${all}`) : "В группе пока нет детей"}</div>
+          ${all ? `<button class="btn sm primary" data-j="${g.id}" data-d="${d.date}" style="flex:0">Отметить</button>` : ""}</div>
+      </div>`; }).join("")}</div>` : `<div class="panel center" style="padding:30px">Сегодня тренировок нет. Отдыхай 😎</div>`}
+    ${up.covering.length || up.covered.length ? `<section class="now calm" style="margin-top:16px"><div class="now-head"><h3>Замены на ближайшие 2 недели</h3></div>
+      ${up.covering.map((x) => `<div class="small">🔁 ${dShort(x.date)}, ${wd(x.date)}, ${esc(x.time || "")}: <b>ты выходишь</b> в ${esc(x.group_name)} (${esc(x.branch)}) вместо ${esc(x.own_name || "другого тренера")}</div>`).join("")}
+      ${up.covered.map((x) => `<div class="small muted">↪ ${dShort(x.date)}, ${wd(x.date)}, ${esc(x.time || "")}: ${esc(x.group_name)} ведёт ${esc(x.sub_name)}, у тебя выходной</div>`).join("")}</section>` : ""}
     <div class="small muted" style="margin-top:14px">Отмечай детей сразу после тренировки: от этого зависят отработки, перерасчёт абонементов и твоё место в таблице тренеров</div>`;
   page.querySelectorAll("[data-j]").forEach((b) => (b.onclick = () => { S.journal.group = +b.dataset.j; S.journal.date = b.dataset.d; go("journal"); }));
 }

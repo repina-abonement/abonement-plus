@@ -40,6 +40,9 @@ async function renderLegalSettings(box) {
     ${d.missing.length ? `<div class="alert" style="margin-bottom:12px">Чтобы документы были действительными, заполните: ${d.missing.map(esc).join(", ")}. Пока пустые места выделены жёлтым на страницах</div>` : ""}
     <div class="row">${["legal_ip_name", "legal_inn", "legal_ogrnip"].map((k) => `<div class="field"><label>${esc(d.labels[k])}</label><input data-l="${k}" value="${esc(r[k])}"></div>`).join("")}</div>
     <div class="row">${["legal_address", "legal_email", "legal_phone"].map((k) => `<div class="field"><label>${esc(d.labels[k])}</label><input data-l="${k}" value="${esc(r[k])}"></div>`).join("")}</div>
+    <div class="row">${["legal_account", "legal_bank"].map((k) => `<div class="field"><label>${esc(d.labels[k])}</label><input data-l="${k}" value="${esc(r[k])}"></div>`).join("")}</div>
+    <div class="row">${["legal_bik", "legal_corr"].map((k) => `<div class="field"><label>${esc(d.labels[k])}</label><input data-l="${k}" value="${esc(r[k])}"></div>`).join("")}</div>
+    <div class="small muted" style="margin:-4px 0 10px">В поле ФИО пишите без «ИП»: Фамилия Имя Отчество. Слова «Индивидуальный предприниматель» документ добавит сам</div>
     <div class="row">${["legal_school", "legal_site", "legal_date"].map((k) => `<div class="field"><label>${esc(d.labels[k])}</label><input data-l="${k}" value="${esc(r[k])}"></div>`).join("")}</div>
     <div class="list" style="box-shadow:none;margin:6px 0 10px">${d.docs.map((x) => `<div class="list-row"><div class="grow"><b>${esc(x.title)}</b>${x.custom ? ` <span class="pill">изменён</span>` : ""}
       <div class="small"><a href="${esc(x.url)}" target="_blank">${esc(x.url)}</a></div></div>

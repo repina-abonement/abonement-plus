@@ -21,6 +21,10 @@ REQUISITES = {
     "legal_phone": "Телефон",
     "legal_school": "Название школы для документов",
     "legal_site": "Адрес сайта",
+    "legal_account": "Расчётный счёт",
+    "legal_bank": "Банк",
+    "legal_bik": "БИК",
+    "legal_corr": "Корреспондентский счёт",
     "legal_date": "Дата редакции документов",
 }
 
@@ -132,6 +136,10 @@ PAYMENT = """# Оплата, возврат и реквизиты
 Адрес: {legal_address}
 Email: {legal_email}
 Телефон: {legal_phone}
+Расчётный счёт {legal_account}
+Банк: {legal_bank}
+БИК {legal_bik}
+Корр. счёт {legal_corr}
 """
 
 DOCS = {

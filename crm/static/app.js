@@ -299,13 +299,42 @@ const ago = (iso) => {
   return m < 1 ? "только что" : m < 60 ? `${m} мин назад` : m < 1440 ? `${Math.floor(m / 60)} ч назад` : dtShort(iso);
 };
 
+/* «Смотреть как»: админ выбирает сотрудника и видит рабочий стол его глазами */
+S.viewAs = (() => { try { return JSON.parse(localStorage.getItem("crm.viewAs") || "null"); } catch (_) { return null; } })();
+async function viewAsBar() {
+  if (S.user.role !== "admin") return "";
+  if (!S.staff) S.staff = (await api("GET", "/api/users")).filter((u) => u.active);
+  const cur = S.viewAs ? S.viewAs.id : S.user.id;
+  const opt = (u) => `<option value="${u.id}" ${u.id === cur ? "selected" : ""}>${esc(u.name)}${u.id === S.user.id ? " (я)" : ""}</option>`;
+  const grp = (role, title) => { const l = S.staff.filter((u) => u.role === role); return l.length ? `<optgroup label="${title}">${l.map(opt).join("")}</optgroup>` : ""; };
+  return `<div class="viewas ${S.viewAs && S.viewAs.id !== S.user.id ? "on" : ""}"><span>👀 Как видит стол</span>
+    <select id="view-as">${grp("admin", "Администраторы")}${grp("operator", "Операторы")}${grp("coach", "Тренеры")}</select>
+    ${S.viewAs && S.viewAs.id !== S.user.id ? `<button class="btn sm" id="view-me">Вернуться к своему</button>` : ""}</div>`;
+}
+function wireViewAs(page) {
+  const sel = page.querySelector("#view-as");
+  if (!sel) return;
+  sel.onchange = () => {
+    const u = S.staff.find((x) => x.id === +sel.value);
+    S.viewAs = u && u.id !== S.user.id ? { id: u.id, name: u.name, role: u.role } : null;
+    try { localStorage.setItem("crm.viewAs", JSON.stringify(S.viewAs)); } catch (_) {}
+    render();
+  };
+  const me = page.querySelector("#view-me");
+  if (me) me.onclick = () => { sel.value = S.user.id; sel.onchange(); };
+}
+
 async function renderWorkdesk(page) {
+  if (S.user.role !== "admin") S.viewAs = null;
+  const bar = await viewAsBar().catch(() => "");
+  if (S.viewAs && S.viewAs.role === "coach") { await renderCoachToday(page, S.viewAs.id, bar); return wireViewAs(page); }
   const [d, tasksHtml, schedHtml] = await Promise.all([api("GET", "/api/workdesk"), tasksSection(), scheduleWidget().catch(() => "")]);
   const wasOpen = page.querySelector(".sched-widget") ? page.querySelector(".sched-widget").open : null;
   const u = d.urgent, reds = u.filter((x) => x.level === "red").length;
   const scroll = page.querySelector(".board") ? page.querySelector(".board").scrollLeft : 0;
   page.innerHTML = `
-    <div class="page-head"><h2 class="grow">Рабочий стол</h2>
+    ${bar}
+    <div class="page-head"><h2 class="grow">Рабочий стол${S.viewAs ? `: ${esc(S.viewAs.name)}` : ""}</h2>
       <span class="muted small">Обновляется сам каждые 20 секунд</span></div>
     ${schedHtml}
     ${birthdaysBox(d.birthdays)}
@@ -330,6 +359,7 @@ async function renderWorkdesk(page) {
   if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
   wireBoard(page, "sales", d.board);
   wireTasks(page);
+  wireViewAs(page);
   if (page.querySelector(".sched-widget")) { if (wasOpen === false) page.querySelector(".sched-widget").open = false; wireSchedule(page.querySelector(".sched-widget"), S.meta.today); }
   page.querySelectorAll(".bday-box [data-open]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.open)));
   page.querySelectorAll("[data-u]").forEach((b) => (b.onclick = async () => {

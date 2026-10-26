@@ -62,6 +62,33 @@ def main():
     check(all(r["id"] != sid2 for r in sv.journal(con, g, "2026-11-05")["rows"]), "Ученик в архиве пропал из журнала")
     check(schedule.archive_list(con)["students"][0]["name"] == "Катя", "…и виден в архиве, его можно вернуть")
 
+    print("Стол тренера и замены")
+    coach2 = con.execute("INSERT INTO users(login,name,role,pw_hash) VALUES ('c2','Иван','coach','x$y')").lastrowid
+    con.execute("""INSERT INTO subscriptions(student_id, month, tariff, lessons, per_lesson, price, status, created_at)
+                   VALUES (?, '2026-11', 'fixed', 8, 1000, 8000, 'paid', '2026-11-01')""", (sid,))
+    pid = sv.create_student(con, {"name": "Петя", "parent_name": "Оля", "phone": "+7 900 555-00-11", "funnel": "sales",
+                                  "group_id": g}, OP)
+    con.execute("UPDATE students SET trial_at='2026-11-09T17:45' WHERE id=?", (pid,))
+    sv.create_student(con, {"name": "Лёва", "parent_name": "Нина", "phone": "+7 900 555-00-22", "funnel": "members",
+                            "group_id": g}, OP)
+    ct = coaches.coach_today(con, coach, date(2026, 11, 9))
+    c = ct["today"][0]["counts"]
+    check((c["paid"], c["unpaid"], c["trials"], c["total"]) == (1, 1, 1, 3),
+          "Тренер видит: придут 3, по абонементу 1, без оплаты 1, пробное 1")
+    try:
+        schedule.save_sub(con, {"group_id": g, "date": "2026-11-10", "coach_id": coach2}, OP)
+        check(False, "Замену во вторник не поставить: тренировки нет")
+    except schedule.SchedError:
+        check(True, "Замену во вторник не поставить: тренировки нет")
+    schedule.save_sub(con, {"group_id": g, "date": "2026-11-09", "coach_id": coach2, "note": "Никита на турнире"}, OP)
+    ct = coaches.coach_today(con, coach, date(2026, 11, 9))
+    check(not ct["today"] and ct["replaced"][0]["by"] == "Иван", "Штатный тренер видит, что сегодня его заменяет Иван")
+    ct2 = coaches.coach_today(con, coach2, date(2026, 11, 9))
+    check(ct2["today"][0]["sub_for"]["instead"] == "Никита", "Иван видит у себя тренировку с пометкой «замена вместо Никиты»")
+    check(schedule.day(con, date(2026, 11, 9))["branches"][0]["lessons"][0]["coach"] == "Иван", "В расписании на этот день стоит Иван")
+    up = coaches.coach_today(con, coach2, date(2026, 11, 6))["upcoming"]["covering"]
+    check(up and up[0]["date"] == "2026-11-09", "Иван заранее видит предстоящую замену")
+
 
 if __name__ == "__main__":
     main()

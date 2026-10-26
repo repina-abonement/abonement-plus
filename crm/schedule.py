@@ -18,6 +18,16 @@ CREATE TABLE IF NOT EXISTS shifts (
     time_to TEXT NOT NULL DEFAULT '',
     active INTEGER NOT NULL DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS substitutions (
+    id INTEGER PRIMARY KEY,
+    group_id INTEGER NOT NULL REFERENCES groups(id),
+    date TEXT NOT NULL,
+    coach_id INTEGER NOT NULL REFERENCES users(id),   -- кто выходит вместо штатного тренера
+    note TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE(group_id, date)
+);
 """
 
 
@@ -163,7 +173,10 @@ def day(con, d: date) -> dict:
                 continue
             j = sv.journal(con, g["id"], d.isoformat())
             kids = [r for r in j["rows"] if r.get("status") != "trial"]
-            lessons.append({"id": g["id"], "name": g["name"], "time": g["time"], "age": g["age"], "coach": g["coach_name"] or "",
+            sub = sub_on(con, g["id"], d.isoformat())
+            lessons.append({"id": g["id"], "name": g["name"], "time": g["time"], "age": g["age"],
+                            "coach": sub["coach_name"] if sub else (g["coach_name"] or ""), "coach_id": g["coach_id"],
+                            "sub": {"id": sub["id"], "coach_id": sub["coach_id"], "instead": g["coach_name"] or "", "note": sub["note"]} if sub else None,
                             "is_makeup": g["is_makeup"], "kids": len(kids), "capacity": g["capacity"],
                             "trials": sum(1 for r in j["rows"] if r.get("status") == "trial")})
         staff = [dict(r) for r in con.execute(
@@ -172,7 +185,8 @@ def day(con, d: date) -> dict:
                ORDER BY sh.time_from""", (b["id"], f"%,{d.weekday()},%"))]
         if lessons or staff:
             out.append({"id": b["id"], "name": b["name"], "address": b["address"], "lessons": lessons, "staff": staff})
-    return {"date": d.isoformat(), "weekday": d.weekday(), "branches": out}
+    coaches = [dict(r) for r in con.execute("SELECT id, name FROM users WHERE role='coach' AND active=1 ORDER BY name")]
+    return {"date": d.isoformat(), "weekday": d.weekday(), "branches": out, "coaches": coaches}
 
 
 def week(con) -> dict:
@@ -184,6 +198,62 @@ def week(con) -> dict:
     for wd in range(7):
         days.append([r for r in rows if wd in logic.parse_weekdays(r["weekdays"])])
     return {"days": days}
+
+
+# ---------------- замены тренеров ----------------
+
+def save_sub(con, data: dict, user: dict) -> int:
+    gid, coach = int(data.get("group_id") or 0), int(data.get("coach_id") or 0)
+    try:
+        d = date.fromisoformat(data.get("date") or "")
+    except ValueError:
+        raise SchedError("Укажите дату замены")
+    g = con.execute("SELECT * FROM groups WHERE id=?", (gid,)).fetchone()
+    if not g:
+        raise SchedError("Группа не найдена")
+    if d.weekday() not in logic.parse_weekdays(g["weekdays"]):
+        raise SchedError("В этот день у группы нет тренировки")
+    if not con.execute("SELECT 1 FROM users WHERE id=? AND role='coach' AND active=1", (coach,)).fetchone():
+        raise SchedError("Выберите тренера")
+    if coach == g["coach_id"]:
+        con.execute("DELETE FROM substitutions WHERE group_id=? AND date=?", (gid, d.isoformat()))
+        return 0
+    con.execute("""INSERT INTO substitutions(group_id, date, coach_id, note, created_by, created_at) VALUES (?,?,?,?,?,?)
+                   ON CONFLICT(group_id, date) DO UPDATE SET coach_id=excluded.coach_id, note=excluded.note,
+                   created_by=excluded.created_by, created_at=excluded.created_at""",
+                (gid, d.isoformat(), coach, (data.get("note") or "").strip()[:200], user.get("name", ""),
+                 datetime.now().isoformat(timespec="minutes")))
+    return con.execute("SELECT id FROM substitutions WHERE group_id=? AND date=?", (gid, d.isoformat())).fetchone()[0]
+
+
+def remove_sub(con, sub_id: int):
+    con.execute("DELETE FROM substitutions WHERE id=?", (sub_id,))
+
+
+def sub_on(con, gid: int, d: str):
+    return con.execute("""SELECT s.*, u.name AS coach_name FROM substitutions s JOIN users u ON u.id=s.coach_id
+                          WHERE s.group_id=? AND s.date=?""", (gid, d)).fetchone()
+
+
+def coach_subs(con, coach_id: int, d_from: str, d_to: str) -> dict:
+    """Замены тренера на период: где он выходит вместо другого и где заменяют его."""
+    q = """SELECT s.id, s.date, s.note, g.id AS group_id, g.name AS group_name, g.time, b.name AS branch,
+                  u.name AS sub_name, o.name AS own_name
+           FROM substitutions s JOIN groups g ON g.id=s.group_id JOIN branches b ON b.id=g.branch_id
+           JOIN users u ON u.id=s.coach_id LEFT JOIN users o ON o.id=g.coach_id
+           WHERE s.date BETWEEN ? AND ? AND {} ORDER BY s.date, g.time"""
+    return {"covering": [dict(r) for r in con.execute(q.format("s.coach_id=?"), (d_from, d_to, coach_id))],
+            "covered": [dict(r) for r in con.execute(q.format("g.coach_id=?"), (d_from, d_to, coach_id))]}
+
+
+def coach_may(con, coach_id: int, gid: int) -> bool:
+    """Тренер может открыть журнал своей группы и той, где у него замена (за неделю до и после)."""
+    g = con.execute("SELECT coach_id FROM groups WHERE id=?", (gid,)).fetchone()
+    if g and g["coach_id"] == coach_id:
+        return True
+    t = date.today()
+    return bool(con.execute("SELECT 1 FROM substitutions WHERE group_id=? AND coach_id=? AND date BETWEEN ? AND ?",
+                            (gid, coach_id, (t - timedelta(days=7)).isoformat(), (t + timedelta(days=7)).isoformat())).fetchone())
 
 
 # ---------------- выгрузка ----------------

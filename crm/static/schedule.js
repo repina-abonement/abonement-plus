@@ -13,11 +13,12 @@ function dayHtml(d, compact = false) {
     <section class="sched-br" style="--br:${BR_COLORS[i % BR_COLORS.length]}">
       <div class="sched-br-head"><b>${esc(b.name)}</b>${b.address && !compact ? `<span class="small muted">${esc(b.address)}</span>` : ""}</div>
       <div class="sched-staff">${b.staff.length ? `На смене: ${b.staff.map((x) => `<b>${esc(x.name)}</b>${x.time_from ? ` ${esc(x.time_from)}–${esc(x.time_to)}` : ""}`).join(", ")}` : `<span class="muted">Смена не назначена</span>`}</div>
-      ${b.lessons.map((l) => `<button class="sched-l" data-jg="${l.id}">
+      ${b.lessons.map((l) => `<div class="sched-lw"><button class="sched-l" data-jg="${l.id}">
         <span class="sched-t">${esc(l.time || "—")}</span>
-        <span class="grow"><b>${esc(l.name)}</b>${l.is_makeup ? ` <span class="pill">отработки</span>` : ""}<span class="small muted"> ${esc(l.age ? l.age + " лет" : "")}${l.coach ? ` · ${esc(l.coach)}` : " · тренер не назначен"}</span></span>
+        <span class="grow"><b>${esc(l.name)}</b>${l.is_makeup ? ` <span class="pill">отработки</span>` : ""}<span class="small muted"> ${esc(l.age ? l.age + " лет" : "")}${l.coach ? ` · ${esc(l.coach)}` : " · тренер не назначен"}</span>
+          ${l.sub ? `<span class="pill yellow">🔁 замена вместо ${esc(l.sub.instead || "штатного")}</span>` : ""}</span>
         <span class="small">${l.is_makeup ? `${l.kids} записано` : `${l.kids} из ${l.capacity}`}${l.trials ? ` · 🎯 ${l.trials}` : ""}</span>
-      </button>`).join("") || `<div class="small muted">Тренировок нет</div>`}
+      </button>${!compact && !isCoach() ? `<button class="btn sm sub-btn" data-sub="${l.id}" title="Поставить другого тренера на этот день">🔁</button>` : ""}</div>`).join("") || `<div class="small muted">Тренировок нет</div>`}
     </section>`).join("")}</div>`;
 }
 
@@ -53,8 +54,31 @@ async function renderSchedule(page) {
     $("#d-next").onclick = () => { C.date = addDays(C.date, 1); render(); };
     $("#d-today").onclick = () => { C.date = S.meta.today; render(); };
     $("#d-date").onchange = (e) => { C.date = e.target.value; render(); };
+    body.querySelectorAll("[data-sub]").forEach((b) => (b.onclick = () => subForm(b, d)));
   }
   wireSchedule(body, C.mode === "day" ? C.date : null);
+}
+
+function subForm(btn, d) {
+  const l = d.branches.flatMap((b) => b.lessons).find((x) => x.id === +btn.dataset.sub);
+  const wrap = btn.closest(".sched-lw");
+  const old = wrap.nextElementSibling;
+  if (old && old.classList.contains("sub-form")) { old.remove(); return; }
+  const cur = l.sub ? l.sub.coach_id : l.coach_id;
+  const f = document.createElement("div");
+  f.className = "sub-form";
+  f.innerHTML = `<div class="small" style="margin-bottom:6px">Кто ведёт <b>${esc(l.name)}</b> ${dShort(d.date)}${l.sub ? `. Сейчас замена вместо ${esc(l.sub.instead)}` : ""}</div>
+    <div class="row" style="align-items:flex-end"><div class="field"><label>Тренер</label><select data-c>${d.coaches.map((c) => `<option value="${c.id}" ${c.id === cur ? "selected" : ""}>${esc(c.name)}${c.id === l.coach_id ? " (штатный)" : ""}</option>`).join("")}</select></div>
+    <div class="field"><label>Комментарий</label><input data-n placeholder="Например: Никита на турнире" value="${esc(l.sub ? l.sub.note : "")}"></div>
+    <button class="btn sm primary" data-ok style="flex:0">Сохранить</button>${l.sub ? `<button class="btn sm" data-del style="flex:0">Отменить замену</button>` : ""}</div>
+    <div class="small muted">Тренер на замене увидит эту тренировку у себя на столе и сможет отметить детей</div>`;
+  wrap.after(f);
+  f.querySelector("[data-ok]").onclick = async () => {
+    try { await api("POST", "/api/substitutions", { group_id: l.id, date: d.date, coach_id: +f.querySelector("[data-c]").value, note: f.querySelector("[data-n]").value }); toast("Сохранено"); render(); }
+    catch (e) { fail(e); }
+  };
+  const del = f.querySelector("[data-del]");
+  if (del) del.onclick = async () => { try { await api("DELETE", `/api/substitutions/${l.sub.id}`); toast("Замена отменена"); render(); } catch (e) { fail(e); } };
 }
 
 function wireSchedule(root, date) {
