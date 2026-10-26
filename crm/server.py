@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import ai, callstats, coaches, comms, db, services as sv
+from . import ai, callstats, coaches, comms, db, services as sv, tasks
 from .services import ApiError
 
 
@@ -187,11 +187,43 @@ def board_sales(con, h, user, body, q):
     return sv.board(con, "sales")
 
 
+@route("GET", "/api/tasks", role="operator")
+def tasks_list(con, h, user, body, q):
+    return tasks.my_tasks(con, user, q.get("scope", "mine"))
+
+
+@route("POST", "/api/tasks/{tid}/done", role="operator")
+def task_done(con, h, user, body, q, tid):
+    cx(tasks.complete, con, int(tid), user, body.get("result") or "")
+    return {"ok": True}
+
+
+@route("POST", "/api/students/{sid}/tasks", role="operator")
+def task_add(con, h, user, body, q, sid):
+    sv.get_student_row(con, int(sid))
+    due = body.get("due") or db.now_iso()
+    return {"id": tasks.add_task(con, "manual", int(sid), due, title=(body.get("title") or "Задача").strip()[:200],
+                                 source="manual", assignee=int(body["assignee"]) if body.get("assignee") else user["id"])}
+
+
+@route("GET", "/api/tasks/settings", role="admin")
+def tasks_settings(con, h, user, body, q):
+    return tasks.settings_view(con)
+
+
+@route("PUT", "/api/tasks/settings", role="admin")
+def tasks_settings_put(con, h, user, body, q):
+    tasks.save_settings(con, body)
+    return tasks.settings_view(con)
+
+
 @route("GET", "/api/workdesk", role="operator")
 def workdesk(con, h, user, body, q):
     board = sv.board(con, "sales")
     trials = [dict(k, kind="trial", level=k["color"], text=k.get("badge") or "Пробное закончилось, связаться")
               for c in board["columns"] if c["key"] == "trial_done" for k in c["cards"] if k.get("color")]
+    covered = {r[0] for r in con.execute("SELECT student_id FROM tasks WHERE status='open' AND kind IN ('how_was','no_show')")}
+    trials = [t for t in trials if t["id"] not in covered]  # по ним уже есть задача сверху
     items = comms.urgent(con) + [{"kind": "trial", "level": t["level"], "ts": t.get("trial_at"), "student_id": t["id"],
                                   "phone": t["phone"], "title": t["name"],
                                   "text": "Пробное закончилось " + (t.get("badge") or "").replace(" мин после пробного", " мин назад") + ", связаться"}
@@ -341,6 +373,12 @@ def attendance(con, h, user, body, q):
     return {"ok": True}
 
 
+@route("GET", "/api/coach/today")
+def coach_today(con, h, user, body, q):
+    cid = user["id"] if user["role"] == "coach" else int(q.get("coach_id") or 0)
+    return coaches.coach_today(con, cid)
+
+
 @route("GET", "/api/coaches/board")
 def coaches_board(con, h, user, body, q):
     me = user["id"] if user["role"] == "coach" else (int(q["as_coach"]) if q.get("as_coach") else None)
@@ -372,6 +410,7 @@ def demo_reset(con, h, user, body, q):
     comms.seed_demo(con)
     coaches.seed_demo_coaches(con)
     ai.seed_demo(con)
+    tasks.seed_demo(con)
     return {"ok": True}
 
 
@@ -721,8 +760,10 @@ def main():
         if not comms.status(con)["telegram"] and not comms.status(con)["sipuni"]:
             comms.seed_demo(con)
         ai.seed_demo(con)
+        tasks.seed_demo(con)
     con.close()
     ai.start_worker(db.connect)
+    tasks.start_worker(db.connect)
     host = os.environ.get("CRM_HOST", "127.0.0.1")
     port = int(os.environ.get("CRM_PORT", "8000"))
     srv = ThreadingHTTPServer((host, port), Handler)

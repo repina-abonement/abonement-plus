@@ -164,3 +164,33 @@ def seed_demo_coaches(con):
                           (login, name, "coach", hash_password(login + "-test-1")))
         uid = cur.lastrowid if cur.rowcount else con.execute("SELECT id FROM users WHERE login=?", (login,)).fetchone()[0]
         con.execute("UPDATE groups SET coach_id=? WHERE id=?", (uid, free[i]))
+
+
+def coach_today(con, coach_id: int, today=None) -> dict:
+    """Рабочий стол тренера: сегодняшние тренировки и что не отмечено за последнюю неделю."""
+    from datetime import date as _d, timedelta as _td
+    from . import services as sv
+    today = today or _d.today()
+    groups = [dict(r) for r in con.execute(
+        """SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id
+           WHERE g.coach_id=? AND g.active=1 ORDER BY g.time""", (coach_id,))]
+    out_today, missing = [], []
+    for g in groups:
+        days = logic.parse_weekdays(g["weekdays"])
+        if today.weekday() in days:
+            j = sv.journal(con, g["id"], today.isoformat())
+            kids = [r for r in j["rows"] if r.get("status") != "trial"] if not g["is_makeup"] else j["rows"]
+            trials = [r for r in j["rows"] if r.get("status") == "trial"]
+            marked = sum(1 for r in kids if r.get("status") in ("present", "absent", "vacation", "done", "missed"))
+            out_today.append({"id": g["id"], "name": g["name"], "time": g["time"], "branch": g["branch"], "age": g["age"],
+                              "is_makeup": g["is_makeup"], "kids": len(kids), "marked": marked, "trials": len(trials),
+                              "trials_marked": sum(1 for r in trials if r.get("trial_came") is not None)})
+        for back in range(1, 8):
+            d = today - _td(days=back)
+            if d.weekday() not in days or g["is_makeup"]:
+                continue
+            j = sv.journal(con, g["id"], d.isoformat())
+            left = sum(1 for r in j["rows"] if r.get("status") is None or (r.get("status") == "trial" and r.get("trial_came") is None))
+            if left:
+                missing.append({"group_id": g["id"], "name": g["name"], "date": d.isoformat(), "left": left})
+    return {"today": out_today, "missing": missing, "date": today.isoformat()}

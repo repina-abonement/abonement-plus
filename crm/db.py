@@ -255,9 +255,10 @@ def init_db(con: sqlite3.Connection):
             ALTER TABLE subscriptions_new RENAME TO subscriptions;
         """)
     sync_enrollments(con)
-    from . import ai, comms
+    from . import ai, comms, tasks
     comms.init(con)
     ai.init(con)
+    tasks.init(con)
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sub_enr_month ON subscriptions(enrollment_id, month)")
     for k, v in DEFAULT_SETTINGS.items():
         con.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
@@ -287,7 +288,7 @@ def settings(con) -> dict:
     return {r["key"]: r["value"] for r in con.execute("SELECT key, value FROM settings")}
 
 
-DATA_TABLES = ["messages", "conversations", "calls", "lead_imports", "hook_log", "history", "makeups", "subscriptions", "vacations", "attendance", "students", "parents",
+DATA_TABLES = ["tasks", "auto_messages", "messages", "conversations", "calls", "lead_imports", "hook_log", "history", "makeups", "subscriptions", "vacations", "attendance", "students", "parents",
                "families", "groups", "branches", "audit"]
 
 
@@ -296,7 +297,8 @@ def reset_demo(con: sqlite3.Connection):
     for t in DATA_TABLES:
         con.execute(f"DELETE FROM {t}")
     con.execute("UPDATE groups SET coach_id = NULL")
-    con.execute("DELETE FROM users WHERE login IN ('trener', 'trener2', 'trener3')")
+    con.execute("DELETE FROM users WHERE login IN ('trener', 'trener2', 'trener3', 'olga')")
+    con.execute("DELETE FROM integrations WHERE key = 'task_owner_trials'")
 
 
 def seed_demo(con: sqlite3.Connection, today: date | None = None):

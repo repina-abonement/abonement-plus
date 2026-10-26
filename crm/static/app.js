@@ -57,11 +57,12 @@ function renderLogin() {
 
 /* ---------- каркас ---------- */
 const VIEWS = [
-  ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["members", "Ученики"], ["skips", "Пропуски"],
+  ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["members", "Ученики"], ["skips", "Пропуски"],
   ["journal", "Журнал"], ["coaches", "Тренеры"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
   sales: '<path d="M4 5h16v14H4z"/><path d="M9 5v14M15 5v14"/>',
+  today: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   inbox: '<path d="M4 6h16v10H8l-4 3z"/><path d="M8 10h8M8 13h5"/>',
   members: '<circle cx="9" cy="8" r="3"/><path d="M3.5 19c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5"/><circle cx="17" cy="9" r="2.3"/><path d="M16 14.6c2.2.2 3.7 1.6 4.4 4.4"/>',
   skips: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4M10 14l4 4M14 14l-4 4"/>',
@@ -75,14 +76,15 @@ const NAV_ICONS = {
 const navIcon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NAV_ICONS[k] || ""}</svg>`;
 
 const isCoach = () => S.user && S.user.role === "coach";
-const visibleViews = () => isCoach() ? VIEWS.filter(([k]) => ["journal", "coaches", "settings"].includes(k)).map(([k, t]) => [k, k === "coaches" ? "Мои результаты" : t])
-  : S.user.role === "admin" ? VIEWS : VIEWS.filter(([k]) => k !== "dashboard");
-const SHORT = { sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
+const COACH_VIEWS = ["today", "journal", "coaches", "settings"];
+const visibleViews = () => isCoach() ? VIEWS.filter(([k]) => COACH_VIEWS.includes(k)).map(([k, t]) => [k, k === "coaches" ? "Мои результаты" : t])
+  : VIEWS.filter(([k]) => k !== "today" && (S.user.role === "admin" || k !== "dashboard"));
+const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
 function isCoachShort() { return "Результаты"; }
 const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></span>` : "";
 
 function shell() {
-  if (isCoach() && !["journal", "coaches", "settings"].includes(S.view)) S.view = "journal";
+  if (isCoach() && !COACH_VIEWS.includes(S.view)) S.view = "today";
   const views = visibleViews();
   const tabs = views.length <= 5 ? views : [...views.slice(0, 4), ["more", "Ещё"]];
   app.innerHTML = `
@@ -116,6 +118,7 @@ async function render() {
   if (!page) return;
   try {
     if (S.view === "sales") return await renderWorkdesk(page);
+    if (S.view === "today") return await renderCoachToday(page);
     if (["members", "skips"].includes(S.view)) return await renderBoard(page, S.view);
     if (S.view === "dashboard") return await renderDashboard(page);
     if (S.view === "inbox") return await renderInbox(page);
@@ -289,13 +292,14 @@ const ago = (iso) => {
 };
 
 async function renderWorkdesk(page) {
-  const d = await api("GET", "/api/workdesk");
+  const [d, tasksHtml] = await Promise.all([api("GET", "/api/workdesk"), tasksSection()]);
   const u = d.urgent, reds = u.filter((x) => x.level === "red").length;
   const scroll = page.querySelector(".board") ? page.querySelector(".board").scrollLeft : 0;
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Рабочий стол</h2>
       <span class="muted small">Обновляется сам каждые 20 секунд</span></div>
-    <section class="now ${u.length ? "" : "calm"}">
+    ${tasksHtml}
+    <section class="now ${u.length ? "" : "calm"}" style="margin-top:14px">
       <div class="now-head"><h3>${u.length ? (reds ? `Горит прямо сейчас: ${reds}` : "Ждут ответа") : "Всё обработано"}</h3>
         ${u.length ? `<span class="muted small">Красное сначала, потом сообщения и пробные</span>` : ""}</div>
       ${u.length ? `<div class="now-list">${u.map((x, i) => `
@@ -314,6 +318,7 @@ async function renderWorkdesk(page) {
     ${boardHtml(d.board)}`;
   if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
   wireBoard(page, "sales", d.board);
+  wireTasks(page);
   page.querySelectorAll("[data-u]").forEach((b) => (b.onclick = async () => {
     const x = u[+b.dataset.u];
     if (x.kind === "missed_call") { await dial(x.phone); if (x.student_id) openStudent(x.student_id); else openNewClient({ phone: x.phone }); }
@@ -708,6 +713,7 @@ async function renderSettings(page) {
         ${g.is_makeup ? "" : `<input type="number" min="0" max="200" data-cap="${g.id}" value="${g.capacity ?? 12}" title="Мест в группе" style="flex:0 0 74px">`}
         <select data-gc="${g.id}" style="flex:0 0 190px"><option value="">— без тренера —</option>${users.filter((u) => u.role === "coach").map((u) => `<option value="${u.id}" ${u.id === g.coach_id ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select></div>`).join("")}
     </div>` : ""}
+    ${admin ? `<div class="section" id="task-settings"><h3>Задачи и автосообщения по пробным</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="comms-settings"><h3>Связь с клиентами</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin && S.meta.demo ? `<div class="section"><h3>Тестовые данные</h3>
       <div class="small muted" style="margin-bottom:8px">Сейчас включён тестовый режим. Кнопка сотрёт всех клиентов и создаст выдуманных заново. Сотрудники и настройки сохранятся.</div>
@@ -730,6 +736,7 @@ async function renderSettings(page) {
     try { await api("POST", "/api/users", Object.fromEntries(new FormData(e.target))); toast("Сотрудник добавлен"); render(); } catch (err) { fail(err); }
   };
   if ($("#comms-settings")) renderCommsSettings($("#comms-settings"), users).catch(fail);
+  if ($("#task-settings")) renderTaskSettings($("#task-settings"), users).catch(fail);
   page.querySelectorAll("[data-sip]").forEach((inp) => (inp.onchange = async () => {
     try { await api("PATCH", `/api/users/${inp.dataset.sip}`, { sip_number: inp.value }); toast("Внутренний номер сохранён"); S.meta = await api("GET", "/api/meta"); S.user = S.meta.user; } catch (err) { fail(err); }
   }));
@@ -759,12 +766,12 @@ async function boot() {
     S.meta = await api("GET", "/api/meta");
     S.user = S.meta.user;
   } catch (e) { if (e.message !== "Нужно войти") renderLogin(); return; }
-  S.view = isCoach() ? "journal" : "sales";
+  S.view = isCoach() ? "today" : "sales";
   try { const v = localStorage.getItem("crm.view"); if (v && visibleViews().some(([k]) => k === v)) S.view = v; } catch (_) {}
   shell();
   render();
   setInterval(() => { if ($("#drawer").hidden && ["members", "skips"].includes(S.view)) render(); }, 60000);
-  setInterval(() => { if ($("#drawer").hidden && S.view === "sales" && !document.hidden) render(); }, 20000);
+  setInterval(() => { if ($("#drawer").hidden && S.view === "sales" && !document.hidden && !document.querySelector(".task-done:not([hidden])")) render(); }, 20000);
   if (!isCoach()) { pollCounts(); setInterval(pollCounts, 20000); }
 }
 boot();

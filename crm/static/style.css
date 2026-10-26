@@ -436,3 +436,28 @@ h2.sub { font-size: 17px; }
 .step b { text-align: right; }
 .chip.on-chip { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 @media (max-width: 760px) { .step { grid-template-columns: 1fr 70px 40px; font-size: 13px; } }
+
+/* задачи */
+.tasks-box .now-head { align-items: center; }
+.task-group h4 { font-size: 13.5px; font-weight: 600; color: var(--ink-2); margin: 12px 0 6px; }
+.task-group.late h4 { color: var(--red); }
+.task { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); margin-bottom: 6px; }
+.task-group.late .task { background: var(--red-soft); }
+.task-group.later .task { opacity: .75; }
+.task .grow { flex: 1; min-width: 0; }
+.task .when { white-space: nowrap; padding-top: 2px; }
+.task-ico { font-size: 20px; line-height: 1.2; }
+.task-done { display: flex; gap: 6px; margin-top: 8px; }
+.task-done input { padding: 6px 10px; }
+.linkish { border: 0; background: none; padding: 0; color: var(--accent); font-weight: 600; cursor: pointer; }
+/* стол тренера */
+.today-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.today-card { text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 16px; padding: 16px; cursor: pointer;
+  display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow); }
+.today-card:hover { border-color: var(--accent); }
+.today-card.ok { background: var(--accent-soft); border-color: transparent; }
+.today-time { font-family: var(--display); font-weight: 700; font-size: 26px; }
+.today-name { font-weight: 650; font-size: 16px; }
+.today-facts { display: flex; gap: 12px; font-size: 14px; margin: 4px 0; }
+@media (max-width: 760px) { .task { flex-wrap: wrap; } .task .grow { flex-basis: calc(100% - 34px); } .task .when { flex: 1; text-align: right; } }
+.task-done[hidden] { display: none; }

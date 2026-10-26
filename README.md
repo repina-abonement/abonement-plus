@@ -41,6 +41,7 @@ python3 -m crm.server          # http://127.0.0.1:8000
 python3 -m tests.test_crm      # проверка правил абонементов
 python3 -m tests.test_comms    # проверка чатов, звонков и заявок
 python3 -m tests.test_ai       # проверка расшифровки и разбора звонков
+python3 -m tests.test_tasks    # проверка задач и автосообщений по пробным
 ```
 
 Пароль администратора задаётся переменной `CRM_ADMIN_PASSWORD`, иначе генерируется
