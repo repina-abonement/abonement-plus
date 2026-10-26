@@ -120,6 +120,12 @@ def main():
     call("POST", sip_url, {"event": "2", "call_id": "C2", "src_num": "79990001122", "src_type": "1",
                            "dst_num": "201", "dst_type": "2", "status": "NOANSWER", "timestamp": "1793000100"})
     check(call("GET", "/api/inbox/counts")["missed"] >= 1, "Пропущенный звонок попал в счётчик")
+    wd = call("GET", "/api/workdesk")
+    check(any(x["kind"] == "missed_call" and x["level"] == "red" for x in wd["urgent"]), "Пропущенный звонок красным на рабочем столе")
+    miss = [x for x in wd["urgent"] if x["kind"] == "missed_call"][0]
+    call("POST", f"/api/calls/{miss['id']}/seen", {})
+    check(all(x.get("id") != miss["id"] for x in call("GET", "/api/workdesk")["urgent"] if x["kind"] == "missed_call"),
+          "Кнопка «Обработан» убирает звонок с рабочего стола")
 
     print("Telegram")
     call("PUT", "/api/integrations", {"tg_token": "123:abc"})

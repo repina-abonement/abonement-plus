@@ -36,16 +36,17 @@ const fail = (e) => toast(e.message || "Ошибка", true);
 function renderLogin() {
   closeDrawer();
   app.innerHTML = `
-  <div class="login">
-    <h1>Абонемент <span style="color:var(--accent)">Плюс</span></h1>
-    <div class="muted">Вход для сотрудников</div>
+  <div class="login-wrap"><div class="login">
+    <div class="login-mark" aria-hidden="true">⚽</div>
+    <h1>Абонемент <span>Плюс</span></h1>
+    <div class="login-sub">Вход для сотрудников школы</div>
     <form id="login-form">
       <div class="field"><label>Логин</label><input name="login" autocomplete="username" required></div>
       <div class="field"><label>Пароль</label><input name="password" type="password" autocomplete="current-password" required></div>
       <button class="btn primary" style="width:100%">Войти</button>
       <div class="error" id="login-err"></div>
     </form>
-  </div>`;
+  </div></div>`;
   $("#login-form").onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
@@ -56,24 +57,47 @@ function renderLogin() {
 
 /* ---------- каркас ---------- */
 const VIEWS = [
-  ["dashboard", "Дашборд"], ["sales", "Продажи"], ["inbox", "Чаты и звонки"], ["members", "Ученики"], ["skips", "Пропуски"],
-  ["journal", "Журнал"], ["coaches", "Тренеры"], ["search", "Все клиенты"], ["settings", "Настройки"],
+  ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["members", "Ученики"], ["skips", "Пропуски"],
+  ["journal", "Журнал"], ["coaches", "Тренеры"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["settings", "Настройки"],
 ];
+const NAV_ICONS = {
+  sales: '<path d="M4 5h16v14H4z"/><path d="M9 5v14M15 5v14"/>',
+  inbox: '<path d="M4 6h16v10H8l-4 3z"/><path d="M8 10h8M8 13h5"/>',
+  members: '<circle cx="9" cy="8" r="3"/><path d="M3.5 19c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5"/><circle cx="17" cy="9" r="2.3"/><path d="M16 14.6c2.2.2 3.7 1.6 4.4 4.4"/>',
+  skips: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4M10 14l4 4M14 14l-4 4"/>',
+  journal: '<rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 9l1.5 1.5L13 8M9 14.5l1.5 1.5L13 13.5M15 9.5h1M15 15h1"/>',
+  coaches: '<path d="M8 4h8v4a4 4 0 0 1-8 0z"/><path d="M8 5H5v1.5A3 3 0 0 0 8 9.5M16 5h3v1.5a3 3 0 0 1-3 3M12 12v4M9 20h6M10 16h4v4h-4z"/>',
+  dashboard: '<path d="M4 19V10M10 19V5M16 19v-7M21 19H3"/>',
+  search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>',
+  more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+};
+const navIcon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NAV_ICONS[k] || ""}</svg>`;
 
 const isCoach = () => S.user && S.user.role === "coach";
 const visibleViews = () => isCoach() ? VIEWS.filter(([k]) => ["journal", "coaches", "settings"].includes(k)).map(([k, t]) => [k, k === "coaches" ? "Мои результаты" : t])
   : S.user.role === "admin" ? VIEWS : VIEWS.filter(([k]) => k !== "dashboard");
+const SHORT = { sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
+function isCoachShort() { return "Результаты"; }
+const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></span>` : "";
 
 function shell() {
   if (isCoach() && !["journal", "coaches", "settings"].includes(S.view)) S.view = "journal";
+  const views = visibleViews();
+  const tabs = views.length <= 5 ? views : [...views.slice(0, 4), ["more", "Ещё"]];
   app.innerHTML = `
   <header class="topbar">
-    <div class="brand">Абонемент <span>Плюс</span></div>
-    <nav class="nav">${visibleViews().map(([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${t}${k === "inbox" ? `<span class="nbadge" id="inbox-badge" hidden></span>` : ""}</button>`).join("")}</nav>
-    ${isCoach() ? "" : `<button class="btn sm" id="new-client">+ Клиент</button>`}
+    <div class="brand"><i aria-hidden="true">⚽</i><div>Абонемент <span>Плюс</span></div></div>
+    <nav class="nav">${views.map(([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}<span>${t}</span>${badge(k)}</button>`).join("")}</nav>
+    ${isCoach() ? "" : `<button class="btn" id="new-client">+ Клиент</button>`}
   </header>
-  <main class="page" id="page"></main>`;
-  app.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => go(b.dataset.view)));
+  <main class="page" id="page"></main>
+  <nav class="tabbar">${tabs.map(([k, t]) => `<button data-${k === "more" ? "more" : "view"}="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}<span>${SHORT[k] || t}</span>${badge(k)}</button>`).join("")}</nav>
+  <div class="more-sheet" hidden><div class="sheet">${views.slice(4).map(([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}${t}</button>`).join("")}</div></div>`;
+  app.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => { $(".more-sheet").hidden = true; go(b.dataset.view); }));
+  const more = $("[data-more]");
+  if (more) more.onclick = () => { $(".more-sheet").hidden = !$(".more-sheet").hidden; };
+  $(".more-sheet").onclick = (e) => { if (e.target.classList.contains("more-sheet")) e.currentTarget.hidden = true; };
   if ($("#new-client")) $("#new-client").onclick = openNewClient;
 }
 
@@ -81,6 +105,9 @@ function go(view) {
   S.view = view;
   try { localStorage.setItem("crm.view", view); } catch (_) {}
   app.querySelectorAll("[data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
+  const more = $("[data-more]");
+  if (more) more.classList.toggle("active", !visibleViews().slice(0, 4).some(([k]) => k === view));
+  window.scrollTo(0, 0);
   render();
 }
 
@@ -88,7 +115,8 @@ async function render() {
   const page = $("#page");
   if (!page) return;
   try {
-    if (["sales", "members", "skips"].includes(S.view)) return await renderBoard(page, S.view);
+    if (S.view === "sales") return await renderWorkdesk(page);
+    if (["members", "skips"].includes(S.view)) return await renderBoard(page, S.view);
     if (S.view === "dashboard") return await renderDashboard(page);
     if (S.view === "inbox") return await renderInbox(page);
     if (S.view === "coaches") return await renderCoaches(page);
@@ -227,27 +255,81 @@ async function renderDashboard(page) {
 /* ---------- воронки ---------- */
 const BOARD_TITLES = { sales: "Воронка продаж", members: "Ученики и продления", skips: "Пропуски и отработки" };
 
+function boardHtml(data) {
+  return `<div class="board">${data.columns.map((c) => `
+      <section class="col" data-stage="${c.key}">
+        <div class="col-head"><h3>${esc(c.title)}</h3>${c.auto ? `<span class="auto">сам</span>` : ""}<span class="count">${c.cards.length}</span></div>
+        <div class="col-body">${c.cards.length ? c.cards.map((k) => cardHtml(k, data.draggable && !c.auto)).join("") : `<div class="empty">Пусто</div>`}</div>
+      </section>`).join("")}
+    </div>`;
+}
+
+function wireBoard(page, funnel, data) {
+  page.querySelectorAll(".card").forEach((el) => (el.onclick = () => openStudent(+el.dataset.id)));
+  if (data.draggable) enableDrag(page, funnel, data.columns);
+}
+
 async function renderBoard(page, funnel) {
   const data = await api("GET", "/api/board/" + funnel);
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">${BOARD_TITLES[funnel]}</h2>
       <button class="btn sm" id="refresh">Обновить</button></div>
     ${data.note ? `<div class="note">${esc(data.note)}</div>` : ""}
-    <div class="board">${data.columns.map((c) => `
-      <section class="col" data-stage="${c.key}">
-        <div class="col-head"><h3>${esc(c.title)}</h3>${c.auto ? `<span class="auto">сам</span>` : ""}<span class="count">${c.cards.length}</span></div>
-        <div class="col-body">${c.cards.length ? c.cards.map((k) => cardHtml(k, data.draggable && !c.auto)).join("") : `<div class="empty">Пусто</div>`}</div>
-      </section>`).join("")}
-    </div>`;
+    ${boardHtml(data)}`;
   $("#refresh").onclick = render;
-  page.querySelectorAll(".card").forEach((el) => (el.onclick = () => openStudent(+el.dataset.id)));
-  if (data.draggable) enableDrag(page, funnel, data.columns);
+  wireBoard(page, funnel, data);
+}
+
+/* ---------- рабочий стол: что горит + воронка ---------- */
+const URG_ACTION = { missed_call: "Перезвонить", site_lead: "Открыть", message: "Ответить", trial: "Открыть" };
+const ago = (iso) => {
+  if (!iso) return "";
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso.length <= 16 ? iso + ":00" : iso).getTime()) / 60000));
+  return m < 1 ? "только что" : m < 60 ? `${m} мин назад` : m < 1440 ? `${Math.floor(m / 60)} ч назад` : dtShort(iso);
+};
+
+async function renderWorkdesk(page) {
+  const d = await api("GET", "/api/workdesk");
+  const u = d.urgent, reds = u.filter((x) => x.level === "red").length;
+  const scroll = page.querySelector(".board") ? page.querySelector(".board").scrollLeft : 0;
+  page.innerHTML = `
+    <div class="page-head"><h2 class="grow">Рабочий стол</h2>
+      <span class="muted small">Обновляется сам каждые 20 секунд</span></div>
+    <section class="now ${u.length ? "" : "calm"}">
+      <div class="now-head"><h3>${u.length ? (reds ? `Горит прямо сейчас: ${reds}` : "Ждут ответа") : "Всё обработано"}</h3>
+        ${u.length ? `<span class="muted small">Красное сначала, потом сообщения и пробные</span>` : ""}</div>
+      ${u.length ? `<div class="now-list">${u.map((x, i) => `
+        <div class="now-item ${x.level}">
+          <span class="ref-card ${x.level}" aria-hidden="true"></span>
+          <div class="grow"><b>${esc(x.title)}</b>${x.count ? ` <span class="nbadge static">${x.count}</span>` : ""}
+            <div class="small ellipsis">${esc(x.text)}</div></div>
+          <span class="small muted when">${ago(x.ts)}</span>
+          <div class="now-act">
+            <button class="btn sm ${x.level === "red" ? "primary" : ""}" data-u="${i}">${URG_ACTION[x.kind]}</button>
+            ${x.kind === "missed_call" ? `<button class="btn sm" data-useen="${x.id}" title="Уже связались другим способом">Обработан</button>` : ""}
+          </div>
+        </div>`).join("")}</div>` : `<div class="muted small">Пропущенных звонков, новых заявок и непрочитанных сообщений нет. Можно выдохнуть ⚽</div>`}
+    </section>
+    <div class="page-head" style="margin-top:22px"><h2 class="grow sub">Воронка продаж</h2></div>
+    ${boardHtml(d.board)}`;
+  if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
+  wireBoard(page, "sales", d.board);
+  page.querySelectorAll("[data-u]").forEach((b) => (b.onclick = async () => {
+    const x = u[+b.dataset.u];
+    if (x.kind === "missed_call") { await dial(x.phone); if (x.student_id) openStudent(x.student_id); else openNewClient({ phone: x.phone }); }
+    else if (x.kind === "message") openChat(x.conversation_id, true);
+    else if (x.student_id) openStudent(x.student_id);
+  }));
+  page.querySelectorAll("[data-useen]").forEach((b) => (b.onclick = async () => {
+    await api("POST", `/api/calls/${b.dataset.useen}/seen`, {}).catch(fail); pollCounts(); render();
+  }));
 }
 
 function cardHtml(k, draggable) {
-  const sub = [k.parent, k.phone].filter(Boolean).join(" · ");
-  const meta2 = [k.group, k.tariff === "flex" ? "гибкий" : (k.group ? "негибкий" : ""), k.siblings ? `братьев/сестёр: ${k.siblings}` : ""].filter(Boolean).join(" · ");
+  const sub = [k.parent, k.phone].filter(Boolean).join(", ");
+  const meta2 = [k.group, k.tariff === "flex" ? "гибкий" : (k.group ? "негибкий" : ""), k.siblings ? `братьев и сестёр: ${k.siblings}` : ""].filter(Boolean).join(" · ");
   return `<article class="card ${k.color || ""}" data-id="${k.id}" ${draggable ? 'draggable="true"' : ""}>
+    ${k.color ? `<span class="ref-card ${k.color}" title="${k.color === "red" ? "Срочно" : "Пора связаться"}"></span>` : ""}
     <div class="name">${esc(k.name)}</div>
     <div class="meta">${esc(sub)}</div>
     ${meta2 ? `<div class="meta">${esc(meta2)}</div>` : ""}
@@ -677,11 +759,12 @@ async function boot() {
     S.meta = await api("GET", "/api/meta");
     S.user = S.meta.user;
   } catch (e) { if (e.message !== "Нужно войти") renderLogin(); return; }
-  if (S.user.role === "admin") S.view = "dashboard";
+  S.view = isCoach() ? "journal" : "sales";
   try { const v = localStorage.getItem("crm.view"); if (v && visibleViews().some(([k]) => k === v)) S.view = v; } catch (_) {}
   shell();
   render();
-  setInterval(() => { if ($("#drawer").hidden && ["sales", "members", "skips"].includes(S.view)) render(); }, 60000);
+  setInterval(() => { if ($("#drawer").hidden && ["members", "skips"].includes(S.view)) render(); }, 60000);
+  setInterval(() => { if ($("#drawer").hidden && S.view === "sales" && !document.hidden) render(); }, 20000);
   if (!isCoach()) { pollCounts(); setInterval(pollCounts, 20000); }
 }
 boot();

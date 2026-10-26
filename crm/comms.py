@@ -947,3 +947,40 @@ def seed_demo(con):
 
 
 DEMO_TABLES = ["messages", "conversations", "calls", "lead_imports", "hook_log"]
+
+
+# ---------------- рабочий стол ----------------
+
+def missed_by_family(con) -> dict:
+    """Семьи с пропущенными и ещё не перезвоненными звонками: family_id → время последнего."""
+    out = {}
+    for fid, ts in con.execute("""SELECT family_id, MAX(started_at) FROM calls WHERE direction='in'
+                                  AND status IN ('missed','busy') AND seen=0 AND family_id IS NOT NULL GROUP BY family_id"""):
+        out[fid] = ts
+    return out
+
+
+def urgent(con) -> list[dict]:
+    """Что горит прямо сейчас. Сортировка: красное сверху, внутри по времени."""
+    items = []
+    for k in con.execute("""SELECT c.*, f.name AS family_name FROM calls c LEFT JOIN families f ON f.id=c.family_id
+                            WHERE c.direction='in' AND c.status IN ('missed','busy') AND c.seen=0
+                            ORDER BY c.started_at DESC LIMIT 50"""):
+        studs = [dict(x) for x in con.execute("SELECT id, name FROM students WHERE family_id=? ORDER BY id",
+                                              (k["family_id"],))] if k["family_id"] else []
+        items.append({"kind": "missed_call", "level": "red", "ts": k["started_at"], "id": k["id"], "phone": k["phone"],
+                      "title": (studs[0]["name"] if studs else k["phone"]),
+                      "text": "Пропущенный звонок" + (f", семья {k['family_name']}" if k["family_name"] else ", номера нет в базе"),
+                      "student_id": studs[0]["id"] if studs else None})
+    for s in con.execute("""SELECT s.id, s.name, s.stage_changed_at, p.phone FROM students s
+                            LEFT JOIN parents p ON p.id = (SELECT MIN(id) FROM parents WHERE family_id=s.family_id)
+                            WHERE s.priority=1 ORDER BY s.stage_changed_at DESC"""):
+        items.append({"kind": "site_lead", "level": "red", "ts": s["stage_changed_at"], "student_id": s["id"],
+                      "phone": s["phone"] or "", "title": s["name"], "text": "Заявка с сайта, позвонить сейчас"})
+    for c in con.execute("""SELECT c.*, f.name AS family_name FROM conversations c LEFT JOIN families f ON f.id=c.family_id
+                            WHERE c.unread > 0 ORDER BY c.last_at DESC LIMIT 50"""):
+        items.append({"kind": "message", "level": "yellow", "ts": c["last_at"], "conversation_id": c["id"],
+                      "title": c["title"] or c["username"] or c["phone"] or "Без имени",
+                      "text": f"{CHANNEL_LABELS.get(c['channel'], c['channel'])}: {c['last_text']}",
+                      "count": c["unread"]})
+    return items

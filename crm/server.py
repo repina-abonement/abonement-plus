@@ -187,6 +187,23 @@ def board_sales(con, h, user, body, q):
     return sv.board(con, "sales")
 
 
+@route("GET", "/api/workdesk", role="operator")
+def workdesk(con, h, user, body, q):
+    board = sv.board(con, "sales")
+    trials = [dict(k, kind="trial", level=k["color"], text=k.get("badge") or "Пробное закончилось, связаться")
+              for c in board["columns"] if c["key"] == "trial_done" for k in c["cards"] if k.get("color")]
+    items = comms.urgent(con) + [{"kind": "trial", "level": t["level"], "ts": t.get("trial_at"), "student_id": t["id"],
+                                  "phone": t["phone"], "title": t["name"],
+                                  "text": "Пробное закончилось " + (t.get("badge") or "").replace(" мин после пробного", " мин назад") + ", связаться"}
+                                 for t in trials]
+    items.sort(key=lambda x: (x["level"] != "red", x["ts"] or ""), reverse=False)
+    reds = [x for x in items if x["level"] == "red"]
+    reds.sort(key=lambda x: x["ts"] or "", reverse=True)
+    rest = [x for x in items if x["level"] != "red"]
+    rest.sort(key=lambda x: x["ts"] or "", reverse=True)
+    return {"urgent": reds + rest, "board": board, **comms.counts(con)}
+
+
 @route("GET", "/api/board/members", role="operator")
 def board_members(con, h, user, body, q):
     return sv.board(con, "members")
@@ -429,6 +446,14 @@ def calls(con, h, user, body, q):
 @route("POST", "/api/calls/seen", role="operator")
 def calls_seen(con, h, user, body, q):
     comms.mark_calls_seen(con)
+    return {"ok": True}
+
+
+@route("POST", "/api/calls/{cid}/seen", role="operator")
+def call_seen(con, h, user, body, q, cid):
+    r = con.execute("SELECT phone_norm FROM calls WHERE id=?", (int(cid),)).fetchone()
+    if r:
+        con.execute("UPDATE calls SET seen=1 WHERE phone_norm=? AND seen=0", (r[0],))
     return {"ok": True}
 
 

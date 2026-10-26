@@ -316,7 +316,7 @@ def card_summary(con, s: dict, st: dict) -> dict:
     sib = con.execute("SELECT COUNT(*) FROM students WHERE family_id=? AND id != ?",
                       (s["family_id"], s["id"])).fetchone()[0]
     return {
-        "id": s["id"], "name": s["name"], "family": fam["name"] if fam else "",
+        "id": s["id"], "name": s["name"], "family": fam["name"] if fam else "", "family_id": s["family_id"],
         "parent": parent["name"] if parent else "", "phone": parent["phone"] if parent else "",
         "group": grp["name"] if grp else "", "tariff": s["tariff"], "siblings": sib,
         "stage": s["stage"], "stage_changed_at": s["stage_changed_at"], "trial_at": s["trial_at"],
@@ -337,6 +337,8 @@ def board(con, funnel: str) -> dict:
     st = settings(con)
     ref = now()
     if funnel == "sales":
+        from .comms import missed_by_family
+        missed = missed_by_family(con)
         cols = {k: {"key": k, "title": t, "cards": [], "auto": k in AUTO_SALES} for k, t in SALES_STAGES}
         for s in _rows(con.execute("SELECT * FROM students WHERE funnel='sales' ORDER BY stage_changed_at DESC")):
             stage, color, mins = effective_sales_stage(s, st, ref)
@@ -347,16 +349,22 @@ def board(con, funnel: str) -> dict:
                 card["badge"] = f"{mins} мин после пробного"
             elif s["trial_at"] and stage in ("trial_booked", "trial_reminder", "on_trial"):
                 card["badge"] = "Пробное " + datetime.fromisoformat(s["trial_at"]).strftime("%d.%m %H:%M")
+            if s["family_id"] in missed:
+                card["color"] = "red"
+                card["missed_call"] = True
+                card["badge"] = "📞 Пропущенный звонок " + missed[s["family_id"]][11:16]
             if s.get("priority"):
                 card["color"] = "red"
                 mins = int((ref - datetime.fromisoformat(s["stage_changed_at"][:16])).total_seconds() // 60)
                 card["badge"] = "Заявка с сайта · " + (f"{mins} мин назад" if mins < 120 else f"{mins // 60} ч назад")
             cols.get(stage, cols["lead"])["cards"].append(card)
         for c in cols.values():
-            c["cards"].sort(key=lambda k: not k.get("priority"))
+            c["cards"].sort(key=lambda k: (not k.get("priority"), not k.get("missed_call")))
         return {"funnel": "sales", "columns": list(cols.values()), "draggable": True}
 
     if funnel == "members":
+        from .comms import missed_by_family
+        missed = missed_by_family(con)
         cur = logic.month_of(today())
         nxt = logic.shift_month(cur, 1)
         deadline_day = int(st["renewal_deadline_day"])
@@ -391,6 +399,9 @@ def board(con, funnel: str) -> dict:
                 key = "renew"
                 card["color"] = "red" if late else None
                 card["badge"] = f"Продлить до {deadline_day}.{today().month:02d}"
+            if s["family_id"] in missed:
+                card["color"] = "red"
+                card["badge"] = "📞 Пропущенный звонок " + missed[s["family_id"]][11:16]
             by[key]["cards"].append(card)
         return {"funnel": "members", "columns": cols, "draggable": False,
                 "note": f"Этапы ставятся сами по оплатам. Продление — до {deadline_day} числа."}

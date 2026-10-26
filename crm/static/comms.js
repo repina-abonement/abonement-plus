@@ -15,8 +15,8 @@ S.inbox = { tab: "chats", filter: "all", q: "" };
 async function pollCounts() {
   try {
     const c = await api("GET", "/api/inbox/counts");
-    const n = c.unread + c.missed, b = $("#inbox-badge");
-    if (b) { b.hidden = !n; b.textContent = n; }
+    const n = c.unread + c.missed;
+    document.querySelectorAll("[data-badge]").forEach((b) => { b.hidden = !n; b.textContent = n; });
     S.counts = c;
   } catch (_) { /* тихо */ }
 }
