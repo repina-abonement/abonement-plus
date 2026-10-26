@@ -1012,6 +1012,18 @@ class Handler(BaseHTTPRequestHandler):
         ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
         if ctype.startswith("text/") or ctype in ("application/javascript",):
             ctype += "; charset=utf-8"
+        st = os.stat(full)
+        etag = f'"{int(st.st_mtime)}-{st.st_size}"'
+        fonts = full.endswith((".woff", ".woff2"))
+        # html/js/css: всегда сверяемся с сервером, иначе Safari держит старую версию после обновления CRM
+        self.extra_headers.append(("Cache-Control", "public, max-age=604800" if fonts else "no-cache"))
+        self.extra_headers.append(("ETag", etag))
+        if self.headers.get("If-None-Match") == etag:
+            self.send_response(304)
+            for k, v in self.extra_headers:
+                self.send_header(k, v)
+            self.end_headers()
+            return
         with open(full, "rb") as f:
             self._send(200, f.read(), ctype)
 
