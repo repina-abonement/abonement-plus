@@ -57,15 +57,15 @@ function renderLogin() {
 /* ---------- каркас ---------- */
 const VIEWS = [
   ["dashboard", "Дашборд"], ["sales", "Продажи"], ["inbox", "Чаты и звонки"], ["members", "Ученики"], ["skips", "Пропуски"],
-  ["journal", "Журнал"], ["search", "Все клиенты"], ["settings", "Настройки"],
+  ["journal", "Журнал"], ["coaches", "Тренеры"], ["search", "Все клиенты"], ["settings", "Настройки"],
 ];
 
 const isCoach = () => S.user && S.user.role === "coach";
-const visibleViews = () => isCoach() ? VIEWS.filter(([k]) => k === "journal" || k === "settings")
+const visibleViews = () => isCoach() ? VIEWS.filter(([k]) => ["journal", "coaches", "settings"].includes(k)).map(([k, t]) => [k, k === "coaches" ? "Мои результаты" : t])
   : S.user.role === "admin" ? VIEWS : VIEWS.filter(([k]) => k !== "dashboard");
 
 function shell() {
-  if (isCoach() && !["journal", "settings"].includes(S.view)) S.view = "journal";
+  if (isCoach() && !["journal", "coaches", "settings"].includes(S.view)) S.view = "journal";
   app.innerHTML = `
   <header class="topbar">
     <div class="brand">Абонемент <span>Плюс</span></div>
@@ -91,6 +91,7 @@ async function render() {
     if (["sales", "members", "skips"].includes(S.view)) return await renderBoard(page, S.view);
     if (S.view === "dashboard") return await renderDashboard(page);
     if (S.view === "inbox") return await renderInbox(page);
+    if (S.view === "coaches") return await renderCoaches(page);
     if (S.view === "journal") return await renderJournal(page);
     if (S.view === "search") return await renderSearch(page);
     if (S.view === "settings") return await renderSettings(page);

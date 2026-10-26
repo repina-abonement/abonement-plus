@@ -294,7 +294,8 @@ def reset_demo(con: sqlite3.Connection):
     """Стирает клиентов и создаёт тестовых заново. Только при CRM_DEMO=1."""
     for t in DATA_TABLES:
         con.execute(f"DELETE FROM {t}")
-    con.execute("DELETE FROM users WHERE login = 'trener'")
+    con.execute("UPDATE groups SET coach_id = NULL")
+    con.execute("DELETE FROM users WHERE login IN ('trener', 'trener2', 'trener3')")
 
 
 def seed_demo(con: sqlite3.Connection, today: date | None = None):

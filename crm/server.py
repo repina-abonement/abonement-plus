@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import comms, db, services as sv
+from . import coaches, comms, db, services as sv
 from .services import ApiError
 
 
@@ -324,6 +324,12 @@ def attendance(con, h, user, body, q):
     return {"ok": True}
 
 
+@route("GET", "/api/coaches/board")
+def coaches_board(con, h, user, body, q):
+    me = user["id"] if user["role"] == "coach" else (int(q["as_coach"]) if q.get("as_coach") else None)
+    return coaches.leaderboard(con, q.get("month"), me)
+
+
 @route("GET", "/api/dashboard", role="admin")
 def dashboard(con, h, user, body, q):
     return sv.dashboard(con, q.get("month"), int(q["branch_id"]) if q.get("branch_id") else None)
@@ -347,6 +353,7 @@ def demo_reset(con, h, user, body, q):
     db.seed_demo(con)
     con.execute("BEGIN")
     comms.seed_demo(con)
+    coaches.seed_demo_coaches(con)
     return {"ok": True}
 
 
@@ -662,6 +669,7 @@ def main():
     db.init_db(con)
     if os.environ.get("CRM_DEMO", "1") == "1":
         db.seed_demo(con)
+        coaches.seed_demo_coaches(con)
         if not comms.status(con)["telegram"] and not comms.status(con)["sipuni"]:
             comms.seed_demo(con)
     con.close()
