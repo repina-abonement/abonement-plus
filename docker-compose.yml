@@ -1,0 +1,34 @@
+services:
+  crm:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      CRM_SECURE_COOKIE: "1"
+    volumes:
+      - ./data:/data
+
+  backup:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "crm.backup"]
+    environment:
+      CRM_DB: /data/crm.sqlite3
+    volumes:
+      - ./data:/data
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file: .env
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - crm
+
+volumes:
+  caddy_data:
