@@ -139,6 +139,13 @@ def meta(con, h, user, body, q):
 
 @route("PATCH", "/api/groups/{gid}", role="admin")
 def group_patch(con, h, user, body, q, gid):
+    if "capacity" in body:
+        cap = int(body["capacity"])
+        if cap < 0 or cap > 200:
+            raise ApiError("Неверное число мест")
+        con.execute("UPDATE groups SET capacity=? WHERE id=?", (cap, int(gid)))
+        if "coach_id" not in body:
+            return {"ok": True}
     coach = body.get("coach_id") or None
     if coach and not con.execute("SELECT 1 FROM users WHERE id=? AND role='coach'", (coach,)).fetchone():
         raise ApiError("Тренер не найден")
@@ -273,7 +280,16 @@ def attendance(con, h, user, body, q):
 
 @route("GET", "/api/dashboard", role="admin")
 def dashboard(con, h, user, body, q):
-    return sv.dashboard(con, q.get("month"))
+    return sv.dashboard(con, q.get("month"), int(q["branch_id"]) if q.get("branch_id") else None)
+
+
+@route("POST", "/api/students/{sid}/trial")
+def trial_mark(con, h, user, body, q, sid):
+    s = sv.get_student_row(con, int(sid))
+    if s["group_id"]:
+        coach_guard(con, user, s["group_id"])
+    sv.mark_trial(con, int(sid), bool(body.get("came")), user)
+    return {"ok": True}
 
 
 @route("PUT", "/api/settings", role="admin")

@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS groups (
     age TEXT NOT NULL DEFAULT '',
     is_makeup INTEGER NOT NULL DEFAULT 0,
     coach_id INTEGER REFERENCES users(id),
+    capacity INTEGER NOT NULL DEFAULT 12,     -- мест в группе
     active INTEGER NOT NULL DEFAULT 1
 );
 
@@ -81,6 +82,8 @@ CREATE TABLE IF NOT EXISTS students (
     source TEXT NOT NULL DEFAULT '',
     refusal_reason TEXT NOT NULL DEFAULT '',
     converted_at TEXT,                        -- когда купил первый абонемент
+    trial_booked_at TEXT,                     -- когда записали на пробное
+    trial_came INTEGER,                       -- пришёл на пробное: 1 / 0 / NULL
     created_at TEXT NOT NULL
 );
 
@@ -216,8 +219,11 @@ def init_db(con: sqlite3.Connection):
     if "coach_id" not in cols:
         con.execute("ALTER TABLE groups ADD COLUMN coach_id INTEGER REFERENCES users(id)")
     scols = {r[1] for r in con.execute("PRAGMA table_info(students)")}
-    if "converted_at" not in scols:
-        con.execute("ALTER TABLE students ADD COLUMN converted_at TEXT")
+    for col in ("converted_at TEXT", "trial_booked_at TEXT", "trial_came INTEGER"):
+        if col.split()[0] not in scols:
+            con.execute(f"ALTER TABLE students ADD COLUMN {col}")
+    if "capacity" not in cols:
+        con.execute("ALTER TABLE groups ADD COLUMN capacity INTEGER NOT NULL DEFAULT 12")
     for k, v in DEFAULT_SETTINGS.items():
         con.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
     login = os.environ.get("CRM_ADMIN_LOGIN", "admin")
@@ -330,6 +336,21 @@ def seed_demo(con: sqlite3.Connection, today: date | None = None):
                        status, created_at, paid_at) SELECT student_id, ?, tariff, lessons, per_lesson, price,
                        'paid', created_at, paid_at FROM subscriptions WHERE student_id=? AND month=?""",
                     (prev_m, sid, cur))
+    # история оплат за 14 месяцев, чтобы на дашборде были графики
+    import random
+    rnd = random.Random(7)
+    for sid in members:
+        for back in range(2, 15):
+            if rnd.random() < 0.2:
+                continue
+            m = shift_month(cur, -back)
+            con.execute("""INSERT OR IGNORE INTO subscriptions(student_id, month, tariff, lessons, per_lesson, price,
+                           status, created_at, paid_at) SELECT id, ?, tariff, 8, 0, ?, 'paid', ?, ? FROM students WHERE id=?""",
+                        (m, rnd.choice([10800, 12400, 9450, 13950]), now, now, sid))
+    con.execute("UPDATE students SET trial_booked_at=created_at WHERE trial_at IS NOT NULL")
+    con.execute("UPDATE students SET trial_came=1 WHERE trial_at < ?", (now,))
+    con.execute("UPDATE groups SET capacity=12 WHERE is_makeup=0")
+
     # тестовый тренер для групп Небо
     coach = con.execute("INSERT OR IGNORE INTO users(login, name, role, pw_hash) VALUES (?,?,?,?)",
                         ("trener", "Тренер Алексей (тест)", "coach", hash_password("trener-test-1"))).lastrowid

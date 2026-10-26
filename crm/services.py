@@ -445,7 +445,9 @@ def update_student(con, sid: int, data: dict, user) -> None:
             con.execute(f"UPDATE students SET {k} = ? WHERE id = ?", (v, sid))
             changes.append(k)
     if "trial_at" in changes:
-        con.execute("UPDATE students SET contacted_after_trial = 0 WHERE id=?", (sid,))
+        con.execute("UPDATE students SET contacted_after_trial = 0, trial_came = NULL WHERE id=?", (sid,))
+        if data.get("trial_at"):
+            con.execute("UPDATE students SET trial_booked_at = COALESCE(trial_booked_at, ?) WHERE id=?", (now_iso(), sid))
         if data.get("trial_at") and s["stage"] in ("lead", "no_answer"):
             con.execute("UPDATE students SET stage='trial_booked', stage_changed_at=? WHERE id=?", (now_iso(), sid))
     names = {"name": "имя", "birth": "дата рождения", "group_id": "группа", "tariff": "тариф",
@@ -498,8 +500,17 @@ def journal(con, group_id: int, day: str) -> dict:
         # пробные на этот день
         for s in con.execute("""SELECT id, name, trial_at FROM students WHERE funnel='sales' AND group_id=?
                                 AND substr(trial_at,1,10)=?""", (group_id, day)):
-            rows.append({"id": s["id"], "name": s["name"], "status": "trial", "trial_at": s["trial_at"]})
+            came = con.execute("SELECT trial_came FROM students WHERE id=?", (s["id"],)).fetchone()[0]
+            rows.append({"id": s["id"], "name": s["name"], "status": "trial", "trial_at": s["trial_at"], "trial_came": came})
     return {"group": dict(g), "date": day, "has_lesson": has_lesson, "rows": rows}
+
+
+def mark_trial(con, sid: int, came: bool, user) -> None:
+    s = get_student_row(con, sid)
+    if not s["trial_at"]:
+        raise ApiError("У ученика нет пробного занятия")
+    con.execute("UPDATE students SET trial_came=? WHERE id=?", (1 if came else 0, sid))
+    log(con, sid, "Пришёл на пробное" if came else "Не пришёл на пробное", user, "attendance")
 
 
 def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -> None:
@@ -567,70 +578,115 @@ def _pct(a, b):
     return round(100 * a / b) if b else None
 
 
-def dashboard(con, ym: str | None = None) -> dict:
+def _change(cur, old):
+    """Изменение в процентах к прошлому периоду (None — сравнивать не с чем)."""
+    if not old:
+        return None
+    return round(100 * (cur - old) / old)
+
+
+def dashboard(con, ym: str | None = None, branch_id: int | None = None) -> dict:
     cur = ym or logic.month_of(today())
-    nxt = logic.shift_month(cur, 1)
+    br_sql = " AND s.group_id IN (SELECT id FROM groups WHERE branch_id = ?)" if branch_id else ""
+    br_arg = (branch_id,) if branch_id else ()
+
+    def holders(m):
+        return {r[0]: r[1] for r in con.execute(
+            "SELECT s.id, x.price FROM subscriptions x JOIN students s ON s.id = x.student_id "
+            "WHERE x.month = ? AND x.status = 'paid'" + br_sql, (m, *br_arg))}
+
+    first_paid = {r[0]: r[1] for r in con.execute(
+        "SELECT student_id, MIN(month) FROM subscriptions WHERE status='paid' GROUP BY student_id")}
+    cache = {}
+
+    def month_stats(m):
+        if m in cache:
+            return cache[m]
+        h = holders(m)
+        prev = holders(logic.shift_month(m, -1))
+        revenue = sum(h.values())
+        st = {"revenue": revenue, "holders": len(h), "avg": round(revenue / len(h)) if h else 0,
+              "conversion": _pct(len(set(h) & set(prev)), len(prev)), "ids": set(h), "prices": h}
+        cache[m] = st
+        return st
+
+    seats = con.execute("SELECT COALESCE(SUM(capacity), 0) FROM groups WHERE is_makeup = 0 AND active = 1"
+                        + (" AND branch_id = ?" if branch_id else ""), br_arg).fetchone()[0]
+    c, m1, y1 = (month_stats(cur), month_stats(logic.shift_month(cur, -1)), month_stats(logic.shift_month(cur, -12)))
+
+    def kpi(key):
+        return {"value": c[key], "vs_month": _change(c[key] or 0, m1[key] or 0),
+                "vs_year": _change(c[key] or 0, y1[key] or 0)}
+
+    fill = _pct(c["holders"], seats)
+    fill_m1 = _pct(m1["holders"], seats)
+
+    # новые / постоянные / вернувшиеся
+    prev_ids = month_stats(logic.shift_month(cur, -1))["ids"]
+    seg = {"new": [0, 0], "regular": [0, 0], "returned": [0, 0]}
+    for sid, price in c["prices"].items():
+        k = "new" if first_paid.get(sid) == cur else ("regular" if sid in prev_ids else "returned")
+        seg[k][0] += 1
+        seg[k][1] += price
+
+    # лиды и пробные
     start, end = logic.month_bounds(cur)
     s_iso, e_iso = start.isoformat(), end.isoformat() + "T23:59"
-    one = lambda sql, *a: con.execute(sql, a).fetchone()[0] or 0
 
-    active = one("SELECT COUNT(*) FROM students WHERE funnel='members' AND stage != 'left'")
-    by_branch = [dict(r) for r in con.execute(
-        """SELECT b.name AS branch, COUNT(s.id) AS students FROM branches b
-           LEFT JOIN groups g ON g.branch_id=b.id AND g.is_makeup=0
-           LEFT JOIN students s ON s.group_id=g.id AND s.funnel='members' AND s.stage != 'left'
-           GROUP BY b.id ORDER BY b.id""")]
-    by_tariff = {r["tariff"]: r["n"] for r in con.execute(
-        "SELECT tariff, COUNT(*) AS n FROM students WHERE funnel='members' AND stage != 'left' GROUP BY tariff")}
+    def cnt(where, *args):
+        return con.execute("SELECT COUNT(*) FROM students s WHERE " + where + br_sql, (*args, *br_arg)).fetchone()[0]
 
-    revenue = one("SELECT SUM(price) FROM subscriptions WHERE month=? AND status='paid'", cur)
-    unpaid_cur = one("""SELECT COUNT(*) FROM students s WHERE s.funnel='members' AND s.stage != 'left'
-                        AND NOT EXISTS (SELECT 1 FROM subscriptions x WHERE x.student_id=s.id AND x.month=? AND x.status='paid')""", cur)
-    next_paid_n = one("SELECT COUNT(*) FROM subscriptions WHERE month=? AND status='paid'", nxt)
-    next_paid_sum = one("SELECT SUM(price) FROM subscriptions WHERE month=? AND status='paid'", nxt)
-    next_inv_n = one("SELECT COUNT(*) FROM subscriptions WHERE month=? AND status='invoiced'", nxt)
-    next_inv_sum = one("SELECT SUM(price) FROM subscriptions WHERE month=? AND status='invoiced'", nxt)
-    avg_check = round(revenue / max(1, one("SELECT COUNT(*) FROM subscriptions WHERE month=? AND status='paid'", cur)))
+    lead_where = "s.created_at BETWEEN ? AND ? AND (s.funnel = 'sales' OR s.converted_at IS NOT NULL)"
+    leads = cnt(lead_where, s_iso, e_iso)
+    leads_trial = cnt(lead_where + " AND s.trial_booked_at IS NOT NULL", s_iso, e_iso)
+    leads_came = cnt(lead_where + " AND s.trial_came = 1", s_iso, e_iso)
+    leads_bought = cnt(lead_where + " AND s.converted_at IS NOT NULL", s_iso, e_iso)
+    tr_where = "s.trial_at BETWEEN ? AND ?"
+    trials = cnt(tr_where, s_iso, e_iso)
+    trials_came = cnt(tr_where + " AND s.trial_came = 1", s_iso, e_iso)
+    trials_bought = cnt(tr_where + " AND s.converted_at IS NOT NULL", s_iso, e_iso)
 
-    leads = one("SELECT COUNT(*) FROM students WHERE created_at BETWEEN ? AND ? AND (funnel='sales' OR converted_at IS NOT NULL)", s_iso, e_iso)
-    trials = one("SELECT COUNT(*) FROM students WHERE trial_at BETWEEN ? AND ?", s_iso, e_iso)
-    bought = one("SELECT COUNT(*) FROM students WHERE converted_at BETWEEN ? AND ?", s_iso, e_iso)
-    refused = one("SELECT COUNT(*) FROM students WHERE funnel='sales' AND stage='refused' AND stage_changed_at BETWEEN ? AND ?", s_iso, e_iso)
-    left = one("SELECT COUNT(*) FROM students WHERE funnel='members' AND stage='left' AND stage_changed_at BETWEEN ? AND ?", s_iso, e_iso)
-    in_sales = one("SELECT COUNT(*) FROM students WHERE funnel='sales' AND stage NOT IN ('refused')")
+    def day_stats(d):
+        a, b = d.isoformat(), d.isoformat() + "T23:59"
+        return {"leads": cnt("s.created_at BETWEEN ? AND ? AND (s.funnel='sales' OR s.converted_at IS NOT NULL)", a, b),
+                "trial_booked": cnt("s.trial_booked_at BETWEEN ? AND ?", a, b),
+                "bought_first": cnt("s.converted_at BETWEEN ? AND ?", a, b)}
 
-    present = one("SELECT COUNT(*) FROM attendance WHERE status='present' AND date BETWEEN ? AND ?", start.isoformat(), end.isoformat())
-    absent = one("SELECT COUNT(*) FROM attendance WHERE status='absent' AND date BETWEEN ? AND ?", start.isoformat(), end.isoformat())
-    makeups_done = one("SELECT COUNT(*) FROM makeups WHERE status='done' AND date BETWEEN ? AND ?", start.isoformat(), end.isoformat())
-    makeups_booked = one("SELECT COUNT(*) FROM makeups WHERE status='booked'")
-    credited = one("SELECT COUNT(*) FROM attendance WHERE resolved='credit' AND date BETWEEN ? AND ?", start.isoformat(), end.isoformat())
+    t = today()
+    future_trials = cnt("s.funnel = 'sales' AND s.trial_at > ?", now().isoformat(timespec="minutes"))
+
+    # графики: 12 месяцев, текущий и прошлый год
+    months = [logic.shift_month(cur, -i) for i in range(11, -1, -1)]
+    series = {}
+    for key in ("revenue", "holders", "avg", "conversion"):
+        val = lambda m: month_stats(m)[key] if month_stats(m)["holders"] else None
+        series[key] = {"cur": [val(x) for x in months],
+                       "prev": [val(logic.shift_month(x, -12)) for x in months]}
+
+    # отработки (своё, нет в ERP)
     can_make_up, at_risk = 0, 0
     per = int(settings(con)["price_flex"])
-    for r in con.execute("SELECT id, tariff FROM students WHERE funnel='members' AND stage != 'left'").fetchall():
+    for r in con.execute("SELECT s.id, s.tariff FROM students s WHERE s.funnel='members' AND s.stage != 'left'"
+                         + br_sql, br_arg).fetchall():
         a = absence_counters(con, r[0])["available"]
         can_make_up += a
         if r[1] == "flex":
             at_risk += min(logic.MAX_FLEX_CREDIT, a) * per
 
-    months = [logic.shift_month(cur, -i) for i in range(5, -1, -1)]
-    trend = []
-    for m in months:
-        trend.append({"month": m, "label": logic.month_label(m),
-                      "revenue": one("SELECT SUM(price) FROM subscriptions WHERE month=? AND status='paid'", m),
-                      "students": one("SELECT COUNT(DISTINCT student_id) FROM subscriptions WHERE month=? AND status='paid'", m)})
-
     return {
-        "month": cur, "month_label": logic.month_label(cur), "next_month_label": logic.month_label(nxt),
-        "students": {"active": active, "by_branch": by_branch, "flex": by_tariff.get("flex", 0),
-                     "fixed": by_tariff.get("fixed", 0), "left": left},
-        "money": {"revenue": revenue, "avg_check": avg_check, "unpaid_cur": unpaid_cur,
-                  "next_paid": next_paid_n, "next_paid_sum": next_paid_sum,
-                  "next_invoiced": next_inv_n, "next_invoiced_sum": next_inv_sum,
-                  "renewal_pct": _pct(next_paid_n, active), "not_renewed": max(0, active - next_paid_n - next_inv_n)},
-        "sales": {"leads": leads, "trials": trials, "bought": bought, "refused": refused, "in_funnel": in_sales,
-                  "trial_conversion_pct": _pct(bought, trials)},
-        "attendance": {"present": present, "absent": absent, "rate_pct": _pct(present, present + absent),
-                       "makeups_done": makeups_done, "makeups_booked": makeups_booked, "credited": credited,
-                       "can_make_up": can_make_up, "at_risk_rub": at_risk},
-        "trend": trend,
+        "month": cur, "month_label": logic.month_label(cur),
+        "kpi": {"revenue": kpi("revenue"), "holders": kpi("holders"), "avg": kpi("avg"),
+                "conversion": kpi("conversion"),
+                "fill": {"value": fill, "vs_month": (fill - fill_m1) if fill is not None and fill_m1 is not None else None},
+                "seats": seats},
+        "days": {"yesterday": day_stats(t - timedelta(days=1)), "today": day_stats(t)},
+        "future_trials": future_trials,
+        "months": [logic.month_label(x).split()[0].capitalize() for x in months],
+        "series": series,
+        "funnel_leads": [["Новый лид", leads], ["Записаны на пробное", leads_trial],
+                         ["Пришли на пробное", leads_came], ["Купили абонемент", leads_bought]],
+        "funnel_trials": [["Записаны на пробное", trials], ["Пришли на пробное", trials_came],
+                          ["Купили абонемент", trials_bought]],
+        "segments": {"count": {k: v[0] for k, v in seg.items()}, "revenue": {k: v[1] for k, v in seg.items()}},
+        "makeups": {"can_make_up": can_make_up, "at_risk_rub": at_risk},
     }

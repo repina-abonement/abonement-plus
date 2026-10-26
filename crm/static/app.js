@@ -97,74 +97,129 @@ async function render() {
 }
 
 /* ---------- дашборд ---------- */
-const pct = (v) => (v === null || v === undefined ? "—" : v + "%");
-const tile = (label, value, sub, tone = "") => `<div class="tile ${tone}"><div class="tile-label">${esc(label)}</div><div class="tile-value">${value}</div>${sub ? `<div class="tile-sub">${sub}</div>` : ""}</div>`;
+const fmtNum = (n) => Number(n || 0).toLocaleString("ru-RU");
+const ICONS = {
+  wallet: '<path d="M3 7h15a3 3 0 0 1 3 3v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm0 0 12-3v3"/><circle cx="17" cy="14" r="1.2"/>',
+  cart: '<path d="M3 4h2l2.5 11h10L20 8H6.2"/><circle cx="9" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/>',
+  calc: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h3M9.5 6.5v3M13 8h3M8 15l3 3M11 15l-3 3M13 15.5h3M13 17.5h3"/>',
+  pie: '<path d="M12 3v9h9A9 9 0 1 1 12 3Z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15V3.5Z"/>',
+  trend: '<path d="M3 17l5-5 4 3 7-7"/><circle cx="3" cy="17" r="1.2"/><circle cx="8" cy="12" r="1.2"/><circle cx="12" cy="15" r="1.2"/><circle cx="19" cy="8" r="1.2"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>',
+};
+const icon = (k) => `<svg class="kpi-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
+const delta = (v, label) => v === null || v === undefined
+  ? `<div class="delta"><span>${label}</span><b class="muted">—</b></div>`
+  : `<div class="delta"><span>${label}</span><b class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "▲" : "▼"} ${v}%</b></div>`;
+
+function kpiCard(ic, title, value, k, extra = "") {
+  return `<div class="kpi"><div class="kpi-head">${icon(ic)}<span>${esc(title)}</span></div>
+    <div class="kpi-body"><div class="kpi-value">${value}</div>
+    ${k ? `<div class="kpi-deltas">${delta(k.vs_month, "мес. назад")}${k.vs_year !== undefined ? delta(k.vs_year, "год назад") : ""}</div>` : ""}</div>${extra}</div>`;
+}
+
+function lineChart(labels, cur, prev, fmt) {
+  const W = 640, H = 230, L = 58, R = 12, T = 14, B = 44;
+  const vals = [...cur, ...prev].filter((v) => v !== null && v !== undefined);
+  let lo = Math.min(0, ...vals), hi = Math.max(1, ...vals);
+  const step = Math.pow(10, Math.floor(Math.log10(hi - lo || 1))) / 2;
+  hi = Math.ceil(hi / step) * step;
+  const x = (i) => L + (i * (W - L - R)) / (labels.length - 1);
+  const y = (v) => T + (H - T - B) * (1 - (v - lo) / (hi - lo || 1));
+  const segs = (arr) => { const out = []; let cur = null; arr.forEach((v, i) => { if (v === null || v === undefined) { cur = null; return; } if (!cur) out.push(cur = []); cur.push(i); }); return out; };
+  const line = (arr) => segs(arr).map((g) => g.map((i, n) => `${n ? "L" : "M"}${x(i).toFixed(1)},${y(arr[i]).toFixed(1)}`).join("")).join("");
+  const area = (arr) => segs(arr).map((g) => g.map((i, n) => `${n ? "L" : "M"}${x(i).toFixed(1)},${y(arr[i]).toFixed(1)}`).join("") + `L${x(g.at(-1))},${y(lo)}L${x(g[0])},${y(lo)}Z`).join("");
+  const ticks = [0, 1, 2, 3, 4].map((k) => lo + ((hi - lo) * k) / 4);
+  return `<div class="chart-legend"><span class="lg cur"></span>Последние 12 месяцев <span class="lg prev"></span>Год назад</div>
+  <svg viewBox="0 0 ${W} ${H}" class="line-chart" role="img">
+    ${ticks.map((t) => `<line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}" class="grid"/><text x="${L - 8}" y="${y(t) + 4}" text-anchor="end" class="tick">${fmt(t)}</text>`).join("")}
+    ${labels.map((l, i) => `<text x="${x(i)}" y="${H - B + 18}" text-anchor="end" transform="rotate(-30 ${x(i)} ${H - B + 18})" class="tick">${esc(l)}</text>`).join("")}
+    <path d="${area(prev)}" class="area prev"/><path d="${line(prev)}" class="ln prev"/>
+    <path d="${area(cur)}" class="area cur"/><path d="${line(cur)}" class="ln cur"/>
+    ${cur.map((v, i) => v === null || v === undefined ? "" : `<circle cx="${x(i)}" cy="${y(v)}" r="3.2" class="pt cur"><title>${esc(labels[i])}: ${fmt(v)}</title></circle>`).join("")}
+    ${prev.map((v, i) => v === null || v === undefined ? "" : `<circle cx="${x(i)}" cy="${y(v)}" r="2.6" class="pt prev"><title>${esc(labels[i])}, прошлый год: ${fmt(v)}</title></circle>`).join("")}
+  </svg>`;
+}
+
+function funnelChart(rows) {
+  const top = Math.max(1, rows[0][1]);
+  const colors = ["#5fb3d9", "#6b73d8", "#a463d8", "#d063c7"];
+  return `<div class="funnel2">${rows.map(([l, v], i) => {
+    const w = Math.max(6, Math.round((v / top) * 100));
+    const p = i === 0 ? 100 : Math.round((v / Math.max(1, rows[i - 1][1])) * 100);
+    return `<div class="fn-row"><div class="fn-track"><div class="fn-bar" style="width:${w}%;background:${colors[i % 4]}"></div></div>
+      <div class="fn-label">${esc(l)}: <b>${rows[i - 1] && !rows[i - 1][1] ? "—" : p + "%"}</b> (${v})</div></div>`;
+  }).join("")}</div>`;
+}
+
+function donut(parts) {
+  const total = parts.reduce((a, p) => a + p.v, 0);
+  const C = 2 * Math.PI * 40;
+  let off = 0;
+  const arcs = total ? parts.map((p) => { const len = (p.v / total) * C; const a = `<circle r="40" cx="60" cy="60" fill="none" stroke="${p.c}" stroke-width="22" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 60 60)"><title>${esc(p.l)}</title></circle>`; off += len; return a; }).join("") : `<circle r="40" cx="60" cy="60" fill="none" stroke="var(--surface-2)" stroke-width="22"/>`;
+  return `<div class="donut-wrap"><svg viewBox="0 0 120 120" class="donut">${arcs}</svg>
+    <ul class="donut-legend">${parts.map((p) => `<li><span style="background:${p.c}"></span>${esc(p.l)}: ${total ? Math.round((p.v / total) * 100) : 0}% (${p.fmt ? p.fmt(p.v) : p.v})</li>`).join("")}</ul></div>`;
+}
 
 async function renderDashboard(page) {
   if (!S.dashMonth) S.dashMonth = S.meta.today.slice(0, 7);
-  const d = await api("GET", "/api/dashboard?month=" + S.dashMonth);
+  if (S.dashBranch === undefined) S.dashBranch = "";
+  if (!S.dashSeg) S.dashSeg = "count";
+  const d = await api("GET", `/api/dashboard?month=${S.dashMonth}${S.dashBranch ? "&branch_id=" + S.dashBranch : ""}`);
   const months = [];
-  for (let i = 0; i < 12; i++) { const dt = new Date(S.meta.today); dt.setDate(1); dt.setMonth(dt.getMonth() - i); months.push(isoDate(dt).slice(0, 7)); }
-  const st = d.students, m = d.money, sa = d.sales, at = d.attendance;
-  const maxRev = Math.max(1, ...d.trend.map((t) => t.revenue));
-  const maxBr = Math.max(1, ...st.by_branch.map((b) => b.students));
+  for (let i = 0; i < 18; i++) { const dt = new Date(S.meta.today); dt.setDate(1); dt.setMonth(dt.getMonth() - i); months.push(isoDate(dt).slice(0, 7)); }
+  const k = d.kpi, sr = d.series;
+  const kRub = (t) => t >= 1e6 ? (t / 1e6).toFixed(1).replace(".0", "") + " млн" : t >= 1000 ? Math.round(t / 1000) + " тыс" : fmtNum(t);
+  const segColors = { new: "#42a5f5", regular: "#4cc0b9", returned: "#f5a23d" };
+  const seg = d.segments[S.dashSeg];
   page.innerHTML = `
-    <div class="page-head"><h2 class="grow">Дашборд</h2>
-      <select id="dash-month" style="width:auto">${months.map((x) => `<option value="${x}" ${x === S.dashMonth ? "selected" : ""}>${monthLabel(x)}</option>`).join("")}</select></div>
-
-    <div class="tiles">
-      ${tile("Учеников сейчас", st.active, `гибкий ${st.flex} · негибкий ${st.fixed}`)}
-      ${tile("Выручка за " + d.month_label.split(" ")[0], rub(m.revenue), `средний чек ${rub(m.avg_check)}`, "accent")}
-      ${tile("Продлили на " + d.next_month_label.split(" ")[0], `${m.next_paid} <small>из ${st.active}</small>`, `${pct(m.renewal_pct)} · ${rub(m.next_paid_sum)}`)}
-      ${tile("Ещё не продлили", m.not_renewed, m.next_invoiced ? `счёт выставлен: ${m.next_invoiced} на ${rub(m.next_invoiced_sum)}` : "", m.not_renewed ? "warn" : "")}
+    <div class="dash-filters">
+      <select id="dash-month">${months.map((x) => `<option value="${x}" ${x === S.dashMonth ? "selected" : ""}>${monthLabel(x)}</option>`).join("")}</select>
+      <select id="dash-branch"><option value="">Все филиалы</option>${S.meta.branches.map((b) => `<option value="${b.id}" ${String(b.id) === String(S.dashBranch) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>
     </div>
 
-    <div class="dash-grid">
-      <section class="section">
-        <h3>Выручка по месяцам</h3>
-        <div class="bars">${d.trend.map((t) => `<div class="bar-col ${t.month === d.month ? "cur" : ""}">
-          <div class="bar-val">${t.revenue ? Math.round(t.revenue / 1000) + "к" : ""}</div>
-          <div class="bar" style="height:${Math.round((t.revenue / maxRev) * 100)}%"></div>
-          <div class="bar-lbl">${t.label.slice(0, 3)}</div></div>`).join("")}</div>
-        <div class="small muted">Оплаченные абонементы, ₽</div>
-      </section>
+    <div class="kpis">
+      ${kpiCard("wallet", "Выручка", `${fmtNum(k.revenue.value)} <small>₽</small>`, k.revenue)}
+      ${kpiCard("cart", "Уникальных держателей абонементов", fmtNum(k.holders.value), k.holders)}
+      ${kpiCard("calc", "Средний чек", `${fmtNum(k.avg.value)} <small>₽</small>`, k.avg)}
+      ${kpiCard("pie", "Заполненность", `${k.fill.value ?? "—"} <small>%</small>`, { vs_month: k.fill.vs_month }, `<div class="kpi-note">учеников с абонементом от числа мест</div>`)}
+      ${kpiCard("trend", "Конверсия из месяца в месяц", `${k.conversion.value ?? "—"} <small>%</small>`, k.conversion, `<div class="kpi-note">продлили из тех, кто занимался в прошлом месяце</div>`)}
+      ${kpiCard("user", "Количество мест", `${fmtNum(k.seats)} <small>шт.</small>`, null, `<div class="kpi-note">сумма мест во всех группах</div>`)}
+    </div>
 
-      <section class="section">
-        <h3>Продажи за ${esc(d.month_label)}</h3>
-        <div class="funnel">
-          ${[["Новые лиды", sa.leads], ["Пробные занятия", sa.trials], ["Купили абонемент", sa.bought]].map(([l, v], i, arr) => `
-            <div class="f-row"><span>${l}</span><div class="f-bar"><div style="width:${v ? Math.max(4, Math.round((v / Math.max(1, arr[0][1], arr[1][1])) * 100)) : 0}%"></div></div><b>${v}</b></div>`).join("")}
-        </div>
-        <div class="kv" style="margin-top:10px">
-          <dt>Конверсия пробное → покупка</dt><dd><b>${pct(sa.trial_conversion_pct)}</b></dd>
-          <dt>Отказы</dt><dd>${sa.refused}</dd>
-          <dt>Сейчас в воронке</dt><dd>${sa.in_funnel}</dd>
-        </div>
-      </section>
+    <div class="dash-row2">
+      <div class="panel">
+        <table class="day-table"><thead><tr><th></th><th>За вчера</th><th>За сегодня</th></tr></thead><tbody>
+          <tr><td>Получено лидов</td><td>${d.days.yesterday.leads} шт.</td><td>${d.days.today.leads} шт.</td></tr>
+          <tr><td>Записаны на пробное</td><td>${d.days.yesterday.trial_booked} шт.</td><td>${d.days.today.trial_booked} шт.</td></tr>
+          <tr><td>Купили впервые</td><td>${d.days.yesterday.bought_first} шт.</td><td>${d.days.today.bought_first} шт.</td></tr>
+        </tbody></table>
+      </div>
+      <div class="panel center">
+        <div class="kpi-head" style="justify-content:center"><span>Записи на пробное на будущие дни</span></div>
+        <div class="kpi-value" style="margin-top:8px">${d.future_trials} <small>шт.</small></div>
+        <div class="kpi-note">Отработки: можно отработать ${d.makeups.can_make_up}${d.makeups.at_risk_rub ? `, ≈ ${rub(d.makeups.at_risk_rub)} могут уйти в перерасчёт` : ""}</div>
+      </div>
+    </div>
 
-      <section class="section">
-        <h3>Ученики по филиалам</h3>
-        ${st.by_branch.map((b) => `<div class="f-row"><span>${esc(b.branch)}</span><div class="f-bar"><div style="width:${Math.max(4, Math.round((b.students / maxBr) * 100))}%"></div></div><b>${b.students}</b></div>`).join("")}
-        <div class="kv" style="margin-top:10px">
-          <dt>Не оплатили текущий месяц</dt><dd>${m.unpaid_cur}</dd>
-          <dt>Ушли в этом месяце</dt><dd>${st.left}</dd>
-        </div>
-      </section>
-
-      <section class="section">
-        <h3>Посещаемость и отработки</h3>
-        <div class="tiles mini">
-          ${tile("Посещаемость", pct(at.rate_pct), `${at.present} посещений · ${at.absent} пропусков`)}
-          ${tile("Можно отработать", at.can_make_up, at.at_risk_rub ? `≈ ${rub(at.at_risk_rub)} могут уйти в перерасчёт (гибкий тариф)` : "", at.can_make_up ? "warn" : "")}
-        </div>
-        <div class="kv" style="margin-top:10px">
-          <dt>Отработали</dt><dd>${at.makeups_done}</dd>
-          <dt>Записаны на отработку</dt><dd>${at.makeups_booked}</dd>
-          <dt>Ушло в перерасчёт</dt><dd>${at.credited}</dd>
-        </div>
+    <div class="chart-grid">
+      <section class="panel"><div class="panel-head">Выручка по месяцам</div>${lineChart(d.months, sr.revenue.cur, sr.revenue.prev, kRub)}</section>
+      <section class="panel"><div class="panel-head">Количество уникальных держателей абонементов</div>${lineChart(d.months, sr.holders.cur, sr.holders.prev, fmtNum)}</section>
+      <section class="panel"><div class="panel-head">Средний чек по месяцам</div>${lineChart(d.months, sr.avg.cur, sr.avg.prev, fmtNum)}</section>
+      <section class="panel"><div class="panel-head">Конверсия из месяца в месяц, %</div>${lineChart(d.months, sr.conversion.cur, sr.conversion.prev, (t) => Math.round(t))}</section>
+      <section class="panel"><div class="panel-head">Воронка продаж по лидам · ${esc(d.month_label)}</div>${funnelChart(d.funnel_leads)}</section>
+      <section class="panel"><div class="panel-head">Воронка продаж по записанным на пробное · ${esc(d.month_label)}</div>${funnelChart(d.funnel_trials)}</section>
+      <section class="panel">
+        <div class="panel-tabs"><button data-seg="count" class="${S.dashSeg === "count" ? "active" : ""}">Абонементы</button><button data-seg="revenue" class="${S.dashSeg === "revenue" ? "active" : ""}">Выручка</button></div>
+        ${donut([
+          { l: "Новые посетители", v: seg.new, c: segColors.new, fmt: S.dashSeg === "revenue" ? rub : null },
+          { l: "Постоянные посетители", v: seg.regular, c: segColors.regular, fmt: S.dashSeg === "revenue" ? rub : null },
+          { l: "Вернувшиеся посетители", v: seg.returned, c: segColors.returned, fmt: S.dashSeg === "revenue" ? rub : null },
+        ])}
       </section>
     </div>`;
   $("#dash-month").onchange = (e) => { S.dashMonth = e.target.value; render(); };
+  $("#dash-branch").onchange = (e) => { S.dashBranch = e.target.value; render(); };
+  page.querySelectorAll("[data-seg]").forEach((b) => (b.onclick = () => { S.dashSeg = b.dataset.seg; render(); }));
 }
 
 /* ---------- воронки ---------- */
@@ -448,11 +503,15 @@ async function renderJournal(page) {
   page.querySelectorAll("[data-mk]").forEach((b) => (b.onclick = async () => {
     try { await api("POST", `/api/makeups/${b.dataset.mk}/status`, { status: b.dataset.st }); render(); } catch (e) { fail(e); }
   }));
+  page.querySelectorAll("[data-trial]").forEach((b) => (b.onclick = async () => {
+    try { await api("POST", `/api/students/${b.dataset.sid}/trial`, { came: b.dataset.trial === "1" }); render(); } catch (e) { fail(e); }
+  }));
 }
 
 function journalRow(r) {
   if (r.status === "vacation") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${esc(r.name)}</div><span class="pill yellow">Отпуск</span></div>`;
-  if (r.status === "trial") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${esc(r.name)}</div><span class="pill green">Пробное ${r.trial_at.slice(11, 16)}</span></div>`;
+  if (r.status === "trial") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${esc(r.name)} <span class="pill green">пробное ${r.trial_at.slice(11, 16)}</span></div>
+    <div class="mark"><button data-trial="1" data-sid="${r.id}" class="${r.trial_came === 1 ? "on-present" : ""}">Пришёл</button><button data-trial="0" data-sid="${r.id}" class="${r.trial_came === 0 ? "on-absent" : ""}">Не пришёл</button></div></div>`;
   const locked = r.resolved ? `<span class="pill">${r.resolved === "credit" ? "в перерасчёте" : "отработан"}</span>` : "";
   return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${esc(r.name)} ${locked}</div>
     <div class="mark">
@@ -524,9 +583,10 @@ async function renderSettings(page) {
       </form>
     </div>
     <div class="section">
-      <h3>Тренеры групп</h3>
-      <div class="small muted" style="margin-bottom:8px">Тренер видит и отмечает в журнале только свои группы.</div>
+      <h3>Группы: тренеры и места</h3>
+      <div class="small muted" style="margin-bottom:8px">Тренер видит и отмечает в журнале только свои группы. Число мест нужно для заполненности на дашборде.</div>
       ${S.meta.groups.map((g) => `<div class="row" style="align-items:center;margin-bottom:8px"><div>${esc(g.name)}</div>
+        ${g.is_makeup ? "" : `<input type="number" min="0" max="200" data-cap="${g.id}" value="${g.capacity ?? 12}" title="Мест в группе" style="flex:0 0 74px">`}
         <select data-gc="${g.id}" style="flex:0 0 190px"><option value="">— без тренера —</option>${users.filter((u) => u.role === "coach").map((u) => `<option value="${u.id}" ${u.id === g.coach_id ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select></div>`).join("")}
     </div>` : ""}
     <form class="section" id="pw">
@@ -546,6 +606,9 @@ async function renderSettings(page) {
     e.preventDefault();
     try { await api("POST", "/api/users", Object.fromEntries(new FormData(e.target))); toast("Сотрудник добавлен"); render(); } catch (err) { fail(err); }
   };
+  page.querySelectorAll("[data-cap]").forEach((inp) => (inp.onchange = async () => {
+    try { await api("PATCH", `/api/groups/${inp.dataset.cap}`, { capacity: +inp.value }); S.meta.groups.find((g) => g.id === +inp.dataset.cap).capacity = +inp.value; toast("Мест: " + inp.value); } catch (err) { fail(err); }
+  }));
   page.querySelectorAll("[data-gc]").forEach((sel) => (sel.onchange = async () => {
     try {
       await api("PATCH", `/api/groups/${sel.dataset.gc}`, { coach_id: sel.value ? +sel.value : null });
