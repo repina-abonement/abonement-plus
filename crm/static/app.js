@@ -589,6 +589,9 @@ async function renderSettings(page) {
         ${g.is_makeup ? "" : `<input type="number" min="0" max="200" data-cap="${g.id}" value="${g.capacity ?? 12}" title="Мест в группе" style="flex:0 0 74px">`}
         <select data-gc="${g.id}" style="flex:0 0 190px"><option value="">— без тренера —</option>${users.filter((u) => u.role === "coach").map((u) => `<option value="${u.id}" ${u.id === g.coach_id ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select></div>`).join("")}
     </div>` : ""}
+    ${admin && S.meta.demo ? `<div class="section"><h3>Тестовые данные</h3>
+      <div class="small muted" style="margin-bottom:8px">Сейчас включён тестовый режим. Кнопка сотрёт всех клиентов и создаст выдуманных заново. Сотрудники и настройки сохранятся.</div>
+      <button class="btn sm danger" id="demo-reset">Пересоздать тестовые данные</button></div>` : ""}
     <form class="section" id="pw">
       <h3>Мой пароль</h3>
       <div class="field"><label>Текущий пароль</label><input name="old" type="password" required></div>
@@ -616,6 +619,10 @@ async function renderSettings(page) {
       toast("Тренер назначен");
     } catch (err) { fail(err); }
   }));
+  if ($("#demo-reset")) $("#demo-reset").onclick = async () => {
+    if (!confirm("Стереть всех клиентов и создать тестовых заново?")) return;
+    try { await api("POST", "/api/demo/reset", {}); S.meta = await api("GET", "/api/meta"); toast("Тестовые данные пересозданы"); render(); } catch (err) { fail(err); }
+  };
   $("#pw").onsubmit = async (e) => {
     e.preventDefault();
     try { await api("POST", "/api/me/password", Object.fromEntries(new FormData(e.target))); toast("Пароль изменён"); e.target.reset(); } catch (err) { fail(err); }

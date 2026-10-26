@@ -80,8 +80,29 @@ RestartSec=60
 WantedBy=multi-user.target
 UNIT
 
+cat > /etc/systemd/system/abonement-plus-update.service <<UNIT
+[Unit]
+Description=Abonement Plus auto-update from GitHub
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash $DIR/deploy/update.sh
+UNIT
+
+cat > /etc/systemd/system/abonement-plus-update.timer <<UNIT
+[Unit]
+Description=Check GitHub for Abonement Plus updates every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
+UNIT
+
 systemctl daemon-reload
-systemctl enable -q --now abonement-plus abonement-plus-backup
+systemctl enable -q --now abonement-plus abonement-plus-backup abonement-plus-update.timer
 systemctl restart abonement-plus
 
 echo "== Настраиваю веб-сервер =="
@@ -113,6 +134,7 @@ certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-w
 echo
 echo "=================================================="
 echo " Готово! Откройте:  https://$DOMAIN"
+echo " Автообновление с GitHub включено (каждые 5 минут)."
 echo " Логин:   admin"
 if [ -n "${NEW_PW:-}" ]; then
   echo " Пароль:  $NEW_PW"

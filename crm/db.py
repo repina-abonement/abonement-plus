@@ -241,6 +241,17 @@ def settings(con) -> dict:
     return {r["key"]: r["value"] for r in con.execute("SELECT key, value FROM settings")}
 
 
+DATA_TABLES = ["history", "makeups", "subscriptions", "vacations", "attendance", "students", "parents",
+               "families", "groups", "branches", "audit"]
+
+
+def reset_demo(con: sqlite3.Connection):
+    """Стирает клиентов и создаёт тестовых заново. Только при CRM_DEMO=1."""
+    for t in DATA_TABLES:
+        con.execute(f"DELETE FROM {t}")
+    con.execute("DELETE FROM users WHERE login = 'trener'")
+
+
 def seed_demo(con: sqlite3.Connection, today: date | None = None):
     """Выдуманные клиенты для теста. Не использовать с реальными данными."""
     if con.execute("SELECT COUNT(*) FROM branches").fetchone()[0]:

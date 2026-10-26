@@ -130,7 +130,7 @@ def coach_guard(con, user, group_id: int):
 
 @route("GET", "/api/meta")
 def meta(con, h, user, body, q):
-    m = sv.meta(con) | {"user": user}
+    m = sv.meta(con) | {"user": user, "demo": os.environ.get("CRM_DEMO", "1") == "1"}
     if user["role"] == "coach":
         m["groups"] = [g for g in m["groups"] if g["coach_id"] == user["id"]]
         m["settings"] = {}
@@ -289,6 +289,17 @@ def trial_mark(con, h, user, body, q, sid):
     if s["group_id"]:
         coach_guard(con, user, s["group_id"])
     sv.mark_trial(con, int(sid), bool(body.get("came")), user)
+    return {"ok": True}
+
+
+@route("POST", "/api/demo/reset", role="admin")
+def demo_reset(con, h, user, body, q):
+    if os.environ.get("CRM_DEMO", "1") != "1":
+        raise ApiError("Тестовый режим выключен — стирать данные нельзя", 403)
+    db.reset_demo(con)
+    con.execute("COMMIT")
+    db.seed_demo(con)
+    con.execute("BEGIN")
     return {"ok": True}
 
 
