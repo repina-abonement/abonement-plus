@@ -92,10 +92,11 @@ async function renderInbox(page) {
   const I = S.inbox;
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Чаты и звонки</h2>
-      <div class="seg"><button data-tab="chats" class="${I.tab === "chats" ? "active" : ""}">Переписки</button><button data-tab="calls" class="${I.tab === "calls" ? "active" : ""}">Звонки</button></div></div>
+      <div class="seg">${[["chats", "Переписки"], ["calls", "Звонки"], ["stats", "Аналитика звонков"]].map(([k, t]) => `<button data-tab="${k}" class="${I.tab === k ? "active" : ""}">${t}</button>`).join("")}</div></div>
     <div id="inbox-body"></div>`;
   page.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { I.tab = b.dataset.tab; render(); }));
   if (I.tab === "calls") return renderCalls($("#inbox-body"));
+  if (I.tab === "stats") return renderCallStats($("#inbox-body"));
   const body = $("#inbox-body");
   body.innerHTML = `
     <div class="row" style="max-width:720px;margin-bottom:12px;align-items:center">
@@ -286,4 +287,67 @@ async function renderCommsSettings(box, users) {
     const rows = await api("GET", "/api/integrations/log").catch(() => []);
     $("#hook-log").innerHTML = rows.length ? rows.map((r) => `<div class="log-row"><b>${dtShort(r.ts)} ${esc(r.source)}</b>${r.error ? ` <span class="error">${esc(r.error)}</span>` : ""}<pre>${esc(r.payload)}</pre></div>`).join("") : "Пока пусто";
   };
+}
+
+/* ---------- аналитика звонков ---------- */
+async function renderCallStats(body) {
+  const I = S.inbox;
+  I.period = I.period || "week";
+  const d = await api("GET", "/api/calls/analytics?period=" + I.period);
+  const sm = d.summary, dl = d.delta;
+  const trend = (v, goodDown) => v == null || v === 0 ? "" : `<span class="trend ${(v < 0) === !!goodDown ? "good" : "bad"}">${v > 0 ? "▲" : "▼"} ${Math.abs(v)}</span>`;
+  const maxH = Math.max(1, ...d.missed_by_hour);
+  const hours = d.missed_by_hour.map((n, h) => ({ n, h })).filter((x) => (x.h >= 8 && x.h <= 22) || x.n);
+  body.innerHTML = `
+    <div class="row" style="max-width:720px;margin-bottom:14px;align-items:center">
+      <div class="seg" style="flex:0 0 auto">${[["today", "Сегодня"], ["week", "7 дней"], ["month", "30 дней"]].map(([k, t]) => `<button data-p="${k}" class="${I.period === k ? "active" : ""}">${t}</button>`).join("")}</div>
+      <span class="muted small">Сравнение с таким же периодом до этого</span>
+    </div>
+    ${S.meta.comms.sipuni ? "" : `<div class="note">Sipuni пока не подключён, цифры по тестовым звонкам</div>`}
+    <div class="cstats">
+      <div class="cstat"><span>Входящих</span><b>${sm.incoming}</b>${trend(dl.incoming)}</div>
+      <div class="cstat ${sm.missed ? "warn" : ""}"><span>Пропущено</span><b>${sm.missed}${sm.missed_pct != null ? `<small> из ${sm.incoming}</small>` : ""}</b>${trend(dl.missed, true)}</div>
+      <div class="cstat"><span>Перезваниваем в среднем через</span><b>${sm.median_callback_label || "—"}</b>${trend(dl.median_callback, true)}</div>
+      <div class="cstat ${sm.never_called_back ? "warn" : ""}"><span>Так и не перезвонили</span><b>${sm.never_called_back}</b></div>
+      <div class="cstat"><span>Исходящих</span><b>${sm.outgoing}${sm.outgoing ? `<small> дозвонились ${sm.out_answered}</small>` : ""}</b>${trend(dl.outgoing)}</div>
+      <div class="cstat"><span>Время в разговорах</span><b>${esc(sm.talk_total_label)}</b></div>
+    </div>
+
+    ${d.waiting.length ? `<section class="panel" style="margin-top:14px">
+      <h3>Ждут перезвона</h3>
+      <div class="small muted" style="margin-bottom:8px">Сначала те, кто ждёт дольше всех</div>
+      <div class="list" style="box-shadow:none">${d.waiting.map((w) => `<div class="list-row">
+        <span class="ref-card red" aria-hidden="true"></span>
+        <div class="grow"><b>${esc(w.phone)}</b> ${w.family_name ? `<span class="muted small">семья ${esc(w.family_name)}</span>` : `<span class="pill yellow">нет карточки</span>`}
+          <div class="small muted">ждёт ${esc(w.waiting)}</div></div>
+        <button class="btn sm primary" data-dial="${esc(w.phone)}" data-sid="${w.student_id || ""}">Перезвонить</button></div>`).join("")}</div>
+    </section>` : ""}
+
+    <section class="panel" style="margin-top:14px">
+      <h3>Операторы</h3>
+      ${d.unassigned ? `<div class="small muted" style="margin-bottom:8px">Часть номеров без имени: впишите внутренние номера сотрудникам в Настройках → Сотрудники</div>` : ""}
+      ${d.operators.length ? `<div class="table-wrap"><table class="optable">
+        <thead><tr><th>Оператор</th><th>Исходящие</th><th>Дозвон</th><th>Принял входящих</th><th>Средний разговор</th><th>Поговорил с лидами</th><th>Записались на пробное</th><th>Купили</th></tr></thead>
+        <tbody>${d.operators.map((o) => `<tr>
+          <td><b>${esc(o.name)}</b><div class="small muted">вн. ${esc(o.number)}</div></td>
+          <td>${o.out}</td><td>${o.reach != null ? `${o.out_answered} из ${o.out}` : "—"}</td><td>${o.in_answered}</td>
+          <td>${o.avg_talk != null ? secs(o.avg_talk) : "—"}</td><td>${o.leads}</td>
+          <td>${o.leads ? `<b>${o.trial}</b> из ${o.leads}` : "—"}</td><td>${o.leads ? `${o.bought} из ${o.leads}` : "—"}</td></tr>`).join("")}</tbody>
+      </table></div>` : `<div class="muted small">За этот период звонков с операторами нет</div>`}
+      <div class="small muted" style="margin-top:8px">«Записались на пробное» и «Купили» считаются по лидам, с которыми оператор поговорил, если запись или покупка случилась после разговора</div>
+    </section>
+
+    <section class="panel" style="margin-top:14px">
+      <h3>Когда пропускаем звонки</h3>
+      <div class="small muted" style="margin-bottom:10px">Пропущенные по часам. Высокий столбик значит, что в это время не хватает рук</div>
+      <div class="hours">${hours.map((x) => `<div class="hcol" title="${x.h}:00 · пропущено ${x.n}"><i style="height:${Math.round(100 * x.n / maxH)}%" class="${x.n ? "" : "zero"}"></i><span>${x.h}</span></div>`).join("")}</div>
+    </section>
+
+    <section class="panel soon" style="margin-top:14px">
+      <h3>Разбор разговоров</h3>
+      <div class="small">Следующий шаг: каждый записанный разговор будет автоматически превращаться в текст, а под ним появится короткий разбор. Поздоровался ли и назвал ли школу, выяснил ли возраст ребёнка и удобный филиал, предложил ли пробное и конкретное время, что ответил на возражение про цену, чем закончился звонок. По операторам будет видно, на каком шаге чаще теряем клиента</div>
+      <div class="small muted" style="margin-top:8px">Для этого нужно подключить сервис распознавания речи на российских серверах, например Yandex SpeechKit</div>
+    </section>`;
+  body.querySelectorAll("[data-p]").forEach((b) => (b.onclick = () => { I.period = b.dataset.p; render(); }));
+  body.querySelectorAll("[data-dial]").forEach((b) => (b.onclick = async () => { await dial(b.dataset.dial); if (b.dataset.sid) openStudent(+b.dataset.sid); }));
 }

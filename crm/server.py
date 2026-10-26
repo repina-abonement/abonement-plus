@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import coaches, comms, db, services as sv
+from . import callstats, coaches, comms, db, services as sv
 from .services import ApiError
 
 
@@ -441,6 +441,11 @@ def make_call(con, h, user, body, q):
 @route("GET", "/api/calls", role="operator")
 def calls(con, h, user, body, q):
     return comms.calls_list(con, q.get("filter", "all"))
+
+
+@route("GET", "/api/calls/analytics", role="operator")
+def calls_analytics(con, h, user, body, q):
+    return callstats.analytics(con, q.get("period", "week"))
 
 
 @route("POST", "/api/calls/seen", role="operator")

@@ -387,3 +387,26 @@ h2.sub { font-size: 17px; }
   .now-list { max-height: 300px; }
   .now-head h3 { font-size: 16px; }
 }
+
+/* аналитика звонков */
+.cstats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.cstat { background: var(--surface); border-radius: 14px; padding: 14px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 4px; }
+.cstat span { font-size: 13px; color: var(--ink-2); }
+.cstat b { font-family: var(--display); font-weight: 600; font-size: 24px; line-height: 1.15; }
+.cstat b small { font-family: var(--font); font-size: 13px; font-weight: 500; color: var(--ink-2); }
+.cstat.warn { background: var(--red-soft); }
+.trend { font-size: 12.5px; font-weight: 600; } .trend.good { color: var(--up); } .trend.bad { color: var(--down); }
+.table-wrap { overflow-x: auto; }
+.optable { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 760px; }
+.optable th { text-align: left; font-size: 12.5px; font-weight: 600; color: var(--ink-2); padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.optable td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.optable tr:last-child td { border-bottom: 0; }
+.hours { display: flex; gap: 6px; align-items: flex-end; height: 140px; }
+.hcol { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; }
+.hcol i { width: 100%; max-width: 34px; background: var(--red); border-radius: 6px 6px 2px 2px; min-height: 3px; }
+.hcol i.zero { background: var(--line); }
+.hcol span { font-size: 11.5px; color: var(--ink-2); }
+.panel.soon { background: var(--surface-2); box-shadow: none; border: 1px dashed var(--line); }
+.panel h3 { margin-bottom: 4px; }
+@media (max-width: 1100px) { .cstats { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 760px) { .cstats { grid-template-columns: 1fr 1fr; } .cstat b { font-size: 21px; } .hours { gap: 3px; } }

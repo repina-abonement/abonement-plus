@@ -126,6 +126,9 @@ def main():
     c9 = [x for x in c if x["external_id"] == "C9"][0]
     check(c9["operator"] == "202" and c9["talk"] == 30 and c9["phone"] == "79001112233",
           "Звонок по примеру из PDF Sipuni: ответил 202, разговор 30 сек")
+    an = call("GET", "/api/calls/analytics?period=month")
+    check(any(o["number"] == "202" and o["in_answered"] >= 1 for o in an["operators"]), "Аналитика: оператор 202 принял звонок")
+    check(an["summary"]["incoming"] >= 2, "Аналитика: входящие посчитаны")
     audio = call("GET", f"/api/calls/{c1['id']}/record", raw=True, headers={"Range": "bytes=0-9"}, expect=206)
     check(audio == b"0123456789", "Запись звонка отдаётся кусками (для iPhone)")
     call("POST", sip_url, {"event": "2", "call_id": "C2", "src_num": "79990001122", "src_type": "1",
