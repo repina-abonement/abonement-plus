@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import ai, callstats, coaches, comms, db, legal, money, schedule, services as sv, sources, staff, tasks
+from . import ai, callstats, coaches, comms, db, legal, merch, money, schedule, services as sv, sources, staff, tasks
 from .services import ApiError
 
 
@@ -240,6 +240,14 @@ def tasks_settings_put(con, h, user, body, q):
     return tasks.settings_view(con)
 
 
+def merch_alerts(con):
+    from datetime import date as _d, timedelta as _td
+    t = _d.today()
+    reg = merch.registry(con, (t - _td(days=30)).isoformat(), t.isoformat())
+    return {"qr_no_receipt": reg["qr_no_receipt"], "missing_reports": merch.missing_reports(con, t - _td(days=1)),
+            "cash_not_handed": [x for x in reg["by_seller"] if x["cash_not_handed"]]}
+
+
 @route("GET", "/api/workdesk", role="operator")
 def workdesk(con, h, user, body, q):
     board = sv.board(con, "sales")
@@ -258,6 +266,7 @@ def workdesk(con, h, user, body, q):
     rest.sort(key=lambda x: x["ts"] or "", reverse=True)
     return {"urgent": reds + rest, "board": board, "birthdays": sv.birthdays(con), "needs_subs": schedule.needs_subs(con),
             "checkins": staff.day_report(con) if checkin_reviewer(con, user) else None,
+            "merch_alerts": merch_alerts(con),
             "absences": schedule.absences(con),
             "coaches": [dict(r) for r in con.execute("SELECT id, name FROM users WHERE role='coach' AND active=1 ORDER BY name")],
             **comms.counts(con)}
@@ -587,6 +596,58 @@ def lesson_staff_set(con, h, user, body, q):
     return {"ok": True}
 
 
+def mex(fn, *a, **kw):
+    try:
+        return fn(*a, **kw)
+    except merch.MerchError as e:
+        raise ApiError(str(e))
+
+
+@route("GET", "/api/merch/items")
+def merch_items(con, h, user, body, q):
+    return {"items": merch.items(con, all_=user["role"] == "admin" and q.get("all") == "1"), "methods": merch.METHODS}
+
+
+@route("POST", "/api/merch/items", role="admin")
+def merch_item_add(con, h, user, body, q):
+    return {"id": mex(merch.save_item, con, body)}
+
+
+@route("PUT", "/api/merch/items/{iid}", role="admin")
+def merch_item_put(con, h, user, body, q, iid):
+    return {"id": mex(merch.save_item, con, body, int(iid))}
+
+
+@route("POST", "/api/merch/sales")
+def merch_sell(con, h, user, body, q):
+    return {"ids": mex(merch.sell, con, user, body)}
+
+
+@route("GET", "/api/merch/sales", role="operator")
+def merch_sales(con, h, user, body, q):
+    from datetime import date as _d
+    t = _d.today()
+    return merch.registry(con, q.get("from") or t.replace(day=1).isoformat(), q.get("to") or t.isoformat())
+
+
+@route("POST", "/api/merch/sales/{sid}/flag", role="operator")
+def merch_flag(con, h, user, body, q, sid):
+    mex(merch.set_flag, con, int(sid), body.get("flag") or "", bool(body.get("value")))
+    return {"ok": True}
+
+
+@route("POST", "/api/merch/sales/{sid}/cancel", role="admin")
+def merch_cancel(con, h, user, body, q, sid):
+    merch.cancel(con, int(sid))
+    return {"ok": True}
+
+
+@route("POST", "/api/shift/report")
+def shift_report(con, h, user, body, q):
+    merch.report_shift(con, user, int(body.get("branch_id") or 0), bool(body.get("sold")))
+    return {"ok": True}
+
+
 @route("GET", "/api/schedule/week")
 def schedule_week(con, h, user, body, q):
     return schedule.week(con)
@@ -694,6 +755,7 @@ def coach_today(con, h, user, body, q):
     for les in out["today"]:
         les["staff"] = staff.lesson_staff(con, les["id"], out["date"])
     out["coaches"] = [dict(r) for r in con.execute("SELECT id, name FROM users WHERE role='coach' AND active=1 ORDER BY name")]
+    out["merch"] = merch.my_shift(con, cid, out["date"])
     return out
 
 

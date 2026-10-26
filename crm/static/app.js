@@ -60,7 +60,7 @@ function renderLogin() {
 /* ---------- каркас ---------- */
 const VIEWS = [
   ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["members", "Ученики"], ["skips", "Пропуски"],
-  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["payments", "Оплаты"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["settings", "Настройки"],
+  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["payments", "Оплаты"], ["merch", "Мерч"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
   sales: '<path d="M4 5h16v14H4z"/><path d="M9 5v14M15 5v14"/>',
@@ -72,6 +72,7 @@ const NAV_ICONS = {
   journal: '<rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 9l1.5 1.5L13 8M9 14.5l1.5 1.5L13 13.5M15 9.5h1M15 15h1"/>',
   coaches: '<path d="M8 4h8v4a4 4 0 0 1-8 0z"/><path d="M8 5H5v1.5A3 3 0 0 0 8 9.5M16 5h3v1.5a3 3 0 0 1-3 3M12 12v4M9 20h6M10 16h4v4h-4z"/>',
   dashboard: '<path d="M4 19V10M10 19V5M16 19v-7M21 19H3"/>',
+  merch: '<path d="M8 4l-4 3 2 3 2-1v11h8V9l2 1 2-3-4-3c-.5 1.5-2 2.5-4 2.5S8.5 5.5 8 4z"/>',
   payments: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h3"/>',
   search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>',
@@ -124,6 +125,7 @@ async function render() {
     if (S.view === "sales") return await renderWorkdesk(page);
     if (S.view === "today") return await renderCoachToday(page);
     if (S.view === "payments") return await renderPayments(page);
+    if (S.view === "merch") return await renderMerch(page);
     if (S.view === "schedule") return await renderSchedule(page);
     if (["members", "skips"].includes(S.view)) return await renderBoard(page, S.view);
     if (S.view === "dashboard") return await renderDashboard(page);
@@ -337,6 +339,7 @@ async function renderWorkdesk(page) {
     <div class="page-head"><h2 class="grow">Рабочий стол${S.viewAs ? `: ${esc(S.viewAs.name)}` : ""}</h2>
       <span class="muted small">Обновляется сам каждые 20 секунд</span></div>
     ${checkinReport(d.checkins)}
+    ${merchAlerts(d.merch_alerts)}
     ${needsSubsBox(d)}
     ${schedHtml}
     ${birthdaysBox(d.birthdays)}
@@ -364,6 +367,7 @@ async function renderWorkdesk(page) {
   wireViewAs(page);
   wireNeedsSubs(page, d);
   wireCheckinReport(page);
+  wireMerchAlerts(page);
   if (page.querySelector(".sched-widget")) { if (wasOpen === false) page.querySelector(".sched-widget").open = false; wireSchedule(page.querySelector(".sched-widget"), S.meta.today); }
   page.querySelectorAll(".bday-box [data-open]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.open)));
   page.querySelectorAll("[data-u]").forEach((b) => (b.onclick = async () => {

@@ -527,3 +527,11 @@ h2.sub { font-size: 17px; }
 .staff-pick .field { min-width: 130px; margin-bottom: 0; }
 .sched-l .pill { white-space: normal; display: inline-block; margin-top: 3px; }
 .chip input[type=checkbox] { margin: 0 4px 0 0; vertical-align: -2px; }
+.merch-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; margin: 8px 0 12px; }
+.merch-it { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
+.merch-it.on { border-color: var(--accent); background: var(--accent-soft); }
+.merch-it b { min-width: 18px; text-align: center; }
+.merch-form .seg { flex-wrap: wrap; }
+.cfacts { display: flex; flex-wrap: wrap; gap: 8px; }
+.merch-form .row { flex-wrap: wrap; }
+.merch-form [data-msave] { flex: 1 1 auto !important; }
