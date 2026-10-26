@@ -42,8 +42,43 @@ function callHtml(k) {
     <div class="grow"><b>${k.direction === "in" ? "Входящий" : "Исходящий"}</b> · ${esc(CALL_ST[k.status] || k.status)}${k.talk ? " · " + secs(k.talk) : ""}
       <div class="small muted">${dtWhen(k.ts || k.started_at)}${k.operator ? " · сотрудник " + esc(k.operator) : ""}</div>
       ${k.has_record ? `<audio controls preload="none" src="/api/calls/${k.id}/record"></audio>` : ""}
-      ${k.transcript ? `<details class="small"><summary>Расшифровка</summary>${esc(k.transcript)}</details>` : ""}
+      ${aiChip(k)}
     </div></div>`;
+}
+
+function aiChip(k) {
+  if (k.score != null || k.ai_status === "done") return `<button class="ai-chip" data-ai="${k.id}">Разбор звонка${k.score != null ? ` · <b class="${scoreClass(k.score)}">${k.score}/10</b>` : ""}</button>`;
+  if (k.ai_status === "stt" || k.ai_status === "llm") return `<span class="ai-chip wait">Разбираем разговор…</span>`;
+  return "";
+}
+const scoreClass = (n) => n >= 8 ? "s-good" : n >= 5 ? "s-mid" : "s-bad";
+document.addEventListener("click", (e) => { const b = e.target.closest("[data-ai]"); if (b) { e.preventDefault(); openCallAi(+b.dataset.ai); } });
+
+async function openCallAi(id) {
+  let d;
+  try { d = await api("GET", `/api/calls/${id}/ai`); } catch (e) { return fail(e); }
+  const a = d.analysis || {}, L = d.checklist_labels;
+  const mark = (v) => v === true ? `<span class="ck ok">✓</span>` : v === false ? `<span class="ck no">✕</span>` : `<span class="ck na">—</span>`;
+  openDrawer(`
+    <h2>Разбор звонка</h2>
+    ${d.ai_status === "error" ? `<div class="alert">Не получилось разобрать: ${esc(d.ai_error)} <button class="btn sm" id="ai-retry">Попробовать снова</button></div>` : ""}
+    ${d.ai_status !== "done" && d.ai_status !== "error" ? `<div class="note">Разговор ещё разбирается. В отложенном режиме это может занять до суток</div>` : ""}
+    ${a.summary ? `<div class="section ai-head">
+      ${d.score != null ? `<div class="ai-score ${scoreClass(d.score)}">${d.score}<small>/10</small></div>` : ""}
+      <div class="grow">${a.result ? `<span class="pill">${esc(a.result)}</span>` : ""}<p>${esc(a.summary)}</p></div></div>` : ""}
+    ${a.good || (a.tips || []).length ? `<div class="section">
+      ${a.good ? `<div class="ai-good">👍 ${esc(a.good)}</div>` : ""}
+      ${(a.tips || []).length ? `<h3 style="margin-top:10px">Что сказать иначе</h3><ul class="ai-tips">${a.tips.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>` : ""}
+    </div>` : ""}
+    ${a.checklist && Object.keys(a.checklist).length ? `<div class="section"><h3>Чек-лист разговора</h3>
+      <div class="cklist">${Object.entries(L).map(([k, t]) => `<div>${mark(a.checklist[k])}${esc(t)}</div>`).join("")}</div>
+      <div class="small muted" style="margin-top:6px">— значит пункт не подходил к этому разговору</div></div>` : ""}
+    ${(a.objections || []).length || a.next_step ? `<div class="section">
+      ${(a.objections || []).length ? `<div><b>Сомнения родителя:</b> ${a.objections.map(esc).join(", ")}</div>` : ""}
+      ${a.next_step ? `<div style="margin-top:6px"><b>Договорились:</b> ${esc(a.next_step)}</div>` : ""}
+    </div>` : ""}
+    ${d.transcript ? `<div class="section"><h3>Расшифровка</h3><pre class="transcript">${esc(d.transcript)}</pre></div>` : ""}`);
+  if ($("#ai-retry")) $("#ai-retry").onclick = async () => { await api("POST", `/api/calls/${id}/ai/retry`, {}).catch(fail); toast("Отправим на разбор в течение минуты"); closeDrawer(); };
 }
 
 async function dial(phone) {
@@ -145,6 +180,7 @@ async function renderCalls(body) {
         <div class="grow"><b>${esc(k.phone)}</b> ${k.family_name ? `<span class="muted small">· семья ${esc(k.family_name)}</span>` : `<span class="pill yellow">нет карточки</span>`}
           <div class="small muted">${dtWhen(k.started_at)} · ${esc(CALL_ST[k.status] || k.status)}${k.talk ? " · " + secs(k.talk) : ""}${k.operator ? " · " + esc(k.operator) : ""}</div>
           ${k.has_record ? `<audio controls preload="none" src="/api/calls/${k.id}/record"></audio>` : ""}
+          ${aiChip(k)}
           <div class="chips" style="margin-top:6px">${k.students.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}
             ${k.family_name ? "" : `<button class="chip" data-newlead="${esc(k.phone)}">+ Создать лид</button>`}</div></div>
         <button class="btn sm" data-dial="${esc(k.phone)}">📞 ${missed ? "Перезвонить" : "Позвонить"}</button>
@@ -265,6 +301,8 @@ async function renderCommsSettings(box, users) {
       <div class="small muted">Последняя заявка: ${inf.lead_last ? dtShort(inf.lead_last) : "ещё не было"}</div>
     </div>
 
+    ${aiSettingsHtml(v, inf, st)}
+
     <div class="int"><div class="field"><label>Приветствие бота в Telegram и MAX</label><textarea data-k="bot_greeting" rows="3">${esc(v.bot_greeting)}</textarea></div></div>
     <button class="btn primary" id="int-save">Сохранить</button>
     <details style="margin-top:12px"><summary class="small muted">Журнал входящих событий</summary><div id="hook-log" class="small"></div></details>`;
@@ -279,6 +317,12 @@ async function renderCommsSettings(box, users) {
     } catch (e) { fail(e); }
     S.meta = await api("GET", "/api/meta"); renderCommsSettings(box, users);
   }));
+  $("#ai-test").onclick = async (e) => {
+    e.target.disabled = true;
+    try { await api("PUT", "/api/integrations", collect()); const r = await api("POST", "/api/integrations/yandex/test", {}); toast("Яндекс отвечает: " + (r.answer || "ок")); }
+    catch (err) { fail(err); }
+    S.meta = await api("GET", "/api/meta"); renderCommsSettings(box, users);
+  };
   box.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async () => {
     try { await navigator.clipboard.writeText(b.dataset.copy); toast("Скопировано"); } catch (_) { b.previousElementSibling.select(); }
   }));
@@ -343,11 +387,60 @@ async function renderCallStats(body) {
       <div class="hours">${hours.map((x) => `<div class="hcol" title="${x.h}:00 · пропущено ${x.n}"><i style="height:${Math.round(100 * x.n / maxH)}%" class="${x.n ? "" : "zero"}"></i><span>${x.h}</span></div>`).join("")}</div>
     </section>
 
-    <section class="panel soon" style="margin-top:14px">
-      <h3>Разбор разговоров</h3>
-      <div class="small">Следующий шаг: каждый записанный разговор будет автоматически превращаться в текст, а под ним появится короткий разбор. Поздоровался ли и назвал ли школу, выяснил ли возраст ребёнка и удобный филиал, предложил ли пробное и конкретное время, что ответил на возражение про цену, чем закончился звонок. По операторам будет видно, на каком шаге чаще теряем клиента</div>
-      <div class="small muted" style="margin-top:8px">Для этого нужно подключить сервис распознавания речи на российских серверах, например Yandex SpeechKit</div>
-    </section>`;
+    ${aiBlock(d.ai)}`;
   body.querySelectorAll("[data-p]").forEach((b) => (b.onclick = () => { I.period = b.dataset.p; render(); }));
+  body.querySelectorAll("[data-aiop]").forEach((b) => (b.onclick = () => { I.aiOp = I.aiOp === b.dataset.aiop ? null : b.dataset.aiop; render(); }));
   body.querySelectorAll("[data-dial]").forEach((b) => (b.onclick = async () => { await dial(b.dataset.dial); if (b.dataset.sid) openStudent(+b.dataset.sid); }));
+}
+
+function aiBlock(x) {
+  if (!x.enabled && !x.analyzed) return `<section class="panel soon" style="margin-top:14px">
+      <h3>Разбор разговоров</h3>
+      <div class="small">Каждый состоявшийся разговор будет превращаться в текст, а под ним появится разбор по чек-листу продаж: поздоровался ли, выяснил ли возраст и филиал, предложил ли пробное на конкретное время, как отработал сомнения, чем закончился звонок</div>
+      <div class="small muted" style="margin-top:8px">${S.user.role === "admin" ? "Включается в Настройках → Связь с клиентами → Расшифровка и разбор звонков" : "Включает администратор в Настройках"}</div>
+    </section>`;
+  const I = S.inbox;
+  const weak = x.checklist.find((c) => c.key === x.weakest);
+  const op = I.aiOp ? x.operators.find((o) => o.number === I.aiOp) : null;
+  const steps = op ? op.steps : x.team;
+  return `
+    <section class="panel" style="margin-top:14px">
+      <div class="row" style="align-items:center"><h3 class="grow" style="flex:1">Разбор разговоров</h3>
+        <span class="small muted" style="flex:0 0 auto">Разобрано ${x.analyzed}${x.pending ? `, ещё ${x.pending} в работе` : ""}</span></div>
+      ${!x.analyzed ? `<div class="small muted">Разборов за этот период пока нет</div>`
+        : weak && x.team[weak.key] < 80 ? `<div class="ai-weak">Чаще всего теряем клиента на шаге: <b>${esc(weak.title.toLowerCase())}</b>. Делают только в ${x.team[weak.key]}% разговоров</div>`
+        : `<div class="ai-good" style="margin-top:8px">Все шаги разговора выполняются хорошо, так держать</div>`}
+      ${x.operators.length ? `
+      <div class="chips" style="margin:12px 0 8px"><span class="small muted" style="align-self:center">Показать:</span>
+        <button class="chip ${!op ? "on-chip" : ""}" data-aiop="${I.aiOp || ""}">Вся команда</button>
+        ${x.operators.map((o) => `<button class="chip ${op && op.number === o.number ? "on-chip" : ""}" data-aiop="${esc(o.number)}">${esc(o.name)} · ${o.avg ?? "—"}/10</button>`).join("")}</div>
+      <div class="steps">${x.checklist.map((c) => { const v = steps[c.key]; return `
+        <div class="step ${c.key === x.weakest && !op ? "weak" : ""}"><span>${esc(c.title)}</span>
+          <div class="bar"><i style="width:${v ?? 0}%" class="${v == null ? "" : v >= 80 ? "s-good" : v >= 50 ? "s-mid" : "s-bad"}"></i></div>
+          <b>${v == null ? "—" : v + "%"}</b></div>`; }).join("")}</div>` : ""}
+    </section>
+    ${x.recent.length ? `<section class="panel" style="margin-top:14px"><h3>Последние разборы</h3>
+      <div class="list" style="box-shadow:none">${x.recent.map((r) => `<div class="list-row click" data-ai="${r.id}">
+        <div class="ai-score sm ${r.score != null ? scoreClass(r.score) : ""}">${r.score ?? "—"}</div>
+        <div class="grow"><b>${esc(r.family_name ? "Семья " + r.family_name : r.phone)}</b> <span class="small muted">${esc(r.operator)} · ${dtWhen(r.started_at)}</span>
+          <div class="small ellipsis">${esc(r.summary || "")}</div></div>
+        ${r.result ? `<span class="pill">${esc(r.result)}</span>` : ""}</div>`).join("")}</div></section>` : ""}`;
+}
+
+/* ---------- настройки разбора звонков ---------- */
+function aiSettingsHtml(v, inf, st) {
+  return `<div class="int"><div class="int-head"><b>Расшифровка и разбор звонков (Яндекс)</b><span class="pill ${st.ai ? "green" : ""}">${st.ai ? "включено" : "выключено"}</span></div>
+    <div class="row"><div class="field"><label>API-ключ сервисного аккаунта</label><input data-k="yc_api_key" value="${esc(v.yc_api_key)}"></div>
+      <div class="field"><label>ID каталога</label><input data-k="yc_folder" value="${esc(v.yc_folder)}" placeholder="b1g..."></div></div>
+    <div class="row">
+      <div class="field"><label>Когда расшифровывать</label><select data-k="ai_mode"><option value="deferred" ${v.ai_mode === "deferred" ? "selected" : ""}>До суток, в 4 раза дешевле</option><option value="general" ${v.ai_mode === "general" ? "selected" : ""}>Сразу после звонка</option></select></div>
+      <div class="field"><label>Модель для разбора</label><select data-k="ai_model"><option value="yandexgpt" ${v.ai_model === "yandexgpt" ? "selected" : ""}>YandexGPT Pro, точнее</option><option value="yandexgpt-lite" ${v.ai_model === "yandexgpt-lite" ? "selected" : ""}>YandexGPT Lite, дешевле</option></select></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Разбирать разговоры длиннее, сек</label><input data-k="ai_min_talk" type="number" min="5" value="${esc(v.ai_min_talk)}"></div>
+      <div class="field"><label>Разбор звонков</label><select data-k="ai_enabled"><option value="0" ${v.ai_enabled !== "1" ? "selected" : ""}>Выключен</option><option value="1" ${v.ai_enabled === "1" ? "selected" : ""}>Включён</option></select></div>
+    </div>
+    ${inf.ai_last_error ? `<div class="error" style="margin-bottom:8px">Последняя ошибка: ${esc(inf.ai_last_error)}</div>` : ""}
+    <button class="btn sm" id="ai-test">Сохранить и проверить</button>
+  </div>`;
 }

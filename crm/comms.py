@@ -96,8 +96,9 @@ CREATE TABLE IF NOT EXISTS hook_log (
 );
 """
 
-SECRET_KEYS = {"sipuni_secret", "tg_token", "max_token", "wazzup_key"}
-EDITABLE_KEYS = {"sipuni_user", "sipuni_secret", "tg_token", "max_token", "max_api", "wazzup_key", "bot_greeting"}
+SECRET_KEYS = {"sipuni_secret", "tg_token", "max_token", "wazzup_key", "yc_api_key"}
+EDITABLE_KEYS = {"sipuni_user", "sipuni_secret", "tg_token", "max_token", "max_api", "wazzup_key", "bot_greeting",
+                 "yc_api_key", "yc_folder", "ai_enabled", "ai_mode", "ai_model", "ai_min_talk"}
 DEFAULT_GREETING = ("Здравствуйте! Вы написали в нашу школу. Задайте вопрос здесь, администратор скоро ответит.\n"
                     "Чтобы мы сразу нашли вашу карточку, нажмите кнопку «Поделиться номером» ниже")
 CHANNEL_LABELS = {"telegram": "Telegram", "max": "MAX", "whatsapp": "WhatsApp"}
@@ -160,6 +161,7 @@ def status(con) -> dict:
         "telegram_business": get(con, "tg_business_enabled") == "1",
         "max": bool(get(con, "max_token")) and get(con, "max_ok") == "1",
         "whatsapp": bool(get(con, "wazzup_key") and get(con, "wazzup_channel")),
+        "ai": get(con, "ai_enabled") == "1" and bool(get(con, "yc_api_key")),
     }
 
 
@@ -173,6 +175,10 @@ def admin_view(con, base_url: str) -> dict:
         vals["bot_greeting"] = DEFAULT_GREETING
     if not vals.get("max_api"):
         vals["max_api"] = MAX_API_DEFAULT
+    vals["ai_mode"] = vals.get("ai_mode") or "deferred"
+    vals["ai_model"] = vals.get("ai_model") or "yandexgpt"
+    vals["ai_min_talk"] = vals.get("ai_min_talk") or "25"
+    vals["ai_enabled"] = vals.get("ai_enabled") or "0"
     return {
         "values": vals,
         "status": status(con),
@@ -187,6 +193,8 @@ def admin_view(con, base_url: str) -> dict:
             "wazzup_channels": json.loads(get(con, "wazzup_channels") or "[]"),
             "wazzup_channel": get(con, "wazzup_channel"), "wazzup_error": get(con, "wazzup_error"),
             "sipuni_last": get(con, "sipuni_last"), "lead_last": get(con, "lead_last"),
+            "ai_last_error": (con.execute("SELECT ai_error FROM calls WHERE ai_error != '' ORDER BY id DESC LIMIT 1")
+                              .fetchone() or [""])[0],
         },
     }
 
@@ -906,7 +914,8 @@ def family_comms(con, family_id: int) -> dict:
                          (family_id, *phones)):
         items.append({"type": "call", "ts": k["started_at"], "id": k["id"], "direction": k["direction"],
                       "status": k["status"], "talk": k["talk"], "duration": k["duration"], "phone": k["phone"],
-                      "operator": k["operator"], "has_record": bool(k["record_url"]), "transcript": k["transcript"]})
+                      "operator": k["operator"], "has_record": bool(k["record_url"]), "transcript": k["transcript"],
+                      "score": k["score"], "ai_status": k["ai_status"]})
     items.sort(key=lambda x: (x["ts"] or "", x["id"]))
     for c in convs:
         if c["unread"]:

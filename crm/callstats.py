@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
+from . import ai
+
 PERIODS = {"today": "Сегодня", "week": "7 дней", "month": "30 дней"}
 
 
@@ -132,4 +134,5 @@ def analytics(con, period: str = "week") -> dict:
         "delta": {k: delta(k) for k in ("incoming", "outgoing", "missed", "missed_pct", "median_callback")},
         "operators": op_list, "missed_by_hour": hours, "waiting": waiting,
         "unassigned": sum(1 for o in op_list if o["name"].startswith("Номер ")),
+        "ai": ai.team_stats(con, start, end),
     }

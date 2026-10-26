@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import callstats, coaches, comms, db, services as sv
+from . import ai, callstats, coaches, comms, db, services as sv
 from .services import ApiError
 
 
@@ -371,6 +371,7 @@ def demo_reset(con, h, user, body, q):
     con.execute("BEGIN")
     comms.seed_demo(con)
     coaches.seed_demo_coaches(con)
+    ai.seed_demo(con)
     return {"ok": True}
 
 
@@ -460,6 +461,22 @@ def call_seen(con, h, user, body, q, cid):
     if r:
         con.execute("UPDATE calls SET seen=1 WHERE phone_norm=? AND seen=0", (r[0],))
     return {"ok": True}
+
+
+@route("GET", "/api/calls/{cid}/ai", role="operator")
+def call_ai(con, h, user, body, q, cid):
+    return cx(ai.call_ai, con, int(cid))
+
+
+@route("POST", "/api/calls/{cid}/ai/retry", role="operator")
+def call_ai_retry(con, h, user, body, q, cid):
+    ai.retry(con, int(cid))
+    return {"ok": True}
+
+
+@route("POST", "/api/integrations/yandex/test", role="admin")
+def int_yandex(con, h, user, body, q):
+    return cx(ai.test_connection, con)
 
 
 @route("GET", "/api/calls/{cid}/record", role="operator")
@@ -703,7 +720,9 @@ def main():
         coaches.seed_demo_coaches(con)
         if not comms.status(con)["telegram"] and not comms.status(con)["sipuni"]:
             comms.seed_demo(con)
+        ai.seed_demo(con)
     con.close()
+    ai.start_worker(db.connect)
     host = os.environ.get("CRM_HOST", "127.0.0.1")
     port = int(os.environ.get("CRM_PORT", "8000"))
     srv = ThreadingHTTPServer((host, port), Handler)

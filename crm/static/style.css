@@ -410,3 +410,29 @@ h2.sub { font-size: 17px; }
 .panel h3 { margin-bottom: 4px; }
 @media (max-width: 1100px) { .cstats { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 760px) { .cstats { grid-template-columns: 1fr 1fr; } .cstat b { font-size: 21px; } .hours { gap: 3px; } }
+
+/* разбор звонков */
+.ai-chip { display: inline-flex; gap: 6px; align-items: center; margin-top: 6px; border: 1px solid var(--line); background: var(--surface);
+  border-radius: 999px; padding: 3px 10px; font-size: 12.5px; cursor: pointer; color: var(--ink); }
+.ai-chip.wait { cursor: default; color: var(--ink-2); border-style: dashed; }
+.s-good { color: var(--up); } .s-mid { color: #b8860b; } .s-bad { color: var(--red); }
+.bar i.s-good { background: var(--accent); } .bar i.s-mid { background: var(--yellow); } .bar i.s-bad { background: var(--red); }
+.ai-head { display: flex; gap: 14px; align-items: flex-start; }
+.ai-head p { margin: 6px 0 0; }
+.ai-score { font-family: var(--display); font-weight: 700; font-size: 36px; line-height: 1; flex: none; }
+.ai-score small { font-size: 15px; color: var(--ink-2); font-weight: 500; }
+.ai-score.sm { font-size: 20px; width: 34px; text-align: center; }
+.ai-good { background: var(--accent-soft); border-radius: 10px; padding: 8px 12px; }
+.ai-tips { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 6px; }
+.cklist { display: grid; gap: 6px; font-size: 14px; }
+.ck { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; margin-right: 8px; font-size: 12px; font-weight: 700; }
+.ck.ok { background: var(--accent-soft); color: var(--accent); } .ck.no { background: var(--red-soft); color: var(--red); }
+.ck.na { background: var(--surface-2); color: var(--ink-2); }
+.transcript { white-space: pre-wrap; font: inherit; font-size: 13.5px; margin: 0; line-height: 1.6; }
+.ai-weak { background: var(--yellow-soft); border-radius: 10px; padding: 10px 12px; margin-top: 8px; font-size: 14.5px; }
+.steps { display: grid; gap: 8px; }
+.step { display: grid; grid-template-columns: minmax(0, 1fr) 160px 44px; gap: 12px; align-items: center; font-size: 14px; }
+.step.weak span { font-weight: 700; }
+.step b { text-align: right; }
+.chip.on-chip { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+@media (max-width: 760px) { .step { grid-template-columns: 1fr 70px 40px; font-size: 13px; } }
