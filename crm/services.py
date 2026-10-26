@@ -324,8 +324,8 @@ def move_card(con, sid: int, funnel: str, stage: str, user) -> None:
         if stage not in SALES_LABELS or stage in AUTO_SALES:
             raise ApiError("В этот этап карточка попадает сама")
         if stage == "bought":
-            con.execute("UPDATE students SET funnel='members', stage='active', stage_changed_at=? WHERE id=?",
-                        (now_iso(), sid))
+            con.execute("""UPDATE students SET funnel='members', stage='active', stage_changed_at=?,
+                           converted_at=COALESCE(converted_at, ?) WHERE id=?""", (now_iso(), now_iso(), sid))
             log(con, sid, "Купил абонемент — переведён в учеников", user, "stage")
             return
         contacted = 1 if stage in ("how_was", "refused") else s["contacted_after_trial"]
@@ -559,3 +559,78 @@ def search_students(con, q: str) -> list[dict]:
               OR (? != '' AND p.phone_norm LIKE ?)
            ORDER BY s.name LIMIT 100""", (like, like, like, p, f"%{p}%")))
     return [card_summary(con, s, st) | {"funnel": s["funnel"]} for s in rows]
+
+
+# ---------- дашборд ----------
+
+def _pct(a, b):
+    return round(100 * a / b) if b else None
+
+
+def dashboard(con, ym: str | None = None) -> dict:
+    cur = ym or logic.month_of(today())
+    nxt = logic.shift_month(cur, 1)
+    start, end = logic.month_bounds(cur)
+    s_iso, e_iso = start.isoformat(), end.isoformat() + "T23:59"
+    one = lambda sql, *a: con.execute(sql, a).fetchone()[0] or 0
+
+    active = one("SELECT COUNT(*) FROM students WHERE funnel='members' AND stage != 'left'")
+    by_branch = [dict(r) for r in con.execute(
+        """SELECT b.name AS branch, COUNT(s.id) AS students FROM branches b
+           LEFT JOIN groups g ON g.branch_id=b.id AND g.is_makeup=0
+           LEFT JOIN students s ON s.group_id=g.id AND s.funnel='members' AND s.stage != 'left'
+           GROUP BY b.id ORDER BY b.id""")]
+    by_tariff = {r["tariff"]: r["n"] for r in con.execute(
+        "SELECT tariff, COUNT(*) AS n FROM students WHERE funnel='members' AND stage != 'left' GROUP BY tariff")}
+
+    revenue = one("SELECT SUM(price) FROM subscriptions WHERE month=? AND status='paid'", cur)
+    unpaid_cur = one("""SELECT COUNT(*) FROM students s WHERE s.funnel='members' AND s.stage != 'left'
+                        AND NOT EXISTS (SELECT 1 FROM subscriptions x WHERE x.student_id=s.id AND x.month=? AND x.status='paid')""", cur)
+    next_paid_n = one("SELECT COUNT(*) FROM subscriptions WHERE month=? AND status='paid'", nxt)
+    next_paid_sum = one("SELECT SUM(price) FROM subscriptions WHERE month=? AND status='paid'", nxt)
+    next_inv_n = one("SELECT COUNT(*) FROM subscriptions WHERE month=? AND status='invoiced'", nxt)
+    next_inv_sum = one("SELECT SUM(price) FROM subscriptions WHERE month=? AND status='invoiced'", nxt)
+    avg_check = round(revenue / max(1, one("SELECT COUNT(*) FROM subscriptions WHERE month=? AND status='paid'", cur)))
+
+    leads = one("SELECT COUNT(*) FROM students WHERE created_at BETWEEN ? AND ? AND (funnel='sales' OR converted_at IS NOT NULL)", s_iso, e_iso)
+    trials = one("SELECT COUNT(*) FROM students WHERE trial_at BETWEEN ? AND ?", s_iso, e_iso)
+    bought = one("SELECT COUNT(*) FROM students WHERE converted_at BETWEEN ? AND ?", s_iso, e_iso)
+    refused = one("SELECT COUNT(*) FROM students WHERE funnel='sales' AND stage='refused' AND stage_changed_at BETWEEN ? AND ?", s_iso, e_iso)
+    left = one("SELECT COUNT(*) FROM students WHERE funnel='members' AND stage='left' AND stage_changed_at BETWEEN ? AND ?", s_iso, e_iso)
+    in_sales = one("SELECT COUNT(*) FROM students WHERE funnel='sales' AND stage NOT IN ('refused')")
+
+    present = one("SELECT COUNT(*) FROM attendance WHERE status='present' AND date BETWEEN ? AND ?", start.isoformat(), end.isoformat())
+    absent = one("SELECT COUNT(*) FROM attendance WHERE status='absent' AND date BETWEEN ? AND ?", start.isoformat(), end.isoformat())
+    makeups_done = one("SELECT COUNT(*) FROM makeups WHERE status='done' AND date BETWEEN ? AND ?", start.isoformat(), end.isoformat())
+    makeups_booked = one("SELECT COUNT(*) FROM makeups WHERE status='booked'")
+    credited = one("SELECT COUNT(*) FROM attendance WHERE resolved='credit' AND date BETWEEN ? AND ?", start.isoformat(), end.isoformat())
+    can_make_up, at_risk = 0, 0
+    per = int(settings(con)["price_flex"])
+    for r in con.execute("SELECT id, tariff FROM students WHERE funnel='members' AND stage != 'left'").fetchall():
+        a = absence_counters(con, r[0])["available"]
+        can_make_up += a
+        if r[1] == "flex":
+            at_risk += min(logic.MAX_FLEX_CREDIT, a) * per
+
+    months = [logic.shift_month(cur, -i) for i in range(5, -1, -1)]
+    trend = []
+    for m in months:
+        trend.append({"month": m, "label": logic.month_label(m),
+                      "revenue": one("SELECT SUM(price) FROM subscriptions WHERE month=? AND status='paid'", m),
+                      "students": one("SELECT COUNT(DISTINCT student_id) FROM subscriptions WHERE month=? AND status='paid'", m)})
+
+    return {
+        "month": cur, "month_label": logic.month_label(cur), "next_month_label": logic.month_label(nxt),
+        "students": {"active": active, "by_branch": by_branch, "flex": by_tariff.get("flex", 0),
+                     "fixed": by_tariff.get("fixed", 0), "left": left},
+        "money": {"revenue": revenue, "avg_check": avg_check, "unpaid_cur": unpaid_cur,
+                  "next_paid": next_paid_n, "next_paid_sum": next_paid_sum,
+                  "next_invoiced": next_inv_n, "next_invoiced_sum": next_inv_sum,
+                  "renewal_pct": _pct(next_paid_n, active), "not_renewed": max(0, active - next_paid_n - next_inv_n)},
+        "sales": {"leads": leads, "trials": trials, "bought": bought, "refused": refused, "in_funnel": in_sales,
+                  "trial_conversion_pct": _pct(bought, trials)},
+        "attendance": {"present": present, "absent": absent, "rate_pct": _pct(present, present + absent),
+                       "makeups_done": makeups_done, "makeups_booked": makeups_booked, "credited": credited,
+                       "can_make_up": can_make_up, "at_risk_rub": at_risk},
+        "trend": trend,
+    }

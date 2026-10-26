@@ -271,6 +271,11 @@ def attendance(con, h, user, body, q):
     return {"ok": True}
 
 
+@route("GET", "/api/dashboard", role="admin")
+def dashboard(con, h, user, body, q):
+    return sv.dashboard(con, q.get("month"))
+
+
 @route("PUT", "/api/settings", role="admin")
 def settings_put(con, h, user, body, q):
     allowed = set(db.DEFAULT_SETTINGS)

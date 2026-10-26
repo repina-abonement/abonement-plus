@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS students (
     skip_stage TEXT NOT NULL DEFAULT 'none',  -- none | offered | refused
     source TEXT NOT NULL DEFAULT '',
     refusal_reason TEXT NOT NULL DEFAULT '',
+    converted_at TEXT,                        -- когда купил первый абонемент
     created_at TEXT NOT NULL
 );
 
@@ -214,6 +215,9 @@ def init_db(con: sqlite3.Connection):
     cols = {r[1] for r in con.execute("PRAGMA table_info(groups)")}
     if "coach_id" not in cols:
         con.execute("ALTER TABLE groups ADD COLUMN coach_id INTEGER REFERENCES users(id)")
+    scols = {r[1] for r in con.execute("PRAGMA table_info(students)")}
+    if "converted_at" not in scols:
+        con.execute("ALTER TABLE students ADD COLUMN converted_at TEXT")
     for k, v in DEFAULT_SETTINGS.items():
         con.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
     login = os.environ.get("CRM_ADMIN_LOGIN", "admin")
@@ -316,8 +320,16 @@ def seed_demo(con: sqlite3.Connection, today: date | None = None):
         con.execute("""INSERT OR IGNORE INTO subscriptions(student_id, month, tariff, lessons, per_lesson, price,
                        status, created_at, paid_at) VALUES (?,?,?,?,?,?,?,?,?)""",
                     (sid, cur, "fixed", 8, 1350, 10800, "paid", now, now))
-        con.execute("UPDATE subscriptions SET tariff=(SELECT tariff FROM students WHERE id=?) WHERE student_id=?",
-                    (sid, sid))
+        con.execute("""UPDATE subscriptions SET tariff=(SELECT tariff FROM students WHERE id=?),
+                       price=CASE (SELECT tariff FROM students WHERE id=?) WHEN 'flex' THEN 12400 ELSE 10800 END
+                       WHERE student_id=?""", (sid, sid, sid))
+        con.execute("UPDATE subscriptions SET month=? WHERE student_id=? AND month=?",
+                    (cur, sid, cur))
+        prev_m = shift_month(cur, -1)
+        con.execute("""INSERT OR IGNORE INTO subscriptions(student_id, month, tariff, lessons, per_lesson, price,
+                       status, created_at, paid_at) SELECT student_id, ?, tariff, lessons, per_lesson, price,
+                       'paid', created_at, paid_at FROM subscriptions WHERE student_id=? AND month=?""",
+                    (prev_m, sid, cur))
     # тестовый тренер для групп Небо
     coach = con.execute("INSERT OR IGNORE INTO users(login, name, role, pw_hash) VALUES (?,?,?,?)",
                         ("trener", "Тренер Алексей (тест)", "coach", hash_password("trener-test-1"))).lastrowid

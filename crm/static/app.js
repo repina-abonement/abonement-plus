@@ -56,12 +56,13 @@ function renderLogin() {
 
 /* ---------- каркас ---------- */
 const VIEWS = [
-  ["sales", "Продажи"], ["members", "Ученики"], ["skips", "Пропуски"],
+  ["dashboard", "Дашборд"], ["sales", "Продажи"], ["members", "Ученики"], ["skips", "Пропуски"],
   ["journal", "Журнал"], ["search", "Все клиенты"], ["settings", "Настройки"],
 ];
 
 const isCoach = () => S.user && S.user.role === "coach";
-const visibleViews = () => isCoach() ? VIEWS.filter(([k]) => k === "journal" || k === "settings") : VIEWS;
+const visibleViews = () => isCoach() ? VIEWS.filter(([k]) => k === "journal" || k === "settings")
+  : S.user.role === "admin" ? VIEWS : VIEWS.filter(([k]) => k !== "dashboard");
 
 function shell() {
   if (isCoach() && !["journal", "settings"].includes(S.view)) S.view = "journal";
@@ -88,10 +89,82 @@ async function render() {
   if (!page) return;
   try {
     if (["sales", "members", "skips"].includes(S.view)) return await renderBoard(page, S.view);
+    if (S.view === "dashboard") return await renderDashboard(page);
     if (S.view === "journal") return await renderJournal(page);
     if (S.view === "search") return await renderSearch(page);
     if (S.view === "settings") return await renderSettings(page);
   } catch (e) { if (e.message !== "Нужно войти") page.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
+}
+
+/* ---------- дашборд ---------- */
+const pct = (v) => (v === null || v === undefined ? "—" : v + "%");
+const tile = (label, value, sub, tone = "") => `<div class="tile ${tone}"><div class="tile-label">${esc(label)}</div><div class="tile-value">${value}</div>${sub ? `<div class="tile-sub">${sub}</div>` : ""}</div>`;
+
+async function renderDashboard(page) {
+  if (!S.dashMonth) S.dashMonth = S.meta.today.slice(0, 7);
+  const d = await api("GET", "/api/dashboard?month=" + S.dashMonth);
+  const months = [];
+  for (let i = 0; i < 12; i++) { const dt = new Date(S.meta.today); dt.setDate(1); dt.setMonth(dt.getMonth() - i); months.push(isoDate(dt).slice(0, 7)); }
+  const st = d.students, m = d.money, sa = d.sales, at = d.attendance;
+  const maxRev = Math.max(1, ...d.trend.map((t) => t.revenue));
+  const maxBr = Math.max(1, ...st.by_branch.map((b) => b.students));
+  page.innerHTML = `
+    <div class="page-head"><h2 class="grow">Дашборд</h2>
+      <select id="dash-month" style="width:auto">${months.map((x) => `<option value="${x}" ${x === S.dashMonth ? "selected" : ""}>${monthLabel(x)}</option>`).join("")}</select></div>
+
+    <div class="tiles">
+      ${tile("Учеников сейчас", st.active, `гибкий ${st.flex} · негибкий ${st.fixed}`)}
+      ${tile("Выручка за " + d.month_label.split(" ")[0], rub(m.revenue), `средний чек ${rub(m.avg_check)}`, "accent")}
+      ${tile("Продлили на " + d.next_month_label.split(" ")[0], `${m.next_paid} <small>из ${st.active}</small>`, `${pct(m.renewal_pct)} · ${rub(m.next_paid_sum)}`)}
+      ${tile("Ещё не продлили", m.not_renewed, m.next_invoiced ? `счёт выставлен: ${m.next_invoiced} на ${rub(m.next_invoiced_sum)}` : "", m.not_renewed ? "warn" : "")}
+    </div>
+
+    <div class="dash-grid">
+      <section class="section">
+        <h3>Выручка по месяцам</h3>
+        <div class="bars">${d.trend.map((t) => `<div class="bar-col ${t.month === d.month ? "cur" : ""}">
+          <div class="bar-val">${t.revenue ? Math.round(t.revenue / 1000) + "к" : ""}</div>
+          <div class="bar" style="height:${Math.round((t.revenue / maxRev) * 100)}%"></div>
+          <div class="bar-lbl">${t.label.slice(0, 3)}</div></div>`).join("")}</div>
+        <div class="small muted">Оплаченные абонементы, ₽</div>
+      </section>
+
+      <section class="section">
+        <h3>Продажи за ${esc(d.month_label)}</h3>
+        <div class="funnel">
+          ${[["Новые лиды", sa.leads], ["Пробные занятия", sa.trials], ["Купили абонемент", sa.bought]].map(([l, v], i, arr) => `
+            <div class="f-row"><span>${l}</span><div class="f-bar"><div style="width:${v ? Math.max(4, Math.round((v / Math.max(1, arr[0][1], arr[1][1])) * 100)) : 0}%"></div></div><b>${v}</b></div>`).join("")}
+        </div>
+        <div class="kv" style="margin-top:10px">
+          <dt>Конверсия пробное → покупка</dt><dd><b>${pct(sa.trial_conversion_pct)}</b></dd>
+          <dt>Отказы</dt><dd>${sa.refused}</dd>
+          <dt>Сейчас в воронке</dt><dd>${sa.in_funnel}</dd>
+        </div>
+      </section>
+
+      <section class="section">
+        <h3>Ученики по филиалам</h3>
+        ${st.by_branch.map((b) => `<div class="f-row"><span>${esc(b.branch)}</span><div class="f-bar"><div style="width:${Math.max(4, Math.round((b.students / maxBr) * 100))}%"></div></div><b>${b.students}</b></div>`).join("")}
+        <div class="kv" style="margin-top:10px">
+          <dt>Не оплатили текущий месяц</dt><dd>${m.unpaid_cur}</dd>
+          <dt>Ушли в этом месяце</dt><dd>${st.left}</dd>
+        </div>
+      </section>
+
+      <section class="section">
+        <h3>Посещаемость и отработки</h3>
+        <div class="tiles mini">
+          ${tile("Посещаемость", pct(at.rate_pct), `${at.present} посещений · ${at.absent} пропусков`)}
+          ${tile("Можно отработать", at.can_make_up, at.at_risk_rub ? `≈ ${rub(at.at_risk_rub)} могут уйти в перерасчёт (гибкий тариф)` : "", at.can_make_up ? "warn" : "")}
+        </div>
+        <div class="kv" style="margin-top:10px">
+          <dt>Отработали</dt><dd>${at.makeups_done}</dd>
+          <dt>Записаны на отработку</dt><dd>${at.makeups_booked}</dd>
+          <dt>Ушло в перерасчёт</dt><dd>${at.credited}</dd>
+        </div>
+      </section>
+    </div>`;
+  $("#dash-month").onchange = (e) => { S.dashMonth = e.target.value; render(); };
 }
 
 /* ---------- воронки ---------- */
@@ -492,7 +565,8 @@ async function boot() {
     S.meta = await api("GET", "/api/meta");
     S.user = S.meta.user;
   } catch (e) { if (e.message !== "Нужно войти") renderLogin(); return; }
-  try { const v = localStorage.getItem("crm.view"); if (v && VIEWS.some(([k]) => k === v)) S.view = v; } catch (_) {}
+  if (S.user.role === "admin") S.view = "dashboard";
+  try { const v = localStorage.getItem("crm.view"); if (v && visibleViews().some(([k]) => k === v)) S.view = v; } catch (_) {}
   shell();
   render();
   setInterval(() => { if ($("#drawer").hidden && ["sales", "members", "skips"].includes(S.view)) render(); }, 60000);
