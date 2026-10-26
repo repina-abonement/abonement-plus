@@ -43,7 +43,7 @@ def main():
     r = tasks.run(con, datetime(2026, 11, 4, 12, 0))
     check(r["sent"] == 0, "Второй раз то же напоминание не уходит")
     r = tasks.run(con, datetime(2026, 11, 5, 15, 0))
-    check(r["sent"] == 1 and "сегодня в 17:00" in SENT[-1]["text"], "За 2 часа ушло второе напоминание")
+    check(r["sent"] == 1 and "Сегодня в 17:00" in SENT[-1]["text"], "За 2 часа ушло второе напоминание")
     con.execute("UPDATE students SET trial_came=1 WHERE id=?", (sid,))
     r = tasks.run(con, datetime(2026, 11, 5, 18, 5))
     check(r["sent"] == 0, "Через 5 минут после пробного ещё рано")
