@@ -632,3 +632,10 @@ h2.sub { font-size: 17px; }
 
 .cr-outcome.s-mid { color: #8a6400; } .cr-outcome.s-bad { color: #b42318; } .cr-outcome.s-good { color: #157347; }
 .cr-box.amber { background: #fdf6e3; border: 1px solid #f1dfa8; } .cr-box.amber b { color: #8a6400; }
+@media (prefers-color-scheme: dark) {
+  .cr-box.green { background: rgba(21,115,71,.18); border-color: rgba(63,179,122,.4); } .cr-box.green b { color: #5fd09a; }
+  .cr-box.blue { background: rgba(36,87,197,.18); border-color: rgba(100,140,230,.4); } .cr-box.blue b { color: #8fb0f5; }
+  .cr-box.amber { background: rgba(184,134,11,.16); border-color: rgba(220,170,40,.4); } .cr-box.amber b { color: #e3b84a; }
+  .cr-score.s-good { background: rgba(21,115,71,.25); color: #5fd09a; } .cr-score.s-mid { background: rgba(184,134,11,.22); color: #e3b84a; } .cr-score.s-bad { background: rgba(180,35,24,.25); color: #f08a80; }
+  .cr-outcome.s-good { color: #5fd09a; } .cr-outcome.s-mid { color: #e3b84a; } .cr-outcome.s-bad { color: #f08a80; }
+}
