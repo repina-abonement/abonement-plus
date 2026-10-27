@@ -217,7 +217,10 @@ def _md(t: str) -> str:
 def page(con, slug: str, base_url: str) -> str:
     links = " · ".join(f'<a href="/legal/{k}">{html.escape(t)}</a>' for k, (t, _) in DOCS.items())
     if slug not in DOCS:
-        body = "<h1>Документы</h1><ul>" + "".join(f'<li><a href="/legal/{k}">{html.escape(t)}</a></li>' for k, (t, _) in DOCS.items()) + "</ul>"
+        body = "<h1>Документы</h1><ul>" + "".join(f'<li><a href="/legal/{k}">{html.escape(t)}</a></li>' for k, (t, _) in DOCS.items())
+        for p in con.execute("SELECT DISTINCT program, slug FROM offers WHERE archived=0 ORDER BY program").fetchall():
+            body += f'<li><a href="/offers/{p["slug"]}.pdf">Договор-оферта: {html.escape(p["program"])}</a></li>'
+        body += "</ul>"
         title = "Документы"
     else:
         title = DOCS[slug][0]

@@ -869,6 +869,7 @@ async function renderSettings(page) {
     <div class="section" id="structure-settings"><h3>Филиалы, группы и смены</h3><div class="muted small">Загружаю…</div></div>
     <div class="section" id="archive-settings"><h3>Архив</h3><div class="muted small">Загружаю…</div></div>
     </div>` : ""}
+    <div class="section" id="offers-settings"><h3>Оферты</h3><div class="muted small">Загружаю…</div></div>
     ${admin ? `<div class="section" id="legal-settings"><h3>Юридические документы</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="source-settings"><h3>Рекламные каналы и источники</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="staff-settings"><h3>Тренеры: приход и оплата</h3><div class="muted small">Загружаю…</div></div>` : ""}
@@ -899,6 +900,8 @@ async function renderSettings(page) {
   if ($("#staff-settings")) renderStaffSettings($("#staff-settings"), users).catch(fail);
   if ($("#source-settings")) renderSourceSettings($("#source-settings")).catch(fail);
   if ($("#legal-settings")) renderLegalSettings($("#legal-settings")).catch(fail);
+  if ($("#offers-settings") && !isCoach()) renderOffers($("#offers-settings")).catch(fail);
+  else if ($("#offers-settings")) $("#offers-settings").remove();
   if ($("#structure-settings")) renderStructure($("#structure-settings"), users).catch(fail);
   if ($("#archive-settings")) renderArchive($("#archive-settings")).catch(fail);
   page.querySelectorAll("[data-upw]").forEach((b) => (b.onclick = async () => {

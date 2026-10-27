@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import ai, callstats, coaches, comms, db, expenses, legal, merch, money, planner, schedule, services as sv, sources, staff, tasks
+from . import ai, callstats, coaches, comms, db, expenses, legal, merch, offers, money, planner, schedule, services as sv, sources, staff, tasks
 from .services import ApiError
 
 
@@ -785,6 +785,27 @@ def ads_post_mark(con, h, user, body, q, pid):
     return {"ok": True}
 
 
+@route("GET", "/api/offers", role="operator")
+def offers_list(con, h, user, body, q):
+    return {"programs": offers.listing(con, base_url(h))}
+
+
+@route("POST", "/api/offers", role="admin")
+def offers_upload(con, h, user, body, q):
+    try:
+        oid = offers.upload(con, body, user)
+    except offers.OfferError as e:
+        raise ApiError(str(e))
+    sv.audit(con, user, "offer.upload", str(oid))
+    return {"id": oid}
+
+
+@route("POST", "/api/offers/{oid}/archive", role="admin")
+def offers_archive(con, h, user, body, q, oid):
+    offers.archive(con, int(oid), bool(body.get("archived", True)))
+    return {"ok": True}
+
+
 @route("GET", "/api/schedule/week")
 def schedule_week(con, h, user, body, q):
     return schedule.week(con)
@@ -1238,6 +1259,18 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
                 return self._send(500, {"error": "Ошибка сервера"})
+        om = re.match(r"^/offers/(v\d+|[a-z0-9-]+)\.pdf$", url.path)
+        if om and method in ("GET", "HEAD"):  # оферты публичные: по ссылке без входа
+            con = db.get_conn()
+            key = om.group(1)
+            oid = int(key[1:]) if re.fullmatch(r"v\d+", key) else offers.current_id(con, key)
+            f = offers.file(con, oid) if oid else None
+            if not f:
+                return self._send(404, b"Not found", "text/plain; charset=utf-8")
+            from urllib.parse import quote as _q
+            self.extra_headers.append(("Content-Disposition", f"inline; filename*=UTF-8''{_q(f[0])}"))
+            self.extra_headers.append(("Cache-Control", "no-cache"))
+            return self._send(200, f[1], "application/pdf")
         lm = re.match(r"^/legal(?:/([a-z]+))?/?$", url.path)
         if lm and method in ("GET", "HEAD"):
             con = db.get_conn()
@@ -1260,7 +1293,7 @@ class Handler(BaseHTTPRequestHandler):
                     if method != "DELETE" and "application/json" not in (self.headers.get("Content-Type") or ""):
                         raise ApiError("Ожидается JSON", 415)
                     n = int(self.headers.get("Content-Length") or 0)
-                    if n > 1_000_000:
+                    if n > (21_000_000 if url.path.startswith("/api/offers") else 1_000_000):
                         raise ApiError("Слишком большой запрос", 413)
                     if n:
                         body = json.loads(self.rfile.read(n) or b"{}")

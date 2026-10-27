@@ -57,3 +57,56 @@ async function renderLegalSettings(box) {
     try { await api("PUT", "/api/legal", data); toast("Сохранено"); renderLegalSettings(box); } catch (e) { fail(e); }
   };
 }
+
+/* ---------- оферты: все редакции по программам ---------- */
+const dFull = (iso) => iso ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}` : "";
+const OFFER_STATE = { current: ["green", "действует"], upcoming: ["yellow", "вступит в силу"], past: ["", "прежняя"], archived: ["", "в архиве"] };
+
+async function renderOffers(box) {
+  const d = await api("GET", "/api/offers");
+  const groups = S.meta.groups.filter((g) => !g.is_makeup);
+  const progs = d.programs;
+  box.innerHTML = `<h3>Оферты</h3>
+    <div class="small muted" style="margin-bottom:10px">Все редакции хранятся, ничего не удаляется. У каждой программы постоянная ссылка на действующую оферту: её можно давать родителям и ставить на сайт, она сама переключится на новую редакцию в день вступления в силу</div>
+    ${progs.length ? progs.map((p) => `<section class="panel" style="padding:12px 14px;margin-bottom:10px">
+      <div class="team-head"><b>📄 ${esc(p.program)}</b><button class="btn sm" data-copy="${esc(p.link)}">Скопировать ссылку</button></div>
+      <div class="small"><a href="${esc(p.link)}" target="_blank">${esc(p.link)}</a></div>
+      <div class="list" style="box-shadow:none;margin-top:8px">${p.versions.map((v) => `<div class="list-row ${v.archived ? "muted" : ""}">
+        <div class="grow"><b>Редакция от ${dFull(v.edition_date)}</b> <span class="pill ${OFFER_STATE[v.state][0]}">${OFFER_STATE[v.state][1]}${v.state !== "past" && v.state !== "archived" ? ` с ${dFull(v.effective_from)}` : ""}</span>
+          <div class="small muted">${v.groups.length ? esc(v.groups.join(", ")) : "все группы"} · загрузил(а) ${esc(v.uploaded_by)} ${dShort(v.uploaded_at)} · ${Math.round(v.size / 1024)} КБ${v.note ? ` · ${esc(v.note)}` : ""}</div></div>
+        <a class="btn sm" href="${esc(v.link)}" target="_blank">Открыть</a>
+        ${S.user.role === "admin" ? `<button class="btn sm" data-oarch="${v.id}" data-v="${v.archived ? 0 : 1}" title="${v.archived ? "Вернуть" : "В архив, если загрузили по ошибке"}">${v.archived ? "↩" : "🗄"}</button>` : ""}</div>`).join("")}</div>
+    </section>`).join("") : `<div class="muted small" style="margin-bottom:10px">Оферт пока нет</div>`}
+    ${S.user.role === "admin" ? `<button class="btn primary" id="of-new">+ Загрузить оферту</button><div id="of-form"></div>` : ""}`;
+  box.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast("Ссылка скопирована"); } catch (_) {} }));
+  box.querySelectorAll("[data-oarch]").forEach((b) => (b.onclick = async () => {
+    try { await api("POST", `/api/offers/${b.dataset.oarch}/archive`, { archived: b.dataset.v === "1" }); renderOffers(box); } catch (e) { fail(e); }
+  }));
+  const nb = box.querySelector("#of-new");
+  if (!nb) return;
+  nb.onclick = () => {
+    const f = box.querySelector("#of-form");
+    if (f.innerHTML) { f.innerHTML = ""; return; }
+    f.innerHTML = `<div class="sub-form" style="margin-top:10px">
+      <div class="field"><label>Программа</label><input data-of="program" list="of-progs" placeholder="Например: Футболика ПРО (сборная)">
+        <datalist id="of-progs">${progs.map((p) => `<option value="${esc(p.program)}">`).join("")}</datalist></div>
+      <div class="small muted" style="margin:-4px 0 8px">Для новой редакции выберите ту же программу из списка: она встанет в её историю</div>
+      <div class="row" style="flex-wrap:wrap">
+        <div class="field" style="flex:0 0 170px"><label>Редакция от</label><input type="date" data-of="edition_date" value="${S.meta.today}"></div>
+        <div class="field" style="flex:0 0 170px"><label>Вступает в силу</label><input type="date" data-of="effective_from" value="${S.meta.today}"></div>
+        <div class="field" style="flex:1 1 220px"><label>Файл PDF</label><input type="file" accept="application/pdf" id="of-file"></div></div>
+      <div class="field"><label>Для каких групп</label><div class="chips">${groups.map((g) => `<label class="chip"><input type="checkbox" data-og="${g.id}"> ${esc(g.name)}</label>`).join("")}</div>
+        <div class="small muted">Ничего не отмечено = для всех групп</div></div>
+      <div class="field"><label>Что изменилось</label><input data-of="note" placeholder="Например: новые цены, ОФП в Небе"></div>
+      <button class="btn primary" id="of-save">Сохранить</button></div>`;
+    f.querySelector("#of-save").onclick = async () => {
+      const file = f.querySelector("#of-file").files[0];
+      if (!file) return toast("Выберите PDF");
+      const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+      const data = Object.fromEntries([...f.querySelectorAll("[data-of]")].map((i) => [i.dataset.of, i.value]));
+      data.group_ids = [...f.querySelectorAll("[data-og]:checked")].map((i) => +i.dataset.og);
+      data.file_base64 = b64; data.file_name = file.name;
+      try { await api("POST", "/api/offers", data); toast("Оферта загружена"); renderOffers(box); } catch (e) { fail(e); }
+    };
+  };
+}
