@@ -63,6 +63,9 @@ def init(con):
     con.execute("UPDATE settings SET value='2500' WHERE key='price_single' AND value=''")
     if not con.execute("SELECT 1 FROM discounts WHERE name LIKE 'Многодет%'").fetchone():
         con.execute("INSERT INTO discounts(name, percent, rule, created_at) VALUES (?,?,?,?)", ("Многодетная семья", 10, "manual", _now()))
+    if not con.execute("SELECT 1 FROM discounts WHERE rule='sibling'").fetchone():
+        con.execute("INSERT INTO discounts(name, percent, rule, created_at) VALUES (?,?,?,?)",
+                    ("Второй и следующий ребёнок в семье", 20, "sibling", _now()))
     # оплаченные раньше абонементы без записи о платеже — переносим в реестр, чтобы баланс сходился
     con.execute("""INSERT INTO payments(student_id, amount, method, paid_at, comment, user_name, confirmed, subscription_id,
                    created_at)
@@ -195,17 +198,42 @@ def discounts(con, active_only: bool = True) -> list[dict]:
     return [dict(r) for r in con.execute(q)]
 
 
-def auto_discount(con, sid: int, today: date | None = None) -> dict | None:
-    """Скидка на первый абонемент в день пробного: ни одного абонемента ещё не было, пробное сегодня."""
+def _sibling_applies(con, sid: int) -> bool:
+    """Скидка на второго и следующих детей: в семье есть другой ребёнок, который занимается и пришёл раньше."""
+    s = con.execute("SELECT family_id FROM students WHERE id=?", (sid,)).fetchone()
+    if not s:
+        return False
+    kids = con.execute("""SELECT id FROM students WHERE family_id=? AND archived=0 AND funnel='members' AND stage!='left'
+                          ORDER BY COALESCE(converted_at, created_at), id""", (s["family_id"],)).fetchall()
+    ids = [k[0] for k in kids]
+    others = [i for i in ids if i != sid]
+    return bool(others) and (sid not in ids or ids.index(sid) > 0)
+
+
+def auto_discounts(con, sid: int, today: date | None = None) -> list[dict]:
+    """Скидки, которые ставятся сами: первый абонемент в день пробного; второй и следующие дети в семье."""
     today = today or date.today()
+    out = []
     d = con.execute("SELECT * FROM discounts WHERE rule='first_on_trial_day' AND active=1").fetchone()
-    if not d:
-        return None
-    s = con.execute("SELECT trial_at FROM students WHERE id=?", (sid,)).fetchone()
-    had = con.execute("SELECT 1 FROM subscriptions WHERE student_id=? AND status != 'cancelled'", (sid,)).fetchone()
-    if s and s["trial_at"] and s["trial_at"][:10] == today.isoformat() and not had:
-        return dict(d)
-    return None
+    if d:
+        s = con.execute("SELECT trial_at FROM students WHERE id=?", (sid,)).fetchone()
+        had = con.execute("SELECT 1 FROM subscriptions WHERE student_id=? AND status != 'cancelled'", (sid,)).fetchone()
+        if s and s["trial_at"] and s["trial_at"][:10] == today.isoformat() and not had:
+            out.append(dict(d))
+    d = con.execute("SELECT * FROM discounts WHERE rule='sibling' AND active=1").fetchone()
+    if d and _sibling_applies(con, sid):
+        out.append(dict(d))
+    return out
+
+
+def best_discount(cands: list) -> dict | None:
+    """Скидки не суммируются: из подходящих берём самую большую."""
+    cands = [c for c in cands if c]
+    return max(cands, key=lambda c: int(c.get("percent") or 0)) if cands else None
+
+
+def auto_discount(con, sid: int, today: date | None = None) -> dict | None:
+    return best_discount(auto_discounts(con, sid, today))
 
 
 def apply_discount(total: int, d: dict | None) -> tuple[int, int]:

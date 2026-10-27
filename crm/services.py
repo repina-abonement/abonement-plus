@@ -246,12 +246,11 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None) -> d
                                       deadline_day=int(st["renewal_deadline_day"]))
     q["late_fee"] = fee
     from . import money
-    disc = None
+    manual = None
     if discount_id:
         r = con.execute("SELECT * FROM discounts WHERE id=? AND active=1", (int(discount_id),)).fetchone()
-        disc = dict(r) if r else None
-    else:
-        disc = money.auto_discount(con, sid)
+        manual = dict(r) if r else None
+    disc = money.best_discount([manual, *money.auto_discounts(con, sid)])  # скидки не суммируются, берём большую
     total, off = money.apply_discount(total, disc)
     q["discount"] = {"id": disc["id"], "name": disc["name"], "percent": disc["percent"], "amount": off,
                      "auto": disc["rule"] != "manual"} if disc else None

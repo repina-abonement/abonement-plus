@@ -35,7 +35,7 @@ async function renderPayments(page) {
         : `<tr><td colspan="7" class="muted">За этот период платежей нет</td></tr>`}</tbody></table></div></section>
     <section class="panel" style="margin-top:14px"><h3>Скидки</h3>
       <div class="list" style="box-shadow:none;margin:8px 0">${disc.map((x) => `<div class="list-row ${x.active ? "" : "struck"}"><div class="grow"><b>${esc(x.name)}</b> · ${x.percent}%
-        <div class="small muted">${x.rule === "first_on_trial_day" ? "Сама на первый абонемент, если его оформляют в день пробного" : "Выбирается вручную при выставлении счёта"}</div></div>
+        <div class="small muted">${x.rule === "first_on_trial_day" ? "Сама на первый абонемент, если его оформляют в день пробного" : x.rule === "sibling" ? "Сама второму и следующим детям в семье, если старший ещё занимается" : "Выбирается вручную при выставлении счёта"}. Скидки не суммируются: действует самая большая</div></div>
         <button class="btn sm" data-darch="${x.id}" data-active="${x.active ? 0 : 1}">${x.active ? "В архив" : "Вернуть"}</button></div>`).join("")}</div>
       <div class="row"><div class="field"><label>Название</label><input id="d-name" placeholder="Например, Многодетным"></div>
         <div class="field" style="flex:0 0 110px"><label>Скидка, %</label><input id="d-pct" type="number" min="1" max="100"></div>
