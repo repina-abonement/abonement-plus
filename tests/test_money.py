@@ -72,6 +72,8 @@ def main():
     check(q3["discount"]["amount"] == round((q3["total"] + q3["discount"]["amount"]) * 0.1), "Ручная скидка 10% применяется")
 
     print("Разовое занятие")
+    check(con.execute("SELECT value FROM settings WHERE key='price_single'").fetchone()[0] == "2500", "Разовое по умолчанию 2500 ₽")
+    con.execute("UPDATE settings SET value='' WHERE key='price_single'")
     try:
         money.sell_single(con, sid, OP)
         check(False, "Без цены разовое не продаётся")

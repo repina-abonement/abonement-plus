@@ -58,7 +58,11 @@ def init(con):
     if not con.execute("SELECT 1 FROM discounts WHERE rule='first_on_trial_day'").fetchone():
         con.execute("INSERT INTO discounts(name, percent, rule, created_at) VALUES (?,?,?,?)",
                     ("Первый абонемент в день пробного", 20, "first_on_trial_day", _now()))
-    con.execute("INSERT OR IGNORE INTO settings(key, value) VALUES ('price_single', '')")
+    con.execute("INSERT OR IGNORE INTO settings(key, value) VALUES ('price_single', '2500')")
+    # цены, которые назвала Юлия 27.10.2026: разовое 2500 ₽, многодетным 10% (ставится вручную)
+    con.execute("UPDATE settings SET value='2500' WHERE key='price_single' AND value=''")
+    if not con.execute("SELECT 1 FROM discounts WHERE name LIKE 'Многодет%'").fetchone():
+        con.execute("INSERT INTO discounts(name, percent, rule, created_at) VALUES (?,?,?,?)", ("Многодетная семья", 10, "manual", _now()))
     # оплаченные раньше абонементы без записи о платеже — переносим в реестр, чтобы баланс сходился
     con.execute("""INSERT INTO payments(student_id, amount, method, paid_at, comment, user_name, confirmed, subscription_id,
                    created_at)

@@ -168,7 +168,7 @@ DEFAULT_SETTINGS = {
     "late_fee_percent": "10",
     "renewal_deadline_day": "25",
     "trial_minutes": "60",
-    "price_single": "",
+    "price_single": "2500",
 }
 
 _local = threading.local()
