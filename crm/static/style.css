@@ -639,3 +639,25 @@ h2.sub { font-size: 17px; }
   .cr-score.s-good { background: rgba(21,115,71,.25); color: #5fd09a; } .cr-score.s-mid { background: rgba(184,134,11,.22); color: #e3b84a; } .cr-score.s-bad { background: rgba(180,35,24,.25); color: #f08a80; }
   .cr-outcome.s-good { color: #5fd09a; } .cr-outcome.s-mid { color: #e3b84a; } .cr-outcome.s-bad { color: #f08a80; }
 }
+/* аналитика */
+.an-tabs { flex-wrap: wrap; margin: 0 0 14px; }
+.an-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.an-card-h { font-weight: 700; margin-bottom: 6px; }
+.an-big { font-size: 26px; font-weight: 700; margin-bottom: 6px; } .an-big small { font-size: 13px; font-weight: 500; color: var(--ink-2); }
+.an-kv { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.an-kv:last-child { border-bottom: 0; } .an-kv span { color: var(--ink-2); }
+.an-fill { display: flex; align-items: center; gap: 8px; min-width: 110px; font-size: 13px; }
+.an-fill span { min-width: 38px; font-variant-numeric: tabular-nums; }
+.an-fill i { flex: 1; height: 6px; background: var(--surface-2); border-radius: 4px; overflow: hidden; display: block; }
+.an-fill i b { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.an-fill.hi i b { background: #1f9d55; } .an-fill.lo i b { background: var(--red); }
+.an-card .an-fill { margin-bottom: 8px; } .an-card .an-fill span { display: none; }
+.an-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.an-tbl { min-width: 640px; } .an-tbl td.r, .an-tbl th.r { text-align: right; white-space: nowrap; }
+.an-tbl tr.an-total td { font-weight: 700; background: var(--surface-2); }
+.an-two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+@media (max-width: 900px) { .an-two { grid-template-columns: 1fr; } }
+.an-chip { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 20px; white-space: nowrap; background: var(--surface-2); color: var(--ink-2); }
+.an-chip.bad { background: #fde8e8; color: #b42318; } .an-chip.warn { background: #fdf3d3; color: #8a6400; }
+@media (prefers-color-scheme: dark) { .an-chip.bad { background: rgba(180,35,24,.25); color: #f08a80; } .an-chip.warn { background: rgba(184,134,11,.22); color: #e3b84a; } }
+.list-row[hidden] { display: none !important; }

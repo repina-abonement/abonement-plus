@@ -968,6 +968,12 @@ def coaches_board(con, h, user, body, q):
     return coaches.leaderboard(con, q.get("month"), me)
 
 
+@route("GET", "/api/analytics", role="admin")
+def analytics_report(con, h, user, body, q):
+    from . import analytics
+    return analytics.report(con, q.get("month"), int(q["branch_id"]) if q.get("branch_id") else None, q.get("part") or "groups")
+
+
 @route("GET", "/api/dashboard", role="admin")
 def dashboard(con, h, user, body, q):
     return sv.dashboard(con, q.get("month"), int(q["branch_id"]) if q.get("branch_id") else None)

@@ -159,6 +159,12 @@ def remove(con) -> int:
     """Удаляет всех выдуманных клиентов вместе с их оплатами, посещениями и историей."""
     init(con)
     con.execute("DELETE FROM calls WHERE external_id LIKE 'fake-call-%'")
+    try:
+        con.execute("DELETE FROM ad_posts WHERE deal_id IN (SELECT id FROM ad_deals WHERE note='fake-demo')")
+        con.execute("DELETE FROM ad_deals WHERE note='fake-demo'")
+        con.execute("DELETE FROM ad_places WHERE note='fake-demo'")
+    except Exception:  # noqa: BLE001
+        pass
     ids = [r[0] for r in con.execute("SELECT id FROM students WHERE fake=1")]
     if not ids:
         return 0
@@ -467,7 +473,7 @@ def realistic(con, user: dict, seed: int | None = 7, start_members: int = 150, m
         if m in (9, 1):
             pool = [x for k, v in left_by_month.items() if k < ym and k >= logic.shift_month(ym, -4) for x in v]
             for sid, g in pool:
-                if rnd.random() < (0.3 if m == 9 else 0.2) and sid not in {a for a, _ in stay}:
+                if rnd.random() < (0.3 if m == 9 else 0.2) and sid not in {a for a, _ in stay} and load[g["id"]] < g["capacity"]:
                     con.execute("UPDATE students SET stage='active', stage_changed_at=? WHERE id=?", (_ts(first - timedelta(days=5), rnd), sid))
                     load[g["id"]] += 1
                     back.append((sid, g))
@@ -511,7 +517,7 @@ def realistic(con, user: dict, seed: int | None = 7, start_members: int = 150, m
                 continue
             came = rnd.random() < 0.72
             con.execute("UPDATE students SET trial_came=? WHERE id=?", (1 if came else 0, sid))
-            buys = came and rnd.random() < min(0.9, 0.5 * k)
+            buys = came and rnd.random() < min(0.9, 0.5 * k) and load[g["id"]] < g["capacity"]
             decided = t + timedelta(days=rnd.choice([0, 0, 0, 1, 2, 3]))
             if buys and decided <= today:
                 when = _ts(decided, rnd)
@@ -549,5 +555,26 @@ def realistic(con, user: dict, seed: int | None = 7, start_members: int = 150, m
                     con.execute("INSERT OR IGNORE INTO attendance(student_id, group_id, date, status) VALUES (?,?,?,?)",
                                 (sid, g["id"], d.isoformat(), "absent" if rnd.random() < 0.11 else "present"))
                 d += timedelta(days=1)
+    # 7) траты на рекламу по месяцам — чтобы считалась цена лида и ученика
+    try:
+        ids = {nm: sid for (sid, _w, _k), (_c, nm, _x, _y) in zip(src, REAL_SOURCES)}
+        places = [("Таргет ВК (рекламный кабинет)", ids["Таргет ВК"], (18000, 32000)),
+                  ("Промоутер у ТЦ «Небо»", ids["Промоутер у ТЦ"], (12000, 20000)),
+                  ("Районный паблик", ids["Районный паблик"], (3000, 6000))]
+        for name, sid_, (lo, hi) in places:
+            pid = con.execute("""INSERT INTO ad_places(name, source_id, price, note, created_at) VALUES (?,?,?,?,?)""",
+                              (name, sid_, lo, "fake-demo", now_iso)).lastrowid
+            for ym in months:
+                y, m = map(int, ym.split("-"))
+                k = LEADS_BY_MONTH[m] / 80
+                paid = date(y, m, rnd.randint(1, 5))
+                if paid > today:
+                    continue
+                did = con.execute("""INSERT INTO ad_deals(place_id, paid_at, amount, posts_total, note, created_at) VALUES (?,?,?,?,?,?)""",
+                                  (pid, paid.isoformat(), round(rnd.randint(lo, hi) * k, -2), 1, "fake-demo", now_iso)).lastrowid
+                con.execute("INSERT INTO ad_posts(deal_id, planned, posted_at, status) VALUES (?,?,?,'posted')",
+                            (did, (paid + timedelta(days=2)).isoformat(), (paid + timedelta(days=2)).isoformat()))
+    except Exception:  # noqa: BLE001 — без раздела рекламы просто без трат
+        pass
     out["members_now"] = len(active)
     return out
