@@ -33,23 +33,42 @@ CHECKLIST = [
 RESULTS = ["записали на пробное", "купил абонемент", "продлил", "думает", "перезвонить", "отказ", "не целевой", "другое"]
 
 SYSTEM_PROMPT = """Ты руководитель отдела продаж детской футбольной школы. Тебе дают расшифровку телефонного разговора администратора школы с родителем.
-Разбери разговор строго по делу, без воды. Пиши по-русски, коротко и конкретно, обращаясь к администратору на «ты».
+Разбери разговор как внутренний разбор для обучения администратора: строго по делу, без воды, по-русски, к администратору на «ты».
 Ответь только JSON без пояснений и без markdown, по схеме:
 {
+ "case": "коротко, о ком звонок: имя родителя и ребёнка, возраст, например «Анна и Тимур, 2,5 года»",
  "summary": "2-3 предложения: кто звонил, зачем, чем закончилось",
  "result": "одно из: %RESULTS%",
+ "outcome": "итог в 2-5 словах, например «Запись на пробное в пн 17:00» или «Расписание в WhatsApp, записи нет»",
  "score": целое 0-10 (насколько хорошо администратор провёл разговор с точки зрения продажи),
+ "headline": "главный вывод одной фразой, например «Результат достигнут, но родителя нужно было увереннее настроить на пробу»",
+ "conclusion": "2-3 предложения: что сделано хорошо и в чём главная потеря",
+ "points": [{"ok": true, "text": "что удалось: записан, получены данные, выбран канал подтверждения"}, {"ok": false, "text": "что упущено"}],
+ "focus": "ключевой фокус для администратора: одна конкретная установка на следующие звонки, с примером фразы",
  "checklist": {%CHECK_KEYS%},
  "objections": ["сомнения или возражения родителя, если были"],
  "next_step": "о чём договорились и кто что должен сделать",
  "good": "что получилось хорошо, одной фразой",
  "tips": ["1-3 конкретных совета, что сказать иначе в следующий раз, с примером фразы"],
+ "dialogue": [{"who": "admin" или "client", "text": "реплика, очищенная только для читаемости, смысл и порядок сохранены"}],
+ "script": [{"who": "admin" или "client", "text": "как разговор должен был пойти правильно: ключевые реплики администратора и ожидаемые ответы, 6-12 реплик"}],
  "child": {"name": "", "age": "", "branch": "", "time": ""}
 }
 В checklist для каждого пункта ставь true, false или null (null если пункт неприменим, например звонок не о продаже).
 Пункты: %CHECK_TEXT%.
-Если разговор не о продаже (например, болеет ребёнок, перенос, оплата), оцени вежливость и решение вопроса, а пункты продажи ставь null.
+Если разговор не о продаже (например, болеет ребёнок, перенос, оплата), оцени вежливость и решение вопроса, а пункты продажи ставь null, script можно оставить пустым.
 В расшифровке реплики помечены каналами, определи сам, где администратор, а где родитель."""
+
+DIGEST_PROMPT = """Ты руководитель отдела продаж детской футбольной школы. Тебе дают разборы всех клиентских звонков одного администратора за день (JSON-список).
+Сделай сводку дня для обучения. Только JSON без пояснений и без markdown:
+{
+ "overview": "2-3 предложения: что за день, сколько разговоров, общее впечатление",
+ "funnel": ["4-6 наблюдений по воронке: что стабильно приводит к записи, где главные потери, что повторяется"],
+ "training": ["3-5 приоритетов обучения: короткие конкретные действия, например «Закрывать на конкретное время двумя вариантами»"],
+ "setting": "главная установка на следующую смену: 1-2 предложения",
+ "focus_today": ["2-3 очень коротких пункта, которые администратор увидит утром на рабочем столе"]
+}
+Пиши по-русски, к администратору на «ты», коротко и по делу."""
 
 
 def _prompt() -> str:
@@ -184,11 +203,18 @@ def transcript_from_stream(raw: str) -> str:
 def submit_llm(con, transcript: str) -> str:
     code, js = comms.http("POST", f"{LLM_URL}/completionAsync", headers=_headers(con), timeout=30, data={
         "modelUri": model_uri(con),
-        "completionOptions": {"temperature": 0.2, "maxTokens": "1500"},
+        "completionOptions": {"temperature": 0.2, "maxTokens": "6000"},
         "messages": [{"role": "system", "text": _prompt()}, {"role": "user", "text": transcript[:30000]}],
     })
     _check(code, js, "YandexGPT")
     return js["id"]
+
+
+def parse_json(text: str) -> dict:
+    m = re.search(r"\{.*\}", text or "", re.S)
+    if not m:
+        raise comms.CommsError("YandexGPT ответил не в том формате")
+    return json.loads(m.group(0))
 
 
 def parse_analysis(text: str) -> dict:
@@ -201,9 +227,12 @@ def parse_analysis(text: str) -> dict:
         a["score"] = max(0, min(10, int(a.get("score"))))
     except (TypeError, ValueError):
         a["score"] = None
-    for k in ("objections", "tips"):
+    for k in ("objections", "tips", "points", "dialogue", "script"):
         if not isinstance(a.get(k), list):
             a[k] = [a[k]] if a.get(k) else []
+    a["points"] = [p if isinstance(p, dict) else {"ok": True, "text": str(p)} for p in a["points"]]
+    a["dialogue"] = [d for d in a["dialogue"] if isinstance(d, dict) and d.get("text")]
+    a["script"] = [d for d in a["script"] if isinstance(d, dict) and d.get("text")]
     return a
 
 
@@ -286,6 +315,17 @@ def start_worker(connect):
         while True:
             try:
                 tick(con)
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+            try:
+                from . import calldigest
+                con.execute("BEGIN IMMEDIATE")
+                try:
+                    calldigest.tick(con)
+                    con.execute("COMMIT")
+                except BaseException:
+                    con.execute("ROLLBACK")
+                    raise
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
             time.sleep(60)

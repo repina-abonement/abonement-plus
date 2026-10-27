@@ -370,7 +370,7 @@ async function renderWorkdesk(page) {
   if (S.user.role !== "admin") S.viewAs = null;
   const bar = await viewAsBar().catch(() => "");
   if (S.viewAs && S.viewAs.role === "coach") { await renderCoachToday(page, S.viewAs.id, bar); return wireViewAs(page); }
-  const [d, tasksHtml, schedHtml] = await Promise.all([api("GET", "/api/workdesk"), tasksSection(), scheduleWidget().catch(() => "")]);
+  const [d, tasksHtml, schedHtml] = await Promise.all([api("GET", "/api/workdesk" + (S.viewAs ? "?as_user=" + S.viewAs.id : "")), tasksSection(), scheduleWidget().catch(() => "")]);
   const wasOpen = page.querySelector(".sched-widget") ? page.querySelector(".sched-widget").open : null;
   const u = d.urgent, reds = u.filter((x) => x.level === "red").length;
   const scroll = page.querySelector(".board") ? page.querySelector(".board").scrollLeft : 0;
@@ -378,6 +378,7 @@ async function renderWorkdesk(page) {
     ${bar}
     <div class="page-head"><h2 class="grow">Рабочий стол${S.viewAs ? `: ${esc(S.viewAs.name)}` : ""}</h2>
       <span class="muted small">Обновляется сам каждые 20 секунд</span></div>
+    ${callFocusBox(d.call_focus)}
     ${spendDeskBox(d)}
     ${checkinReport(d.checkins)}
     ${merchAlerts(d.merch_alerts)}
@@ -878,7 +879,7 @@ async function renderSettings(page) {
     ${admin ? `<div class="section"><h3>Выдуманные клиенты для проверки</h3>
       <div class="small muted" style="margin-bottom:8px">Добавляют клиентов в настоящие группы: с абонементами, оплатами, посещениями, пропусками и лидами на разных этапах. Все помечены как выдуманные и удаляются одной кнопкой, настоящие клиенты не пострадают</div>
       <div class="row" style="align-items:center;flex-wrap:wrap"><input type="number" id="fake-n" value="150" min="1" max="500" style="flex:0 0 100px">
-        <button class="btn sm primary" id="fake-add" style="flex:0">Добавить</button><button class="btn sm danger" id="fake-del" style="flex:0">Удалить всех выдуманных</button></div></div>` : ""}
+        <button class="btn sm primary" id="fake-add" style="flex:0">Добавить</button><button class="btn sm" id="fake-calls" style="flex:0">+ Звонки с разборами</button><button class="btn sm danger" id="fake-del" style="flex:0">Удалить всех выдуманных</button></div></div>` : ""}
     ${admin && S.meta.demo ? `<div class="section"><h3>Тестовые данные</h3>
       <div class="small muted" style="margin-bottom:8px">Сейчас включён тестовый режим. Кнопка сотрёт всех клиентов и создаст выдуманных заново. Сотрудники и настройки сохранятся.</div>
       <button class="btn sm danger" id="demo-reset">Пересоздать тестовые данные</button></div>` : ""}
@@ -935,6 +936,9 @@ async function renderSettings(page) {
     try { const r = await api("POST", "/api/fake-clients", { count: +$("#fake-n").value }); toast(`Добавлено: занимаются ${r.members}, лидов ${r.leads}`); }
     catch (err) { fail(err); }
     e.target.disabled = false; e.target.textContent = "Добавить";
+  };
+  if ($("#fake-calls")) $("#fake-calls").onclick = async () => {
+    try { const r = await api("POST", "/api/fake-clients/calls", {}); toast(`Звонков: ${r.calls}, оператор ${r.operator}. Сводка дня в «Звонки» → «Сводки по дням»`); } catch (err) { fail(err); }
   };
   if ($("#fake-del")) $("#fake-del").onclick = async () => {
     if (!confirm("Удалить всех выдуманных клиентов вместе с их оплатами и посещениями?")) return;

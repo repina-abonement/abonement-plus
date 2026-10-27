@@ -60,26 +60,77 @@ async function openCallAi(id) {
   try { d = await api("GET", `/api/calls/${id}/ai`); } catch (e) { return fail(e); }
   const a = d.analysis || {}, L = d.checklist_labels;
   const mark = (v) => v === true ? `<span class="ck ok">✓</span>` : v === false ? `<span class="ck no">✕</span>` : `<span class="ck na">—</span>`;
+  const bubbles = (list) => `<div class="dlg">${list.map((r) => `<div class="dlg-r ${r.who === "admin" ? "adm" : "cli"}"><span>${r.who === "admin" ? "Администратор" : "Клиент"}</span>${esc(r.text)}</div>`).join("")}</div>`;
+  const hasDlg = (a.dialogue || []).length, hasScript = (a.script || []).length;
   openDrawer(`
-    <h2>Разбор звонка</h2>
+    <div class="cr-head">
+      <div class="cr-score ${d.score != null ? scoreClass(d.score) : ""}">${d.score ?? "—"}<small>/10</small></div>
+      <div class="grow"><div class="cr-kicker">Разбор звонка</div><h2>${esc(a.case || "Разговор")}</h2>
+        ${a.outcome || a.result ? `<div class="cr-outcome ${d.score != null ? scoreClass(d.score) : ""}">${esc((a.outcome || a.result).toUpperCase())}</div>` : ""}</div></div>
     ${d.ai_status === "error" ? `<div class="alert">Не получилось разобрать: ${esc(d.ai_error)} <button class="btn sm" id="ai-retry">Попробовать снова</button></div>` : ""}
     ${d.ai_status !== "done" && d.ai_status !== "error" ? `<div class="note">Разговор ещё разбирается. В отложенном режиме это может занять до суток</div>` : ""}
-    ${a.summary ? `<div class="section ai-head">
-      ${d.score != null ? `<div class="ai-score ${scoreClass(d.score)}">${d.score}<small>/10</small></div>` : ""}
-      <div class="grow">${a.result ? `<span class="pill">${esc(a.result)}</span>` : ""}<p>${esc(a.summary)}</p></div></div>` : ""}
-    ${a.good || (a.tips || []).length ? `<div class="section">
-      ${a.good ? `<div class="ai-good">👍 ${esc(a.good)}</div>` : ""}
-      ${(a.tips || []).length ? `<h3 style="margin-top:10px">Что сказать иначе</h3><ul class="ai-tips">${a.tips.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>` : ""}
-    </div>` : ""}
-    ${a.checklist && Object.keys(a.checklist).length ? `<div class="section"><h3>Чек-лист разговора</h3>
-      <div class="cklist">${Object.entries(L).map(([k, t]) => `<div>${mark(a.checklist[k])}${esc(t)}</div>`).join("")}</div>
-      <div class="small muted" style="margin-top:6px">— значит пункт не подходил к этому разговору</div></div>` : ""}
+    ${a.headline || a.conclusion || a.summary ? `<div class="cr-box ${d.score != null && d.score < 7 ? "amber" : "green"}"><b>${esc(a.headline || "Главный вывод")}</b><div>${esc(a.conclusion || a.summary || "")}</div></div>` : ""}
+    ${(a.points || []).length ? `<div class="section"><h3>Результат звонка</h3><ul class="cr-points">${a.points.map((p) => `<li class="${p.ok ? "ok" : "no"}">${esc(p.text)}</li>`).join("")}</ul></div>` : ""}
+    ${a.focus ? `<div class="cr-box blue"><b>Ключевой фокус</b><div>${esc(a.focus)}</div></div>` : ""}
+    ${!a.focus && (a.tips || []).length ? `<div class="section"><h3>Что сказать иначе</h3><ul class="ai-tips">${a.tips.map((t) => `<li>${esc(t)}</li>`).join("")}</ul></div>` : ""}
+    ${hasDlg || hasScript || d.transcript ? `<div class="seg cr-tabs" style="margin:14px 0 8px">
+        ${hasDlg || d.transcript ? `<button data-crt="dlg" class="active">Расшифровка</button>` : ""}${hasScript ? `<button data-crt="script" class="${hasDlg || d.transcript ? "" : "active"}">Правильный сценарий</button>` : ""}
+        ${a.checklist && Object.keys(a.checklist).length ? `<button data-crt="check">Чек-лист</button>` : ""}</div>
+      <div data-crp="dlg">${hasDlg ? bubbles(a.dialogue) : d.transcript ? `<pre class="transcript">${esc(d.transcript)}</pre>` : ""}</div>
+      <div data-crp="script" ${hasDlg || d.transcript ? "hidden" : ""}>${hasScript ? `<div class="small muted" style="margin-bottom:6px">Как разговор мог пойти, чтобы закончиться записью</div>${bubbles(a.script)}` : ""}</div>
+      <div data-crp="check" hidden>${a.checklist ? `<div class="cklist">${Object.entries(L).map(([k, t]) => `<div>${mark(a.checklist[k])}${esc(t)}</div>`).join("")}</div>
+        <div class="small muted" style="margin-top:6px">— значит пункт не подходил к этому разговору</div>` : ""}</div>` : ""}
     ${(a.objections || []).length || a.next_step ? `<div class="section">
       ${(a.objections || []).length ? `<div><b>Сомнения родителя:</b> ${a.objections.map(esc).join(", ")}</div>` : ""}
-      ${a.next_step ? `<div style="margin-top:6px"><b>Договорились:</b> ${esc(a.next_step)}</div>` : ""}
-    </div>` : ""}
-    ${d.transcript ? `<div class="section"><h3>Расшифровка</h3><pre class="transcript">${esc(d.transcript)}</pre></div>` : ""}`);
+      ${a.next_step ? `<div style="margin-top:6px"><b>Договорились:</b> ${esc(a.next_step)}</div>` : ""}</div>` : ""}`);
+  document.querySelectorAll("[data-crt]").forEach((b) => (b.onclick = () => {
+    document.querySelectorAll("[data-crt]").forEach((x) => x.classList.toggle("active", x === b));
+    document.querySelectorAll("[data-crp]").forEach((x) => { x.hidden = x.dataset.crp !== b.dataset.crt; });
+  }));
   if ($("#ai-retry")) $("#ai-retry").onclick = async () => { await api("POST", `/api/calls/${id}/ai/retry`, {}).catch(fail); toast("Отправим на разбор в течение минуты"); closeDrawer(); };
+}
+
+/* ---------- сводка дня по звонкам оператора ---------- */
+async function openDigest(day, operator) {
+  let d;
+  try { d = await api("GET", `/api/calls/digest?day=${day}&operator=${encodeURIComponent(operator)}`); } catch (e) { return fail(e); }
+  openDrawer(`
+    <div class="cr-kicker">Разборы звонков · ${esc(d.name)}</div><h2>Сводка за ${dShort(d.day)}</h2>
+    <div class="cfacts" style="margin:10px 0 14px"><div class="cfact"><b>${d.calls}</b><span>клиентских звонков</span></div>
+      <div class="cfact ${d.avg >= 8 ? "green" : d.avg >= 5 ? "" : "yellow"}"><b>${d.avg ?? "—"}/10</b><span>средняя оценка</span></div>
+      <div class="cfact green"><b>${d.booked}</b><span>записей и покупок</span></div></div>
+    ${d.overview ? `<div class="cr-box">${esc(d.overview)}</div>` : ""}
+    ${(d.funnel || []).length ? `<div class="section"><h3>Что видно по воронке</h3><ul class="cr-points">${d.funnel.map((x) => `<li class="ok">${esc(x)}</li>`).join("")}</ul></div>` : ""}
+    ${d.setting ? `<div class="cr-box blue"><b>Главная установка на следующую смену</b><div>${esc(d.setting)}</div></div>` : ""}
+    <div class="section"><h3>Карта звонков</h3><table class="tbl"><thead><tr><th>Время</th><th>Кейс</th><th>Оценка</th><th>Итог</th></tr></thead>
+      <tbody>${d.map.map((r) => `<tr class="click" data-ai="${r.id}"><td>${esc(r.time)}</td><td>${esc(r.case)}</td><td><b class="${r.score != null ? scoreClass(r.score) : ""}">${r.score ?? "—"}/10</b></td><td>${esc(r.outcome)}</td></tr>`).join("")}</tbody></table>
+      <div class="small muted" style="margin-top:6px">Нажмите на строку, чтобы открыть полный разбор звонка</div></div>
+    ${(d.training || []).length ? `<div class="section"><h3>Приоритеты обучения</h3><ul class="cr-points">${d.training.map((x) => `<li class="focus">${esc(x)}</li>`).join("")}</ul></div>` : ""}
+    ${d.llm_error ? `<div class="small muted">Текст сводки не собрался: ${esc(d.llm_error)}</div>` : ""}
+    ${S.user.role === "admin" ? `<button class="btn sm" id="dg-rebuild" style="margin-top:10px">Пересобрать сводку</button>` : ""}`);
+  if ($("#dg-rebuild")) $("#dg-rebuild").onclick = async () => { try { await api("POST", "/api/calls/digest", { day, operator }); toast("Сводка пересобрана"); openDigest(day, operator); } catch (e) { fail(e); } };
+}
+document.addEventListener("click", (e) => { const b = e.target.closest("[data-digest]"); if (b) { e.preventDefault(); const [day, op] = b.dataset.digest.split("|"); openDigest(day, op); } });
+
+async function digestsSection() {
+  let d;
+  try { d = await api("GET", "/api/calls/digests"); } catch (_) { return ""; }
+  if (!d.items.length) return "";
+  return `<section class="panel" style="margin-top:14px"><h3>Сводки дня по операторам</h3>
+    <div class="list" style="box-shadow:none">${d.items.map((x) => `<div class="list-row click" data-digest="${x.day}|${esc(x.operator)}">
+      <div class="ai-score sm ${x.avg != null ? scoreClass(x.avg) : ""}">${x.avg ?? "—"}</div>
+      <div class="grow"><b>${dShort(x.day)} · ${esc(x.name)}</b> <span class="small muted">${x.calls} звонков, записей ${x.booked}</span>
+        ${x.setting ? `<div class="small ellipsis">${esc(x.setting)}</div>` : ""}</div><span class="small muted">открыть ›</span></div>`).join("")}</div></section>`;
+}
+
+/* фокус на сегодня: на рабочем столе оператора */
+function callFocusBox(f) {
+  if (!f) return "";
+  return `<section class="now focus-box" style="margin-bottom:14px"><div class="now-head"><h3>🎯 Фокус на сегодня</h3>
+      <button class="linkish small" data-digest="${f.day}|${esc(f.operator)}" style="margin-left:auto">Разбор за ${dShort(f.day)} ›</button></div>
+    <ul class="cr-points">${f.focus.map((x) => `<li class="focus">${esc(x)}</li>`).join("")}</ul>
+    ${f.setting ? `<div class="small" style="margin-top:6px"><b>Установка:</b> ${esc(f.setting)}</div>` : ""}
+    <div class="small muted" style="margin-top:6px">Вчера: ${f.calls} звонков, средняя оценка ${f.avg ?? "—"}/10, записей ${f.booked}</div></section>`;
 }
 
 async function dial(phone) {
@@ -388,7 +439,8 @@ async function renderCallStats(body) {
       <div class="hours">${hours.map((x) => `<div class="hcol" title="${x.h}:00 · пропущено ${x.n}"><i style="height:${Math.round(100 * x.n / maxH)}%" class="${x.n ? "" : "zero"}"></i><span>${x.h}</span></div>`).join("")}</div>
     </section>
 
-    ${aiBlock(d.ai)}`;
+    ${aiBlock(d.ai)}
+    ${await digestsSection()}`;
   body.querySelectorAll("[data-p]").forEach((b) => (b.onclick = () => { I.period = b.dataset.p; render(); }));
   body.querySelectorAll("[data-aiop]").forEach((b) => (b.onclick = () => { I.aiOp = I.aiOp === b.dataset.aiop ? null : b.dataset.aiop; render(); }));
   body.querySelectorAll("[data-dial]").forEach((b) => (b.onclick = async () => { await dial(b.dataset.dial); if (b.dataset.sid) openStudent(+b.dataset.sid); }));

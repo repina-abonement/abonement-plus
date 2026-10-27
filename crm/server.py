@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import ai, callstats, coaches, comms, db, expenses, fakegen, legal, merch, offers, money, planner, schedule, services as sv, sources, staff, tasks
+from . import ai, calldigest, callstats, coaches, comms, db, expenses, fakegen, legal, merch, offers, money, planner, schedule, services as sv, sources, staff, tasks
 from .services import ApiError
 
 
@@ -276,6 +276,8 @@ def workdesk(con, h, user, body, q):
     return {"urgent": reds + rest, "board": board, "birthdays": sv.birthdays(con), "needs_subs": schedule.needs_subs(con),
             "checkins": staff.day_report(con) if checkin_reviewer(con, user) else None,
             "merch_alerts": merch_alerts(con),
+            "call_focus": calldigest.focus_for(con, (con.execute("SELECT sip_number FROM users WHERE id=?",
+                                                                 (int(q["as_user"]) if q.get("as_user") and user["role"] == "admin" else user["id"],)).fetchone() or [""])[0]),
             "bills_due": expenses.bills_due(con) if user["role"] == "admin" else [],
             "ads_alerts": expenses.ads_alerts(con) if user["role"] == "admin" else [],
             "absences": schedule.absences(con),
@@ -822,6 +824,14 @@ def fake_subscribe(con, h, user, body, q):
     return fakegen.subscribe_all(con, user)
 
 
+@route("POST", "/api/fake-clients/calls", role="admin")
+def fake_calls(con, h, user, body, q):
+    try:
+        return fakegen.fake_calls(con, user)
+    except ValueError as e:
+        raise ApiError(str(e))
+
+
 @route("POST", "/api/fake-clients/remove", role="admin")
 def fake_remove(con, h, user, body, q):
     n = fakegen.remove(con)
@@ -1069,6 +1079,29 @@ def call_seen(con, h, user, body, q, cid):
 @route("GET", "/api/calls/{cid}/ai", role="operator")
 def call_ai(con, h, user, body, q, cid):
     return cx(ai.call_ai, con, int(cid))
+
+
+@route("GET", "/api/calls/digests", role="operator")
+def call_digests(con, h, user, body, q):
+    return {"items": calldigest.listing(con)}
+
+
+@route("GET", "/api/calls/digest", role="operator")
+def call_digest(con, h, user, body, q):
+    d = calldigest.get(con, q.get("day") or "", q.get("operator") or "")
+    if not d:
+        raise ApiError("Сводки за этот день нет", 404)
+    names = {r[0]: r[1] for r in con.execute("SELECT sip_number, name FROM users WHERE sip_number != ''")}
+    d["name"] = names.get(d["operator"], f"Номер {d['operator']}")
+    return d
+
+
+@route("POST", "/api/calls/digest", role="admin")
+def call_digest_build(con, h, user, body, q):
+    d = calldigest.build(con, body.get("day") or "", body.get("operator") or "")
+    if not d:
+        raise ApiError("За этот день у оператора нет разобранных звонков")
+    return d
 
 
 @route("POST", "/api/calls/{cid}/ai/retry", role="operator")
