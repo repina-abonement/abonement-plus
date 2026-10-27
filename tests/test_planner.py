@@ -49,7 +49,18 @@ def main():
     check(r["status"] == "open" and r["returned_note"] == "не всех", "Варвара вернула задачу с комментарием")
     v = planner.view(con, julia)
     check(v["given"] and v["recurring"] and v["can_manage"], "Страница планера: поручения и повторы видны")
-    check(t, "ok")
+    w = planner.week(con, varya, date.today().isoformat())
+    water = [x for d in w["days"] for x in d["tasks"] if x["title"] == "Купить воду"]
+    check(len(water) >= len([d for d in w["days"] if d["date"] >= t]), "Неделя: «Купить воду» стоит в каждом дне до конца недели")
+    tid2 = water[-1]["id"]
+    planner.move(con, tid2, varya, (date.today() + timedelta(days=10)).isoformat())
+    check(con.execute("SELECT substr(due_at,1,10) FROM tasks WHERE id=?", (tid2,)).fetchone()[0] == (date.today() + timedelta(days=10)).isoformat(),
+          "Перетащили задачу на другой день")
+    try:
+        planner.move(con, tid2, olya, t)
+        check(False, "Чужую задачу перенести нельзя")
+    except planner.PlanError:
+        check(True, "Чужую задачу перенести нельзя")
 
 
 if __name__ == "__main__":

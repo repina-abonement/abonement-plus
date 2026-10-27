@@ -676,6 +676,24 @@ def planner_add(con, h, user, body, q):
     return {"id": px(planner.add, con, user, body)}
 
 
+@route("GET", "/api/planner/week")
+def planner_week(con, h, user, body, q):
+    from datetime import date as _d
+    return px(planner.week, con, user, q.get("start") or _d.today().isoformat(), int(q["user"]) if q.get("user") else None)
+
+
+@route("POST", "/api/planner/tasks/{tid}/move")
+def planner_move(con, h, user, body, q, tid):
+    px(planner.move, con, int(tid), user, body.get("date") or "")
+    return {"ok": True}
+
+
+@route("POST", "/api/planner/tasks/{tid}/reopen")
+def planner_reopen(con, h, user, body, q, tid):
+    px(planner.reopen, con, int(tid), user)
+    return {"ok": True}
+
+
 @route("POST", "/api/planner/tasks/{tid}/cancel")
 def planner_cancel(con, h, user, body, q, tid):
     px(planner.cancel, con, int(tid), user)

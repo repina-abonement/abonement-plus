@@ -180,6 +180,63 @@ def generate(con, today: date | None = None) -> int:
     return made
 
 
+def week(con, user: dict, start: str, who: int | None = None) -> dict:
+    """Неделя колонками (как в Weeek): задачи по дням, повторы разложены на всю неделю."""
+    d0 = date.fromisoformat(start)
+    d0 = d0 - timedelta(days=d0.weekday())  # с понедельника
+    uid = who if who and can_manage(con, user) else user["id"]
+    today = date.today()
+    for i in range(7):  # повторы на эту неделю (не дальше двух месяцев вперёд)
+        d = d0 + timedelta(days=i)
+        if today <= d <= today + timedelta(days=62):
+            _materialize(con, d)
+    days = []
+    for i in range(7):
+        d = (d0 + timedelta(days=i)).isoformat()
+        rows = [_out(con, r) for r in con.execute(
+            """SELECT * FROM tasks WHERE assignee_id=? AND substr(due_at,1,10)=? AND status IN ('open','done')
+               ORDER BY status='done', priority DESC, due_at""", (uid, d))]
+        days.append({"date": d, "tasks": rows})
+    overdue = [_out(con, r) for r in con.execute(
+        "SELECT * FROM tasks WHERE assignee_id=? AND status='open' AND substr(due_at,1,10)<? ORDER BY due_at",
+        (uid, min(today.isoformat(), d0.isoformat())))]
+    name = (con.execute("SELECT name FROM users WHERE id=?", (uid,)).fetchone() or [""])[0]
+    return {"start": d0.isoformat(), "days": days, "overdue": overdue, "user_id": uid, "user_name": name,
+            "can_manage": can_manage(con, user),
+            "staff": [dict(r) for r in con.execute("SELECT id, name FROM users WHERE active=1 ORDER BY role, name")] if can_manage(con, user) else []}
+
+
+def _materialize(con, d: date):
+    now = _now().isoformat(timespec="minutes")
+    for r in con.execute("SELECT * FROM recurring WHERE active=1").fetchall():
+        if _occurs(r, d):
+            con.execute("""INSERT OR IGNORE INTO tasks(kind, title, assignee_id, due_at, source, auto_key, note, created_at,
+                           created_by_id, created_by, priority, recur_id) VALUES ('plan',?,?,?,'recurring',?,?,?,?,?,?,?)""",
+                        (r["title"], r["assignee_id"], f"{d.isoformat()}T{r['time'] or '23:59'}", f"recur:{r['id']}:{d}",
+                         r["note"], now, r["created_by_id"], r["created_by"], r["priority"], r["id"]))
+
+
+def move(con, tid: int, user: dict, new_date: str):
+    """Перетащили задачу на другой день: время остаётся прежним."""
+    t = con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
+    if not t:
+        raise PlanError("Задача не найдена")
+    if not (can_manage(con, user) or user["id"] in (t["assignee_id"], t["created_by_id"])):
+        raise PlanError("Переносить можно свои задачи")
+    try:
+        date.fromisoformat(new_date)
+    except ValueError:
+        raise PlanError("Неверная дата")
+    con.execute("UPDATE tasks SET due_at=? WHERE id=?", (f"{new_date}T{t['due_at'][11:16]}", tid))
+
+
+def reopen(con, tid: int, user: dict):
+    t = con.execute("SELECT assignee_id FROM tasks WHERE id=?", (tid,)).fetchone()
+    if not t or not (can_manage(con, user) or t["assignee_id"] == user["id"]):
+        raise PlanError("Нет доступа")
+    con.execute("UPDATE tasks SET status='open', done_at=NULL WHERE id=?", (tid,))
+
+
 def cancel(con, tid: int, user: dict):
     t = con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
     if not t:

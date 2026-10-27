@@ -1,7 +1,7 @@
 "use strict";
 /* Абонемент Плюс — планер: свои дела, поручения, повторы, дни рождения сотрудников, контроль команды. */
 
-S.planner = { tab: "mine" };
+S.planner = { tab: "week", start: null, user: null };
 const WD_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
 /* форма новой задачи: кому, когда, повтор */
@@ -57,11 +57,13 @@ async function renderPlanner(page) {
   const p = await api("GET", "/api/planner");
   const C = S.planner;
   S.tasks.canManage = p.can_manage;
-  const tabs = [["mine", `Мои дела · ${p.mine.length}`], ["given", "Я поручила"], ["recurring", "Повторы"]];
+  const tabs = [["week", "Неделя"], ["mine", `Списком · ${p.mine.length}`], ["given", "Я поручила"], ["recurring", "Повторы"]];
   if (p.can_manage) tabs.push(["team", "Команда"], ["bdays", "Дни рождения"]);
   if (!tabs.some(([k]) => k === C.tab)) C.tab = "mine";
   let body = "";
-  if (C.tab === "mine") {
+  if (C.tab === "week") {
+    body = `<div id="pl-week"></div>`;
+  } else if (C.tab === "mine") {
     body = p.mine.length ? groupByDay(p.mine).map(([day, list]) => `<div class="task-group ${day === "Просрочено" ? "late" : ""}"><h4>${day} · ${list.length}</h4>${list.map(taskRow).join("")}</div>`).join("")
       : `<div class="muted">Дел нет. Добавьте первое кнопкой «+ Задача»</div>`;
   } else if (C.tab === "given") {
@@ -91,7 +93,8 @@ async function renderPlanner(page) {
     <div class="seg" style="margin-bottom:14px;flex-wrap:wrap">${tabs.map(([k, t]) => `<button data-pt="${k}" class="${C.tab === k ? "active" : ""}">${t}</button>`).join("")}</div>
     <div class="tasks-box">${body}</div>`;
   page.querySelectorAll("[data-pt]").forEach((b) => (b.onclick = () => { step(() => { C.tab = b.dataset.pt; }); }));
-  $("#pl-add").onclick = () => openTaskForm($("#pl-form"), render);
+  $("#pl-add").onclick = () => openTaskForm($("#pl-form"), render, C.tab === "week" && C.user ? { assignee_id: C.user } : {});
+  if (C.tab === "week") await renderWeek($("#pl-week"));
   wireTasks(page);
   page.querySelectorAll("[data-tret]").forEach((b) => (b.onclick = async () => {
     const note = prompt("Что не так? Сотрудник увидит этот комментарий");
@@ -108,4 +111,82 @@ async function renderPlanner(page) {
   if ($("#pl-ctrl")) $("#pl-ctrl").onchange = async (e) => {
     try { await api("PUT", "/api/planner/settings", { planner_controller: e.target.value }); toast("Контролёр назначен"); render(); } catch (err) { fail(err); }
   };
+}
+
+
+/* ---------- неделя колонками, как в Weeek ---------- */
+const WD_HEAD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+function pcard(t, d) {
+  const done = t.status === "done";
+  const time = t.due_at.slice(11, 16) === "23:59" ? "" : t.due_at.slice(11, 16);
+  return `<article class="pcard ${done ? "done" : ""} ${t.priority ? "hot" : ""}" draggable="${done ? "false" : "true"}" data-pc="${t.id}">
+    <label class="pcheck"><input type="checkbox" data-pdone="${t.id}" ${done ? "checked" : ""}></label>
+    <div class="grow"><div class="ptitle">${t.priority ? "🔥 " : ""}${esc(t.title)}</div>
+      <div class="pmeta">${time ? `<span>🕒 ${time}</span>` : ""}${t.recur_id ? `<span>🔁</span>` : ""}${t.student ? `<span>${esc(t.student.name)}</span>` : ""}
+        ${t.created_by_id && t.created_by_id !== t.assignee_id && t.created_by ? `<span>от ${esc(firstName(t.created_by))}</span>` : ""}
+        ${t.returned_note ? `<span style="color:var(--red)">↩ ${esc(t.returned_note)}</span>` : ""}</div>
+      ${t.note ? `<div class="pnote">${esc(t.note)}</div>` : ""}</div>
+    ${done ? "" : `<button class="pmove" data-pmove="${t.id}" title="Перенести на другой день">📅</button>`}
+  </article>`;
+}
+
+async function renderWeek(box) {
+  const C = S.planner;
+  if (!C.start) C.start = S.meta.today;
+  const w = await api("GET", `/api/planner/week?start=${C.start}${C.user ? "&user=" + C.user : ""}`);
+  const end = addDays(w.start, 6), today = S.meta.today;
+  box.innerHTML = `<div class="week-nav">
+      <button class="btn sm" data-wk="-7">‹</button>
+      <b>${dShort(w.start)} – ${dShort(end)}</b>
+      <button class="btn sm" data-wk="7">›</button>
+      <button class="btn sm" data-wk="0">Эта неделя</button>
+      ${w.can_manage ? `<select id="wk-user">${w.staff.map((u) => `<option value="${u.id}" ${u.id === w.user_id ? "selected" : ""}>${esc(u.name)}${u.id === S.user.id ? " (я)" : ""}</option>`).join("")}</select>` : ""}
+    </div>
+    ${w.overdue.length ? `<section class="col overdue-col"><div class="col-head"><h3>Просрочено: перетащите на нужный день</h3><span class="count">${w.overdue.length}</span></div>
+      <div class="col-body ov-body">${w.overdue.map((t) => pcard(t)).join("")}</div></section>` : ""}
+    <div class="board week-board">${w.days.map((d, i) => `<section class="col ${d.date === today ? "is-today" : ""} ${d.date < today ? "past" : ""}" data-day="${d.date}">
+      <div class="col-head"><h3>${WD_HEAD[i]} <span class="muted">${dShort(d.date)}</span>${d.date === today ? " · сегодня" : ""}</h3><span class="count">${d.tasks.filter((t) => t.status === "open").length}</span></div>
+      <div class="col-body">${d.tasks.map((t) => pcard(t, d.date)).join("") || `<div class="empty">Свободно</div>`}</div>
+      <input class="pquick" data-pq="${d.date}" placeholder="+ Добавить задачу">
+    </section>`).join("")}</div>
+    <input type="date" id="pmove-date" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px">`;
+  box.querySelectorAll("[data-wk]").forEach((b) => (b.onclick = () => { C.start = +b.dataset.wk ? addDays(w.start, +b.dataset.wk) : S.meta.today; renderWeek(box); }));
+  if ($("#wk-user")) $("#wk-user").onchange = (e) => { C.user = +e.target.value; renderWeek(box); };
+  const reload = () => renderWeek(box);
+  const tc = box.querySelector(".week-board .is-today");  // на телефоне сразу показываем сегодня
+  if (tc && window.innerWidth < 1100) box.querySelector(".week-board").scrollLeft = tc.offsetLeft - 12;
+  // галочка «сделано»
+  box.querySelectorAll("[data-pdone]").forEach((cb) => (cb.onchange = async () => {
+    try {
+      if (cb.checked) await api("POST", `/api/tasks/${cb.dataset.pdone}/done`, { result: "" });
+      else await api("POST", `/api/planner/tasks/${cb.dataset.pdone}/reopen`, {});
+      reload();
+    } catch (e) { fail(e); cb.checked = !cb.checked; }
+  }));
+  // быстрое добавление в колонку дня
+  box.querySelectorAll("[data-pq]").forEach((inp) => (inp.onkeydown = async (e) => {
+    if (e.key !== "Enter" || !inp.value.trim()) return;
+    try { await api("POST", "/api/planner/tasks", { title: inp.value.trim(), date: inp.dataset.pq, assignee_id: w.user_id }); reload(); } catch (err) { fail(err); }
+  }));
+  // перенос: перетаскиванием (компьютер) или кнопкой 📅 (телефон)
+  let dragId = null;
+  box.querySelectorAll(".pcard[draggable=true]").forEach((el) => {
+    el.addEventListener("dragstart", (e) => { dragId = el.dataset.pc; el.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; });
+    el.addEventListener("dragend", () => el.classList.remove("dragging"));
+  });
+  box.querySelectorAll(".week-board .col").forEach((col) => {
+    col.addEventListener("dragover", (e) => { e.preventDefault(); col.classList.add("drop"); });
+    col.addEventListener("dragleave", () => col.classList.remove("drop"));
+    col.addEventListener("drop", async (e) => {
+      e.preventDefault(); col.classList.remove("drop");
+      if (!dragId) return;
+      try { await api("POST", `/api/planner/tasks/${dragId}/move`, { date: col.dataset.day }); dragId = null; reload(); } catch (err) { fail(err); }
+    });
+  });
+  const picker = $("#pmove-date");
+  box.querySelectorAll("[data-pmove]").forEach((b) => (b.onclick = () => {
+    picker.value = S.meta.today;
+    picker.onchange = async () => { try { await api("POST", `/api/planner/tasks/${b.dataset.pmove}/move`, { date: picker.value }); toast("Перенесено"); reload(); } catch (e) { fail(e); } };
+    try { picker.showPicker(); } catch (_) { const d = prompt("На какую дату? ГГГГ-ММ-ДД", addDays(S.meta.today, 1)); if (d) { picker.value = d; picker.onchange(); } }
+  }));
 }
