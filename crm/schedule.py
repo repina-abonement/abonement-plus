@@ -366,7 +366,8 @@ def needs_subs(con, today: date | None = None, horizon: int = 21) -> list[dict]:
                 for role in ("main", "assistant"):
                     if _own(g, role) != a["user_id"] or sub_on(con, g["id"], d.isoformat(), role):
                         continue
-                    out.append({"date": d.isoformat(), "time": logic.group_time(g, d.weekday()), "group_id": g["id"],
+                    out.append({"date": d.isoformat(), "time": logic.group_time(g, d.weekday()), "group_id": g["id"], "age": g["age"],
+                                "is_makeup": g["is_makeup"],
                                 "group": g["name"], "branch": g["branch"], "role": role, "role_label": ROLES[role],
                                 "absent": a["user_name"], "absent_id": a["user_id"], "note": a["note"]})
             d += timedelta(days=1)

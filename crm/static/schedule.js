@@ -100,26 +100,32 @@ function openSubForm(f, o, coaches, done) {
 /* блок на рабочем столе: отсутствия тренеров и тренировки без замены (по дням) */
 function needsGroups(n) {
   const m = new Map();
-  n.forEach((x) => { const k = `${x.date}|${x.absent_id}|${x.role}`; if (!m.has(k)) m.set(k, { ...x, items: [] }); m.get(k).items.push(x); });
+  n.forEach((x) => { const k = `${x.date}|${x.absent_id}|${x.role}|${x.branch}`; if (!m.has(k)) m.set(k, { ...x, items: [] }); m.get(k).items.push(x); });
   return [...m.values()];
 }
+const WD_RU = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+const shortName = (n) => { const p = (n || "").trim().split(/\s+/); return p.length > 1 ? `${p[0]} ${p[1][0]}.` : n; };
+const lessonChip = (y) => `${esc(y.time)}${y.is_makeup ? " отработки" : y.age ? ` · ${esc(y.age)}` : ""}`;
 
 function needsSubsBox(d) {
   const n = d.needs_subs || [], ab = d.absences || [];
   if (!n.length && !ab.length) return `<div style="margin:-6px 0 12px"><button class="linkish small" id="abs-add">+ Тренер будет отсутствовать</button><div id="abs-form"></div></div>`;
-  const wdS = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
   const gr = needsGroups(n);
+  const showAll = S.needsAll, list = showAll ? gr : gr.slice(0, 3);
+  const days = new Set(gr.map((x) => x.date)).size;
   return `<section class="now ${n.length ? "" : "calm"} subs-box" style="margin-bottom:14px">
-    <div class="now-head"><h3>${n.length ? `Нужно подобрать замены: ${gr.length} ${gr.length === 1 ? "день" : gr.length < 5 ? "дня" : "дней"}, ${n.length} трен.` : "Замены подобраны 👍"}</h3>
+    <div class="now-head"><h3>${n.length ? `Нужны замены · ${days} ${days === 1 ? "день" : days < 5 ? "дня" : "дней"}` : "Замены подобраны 👍"}</h3>
       <button class="btn sm" id="abs-add" style="margin-left:auto">+ Отсутствие</button></div>
     <div id="abs-form"></div>
-    ${ab.length ? `<div class="chips" style="margin-bottom:8px">${ab.map((a) => `<span class="pill">🏖 ${esc(a.user_name)}: ${dShort(a.date_from)}–${dShort(a.date_to)}${a.note ? `, ${esc(a.note)}` : ""} <button class="linkish small" data-abdel="${a.id}" title="Убрать">✕</button></span>`).join("")}</div>` : ""}
-    ${gr.length ? `<div class="now-list">${gr.map((x, i) => { const hot = x.date <= addDays(S.meta.today, 2) ? "red" : "yellow"; return `<div class="now-item ${hot}">
-      <span class="ref-card ${hot}"></span>
-      <div class="grow"><b>${dShort(x.date)}, ${wdS[new Date(x.date + "T00:00").getDay()]}</b> · ${esc(x.absent)} отсутствует, нужен ${x.role === "main" ? "тренер" : "помощник"}
-        <div class="small">${x.items.map((y) => `${esc(y.time)} ${esc(y.group)}`).join(" · ")}</div>
-        <div class="sub-form" data-nf="${i}" hidden></div></div>
-      <div class="now-act"><button class="btn sm primary" data-nsub="${i}">Подобрать</button></div></div>`; }).join("")}</div>` : ""}
+    ${ab.length ? `<div class="abs-list">${ab.map((a) => `<span class="abs-chip">🏖 <b>${esc(shortName(a.user_name))}</b> ${dShort(a.date_from)}${a.date_to !== a.date_from ? `–${dShort(a.date_to)}` : ""}<button data-abdel="${a.id}" title="Убрать отсутствие">✕</button></span>`).join("")}</div>` : ""}
+    ${list.length ? `<div class="need-list">${list.map((x, i) => { const hot = x.date <= addDays(S.meta.today, 2) ? "red" : "yellow"; return `<div class="need ${hot}">
+      <div class="need-top"><div class="need-date"><b>${dShort(x.date)}</b><span>${WD_RU[new Date(x.date + "T00:00").getDay()]}</span></div>
+        <div class="grow"><div class="need-who">Нужен ${x.role === "main" ? "тренер" : "помощник"} вместо <b>${esc(shortName(x.absent))}</b></div>
+          <div class="need-br">${esc(x.branch)}</div></div>
+        <button class="btn sm ${hot === "red" ? "primary" : ""}" data-nsub="${gr.indexOf(x)}">Подобрать</button></div>
+      <div class="need-chips">${x.items.map((y) => `<span>${lessonChip(y)}</span>`).join("")}</div>
+      <div class="sub-form" data-nf="${gr.indexOf(x)}" hidden></div></div>`; }).join("")}</div>
+      ${gr.length > 3 ? `<button class="linkish small" id="needs-more" style="margin-top:8px">${showAll ? "Свернуть" : `Показать ещё ${gr.length - 3}`}</button>` : ""}` : ""}
   </section>`;
 }
 
@@ -133,7 +139,7 @@ function wireNeedsSubs(page, d) {
     const away = new Set((d.absences || []).filter((a) => a.date_from <= x.date && a.date_to >= x.date).map((a) => a.user_id));
     f.innerHTML = `<div class="row" style="flex-wrap:wrap;align-items:flex-end">
       <div class="field"><label>Кто выйдет ${x.role === "main" ? "тренером" : "помощником"}</label><select data-c><option value="">— выберите —</option>${coaches.filter((c) => !away.has(c.id)).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select></div>
-      <div class="field"><label>На какие тренировки</label><div class="chips">${x.items.map((y, k) => `<label class="chip"><input type="checkbox" data-it="${k}" checked> ${esc(y.time)}</label>`).join("")}</div></div>
+      <div class="field"><label>На какие тренировки</label><div class="chips">${x.items.map((y, k) => `<label class="chip"><input type="checkbox" data-it="${k}" checked> ${lessonChip(y)}</label>`).join("")}</div></div>
       <button class="btn sm primary" data-ok style="flex:0">Сохранить</button></div>
       <div class="small muted">Можно поставить одного человека на весь день или разных: снимите галочки и сохраните по очереди</div>`;
     f.querySelector("[data-ok]").onclick = async () => {
@@ -150,6 +156,8 @@ function wireNeedsSubs(page, d) {
     if (!confirm("Убрать отсутствие? Уже поставленные замены останутся")) return;
     try { await api("DELETE", `/api/absences/${b.dataset.abdel}`); render(); } catch (e) { fail(e); }
   }));
+  const more = page.querySelector("#needs-more");
+  if (more) more.onclick = () => { S.needsAll = !S.needsAll; render(); };
   const add = page.querySelector("#abs-add");
   if (add) add.onclick = () => {
     const box = page.querySelector("#abs-form");
