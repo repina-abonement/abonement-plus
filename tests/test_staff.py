@@ -57,6 +57,13 @@ def main():
     ct = coaches.coach_today(con, ivan, date(2026, 10, 31))
     check(ct["today"] and ct["today"][0]["sub_for"]["role"] == "assistant", "Иван видит замену помощником")
 
+    schedule.save_sub(con, {"group_id": need[1]["group_id"], "date": need[1]["date"], "role": "assistant", "solo": True}, ADM)
+    check(len(schedule.needs_subs(con, date(2026, 10, 27))) == 5, "Вариант «Никита выйдет один» тоже закрывает потребность")
+    l2 = [l for b in schedule.day(con, date.fromisoformat(need[1]["date"]))["branches"] for l in b["lessons"] if l["id"] == need[1]["group_id"]][0]
+    check(l2["assistant"] == "" and l2["subs"]["assistant"]["solo"] == 1 and l2["coach"] == "Никита Евсюнин", "В расписании: Никита один, без помощника")
+    st1 = staff.lesson_staff(con, need[1]["group_id"], need[1]["date"])
+    check(st1["solo"] and st1["main_id"] == nik, "Для зарплаты по плану: Никита один (20%)")
+
     print("Приход на филиал")
     exp = staff.expected(con, date(2026, 10, 31))
     nik_sh = [x for x in exp if x["user_id"] == nik][0]

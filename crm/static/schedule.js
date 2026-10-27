@@ -16,7 +16,7 @@ function dayHtml(d, compact = false) {
       ${b.lessons.map((l) => `<div class="sched-lw"><button class="sched-l" data-jg="${l.id}">
         <span class="sched-t">${esc(l.time || "—")}</span>
         <span class="grow"><b>${esc(l.name)}</b>${l.is_makeup ? ` <span class="pill">отработки</span>` : ""}<span class="small muted"> ${esc(l.age ? (/\d$/.test(l.age) ? l.age + " лет" : l.age) : "")}${l.coach ? ` · ${esc(l.coach)}` : " · тренер не назначен"}${l.assistant ? ` / ${esc(l.assistant)}` : ""}</span>
-          ${Object.entries(l.subs || {}).map(([r, x]) => x.missing ? `<span class="pill red">⚠️ нужна замена: ${r === "main" ? "тренер" : "помощник"} ${esc(x.instead)} отсутствует</span>` : `<span class="pill yellow">🔁 ${esc(x.name)} вместо ${esc(x.instead || "штатного")}</span>`).join(" ")}</span>
+          ${Object.entries(l.subs || {}).map(([r, x]) => x.missing ? `<span class="pill red">⚠️ нужна замена: ${r === "main" ? "тренер" : "помощник"} ${esc(x.instead)} отсутствует</span>` : x.solo ? `<span class="pill">👤 без ${r === "main" ? "тренера" : "помощника"}: тренер один</span>` : `<span class="pill yellow">🔁 ${esc(x.name)} вместо ${esc(x.instead || "штатного")}</span>`).join(" ")}</span>
         <span class="small">${l.is_makeup ? `${l.kids} записано` : `${l.kids} из ${l.capacity}`}${l.trials ? ` · 🎯 ${l.trials}` : ""}</span>
       </button>${!compact && !isCoach() ? `<button class="btn sm sub-btn" data-sub="${l.id}" title="Поставить другого тренера на этот день">🔁</button>` : ""}</div>`).join("") || `<div class="small muted">Тренировок нет</div>`}
     </section>`).join("")}</div>`;
@@ -80,15 +80,15 @@ function openSubForm(f, o, coaches, done) {
     f.innerHTML = `<div class="small" style="margin-bottom:6px">Кто ведёт <b>${esc(o.name)}</b> ${dShort(o.date)}</div>
       ${o.hasAssistant ? `<div class="seg" style="margin-bottom:8px"><button type="button" data-r="main" class="${role === "main" ? "active" : ""}">Тренер</button><button type="button" data-r="assistant" class="${role === "assistant" ? "active" : ""}">Помощник</button></div>` : ""}
       <div class="row" style="align-items:flex-end"><div class="field"><label>${role === "main" ? "Тренер" : "Помощник"}</label><select data-c>
-        ${o.own[role] ? "" : `<option value="">— выберите —</option>`}${coaches.map((c) => `<option value="${c.id}" ${c.id === cur ? "selected" : ""} ${c.absent ? "disabled" : ""}>${esc(c.name)}${c.id === o.own[role] ? " (штатный)" : ""}${c.absent ? " (отсутствует)" : ""}</option>`).join("")}</select></div>
+        ${o.own[role] ? "" : `<option value="">— выберите —</option>`}${o.own[role === "main" ? "assistant" : "main"] ? `<option value="solo" ${sub && sub.solo ? "selected" : ""}>👤 Никто: второй тренер ${role === "main" ? "проведёт" : "выйдет"} один</option>` : ""}${coaches.map((c) => `<option value="${c.id}" ${c.id === cur ? "selected" : ""} ${c.absent ? "disabled" : ""}>${esc(c.name)}${c.id === o.own[role] ? " (штатный)" : ""}${c.absent ? " (отсутствует)" : ""}</option>`).join("")}</select></div>
       <div class="field"><label>Комментарий</label><input data-n placeholder="Например: Артём в отпуске" value="${esc(sub ? sub.note : "")}"></div>
       <button class="btn sm primary" data-ok style="flex:0">Сохранить</button>${sub ? `<button class="btn sm" data-del style="flex:0">Отменить замену</button>` : ""}</div>
       <div class="small muted">Тренер на замене увидит эту тренировку у себя на столе</div>`;
     f.querySelectorAll("[data-r]").forEach((b) => (b.onclick = () => draw(b.dataset.r)));
     f.querySelector("[data-ok]").onclick = async () => {
-      const c = +f.querySelector("[data-c]").value;
-      if (!c) return toast("Выберите тренера");
-      try { await api("POST", "/api/substitutions", { group_id: o.group_id, date: o.date, role, coach_id: c, note: f.querySelector("[data-n]").value }); toast("Замена сохранена"); done(); }
+      const v = f.querySelector("[data-c]").value, c = +v;
+      if (!v) return toast("Выберите тренера");
+      try { await api("POST", "/api/substitutions", { group_id: o.group_id, date: o.date, role, coach_id: c, solo: v === "solo", note: f.querySelector("[data-n]").value }); toast("Сохранено"); done(); }
       catch (e) { fail(e); }
     };
     const del = f.querySelector("[data-del]");
@@ -137,17 +137,21 @@ function wireNeedsSubs(page, d) {
     f.hidden = !f.hidden;
     if (f.hidden) return;
     const away = new Set((d.absences || []).filter((a) => a.date_from <= x.date && a.date_to >= x.date).map((a) => a.user_id));
+    const partner = x.items.every((y) => y.partner_id === x.partner_id) && x.partner_id && !away.has(x.partner_id) ? coaches.find((c) => c.id === x.partner_id) : null;
     f.innerHTML = `<div class="row" style="flex-wrap:wrap;align-items:flex-end">
-      <div class="field"><label>Кто выйдет ${x.role === "main" ? "тренером" : "помощником"}</label><select data-c><option value="">— выберите —</option>${coaches.filter((c) => !away.has(c.id)).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select></div>
+      <div class="field"><label>Кто выйдет ${x.role === "main" ? "тренером" : "помощником"}</label><select data-c><option value="">— выберите —</option>
+        ${partner ? `<option value="solo">👤 Никто: ${esc(partner.name)} ${x.role === "main" ? "проведёт" : "выйдет"} один</option>` : ""}
+        ${coaches.filter((c) => !away.has(c.id)).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select></div>
       <div class="field"><label>На какие тренировки</label><div class="chips">${x.items.map((y, k) => `<label class="chip"><input type="checkbox" data-it="${k}" checked> ${lessonChip(y)}</label>`).join("")}</div></div>
       <button class="btn sm primary" data-ok style="flex:0">Сохранить</button></div>
       <div class="small muted">Можно поставить одного человека на весь день или разных: снимите галочки и сохраните по очереди</div>`;
     f.querySelector("[data-ok]").onclick = async () => {
-      const c = +f.querySelector("[data-c]").value;
-      if (!c) return toast("Выберите тренера");
+      const v = f.querySelector("[data-c]").value, c = +v;
+      if (!v) return toast("Выберите тренера");
       const its = [...f.querySelectorAll("[data-it]:checked")].map((i) => x.items[+i.dataset.it]);
       try {
-        for (const y of its) await api("POST", "/api/substitutions", { group_id: y.group_id, date: y.date, role: y.role, coach_id: c, note: `${y.absent} отсутствует` });
+        for (const y of its) await api("POST", "/api/substitutions", v === "solo" ? { group_id: y.group_id, date: y.date, role: y.role, solo: true, note: `${y.absent} отсутствует` }
+          : { group_id: y.group_id, date: y.date, role: y.role, coach_id: c, note: `${y.absent} отсутствует` });
         toast("Замена сохранена"); render();
       } catch (e) { fail(e); }
     };

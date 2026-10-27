@@ -240,7 +240,7 @@ def coach_today(con, coach_id: int, today=None) -> dict:
             sub = schedule.sub_on(con, g["id"], day, role)
             if sub:
                 replaced.append({"group_id": g["id"], "name": g["name"], "time": logic.group_time(g, today.weekday()),
-                                 "branch": g["branch"], "by": sub["coach_name"]})
+                                 "branch": g["branch"], "by": sub["coach_name"] or "никто, коллега ведёт один"})
             else:
                 les = _lesson(con, g, day, today)
                 les["role"] = role

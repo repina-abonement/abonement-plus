@@ -595,3 +595,4 @@ h2.sub { font-size: 17px; }
 .need-chips span { background: var(--surface); border-radius: 8px; padding: 2px 8px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
 @media (max-width: 700px) { .need-chips { margin-left: 0; } }
 .sub-form .chips .chip { padding: 4px 10px; font-size: 13px; flex: 0 0 auto; } .sub-form .chips { gap: 6px; }
+.chip input[type=checkbox] { width: auto; height: auto; padding: 0; display: inline-block; } .sub-form .chips label.chip { display: inline-flex; align-items: center; }

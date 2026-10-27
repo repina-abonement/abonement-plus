@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS substitutions (
     group_id INTEGER NOT NULL REFERENCES groups(id),
     date TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'main',               -- main: главный тренер, assistant: помощник
-    coach_id INTEGER NOT NULL REFERENCES users(id),   -- кто выходит вместо штатного
+    coach_id INTEGER REFERENCES users(id),            -- кто выходит вместо штатного (пусто, если коллега работает один)
+    solo INTEGER NOT NULL DEFAULT 0,                  -- 1: замены нет, второй тренер ведёт один
     note TEXT NOT NULL DEFAULT '',
     created_by TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
@@ -52,6 +53,13 @@ def init(con):
         con.executescript(SCHEMA)
         con.execute("""INSERT INTO substitutions(id, group_id, date, role, coach_id, note, created_by, created_at)
                        SELECT id, group_id, date, 'main', coach_id, note, created_by, created_at FROM substitutions_old""")
+        con.execute("DROP TABLE substitutions_old")
+    old = {r[1] for r in con.execute("PRAGMA table_info(substitutions)")}
+    if old and "solo" not in old:  # добавили вариант «коллега выйдет один»
+        con.execute("ALTER TABLE substitutions RENAME TO substitutions_old")
+        con.executescript(SCHEMA)
+        con.execute("""INSERT INTO substitutions(id, group_id, date, role, coach_id, note, created_by, created_at)
+                       SELECT id, group_id, date, role, coach_id, note, created_by, created_at FROM substitutions_old""")
         con.execute("DROP TABLE substitutions_old")
     con.executescript(SCHEMA)
     gcols = {r[1] for r in con.execute("PRAGMA table_info(groups)")}
@@ -211,7 +219,8 @@ def day(con, d: date) -> dict:
                 own_name = g["coach_name"] if role == "main" else g["assistant_name"]
                 own_id = _own(g, role)
                 if sub:
-                    subs[role] = {"id": sub["id"], "coach_id": sub["coach_id"], "name": sub["coach_name"], "instead": own_name or "", "note": sub["note"]}
+                    subs[role] = {"id": sub["id"], "coach_id": sub["coach_id"], "name": sub["coach_name"], "instead": own_name or "",
+                                  "note": sub["note"], "solo": sub["solo"]}
                 elif own_id and absent_on(con, own_id, ds):
                     subs[role] = {"missing": True, "instead": own_name or ""}
             m, a2 = subs.get("main"), subs.get("assistant")
@@ -272,17 +281,34 @@ def save_sub(con, data: dict, user: dict) -> int:
         raise SchedError("Группа не найдена")
     if d.weekday() not in logic.parse_weekdays(g["weekdays"]):
         raise SchedError("В этот день у группы нет тренировки")
+    solo = bool(data.get("solo"))
+    ds = d.isoformat()
+    note = (data.get("note") or "").strip()[:200]
+    if solo:
+        # замены нет: второй тренер группы ведёт один. Если отсутствует главный, ведёт помощник
+        other = g["assistant_id"] if role == "main" else g["coach_id"]
+        if not other:
+            raise SchedError("В группе нет второго тренера, нужна замена")
+        if role == "main":
+            _put_sub(con, gid, ds, "main", other, 0, note, user)
+            _put_sub(con, gid, ds, "assistant", None, 1, note, user)
+        else:
+            _put_sub(con, gid, ds, "assistant", None, 1, note, user)
+        return con.execute("SELECT id FROM substitutions WHERE group_id=? AND date=? AND role=?", (gid, ds, role)).fetchone()[0]
     if not con.execute("SELECT 1 FROM users WHERE id=? AND role='coach' AND active=1", (coach,)).fetchone():
         raise SchedError("Выберите тренера")
     if coach == _own(g, role):
         con.execute("DELETE FROM substitutions WHERE group_id=? AND date=? AND role=?", (gid, d.isoformat(), role))
         return 0
-    con.execute("""INSERT INTO substitutions(group_id, date, role, coach_id, note, created_by, created_at) VALUES (?,?,?,?,?,?,?)
-                   ON CONFLICT(group_id, date, role) DO UPDATE SET coach_id=excluded.coach_id, note=excluded.note,
+    _put_sub(con, gid, ds, role, coach, 0, note, user)
+    return con.execute("SELECT id FROM substitutions WHERE group_id=? AND date=? AND role=?", (gid, ds, role)).fetchone()[0]
+
+
+def _put_sub(con, gid, ds, role, coach, solo, note, user):
+    con.execute("""INSERT INTO substitutions(group_id, date, role, coach_id, solo, note, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)
+                   ON CONFLICT(group_id, date, role) DO UPDATE SET coach_id=excluded.coach_id, solo=excluded.solo, note=excluded.note,
                    created_by=excluded.created_by, created_at=excluded.created_at""",
-                (gid, d.isoformat(), role, coach, (data.get("note") or "").strip()[:200], user.get("name", ""),
-                 datetime.now().isoformat(timespec="minutes")))
-    return con.execute("SELECT id FROM substitutions WHERE group_id=? AND date=? AND role=?", (gid, d.isoformat(), role)).fetchone()[0]
+                (gid, ds, role, coach, solo, note, user.get("name", ""), datetime.now().isoformat(timespec="minutes")))
 
 
 def remove_sub(con, sub_id: int):
@@ -290,16 +316,16 @@ def remove_sub(con, sub_id: int):
 
 
 def sub_on(con, gid: int, d: str, role: str = "main"):
-    return con.execute("""SELECT s.*, u.name AS coach_name FROM substitutions s JOIN users u ON u.id=s.coach_id
+    return con.execute("""SELECT s.*, COALESCE(u.name, '') AS coach_name FROM substitutions s LEFT JOIN users u ON u.id=s.coach_id
                           WHERE s.group_id=? AND s.date=? AND s.role=?""", (gid, d, role)).fetchone()
 
 
 def coach_subs(con, coach_id: int, d_from: str, d_to: str) -> dict:
     """Замены тренера на период: где он выходит вместо другого и где заменяют его."""
     q = """SELECT s.id, s.date, s.note, s.role, g.id AS group_id, g.name AS group_name, g.time, g.day_times, b.name AS branch,
-                  u.name AS sub_name, o.name AS own_name
+                  COALESCE(u.name, 'никто, коллега один') AS sub_name, s.solo, o.name AS own_name
            FROM substitutions s JOIN groups g ON g.id=s.group_id JOIN branches b ON b.id=g.branch_id
-           JOIN users u ON u.id=s.coach_id LEFT JOIN users o ON o.id=(CASE s.role WHEN 'main' THEN g.coach_id ELSE g.assistant_id END)
+           LEFT JOIN users u ON u.id=s.coach_id LEFT JOIN users o ON o.id=(CASE s.role WHEN 'main' THEN g.coach_id ELSE g.assistant_id END)
            WHERE s.date BETWEEN ? AND ? AND {} ORDER BY s.date, g.time"""
     fix = lambda r: dict(r) | {"time": logic.group_time(r, date.fromisoformat(r["date"]).weekday())}
     return {"covering": [fix(r) for r in con.execute(q.format("s.coach_id=?"), (d_from, d_to, coach_id))],
@@ -369,6 +395,7 @@ def needs_subs(con, today: date | None = None, horizon: int = 21) -> list[dict]:
                     out.append({"date": d.isoformat(), "time": logic.group_time(g, d.weekday()), "group_id": g["id"], "age": g["age"],
                                 "is_makeup": g["is_makeup"],
                                 "group": g["name"], "branch": g["branch"], "role": role, "role_label": ROLES[role],
+                                "partner_id": _own(g, "assistant" if role == "main" else "main"),
                                 "absent": a["user_name"], "absent_id": a["user_id"], "note": a["note"]})
             d += timedelta(days=1)
     out.sort(key=lambda x: (x["date"], x["time"]))
