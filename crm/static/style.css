@@ -661,3 +661,13 @@ h2.sub { font-size: 17px; }
 .an-chip.bad { background: #fde8e8; color: #b42318; } .an-chip.warn { background: #fdf3d3; color: #8a6400; }
 @media (prefers-color-scheme: dark) { .an-chip.bad { background: rgba(180,35,24,.25); color: #f08a80; } .an-chip.warn { background: rgba(184,134,11,.22); color: #e3b84a; } }
 .list-row[hidden] { display: none !important; }
+/* телефон: Safari не увеличивает страницу при вводе (шрифт полей от 16px), у карточки всегда видна кнопка «Назад» */
+@media (max-width: 760px) {
+  input, select, textarea { font-size: 16px; }
+  .drawer-panel { padding-top: 0; overscroll-behavior: contain; }
+  .drawer-top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between;
+    margin: 0 -20px 6px; padding: calc(8px + env(safe-area-inset-top)) 14px 8px; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .drawer-top .drawer-close { position: static; }
+  .drawer-back { border: 0; background: none; color: var(--accent); font-weight: 600; font-size: 16px; padding: 6px 4px; cursor: pointer; }
+}
+@media (min-width: 761px) { .drawer-back { display: none; } .drawer-top { display: contents; } }
