@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import ai, callstats, coaches, comms, db, legal, merch, money, schedule, services as sv, sources, staff, tasks
+from . import ai, callstats, coaches, comms, db, legal, merch, money, planner, schedule, services as sv, sources, staff, tasks
 from .services import ApiError
 
 
@@ -221,8 +221,11 @@ def tasks_list(con, h, user, body, q):
     return tasks.my_tasks(con, user, q.get("scope", "mine"))
 
 
-@route("POST", "/api/tasks/{tid}/done", role="operator")
+@route("POST", "/api/tasks/{tid}/done", role="coach")
 def task_done(con, h, user, body, q, tid):
+    t = con.execute("SELECT assignee_id FROM tasks WHERE id=?", (int(tid),)).fetchone()
+    if user["role"] == "coach" and (not t or t["assignee_id"] != user["id"]):
+        raise ApiError("Это не ваша задача", 403)
     cx(tasks.complete, con, int(tid), user, body.get("result") or "")
     return {"ok": True}
 
@@ -654,6 +657,55 @@ def shift_report(con, h, user, body, q):
     return {"ok": True}
 
 
+def px(fn, *a, **kw):
+    try:
+        return fn(*a, **kw)
+    except planner.PlanError as e:
+        raise ApiError(str(e))
+
+
+@route("GET", "/api/planner")
+def planner_view(con, h, user, body, q):
+    return planner.view(con, user)
+
+
+@route("POST", "/api/planner/tasks")
+def planner_add(con, h, user, body, q):
+    return {"id": px(planner.add, con, user, body)}
+
+
+@route("POST", "/api/planner/tasks/{tid}/cancel")
+def planner_cancel(con, h, user, body, q, tid):
+    px(planner.cancel, con, int(tid), user)
+    return {"ok": True}
+
+
+@route("POST", "/api/planner/tasks/{tid}/return")
+def planner_return(con, h, user, body, q, tid):
+    px(planner.return_task, con, int(tid), user, body.get("note") or "")
+    return {"ok": True}
+
+
+@route("POST", "/api/planner/recurring/{rid}/stop")
+def planner_stop(con, h, user, body, q, rid):
+    px(planner.stop_recurring, con, int(rid), user)
+    return {"ok": True}
+
+
+@route("PUT", "/api/planner/settings", role="admin")
+def planner_settings(con, h, user, body, q):
+    px(planner.save_settings, con, body)
+    return {"ok": True}
+
+
+@route("PUT", "/api/users/{uid}/birth")
+def user_birth(con, h, user, body, q, uid):
+    if not planner.can_manage(con, user) and int(uid) != user["id"]:
+        raise ApiError("Нет доступа", 403)
+    px(planner.set_birth, con, int(uid), body.get("birth") or "")
+    return {"ok": True}
+
+
 @route("GET", "/api/schedule/week")
 def schedule_week(con, h, user, body, q):
     return schedule.week(con)
@@ -762,6 +814,8 @@ def coach_today(con, h, user, body, q):
         les["staff"] = staff.lesson_staff(con, les["id"], out["date"])
     out["coaches"] = [dict(r) for r in con.execute("SELECT id, name FROM users WHERE role='coach' AND active=1 ORDER BY name")]
     out["merch"] = merch.my_shift(con, cid, out["date"])
+    out["tasks"] = [tasks._task_out(con, r) for r in con.execute(
+        "SELECT * FROM tasks WHERE status='open' AND assignee_id=? AND due_at<=? ORDER BY due_at", (cid, out["date"] + "T23:59"))]
     return out
 
 

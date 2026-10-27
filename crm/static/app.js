@@ -60,7 +60,7 @@ function renderLogin() {
 
 /* ---------- каркас ---------- */
 const VIEWS = [
-  ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["members", "Ученики"], ["skips", "Пропуски"],
+  ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Ученики"], ["skips", "Пропуски"],
   ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["payments", "Оплаты"], ["merch", "Мерч"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
@@ -73,6 +73,7 @@ const NAV_ICONS = {
   journal: '<rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 9l1.5 1.5L13 8M9 14.5l1.5 1.5L13 13.5M15 9.5h1M15 15h1"/>',
   coaches: '<path d="M8 4h8v4a4 4 0 0 1-8 0z"/><path d="M8 5H5v1.5A3 3 0 0 0 8 9.5M16 5h3v1.5a3 3 0 0 1-3 3M12 12v4M9 20h6M10 16h4v4h-4z"/>',
   dashboard: '<path d="M4 19V10M10 19V5M16 19v-7M21 19H3"/>',
+  planner: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9l1.5 1.5L12 8M8 15l1.5 1.5L12 14M14 9.5h3M14 15.5h3"/>',
   merch: '<path d="M8 4l-4 3 2 3 2-1v11h8V9l2 1 2-3-4-3c-.5 1.5-2 2.5-4 2.5S8.5 5.5 8 4z"/>',
   payments: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h3"/>',
   search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
@@ -82,7 +83,7 @@ const NAV_ICONS = {
 const navIcon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NAV_ICONS[k] || ""}</svg>`;
 
 const isCoach = () => S.user && S.user.role === "coach";
-const COACH_VIEWS = ["today", "journal", "coaches", "settings"];
+const COACH_VIEWS = ["today", "journal", "planner", "coaches", "settings"];
 const visibleViews = () => isCoach() ? VIEWS.filter(([k]) => COACH_VIEWS.includes(k)).map(([k, t]) => [k, k === "coaches" ? "Мои результаты" : t])
   : VIEWS.filter(([k]) => k !== "today" && (S.user.role === "admin" || !["dashboard", "payments"].includes(k)));
 const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
@@ -127,6 +128,7 @@ async function render() {
     if (S.view === "today") return await renderCoachToday(page);
     if (S.view === "payments") return await renderPayments(page);
     if (S.view === "merch") return await renderMerch(page);
+    if (S.view === "planner") return await renderPlanner(page);
     if (S.view === "schedule") return await renderSchedule(page);
     if (["members", "skips"].includes(S.view)) return await renderBoard(page, S.view);
     if (S.view === "dashboard") return await renderDashboard(page);

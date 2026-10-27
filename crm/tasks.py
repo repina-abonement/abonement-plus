@@ -19,6 +19,8 @@ KINDS = {
     "not_marked": ("Тренер не отметил клиента на пробном", "📝"),
     "why_not_bought": ("Почему не купили", "🤔"),
     "manual": ("Задача", "✅"),
+    "plan": ("Задача", "📌"),
+    "bday": ("День рождения сотрудника", "🎂"),
 }
 # статусы задач в ERP Футболики → виды задач здесь. При переносе все они встают на ответственного за пробные
 ERP_STATUSES = {
@@ -181,6 +183,8 @@ def send_auto(con, s: dict, kind: str, tpl: str) -> dict:
 def run(con, now: datetime | None = None, send: bool = True) -> dict:
     """Один проход: создать задачи по пробным, отправить автосообщения, закрыть неактуальные задачи."""
     now = now or _now()
+    from . import planner
+    planner.generate(con, now.date())
     st = {k: setting(con, k) for k in AUTO_SETTINGS}
     trial_min = int((con.execute("SELECT value FROM settings WHERE key='trial_minutes'").fetchone() or ["60"])[0])
     made = sent = 0
@@ -251,8 +255,10 @@ def my_tasks(con, user: dict, scope: str = "mine") -> dict:
     now = _now()
     end_today = datetime.combine(date.today(), datetime.max.time()).isoformat(timespec="minutes")
     end_tomorrow = (datetime.combine(date.today() + timedelta(days=1), datetime.max.time())).isoformat(timespec="minutes")
+    from . import planner
+    boss = planner.can_manage(con, user)
     where, args = "status='open' AND due_at <= ?", [end_tomorrow]
-    if scope == "mine" or user["role"] != "admin":
+    if scope == "mine" or not boss:
         where += " AND assignee_id=?"
         args.append(user["id"])
     rows = [_task_out(con, r) for r in con.execute(f"SELECT * FROM tasks WHERE {where} ORDER BY due_at", args)]
@@ -265,15 +271,16 @@ def my_tasks(con, user: dict, scope: str = "mine") -> dict:
         else:
             groups["tomorrow"].append(t)
     done_today = con.execute(f"""SELECT COUNT(*) FROM tasks WHERE status='done' AND done_at >= ?
-                                 {"AND assignee_id=?" if scope == "mine" or user["role"] != "admin" else ""}""",
-                             (date.today().isoformat(), *([user["id"]] if scope == "mine" or user["role"] != "admin" else []))).fetchone()[0]
+                                 {"AND assignee_id=?" if scope == "mine" or not boss else ""}""",
+                             (date.today().isoformat(), *([user["id"]] if scope == "mine" or not boss else []))).fetchone()[0]
     team = []
-    if user["role"] == "admin":
-        for u in con.execute("SELECT id, name FROM users WHERE active=1 AND role IN ('admin','operator') ORDER BY id"):
+    if boss:
+        for u in con.execute("SELECT id, name FROM users WHERE active=1 ORDER BY role, id"):
             c = con.execute("""SELECT SUM(due_at <= ?), SUM(due_at < ?) FROM tasks WHERE status='open' AND assignee_id=?""",
                             (end_today, date.today().isoformat(), u["id"])).fetchone()
-            team.append({"id": u["id"], "name": u["name"], "open": c[0] or 0, "overdue": c[1] or 0})
-    return {"groups": groups, "done_today": done_today, "team": team, "scope": scope}
+            if c[0]:
+                team.append({"id": u["id"], "name": u["name"], "open": c[0] or 0, "overdue": c[1] or 0})
+    return {"groups": groups, "done_today": done_today, "team": team, "scope": scope, "can_manage": boss}
 
 
 def complete(con, tid: int, user: dict, result: str = "") -> None:

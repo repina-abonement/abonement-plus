@@ -8,7 +8,8 @@ const secs = (n) => n == null ? "" : n < 60 ? `${n} сек` : `${Math.floor(n / 
 const dtWhen = (iso) => {
   if (!iso) return "";
   const today = isoDate(new Date());
-  return iso.slice(0, 10) === today ? iso.slice(11, 16) : `${dShort(iso)} ${iso.slice(11, 16)}`;
+  const t = iso.slice(11, 16) === "23:59" ? "" : iso.slice(11, 16);  // задача на день без времени
+  return iso.slice(0, 10) === today ? (t || "сегодня") : `${dShort(iso)}${t ? " " + t : ""}`;
 };
 S.inbox = { tab: "chats", filter: "all", q: "" };
 

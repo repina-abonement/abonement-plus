@@ -11,7 +11,10 @@ function taskRow(t) {
   return `<div class="task" data-task="${t.id}">
     <span class="task-ico" aria-hidden="true">${t.icon}</span>
     <div class="grow">
-      <div><b>${esc(t.title)}</b>${t.source === "erp" ? ` <span class="pill">из ERP</span>` : ""}</div>
+      <div>${t.priority ? "🔥 " : ""}<b>${esc(t.title)}</b>${t.source === "erp" ? ` <span class="pill">из ERP</span>` : ""}
+        ${t.created_by_id && t.created_by_id !== t.assignee_id && t.created_by ? ` <span class="pill blue">от ${esc(firstName(t.created_by))}</span>` : ""}
+        ${t.recur_id ? ` <span class="pill" title="Повторяющееся дело">🔁</span>` : ""}</div>
+      ${t.returned_note ? `<div class="small" style="color:var(--red)">↩ Вернули: ${esc(t.returned_note)}</div>` : ""}
       ${s.id ? `<button class="linkish" data-open="${s.id}">${esc(s.name)}</button> <span class="small muted">${esc([s.parent, s.phone, trial].filter(Boolean).join(", "))}</span>` : ""}
       ${t.note ? `<div class="small muted">${esc(t.note)}</div>` : ""}
       ${auto ? `<div class="chips" style="margin-top:6px">${auto}</div>` : ""}
@@ -22,6 +25,7 @@ function taskRow(t) {
     <div class="now-act">
       ${s.phone ? `<button class="btn sm" data-dial="${esc(s.phone)}">📞</button>` : ""}
       <button class="btn sm" data-done>Выполнено</button>
+      ${t.kind === "plan" && (S.tasks.canManage || t.created_by_id === S.user.id) ? `<button class="btn sm" data-tcancel="${t.id}" title="Убрать задачу">✕</button>` : ""}
     </div>
   </div>`;
 }
@@ -29,14 +33,17 @@ function taskRow(t) {
 async function tasksSection() {
   const as = S.viewAs && S.viewAs.id !== S.user.id ? S.viewAs : null;
   const d = await api("GET", as ? "/api/tasks?as_user=" + as.id : "/api/tasks?scope=" + S.tasks.scope);
+  S.tasks.canManage = !!d.can_manage;
   const g = d.groups, total = g.overdue.length + g.today.length;
   const block = (title, list, cls = "") => list.length ? `<div class="task-group ${cls}"><h4>${title} · ${list.length}</h4>${list.map(taskRow).join("")}</div>` : "";
   return `<section class="now tasks-box">
     <div class="now-head"><h3>${as ? `Задачи: ${esc(as.name)}` : S.tasks.scope === "all" ? "Задачи команды" : "Мои задачи"}: ${total ? `на сегодня ${total}` : "на сегодня всё сделано 🎉"}</h3>
       <span class="small muted">Выполнено сегодня: ${d.done_today}</span>
-      ${S.user.role === "admin" && !as ? `<div class="seg" style="margin-left:auto"><button data-scope="mine" class="${S.tasks.scope === "mine" ? "active" : ""}">Мои</button><button data-scope="all" class="${S.tasks.scope === "all" ? "active" : ""}">Все сотрудники</button></div>` : ""}
+      ${!as ? `<button class="btn sm primary" data-tadd style="margin-left:auto">+ Задача</button>` : ""}
+      ${d.can_manage && !as ? `<div class="seg"><button data-scope="mine" class="${S.tasks.scope === "mine" ? "active" : ""}">Мои</button><button data-scope="all" class="${S.tasks.scope === "all" ? "active" : ""}">Все сотрудники</button></div>` : ""}
     </div>
     ${d.team.length && S.tasks.scope === "all" ? `<div class="chips" style="margin-bottom:10px">${d.team.map((u) => `<span class="pill ${u.overdue ? "red" : u.open ? "yellow" : "green"}">${esc(u.name)}: ${u.open} на сегодня${u.overdue ? `, просрочено ${u.overdue}` : ""}</span>`).join("")}</div>` : ""}
+    <div data-taddbox></div>
     ${block("Просрочено", g.overdue, "late")}${block("Сегодня", g.today)}${block("Завтра", g.tomorrow, "later")}
     ${!total && !g.tomorrow.length ? `<div class="muted small">Задачи по пробным появятся сами: за день до пробного, после пробного и если клиент не пришёл</div>` : ""}
   </section>`;
@@ -44,6 +51,12 @@ async function tasksSection() {
 
 function wireTasks(root) {
   root.querySelectorAll("[data-scope]").forEach((b) => (b.onclick = () => { S.tasks.scope = b.dataset.scope; render(); }));
+  const add = root.querySelector("[data-tadd]");
+  if (add) add.onclick = () => openTaskForm(root.querySelector("[data-taddbox]"), render);
+  root.querySelectorAll("[data-tcancel]").forEach((b) => (b.onclick = async () => {
+    if (!confirm("Убрать задачу?")) return;
+    try { await api("POST", `/api/planner/tasks/${b.dataset.tcancel}/cancel`, {}); render(); } catch (e) { fail(e); }
+  }));
   root.querySelectorAll(".task").forEach((row) => {
     const id = row.dataset.task;
     row.querySelector("[data-done]").onclick = () => { const f = row.querySelector(".task-done"); f.hidden = !f.hidden; if (!f.hidden) f.querySelector("input").focus(); };
@@ -93,6 +106,7 @@ async function renderCoachToday(page, coachId, viewBar = "") {
     ${d.today.length ? `<section class="now coach-sum"><div class="now-head"><h3>Сегодня ${d.today.length} ${d.today.length === 1 ? "тренировка" : d.today.length < 5 ? "тренировки" : "тренировок"}, ждём ${t.total} ${kidsWord(t.total)}</h3></div>
       <div class="cfacts">${fact(t.paid, "по абонементу", "green")}${fact(t.trials, "на пробном", "blue")}${fact(t.single, "разовое")}${fact(t.makeups, "на отработке")}${fact(t.unpaid, "без оплаты", "yellow")}${fact(t.vacation, "в отпуске, не придут")}</div></section>` : ""}
     ${checkinBox(d, !!coachId)}
+    ${(d.tasks || []).length ? `<section class="now tasks-box" style="margin-bottom:12px"><div class="now-head"><h3>Задачи на сегодня: ${d.tasks.length}</h3></div>${d.tasks.map(taskRow).join("")}</section>` : ""}
     ${d.away ? `<section class="now calm"><div class="now-head"><h3>🏖 Ты сейчас отдыхаешь до ${dShort(d.away.date_to)}</h3></div><div class="small">Тренировки на эти дни передаём другим тренерам</div></section>` : ""}
     ${d.replaced.length ? `<section class="now calm" style="margin-top:12px"><div class="now-head"><h3>Сегодня тебя заменяют</h3></div>
       ${d.replaced.map((r) => `<div class="small">🔁 ${esc(r.time || "")} ${esc(r.name)}, ${esc(r.branch)}: вместо тебя <b>${esc(r.by)}</b></div>`).join("")}</section>` : ""}
@@ -127,6 +141,7 @@ async function renderCoachToday(page, coachId, viewBar = "") {
     <div class="small muted" style="margin-top:14px">Отмечай детей сразу после тренировки: от этого зависят отработки, перерасчёт абонементов и твоё место в таблице тренеров</div>`;
   page.querySelectorAll("[data-j]").forEach((b) => (b.onclick = () => { S.journal.group = +b.dataset.j; S.journal.date = b.dataset.d; go("journal"); }));
   wireCheckin(page);
+  if (!coachId) wireTasks(page);
   wireMerchShift(page, d);
   d.today.forEach((g) => wireStaffPicker(page, "c" + g.id, g.id, d.date, render));
 }
