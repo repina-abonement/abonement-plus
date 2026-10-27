@@ -832,6 +832,16 @@ def fake_calls(con, h, user, body, q):
         raise ApiError(str(e))
 
 
+@route("POST", "/api/fake-clients/realistic", role="admin")
+def fake_realistic(con, h, user, body, q):
+    try:
+        r = fakegen.realistic(con, user, start_members=int(body.get("start") or 150))
+        r["calls"] = fakegen.fake_calls(con, user)["calls"] if con.execute("SELECT 1 FROM users WHERE role='operator' AND active=1").fetchone() else 0
+        return r
+    except ValueError as e:
+        raise ApiError(str(e))
+
+
 @route("POST", "/api/fake-clients/remove", role="admin")
 def fake_remove(con, h, user, body, q):
     n = fakegen.remove(con)

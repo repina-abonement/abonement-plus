@@ -23,3 +23,18 @@ assert ai.parse_json('```json\n{"a": 1}\n```') == {"a": 1}
 fakegen.remove(con)
 assert con.execute("select count(*) from calls").fetchone()[0] == 0
 print("ok")
+
+# школа с историей
+from crm import services as sv
+con2 = db.connect(os.path.join(tempfile.mkdtemp(), "r.sqlite3")); db.init_db(con2)
+b = schedule.save_branch(con2, {"name": "Небо"})
+for wd, t, age in (([0, 3], "16:45", "3–4"), ([1, 4], "17:45", "4–5"), ([5, 6], "10:00", "5–6"), ([2, 6], "18:00", "6–8")):
+    schedule.save_group(con2, {"name": f"Небо {t} {age}", "branch_id": b, "weekdays": wd, "time": t, "age": age})
+r = fakegen.realistic(con2, u, start_members=30, months_back=13)
+assert r["members_now"] > 10 and r["leads"] > 300 and r["left"] > 0, r
+dd = sv.dashboard(con2)
+assert dd["kpi"]["holders"]["value"] > 10 and dd["funnel_leads"][0][1] >= dd["funnel_leads"][3][1]
+assert con2.execute("SELECT COUNT(*) FROM subscriptions s LEFT JOIN payments p ON p.subscription_id=s.id WHERE s.status='paid' AND p.id IS NULL").fetchone()[0] == 0
+fakegen.remove(con2)
+assert con2.execute("SELECT COUNT(*) FROM students").fetchone()[0] == 0
+print("ok realistic")

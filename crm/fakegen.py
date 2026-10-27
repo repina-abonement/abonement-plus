@@ -334,3 +334,220 @@ def fake_calls(con, user: dict, seed: int | None = None) -> dict:
                               "Называй дату пробного целиком: «среда, 29 октября, 16:45»"]})
     calldigest.save(con, y, sip, d)
     return {"calls": made, "operator": op["name"], "digest_day": y}
+
+
+# ---------------- «как настоящая школа»: полтора года истории ----------------
+# Помесячно: лиды по сезону → пробные → покупки; отток по сезону (летом сильнее), часть ушедших летом возвращается в сентябре.
+# Конверсии разные по источникам (сарафан и «увидели тренировку» продают лучше таргета и промоутеров).
+
+LEADS_BY_MONTH = {1: 70, 2: 75, 3: 85, 4: 80, 5: 65, 6: 40, 7: 30, 8: 55, 9: 130, 10: 105, 11: 80, 12: 55}
+CHURN_BY_MONTH = {1: .06, 2: .05, 3: .05, 4: .06, 5: .09, 6: .2, 7: .24, 8: .1, 9: .04, 10: .05, 11: .05, 12: .1}
+REAL_SOURCES = [  # канал, источник, доля лидов, множитель конверсии
+    ("Сайт", "Заявка с сайта", 25, 1.0), ("Вконтакте", "Таргет ВК", 22, .7), ("Сарафан", "Посоветовали знакомые", 18, 1.6),
+    ("Филиал", "Увидели тренировку", 15, 1.4), ("Промоутер", "Промоутер у ТЦ", 12, .6), ("Паблики", "Районный паблик", 8, .9)]
+REFUSALS = ["Далеко ездить", "Неудобное время", "Дорого", "Ребёнок не захотел", "Выбрали другую секцию", "Не дозвонились"]
+
+
+def _ts(d: date, rnd, lo=9, hi=21) -> str:
+    return datetime.combine(d, datetime.min.time()).replace(hour=rnd.randint(lo, hi), minute=rnd.randint(0, 59)).isoformat(timespec="minutes")
+
+
+def realistic(con, user: dict, seed: int | None = 7, start_members: int = 150, months_back: int = 18) -> dict:
+    """Стирает прежних выдуманных и создаёт школу с историей за полтора года, похожую на настоящую."""
+    from . import services as sv, sources
+    init(con)
+    remove(con)
+    rnd = random.Random(seed)
+    today = date.today()
+    now_iso = datetime.now().isoformat(timespec="minutes")
+    cur = logic.month_of(today)
+    st = sv.settings(con)
+    prices = {"fixed": st["price_fixed"], "flex": st["price_flex"]}
+    groups = [dict(g) for g in con.execute("""SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id
+                                              WHERE g.active=1 AND b.active=1 AND g.is_makeup=0""")]
+    groups = [g for g in groups if "взросл" not in (g["age"] or "").lower()] or groups
+    if not groups:
+        raise ValueError("Сначала нужны группы в расписании")
+    src = [(sources.ensure_source(con, ch, nm), w, k) for ch, nm, w, k in REAL_SOURCES]
+    used = {r[0] for r in con.execute("SELECT phone_norm FROM parents")}
+    load = {g["id"]: 0 for g in groups}
+
+    def pick_group():
+        free = [g for g in groups if load[g["id"]] < g["capacity"]] or groups
+        w = [max(1, g["capacity"] - load[g["id"]]) ** 1.3 for g in free]
+        return rnd.choices(free, weights=w)[0]
+
+    def new_kid(g, created: str, source_id, funnel: str) -> int:
+        female = rnd.random() < 0.15
+        base = rnd.choice(SURN)
+        while True:
+            phone = f"+7 999 {rnd.randint(100, 999)}-{rnd.randint(10, 99)}-{rnd.randint(10, 99)}"
+            norm = "7999" + "".join(c for c in phone[7:] if c.isdigit())
+            if norm not in used:
+                used.add(norm)
+                break
+        mom = rnd.random() < 0.8
+        sid = sv.create_student(con, {"name": f"{rnd.choice(GIRLS if female else BOYS)} {_surname(base, female)}",
+                                      "parent_name": f"{rnd.choice(MOMS if mom else DADS)} {_surname(base, mom)}", "phone": phone,
+                                      "family_name": base + "ы", "funnel": funnel, "group_id": g["id"],
+                                      "birth": _age_birth(g["age"], rnd, today), "tariff": "flex" if rnd.random() < 0.22 else "fixed",
+                                      "source_id": source_id, "messenger": rnd.choice(["WhatsApp", "Telegram", "MAX", "WhatsApp"]),
+                                      "force_new_family": True}, user)
+        con.execute("UPDATE students SET fake=1, created_at=?, stage_changed_at=? WHERE id=?", (created, created, sid))
+        con.execute("UPDATE families SET fake=1 WHERE id=(SELECT family_id FROM students WHERE id=?)", (sid,))
+        return sid
+
+    def to_member(sid, g, when: str):
+        con.execute("""UPDATE students SET funnel='members', stage='active', converted_at=?, stage_changed_at=? WHERE id=?""",
+                    (when, when, sid))
+        if not con.execute("SELECT 1 FROM enrollments WHERE student_id=?", (sid,)).fetchone():
+            con.execute("INSERT INTO enrollments(student_id, group_id, weekdays, tariff, created_at) VALUES (?,?,?,?,?)",
+                        (sid, g["id"], "", "fixed", when))
+        load[g["id"]] += 1
+
+    def invoice(sid, ym: str, paid_at: str | None):
+        if con.execute("SELECT 1 FROM subscriptions WHERE student_id=? AND month=?", (sid, ym)).fetchone():
+            return 0
+        e = con.execute("""SELECT e.id, e.tariff, e.weekdays, g.weekdays AS gw FROM enrollments e JOIN groups g ON g.id=e.group_id
+                           WHERE e.student_id=? ORDER BY e.id LIMIT 1""", (sid,)).fetchone()
+        days = logic.parse_weekdays(e["gw"])
+        q = logic.quote(weekdays=days, ym=ym, tariff=e["tariff"], prices=prices, vacations=[], prev_unresolved_absences=0)
+        price = q["total"]
+        if rnd.random() < 0.08:  # отпуск, перерасчёт
+            price -= q["per_lesson"] * rnd.randint(1, 2)
+        y, m = map(int, ym.split("-"))
+        created = date(y, m, 1) - timedelta(days=rnd.randint(8, 14))
+        sub = con.execute("""INSERT INTO subscriptions(student_id, enrollment_id, month, tariff, lessons, per_lesson, price, status,
+                             created_at, paid_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                          (sid, e["id"], ym, e["tariff"], q["lessons_paid"], q["per_lesson"], price, "paid" if paid_at else "invoiced",
+                           created.isoformat() + "T10:00", paid_at)).lastrowid
+        if paid_at:
+            con.execute("""INSERT INTO payments(student_id, amount, method, paid_at, comment, user_name, confirmed, confirmed_by,
+                           confirmed_at, subscription_id, created_at) VALUES (?,?,?,?,?,?,1,?,?,?,?)""",
+                        (sid, price, rnd.choice(["sbp", "sbp", "card", "online", "cash", "card"]), paid_at,
+                         f"Абонемент на {logic.month_label(ym)}", "Ольга", "Юлия", paid_at, sub, paid_at))
+        return price
+
+    def renew_ts(ym: str) -> str:  # продление оплачивают с 15 по 25 число прошлого месяца, кто-то опаздывает
+        y, m = map(int, ym.split("-"))
+        first = date(y, m, 1)
+        d = first - timedelta(days=rnd.randint(4, 16)) if rnd.random() < 0.85 else first + timedelta(days=rnd.randint(0, 6))
+        return _ts(min(d, today), rnd)
+
+    months = [logic.shift_month(cur, -i) for i in range(months_back, -1, -1)]
+    active: list[tuple[int, dict]] = []
+    left_by_month: dict[str, list] = {}
+    out = {"members_now": 0, "leads": 0, "bought": 0, "left": 0, "returned": 0, "invoices": 0}
+
+    # стартовый состав: занимаются давно
+    for _ in range(start_members):
+        g = pick_group()
+        old = today.replace(day=1) - timedelta(days=30 * months_back + rnd.randint(30, 700))
+        sid = new_kid(g, _ts(old, rnd), rnd.choices([s[0] for s in src], weights=[s[1] for s in src])[0], "sales")
+        to_member(sid, g, _ts(old + timedelta(days=rnd.randint(3, 12)), rnd))
+        active.append((sid, g))
+
+    for ym in months:
+        y, m = map(int, ym.split("-"))
+        first = date(y, m, 1)
+        last = (logic.month_bounds(ym)[1])
+        is_cur = ym == cur
+        # 1) отток перед месяцем
+        churn = CHURN_BY_MONTH[m]
+        stay, gone = [], []
+        for x in active:
+            (gone if rnd.random() < churn else stay).append(x)
+        for sid, g in gone:
+            load[g["id"]] -= 1
+            con.execute("UPDATE students SET stage='left', stage_changed_at=? WHERE id=?", (_ts(first - timedelta(days=rnd.randint(1, 10)), rnd), sid))
+        left_by_month[ym] = gone
+        out["left"] += len(gone)
+        # 2) возвращения: в сентябре часть ушедших летом, в январе часть ушедших в декабре
+        back = []
+        if m in (9, 1):
+            pool = [x for k, v in left_by_month.items() if k < ym and k >= logic.shift_month(ym, -4) for x in v]
+            for sid, g in pool:
+                if rnd.random() < (0.3 if m == 9 else 0.2) and sid not in {a for a, _ in stay}:
+                    con.execute("UPDATE students SET stage='active', stage_changed_at=? WHERE id=?", (_ts(first - timedelta(days=5), rnd), sid))
+                    load[g["id"]] += 1
+                    back.append((sid, g))
+        out["returned"] += len(back)
+        # 3) оплаты продления за месяц
+        for sid, g in stay + back:
+            paid = rnd.random() < (0.93 if is_cur else 1)
+            invoice(sid, ym, renew_ts(ym) if paid else None)
+            out["invoices"] += 1
+        active = stay + back
+        # 4) лиды месяца и их путь
+        end_day = today if is_cur else last
+        n_leads = round(LEADS_BY_MONTH[m] * rnd.uniform(0.9, 1.1) * (end_day.day / last.day if is_cur else 1))
+        for _ in range(n_leads):
+            d = first + timedelta(days=rnd.randint(0, (end_day - first).days))
+            created = _ts(d, rnd)
+            if d == today and created > now_iso:
+                created = now_iso
+            s_id, _w, k = rnd.choices(src, weights=[s[1] for s in src])[0]
+            g = pick_group()
+            sid = new_kid(g, created, s_id, "sales")
+            out["leads"] += 1
+            booked = rnd.random() < min(0.85, 0.55 * (0.7 + 0.3 * k))
+            if not booked:
+                age = (today - d).days
+                stage = "lead" if age <= 1 else "no_answer" if age <= 6 and rnd.random() < .6 else "refused"
+                con.execute("UPDATE students SET stage=?, refusal_reason=?, archived=? WHERE id=?",
+                            (stage, rnd.choice(REFUSALS) if stage == "refused" else "", 1 if age > 45 else 0, sid))
+                continue
+            gd = logic.parse_weekdays(g["weekdays"]) or [1, 4]
+            t = d + timedelta(days=1)
+            while t.weekday() not in gd:
+                t += timedelta(days=1)
+            if rnd.random() < 0.3:
+                t += timedelta(days=7)
+            trial_at = f"{t.isoformat()}T{logic.group_time(g, t.weekday()) or '18:00'}"
+            con.execute("UPDATE students SET trial_booked_at=?, trial_at=?, stage='trial_booked' WHERE id=?",
+                        (_ts(d, rnd) if _ts(d, rnd) >= created else created, trial_at, sid))
+            if t > today or (t == today and trial_at > now_iso):
+                con.execute("UPDATE students SET stage=? WHERE id=?", ("trial_reminder" if (t - today).days <= 1 else "trial_booked", sid))
+                continue
+            came = rnd.random() < 0.72
+            con.execute("UPDATE students SET trial_came=? WHERE id=?", (1 if came else 0, sid))
+            buys = came and rnd.random() < min(0.9, 0.5 * k)
+            decided = t + timedelta(days=rnd.choice([0, 0, 0, 1, 2, 3]))
+            if buys and decided <= today:
+                when = _ts(decided, rnd)
+                when = min(when, now_iso)
+                to_member(sid, g, when)
+                bym = logic.month_of(decided)
+                invoice(sid, bym, when)
+                if bym != ym:  # пробное в конце месяца, купили уже следующий
+                    pass
+                active.append((sid, g))
+                out["bought"] += 1
+                continue
+            age = (today - t).days
+            if not came:
+                stage = "no_answer" if age <= 7 else "refused"
+            else:
+                stage = "how_was" if age <= 3 else "refused"
+            con.execute("UPDATE students SET stage=?, refusal_reason=?, archived=?, stage_changed_at=? WHERE id=?",
+                        (stage, rnd.choice(REFUSALS[:5]) if stage == "refused" else "", 1 if age > 45 else 0, _ts(t, rnd), sid))
+
+    # 5) следующий месяц: продление уже идёт (дедлайн 25-го)
+    nxt = logic.shift_month(cur, 1)
+    for sid, g in active:
+        if rnd.random() < 0.94 and not con.execute("SELECT 1 FROM subscriptions WHERE student_id=? AND month=?", (sid, nxt)).fetchone():
+            invoice(sid, nxt, renew_ts(nxt) if rnd.random() < (0.7 if today.day >= 25 else 0.35) else None)
+            out["invoices"] += 1
+    # 6) посещения за прошлый и текущий месяц
+    for ym in (logic.shift_month(cur, -1), cur):
+        a, b = logic.month_bounds(ym)
+        for sid, g in active:
+            gd = logic.parse_weekdays(g["weekdays"])
+            d = a
+            while d <= b and d < today:
+                if d.weekday() in gd:
+                    con.execute("INSERT OR IGNORE INTO attendance(student_id, group_id, date, status) VALUES (?,?,?,?)",
+                                (sid, g["id"], d.isoformat(), "absent" if rnd.random() < 0.11 else "present"))
+                d += timedelta(days=1)
+    out["members_now"] = len(active)
+    return out

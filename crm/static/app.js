@@ -879,7 +879,7 @@ async function renderSettings(page) {
     ${admin ? `<div class="section"><h3>Выдуманные клиенты для проверки</h3>
       <div class="small muted" style="margin-bottom:8px">Добавляют клиентов в настоящие группы: с абонементами, оплатами, посещениями, пропусками и лидами на разных этапах. Все помечены как выдуманные и удаляются одной кнопкой, настоящие клиенты не пострадают</div>
       <div class="row" style="align-items:center;flex-wrap:wrap"><input type="number" id="fake-n" value="150" min="1" max="500" style="flex:0 0 100px">
-        <button class="btn sm primary" id="fake-add" style="flex:0">Добавить</button><button class="btn sm" id="fake-calls" style="flex:0">+ Звонки с разборами</button><button class="btn sm danger" id="fake-del" style="flex:0">Удалить всех выдуманных</button></div></div>` : ""}
+        <button class="btn sm primary" id="fake-add" style="flex:0">Добавить</button><button class="btn sm" id="fake-real" style="flex:0">Школа с историей за 1,5 года</button><button class="btn sm" id="fake-calls" style="flex:0">+ Звонки с разборами</button><button class="btn sm danger" id="fake-del" style="flex:0">Удалить всех выдуманных</button></div></div>` : ""}
     ${admin && S.meta.demo ? `<div class="section"><h3>Тестовые данные</h3>
       <div class="small muted" style="margin-bottom:8px">Сейчас включён тестовый режим. Кнопка сотрёт всех клиентов и создаст выдуманных заново. Сотрудники и настройки сохранятся.</div>
       <button class="btn sm danger" id="demo-reset">Пересоздать тестовые данные</button></div>` : ""}
@@ -936,6 +936,13 @@ async function renderSettings(page) {
     try { const r = await api("POST", "/api/fake-clients", { count: +$("#fake-n").value }); toast(`Добавлено: занимаются ${r.members}, лидов ${r.leads}`); }
     catch (err) { fail(err); }
     e.target.disabled = false; e.target.textContent = "Добавить";
+  };
+  if ($("#fake-real")) $("#fake-real").onclick = async (e) => {
+    if (!confirm("Удалить прежних выдуманных и создать школу с историей за полтора года (лиды, пробные, покупки, отток, оплаты)? Настоящих клиентов это не трогает.")) return;
+    e.target.disabled = true; e.target.textContent = "Создаю, до минуты…";
+    try { const r = await api("POST", "/api/fake-clients/realistic", {}); toast(`Готово: занимаются ${r.members_now}, лидов за всё время ${r.leads}, ушли ${r.left}`); }
+    catch (err) { fail(err); }
+    e.target.disabled = false; e.target.textContent = "Школа с историей за 1,5 года";
   };
   if ($("#fake-calls")) $("#fake-calls").onclick = async () => {
     try { const r = await api("POST", "/api/fake-clients/calls", {}); toast(`Звонков: ${r.calls}, оператор ${r.operator}. Сводка дня в «Звонки» → «Сводки по дням»`); } catch (err) { fail(err); }
