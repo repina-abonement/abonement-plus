@@ -180,3 +180,38 @@ def remove(con) -> int:
                     con.execute(f"DELETE FROM {t} WHERE family_id IN ({fq})", fams)
         con.execute(f"DELETE FROM families WHERE id IN ({fq})", fams)
     return len(ids)
+
+
+def subscribe_all(con, user: dict, seed: int | None = None) -> dict:
+    """Все выдуманные клиенты — абонементщики: лиды переводим в ученики, у всех оплачены сентябрь и октябрь."""
+    from . import money, services as sv
+    init(con)
+    rnd = random.Random(seed)
+    today = date.today()
+    months = [logic.month_of(today.replace(day=1) - timedelta(days=1)), logic.month_of(today)]
+    out = {"converted": 0, "invoices": 0, "paid": 0}
+    for s in con.execute("SELECT * FROM students WHERE fake=1").fetchall():
+        sid = s["id"]
+        if s["funnel"] != "members":
+            con.execute("UPDATE students SET trial_at=NULL, trial_came=NULL WHERE id=?", (sid,))
+            sv.move_card(con, sid, "sales", "bought", user)
+            out["converted"] += 1
+        con.execute("UPDATE students SET stage='active', archived=0 WHERE id=?", (sid,))
+        for ym in months:
+            for e in con.execute("SELECT id FROM enrollments WHERE student_id=? AND active=1", (sid,)).fetchall():
+                sub = con.execute("SELECT id, status FROM subscriptions WHERE enrollment_id=? AND month=? AND status!='cancelled'",
+                                  (e["id"], ym)).fetchone()
+                if not sub:
+                    try:
+                        sub_id = sv.create_invoice(con, sid, ym, user, e["id"])["id"]
+                        out["invoices"] += 1
+                    except Exception:  # noqa: BLE001
+                        continue
+                else:
+                    sub_id = sub["id"]
+                try:
+                    money.pay_subscription(con, sub_id, rnd.choice(["sbp", "card", "cash", "sbp", "online"]), user)
+                    out["paid"] += 1
+                except ValueError:
+                    pass  # уже оплачен
+    return out

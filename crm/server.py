@@ -817,6 +817,11 @@ def fake_add(con, h, user, body, q):
     return r
 
 
+@route("POST", "/api/fake-clients/subscribe", role="admin")
+def fake_subscribe(con, h, user, body, q):
+    return fakegen.subscribe_all(con, user)
+
+
 @route("POST", "/api/fake-clients/remove", role="admin")
 def fake_remove(con, h, user, body, q):
     n = fakegen.remove(con)
