@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import ai, callstats, coaches, comms, db, legal, merch, money, planner, schedule, services as sv, sources, staff, tasks
+from . import ai, callstats, coaches, comms, db, expenses, legal, merch, money, planner, schedule, services as sv, sources, staff, tasks
 from .services import ApiError
 
 
@@ -276,6 +276,8 @@ def workdesk(con, h, user, body, q):
     return {"urgent": reds + rest, "board": board, "birthdays": sv.birthdays(con), "needs_subs": schedule.needs_subs(con),
             "checkins": staff.day_report(con) if checkin_reviewer(con, user) else None,
             "merch_alerts": merch_alerts(con),
+            "bills_due": expenses.bills_due(con) if user["role"] == "admin" else [],
+            "ads_alerts": expenses.ads_alerts(con) if user["role"] == "admin" else [],
             "absences": schedule.absences(con),
             "coaches": [dict(r) for r in con.execute("SELECT id, name FROM users WHERE role='coach' AND active=1 ORDER BY name")],
             **comms.counts(con)}
@@ -703,6 +705,65 @@ def user_birth(con, h, user, body, q, uid):
     if not planner.can_manage(con, user) and int(uid) != user["id"]:
         raise ApiError("Нет доступа", 403)
     px(planner.set_birth, con, int(uid), body.get("birth") or "")
+    return {"ok": True}
+
+
+def ex(fn, *a, **kw):
+    try:
+        return fn(*a, **kw)
+    except expenses.ExpError as e:
+        raise ApiError(str(e))
+
+
+@route("GET", "/api/bills", role="admin")
+def bills_get(con, h, user, body, q):
+    return expenses.bills_view(con)
+
+
+@route("POST", "/api/bills", role="admin")
+def bills_add(con, h, user, body, q):
+    return {"id": ex(expenses.save_bill, con, body)}
+
+
+@route("PUT", "/api/bills/{bid}", role="admin")
+def bills_put(con, h, user, body, q, bid):
+    return {"id": ex(expenses.save_bill, con, body, int(bid))}
+
+
+@route("POST", "/api/bills/{bid}/pay", role="admin")
+def bills_pay(con, h, user, body, q, bid):
+    return {"next_due": ex(expenses.pay_bill, con, int(bid), user, body.get("amount"))}
+
+
+@route("POST", "/api/bills/{bid}/archive", role="admin")
+def bills_archive(con, h, user, body, q, bid):
+    expenses.archive_bill(con, int(bid))
+    return {"ok": True}
+
+
+@route("GET", "/api/ads", role="admin")
+def ads_get(con, h, user, body, q):
+    return expenses.ads_view(con)
+
+
+@route("POST", "/api/ads/places", role="admin")
+def ads_place_add(con, h, user, body, q):
+    return {"id": ex(expenses.save_place, con, body)}
+
+
+@route("PUT", "/api/ads/places/{pid}", role="admin")
+def ads_place_put(con, h, user, body, q, pid):
+    return {"id": ex(expenses.save_place, con, body, int(pid))}
+
+
+@route("POST", "/api/ads/deals", role="admin")
+def ads_deal_add(con, h, user, body, q):
+    return {"id": ex(expenses.add_deal, con, body)}
+
+
+@route("POST", "/api/ads/posts/{pid}", role="admin")
+def ads_post_mark(con, h, user, body, q, pid):
+    ex(expenses.mark_post, con, int(pid), body.get("link") or "", body.get("status") or "posted", body.get("planned") or "")
     return {"ok": True}
 
 
