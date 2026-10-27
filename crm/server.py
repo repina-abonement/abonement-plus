@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import ai, callstats, coaches, comms, db, expenses, legal, merch, offers, money, planner, schedule, services as sv, sources, staff, tasks
+from . import ai, callstats, coaches, comms, db, expenses, fakegen, legal, merch, offers, money, planner, schedule, services as sv, sources, staff, tasks
 from .services import ApiError
 
 
@@ -804,6 +804,24 @@ def offers_upload(con, h, user, body, q):
 def offers_archive(con, h, user, body, q, oid):
     offers.archive(con, int(oid), bool(body.get("archived", True)))
     return {"ok": True}
+
+
+@route("POST", "/api/fake-clients", role="admin")
+def fake_add(con, h, user, body, q):
+    n = max(1, min(500, int(body.get("count") or 150)))
+    try:
+        r = fakegen.generate(con, n, user)
+    except ValueError as e:
+        raise ApiError(str(e))
+    sv.audit(con, user, "fake.add", str(n))
+    return r
+
+
+@route("POST", "/api/fake-clients/remove", role="admin")
+def fake_remove(con, h, user, body, q):
+    n = fakegen.remove(con)
+    sv.audit(con, user, "fake.remove", str(n))
+    return {"removed": n}
 
 
 @route("GET", "/api/schedule/week")

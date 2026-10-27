@@ -256,7 +256,7 @@ def init_db(con: sqlite3.Connection):
             ALTER TABLE subscriptions_new RENAME TO subscriptions;
         """)
     sync_enrollments(con)
-    from . import ai, comms, expenses, legal, merch, money, offers, planner, schedule, sources, staff, tasks
+    from . import ai, comms, expenses, fakegen, legal, merch, money, offers, planner, schedule, sources, staff, tasks
     legal.init(con)
     schedule.init(con)
     staff.init(con)
@@ -269,6 +269,7 @@ def init_db(con: sqlite3.Connection):
     planner.init(con)
     expenses.init(con)
     offers.init(con)
+    fakegen.init(con)
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sub_enr_month ON subscriptions(enrollment_id, month)")
     for k, v in DEFAULT_SETTINGS.items():
         con.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))

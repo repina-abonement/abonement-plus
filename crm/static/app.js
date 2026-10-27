@@ -875,6 +875,10 @@ async function renderSettings(page) {
     ${admin ? `<div class="section" id="staff-settings"><h3>Тренеры: приход и оплата</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="task-settings"><h3>Задачи и автосообщения по пробным</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="comms-settings"><h3>Связь с клиентами</h3><div class="muted small">Загружаю…</div></div>` : ""}
+    ${admin ? `<div class="section"><h3>Выдуманные клиенты для проверки</h3>
+      <div class="small muted" style="margin-bottom:8px">Добавляют клиентов в настоящие группы: с абонементами, оплатами, посещениями, пропусками и лидами на разных этапах. Все помечены как выдуманные и удаляются одной кнопкой, настоящие клиенты не пострадают</div>
+      <div class="row" style="align-items:center;flex-wrap:wrap"><input type="number" id="fake-n" value="150" min="1" max="500" style="flex:0 0 100px">
+        <button class="btn sm primary" id="fake-add" style="flex:0">Добавить</button><button class="btn sm danger" id="fake-del" style="flex:0">Удалить всех выдуманных</button></div></div>` : ""}
     ${admin && S.meta.demo ? `<div class="section"><h3>Тестовые данные</h3>
       <div class="small muted" style="margin-bottom:8px">Сейчас включён тестовый режим. Кнопка сотрёт всех клиентов и создаст выдуманных заново. Сотрудники и настройки сохранятся.</div>
       <button class="btn sm danger" id="demo-reset">Пересоздать тестовые данные</button></div>` : ""}
@@ -926,6 +930,16 @@ async function renderSettings(page) {
       toast("Тренер назначен");
     } catch (err) { fail(err); }
   }));
+  if ($("#fake-add")) $("#fake-add").onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = "Добавляю…";
+    try { const r = await api("POST", "/api/fake-clients", { count: +$("#fake-n").value }); toast(`Добавлено: занимаются ${r.members}, лидов ${r.leads}`); }
+    catch (err) { fail(err); }
+    e.target.disabled = false; e.target.textContent = "Добавить";
+  };
+  if ($("#fake-del")) $("#fake-del").onclick = async () => {
+    if (!confirm("Удалить всех выдуманных клиентов вместе с их оплатами и посещениями?")) return;
+    try { const r = await api("POST", "/api/fake-clients/remove", {}); toast(`Удалено: ${r.removed}`); } catch (err) { fail(err); }
+  };
   if ($("#demo-reset")) $("#demo-reset").onclick = async () => {
     if (!confirm("Стереть всех клиентов и создать тестовых заново?")) return;
     try { await api("POST", "/api/demo/reset", {}); S.meta = await api("GET", "/api/meta"); toast("Тестовые данные пересозданы"); render(); } catch (err) { fail(err); }
