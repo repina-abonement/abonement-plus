@@ -130,7 +130,7 @@ async function renderInbox(page) {
     <div class="page-head"><h2 class="grow">Чаты и звонки</h2>
       <div class="seg">${[["chats", "Переписки"], ["calls", "Звонки"], ["stats", "Аналитика звонков"]].map(([k, t]) => `<button data-tab="${k}" class="${I.tab === k ? "active" : ""}">${t}</button>`).join("")}</div></div>
     <div id="inbox-body"></div>`;
-  page.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { I.tab = b.dataset.tab; render(); }));
+  page.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { step(() => { I.tab = b.dataset.tab; }); }));
   if (I.tab === "calls") return renderCalls($("#inbox-body"));
   if (I.tab === "stats") return renderCallStats($("#inbox-body"));
   const body = $("#inbox-body");

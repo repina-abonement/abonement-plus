@@ -35,7 +35,7 @@ async function renderSchedule(page) {
   page.innerHTML = `<div class="page-head"><h2 class="grow">Расписание</h2>
     <div class="seg"><button data-mode="day" class="${C.mode === "day" ? "active" : ""}">День</button><button data-mode="week" class="${C.mode === "week" ? "active" : ""}">Неделя</button></div></div>
     <div id="sched-body"></div>`;
-  page.querySelectorAll("[data-mode]").forEach((b) => (b.onclick = () => { C.mode = b.dataset.mode; render(); }));
+  page.querySelectorAll("[data-mode]").forEach((b) => (b.onclick = () => { step(() => { C.mode = b.dataset.mode; }); }));
   const body = $("#sched-body");
   if (C.mode === "week") {
     const w = await api("GET", "/api/schedule/week");

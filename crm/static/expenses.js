@@ -45,7 +45,7 @@ async function renderSpend(page) {
   page.innerHTML = `<div class="page-head"><h2 class="grow">Расходы</h2></div>
     <div class="seg" style="margin-bottom:14px"><button data-st="bills" class="${C.tab === "bills" ? "active" : ""}">Мои платежи</button><button data-st="ads" class="${C.tab === "ads" ? "active" : ""}">Реклама в пабликах</button></div>
     <div id="sp-body"></div>`;
-  page.querySelectorAll("[data-st]").forEach((b) => (b.onclick = () => { C.tab = b.dataset.st; render(); }));
+  page.querySelectorAll("[data-st]").forEach((b) => (b.onclick = () => { step(() => { C.tab = b.dataset.st; }); }));
   if (C.tab === "bills") await renderBills($("#sp-body"));
   else await renderAds($("#sp-body"));
   wireSpend(page);

@@ -111,8 +111,35 @@ function shell() {
   if ($("#new-client")) $("#new-client").onclick = openNewClient;
 }
 
-function go(view) {
+/* ---------- навигация «назад»: каждый переход пишется в историю браузера ---------- */
+const navSnap = () => JSON.parse(JSON.stringify({ journal: S.journal, sched: S.sched, planner: S.planner, spend: S.spend,
+  inbox: S.inbox && { tab: S.inbox.tab, filter: S.inbox.filter } }));
+function navRestore(sub) {
+  if (!sub) return;
+  if (sub.journal) S.journal = sub.journal;
+  if (sub.sched) S.sched = sub.sched;
+  if (sub.planner) S.planner = sub.planner;
+  if (sub.spend) S.spend = sub.spend;
+  if (sub.inbox && S.inbox) Object.assign(S.inbox, sub.inbox);
+}
+const navDepth = () => (history.state && history.state.depth) || 0;
+function pushNav() {
+  try { history.pushState({ view: S.view, sub: navSnap(), depth: navDepth() + 1 }, "", "#" + S.view); } catch (_) {}
+}
+function step(fn) { fn(); pushNav(); window.scrollTo(0, 0); render(); }
+let drawerInHistory = false, skipPop = false;
+window.addEventListener("popstate", (e) => {
+  if (skipPop) { skipPop = false; return; }
+  if (drawerInHistory) { drawerInHistory = false; hideDrawer(); return; }
+  const st = e.state;
+  if (!st || !st.view) return;
+  navRestore(st.sub);
+  go(st.view, true);
+});
+
+function go(view, fromHistory = false) {
   S.view = view;
+  if (!fromHistory) pushNav();
   try { localStorage.setItem("crm.view", view); } catch (_) {}
   app.querySelectorAll("[data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   const more = $("[data-more]");
@@ -124,6 +151,14 @@ function go(view) {
 async function render() {
   const page = $("#page");
   if (!page) return;
+  await renderView(page);
+  if (navDepth() > 0 && !page.querySelector(".back-btn")) {
+    page.insertAdjacentHTML("afterbegin", `<button class="back-btn" type="button">← Назад</button>`);
+    page.querySelector(".back-btn").onclick = () => history.back();
+  }
+}
+
+async function renderView(page) {
   try {
     if (S.view === "sales") return await renderWorkdesk(page);
     if (S.view === "today") return await renderCoachToday(page);
@@ -423,8 +458,16 @@ function enableDrag(page, funnel, columns) {
 }
 
 /* ---------- карточка ---------- */
-function openDrawer(html) { $("#drawer-body").innerHTML = html; $("#drawer").hidden = false; document.body.style.overflow = "hidden"; }
-function closeDrawer() { const d = $("#drawer"); if (d) d.hidden = true; document.body.style.overflow = ""; }
+function openDrawer(html) {
+  $("#drawer-body").innerHTML = html; $("#drawer").hidden = false; document.body.style.overflow = "hidden";
+  if (!drawerInHistory) { try { history.pushState({ ...(history.state || {}), drawer: true }, ""); drawerInHistory = true; } catch (_) {} }
+}
+function hideDrawer() { const d = $("#drawer"); if (d) d.hidden = true; document.body.style.overflow = ""; }
+/* закрыть карточку: крестиком, Esc, после сохранения или кнопкой/свайпом «назад» на телефоне */
+function closeDrawer() {
+  hideDrawer();
+  if (drawerInHistory) { drawerInHistory = false; skipPop = true; history.back(); }
+}
 document.addEventListener("click", (e) => { if (e.target.closest("[data-close]")) { closeDrawer(); } });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 /* глазик в поле пароля: показать или скрыть, что вводишь */
@@ -728,8 +771,8 @@ async function renderJournal(page) {
     ${st ? `<div class="panel" style="padding:12px 14px;margin-bottom:12px">${staffPicker(st, st.coaches, "j")}</div>` : ""}
     <div class="list">${j.rows.length ? j.rows.map((r) => g.is_makeup ? makeupRow(r) : journalRow(r)).join("") : `<div class="list-row muted">${g.is_makeup ? "На эту дату никто не записан на отработку" : "В группе пока нет учеников"}</div>`}</div>`;
   if (st) wireStaffPicker(page, "j", g.id, S.journal.date, render);
-  $("#j-group").onchange = (e) => { S.journal.group = +e.target.value; render(); };
-  $("#j-date").onchange = (e) => { S.journal.date = e.target.value; render(); };
+  $("#j-group").onchange = (e) => { step(() => { S.journal.group = +e.target.value; }); };
+  $("#j-date").onchange = (e) => { step(() => { S.journal.date = e.target.value; }); };
   if (!isCoach()) page.querySelectorAll("[data-who]").forEach((el) => (el.onclick = () => openStudent(+el.dataset.who)));
   page.querySelectorAll("[data-att]").forEach((b) => (b.onclick = async () => {
     try { await api("POST", "/api/attendance", { student_id: +b.dataset.sid, group_id: S.journal.group, date: S.journal.date, status: b.dataset.att }); render(); } catch (e) { fail(e); }
@@ -899,6 +942,7 @@ async function boot() {
   S.view = isCoach() ? "today" : "sales";
   try { const v = localStorage.getItem("crm.view"); if (v && visibleViews().some(([k]) => k === v)) S.view = v; } catch (_) {}
   shell();
+  try { history.replaceState({ view: S.view, sub: navSnap(), depth: 0 }, "", "#" + S.view); } catch (_) {}
   render();
   setInterval(() => { if ($("#drawer").hidden && ["members", "skips"].includes(S.view)) render(); }, 60000);
   setInterval(() => { if ($("#drawer").hidden && S.view === "sales" && !document.hidden && !document.querySelector(".task-done:not([hidden])")) render(); }, 20000);

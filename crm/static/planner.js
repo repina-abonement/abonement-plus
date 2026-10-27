@@ -90,7 +90,7 @@ async function renderPlanner(page) {
     <div id="pl-form"></div>
     <div class="seg" style="margin-bottom:14px;flex-wrap:wrap">${tabs.map(([k, t]) => `<button data-pt="${k}" class="${C.tab === k ? "active" : ""}">${t}</button>`).join("")}</div>
     <div class="tasks-box">${body}</div>`;
-  page.querySelectorAll("[data-pt]").forEach((b) => (b.onclick = () => { C.tab = b.dataset.pt; render(); }));
+  page.querySelectorAll("[data-pt]").forEach((b) => (b.onclick = () => { step(() => { C.tab = b.dataset.pt; }); }));
   $("#pl-add").onclick = () => openTaskForm($("#pl-form"), render);
   wireTasks(page);
   page.querySelectorAll("[data-tret]").forEach((b) => (b.onclick = async () => {

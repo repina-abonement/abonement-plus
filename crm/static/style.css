@@ -541,3 +541,4 @@ h2.sub { font-size: 17px; }
 .task.done { opacity: .6; } .task-form textarea { width: 100%; }
 .chips[hidden], .sub-form[hidden] { display: none !important; } .team-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; } .team-head b { flex: 1; }
 .deal { padding: 8px 0; border-top: 1px solid var(--line); }
+.back-btn { border: 0; background: none; color: var(--accent); font-weight: 600; font-size: 15px; padding: 4px 0 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; } .back-btn:hover { text-decoration: underline; }
