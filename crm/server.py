@@ -1042,6 +1042,34 @@ def conv_link(con, h, user, body, q, cid):
     return {"ok": True}
 
 
+@route("GET", "/api/families/{fid}/lessons", role="operator")
+def family_lessons(con, h, user, body, q, fid):
+    from . import capacity
+    return {"kids": capacity.family_lessons(con, int(fid))}
+
+
+@route("POST", "/api/students/{sid}/warn", role="operator")
+def student_warn(con, h, user, body, q, sid):
+    from . import capacity
+    gid = int(body["group_id"]) if body.get("group_id") else None
+    if body.get("undo"):
+        capacity.unwarn(con, int(sid), body.get("date") or "", gid or 0, user)
+        return {"ok": True}
+    return capacity.warn(con, int(sid), body.get("date") or "", gid, body.get("note") or "", user)
+
+
+@route("GET", "/api/free-slots", role="operator")
+def free_slots(con, h, user, body, q):
+    from . import capacity
+    return {"slots": capacity.free_slots(con, int(q.get("days") or 14), int(q["branch_id"]) if q.get("branch_id") else None)}
+
+
+@route("GET", "/api/occupancy", role="operator")
+def occupancy(con, h, user, body, q):
+    from . import capacity
+    return capacity.occupancy(con, int(q.get("group_id") or 0), q.get("date") or "")
+
+
 @route("GET", "/api/families/{fid}/comms", role="operator")
 def family_comms(con, h, user, body, q, fid):
     return comms.family_comms(con, int(fid))

@@ -85,7 +85,7 @@ function birthdaysBox(list) {
 /* ---------- стол тренера ---------- */
 const KID_TAG = {
   paid: ["green", "абонемент"], single: ["", "разовое"], unpaid: ["yellow", "без оплаты"], vacation: ["", "в отпуске"],
-  makeup: ["", "отработка"], trial: ["blue", "пробное"],
+  makeup: ["", "отработка"], trial: ["blue", "пробное"], warned: ["", "предупредил, не придёт"],
 };
 const COACH_LINES = [
   "Сегодня твоя команда, тренер. Погнали ⚽", "Сначала разминка, потом магия", "Свисток на шею, улыбку на лицо",
@@ -125,7 +125,7 @@ async function renderCoachToday(page, coachId, viewBar = "") {
         <div class="today-name">${esc(g.name)}</div>
         <div class="small muted">${esc(g.branch)}${g.age ? `, ${esc(g.age)} лет` : ""}</div>
         <div class="today-facts"><span>🧒 придут ${all} ${kidsWord(all)}${g.is_makeup ? "" : ` из ${g.capacity}`}</span></div>
-        <div class="chips" style="margin:6px 0">${[["paid", c.paid], ["trial", c.trials], ["single", c.single], ["makeup", c.makeups], ["unpaid", c.unpaid], ["vacation", c.vacation]]
+        <div class="chips" style="margin:6px 0">${[["paid", c.paid], ["trial", c.trials], ["single", c.single], ["makeup", c.makeups], ["unpaid", c.unpaid], ["vacation", c.vacation], ["warned", c.warned]]
           .filter(([, n]) => n).map(([k, n]) => `<span class="pill ${KID_TAG[k][0]}">${KID_TAG[k][1]}: ${n}</span>`).join("")}</div>
         ${(g.birthdays || []).map((b) => `<div class="bday">🎂 <b>${esc(b.name)}</b>: ${b.when === "today" ? "сегодня" : "вчера был"} день рождения, ${b.age} ${yearsWord(b.age)}. Поздравь всей командой!</div>`).join("")}
         ${g.list.length ? `<details class="kid-list"><summary class="small">Кто придёт</summary>${g.list.map((k) => `<div class="kid-row"><span class="grow">${esc(k.name)}</span>${k.note ? `<span class="small muted">${esc(k.note)}</span>` : ""}<span class="pill ${KID_TAG[k.tag][0]}">${KID_TAG[k.tag][1]}</span></div>`).join("")}</details>` : ""}

@@ -71,27 +71,48 @@ def generate(con, count: int, user: dict, seed: int | None = None) -> dict:
                 break
         mom = rnd.random() < 0.8
         parent = f"{rnd.choice(MOMS if mom else DADS)} {_surname(base, mom)}"
-        g = rnd.choice(kids_groups)
         member = rnd.random() < 0.65
+        if member:
+            free = [x for x in kids_groups if _roster(con, x["id"]) < _cap(con, x)]
+            member = bool(free)
+            g = rnd.choice(free) if free else rnd.choice(kids_groups)
+        else:
+            g = rnd.choice(kids_groups)
         data = {"name": f"{child} {_surname(base, female_child)}", "parent_name": parent, "phone": phone,
                 "family_name": _surname(base, False) + "ы", "funnel": "members" if member else "sales",
                 "group_id": g["id"], "birth": _age_birth(g["age"], rnd, today), "tariff": "flex" if rnd.random() < 0.25 else "fixed",
                 "source_id": rnd.choice(src_ids), "messenger": rnd.choice(["WhatsApp", "Telegram", "MAX", ""]), "force_new_family": True}
-        sid = sv.create_student(con, data, user)
+        con.execute("SAVEPOINT fk")
+        try:
+            sid = sv.create_student(con, data, user)
+            con.execute("RELEASE fk")
+        except sv.ApiError:  # группа заполнена до лимита: этот станет лидом
+            con.execute("ROLLBACK TO fk")
+            con.execute("RELEASE fk")
+            member = False
+            data["funnel"] = "sales"
+            sid = sv.create_student(con, data, user)
         fam_id = con.execute("SELECT family_id FROM students WHERE id=?", (sid,)).fetchone()[0]
         con.execute("UPDATE families SET fake=1 WHERE id=?", (fam_id,))
         con.execute("UPDATE students SET fake=1 WHERE id=?", (sid,))
         made["families"] += 1
         n += 1
         kids = [sid]
-        if member and n < count and rnd.random() < 0.08:  # брат или сестра в той же семье
-            g2 = rnd.choice(kids_groups)
-            sid2 = sv.create_student(con, {"name": f"{rnd.choice(BOYS)} {base}", "family_id": fam_id, "funnel": "members",
-                                           "group_id": g2["id"], "birth": _age_birth(g2["age"], rnd, today),
-                                           "source_id": data["source_id"]}, user)
-            con.execute("UPDATE students SET fake=1 WHERE id=?", (sid2,))
-            kids.append(sid2)
-            n += 1
+        free2 = [x for x in kids_groups if _roster(con, x["id"]) < _cap(con, x)]
+        if member and free2 and n < count and rnd.random() < 0.08:  # брат или сестра в той же семье
+            g2 = rnd.choice(free2)
+            con.execute("SAVEPOINT fk2")
+            try:
+                sid2 = sv.create_student(con, {"name": f"{rnd.choice(BOYS)} {base}", "family_id": fam_id, "funnel": "members",
+                                               "group_id": g2["id"], "birth": _age_birth(g2["age"], rnd, today),
+                                               "source_id": data["source_id"]}, user)
+                con.execute("RELEASE fk2")
+                con.execute("UPDATE students SET fake=1 WHERE id=?", (sid2,))
+                kids.append(sid2)
+                n += 1
+            except sv.ApiError:
+                con.execute("ROLLBACK TO fk2")
+                con.execute("RELEASE fk2")
         for k in kids:
             if member:
                 made["members"] += 1
@@ -100,6 +121,16 @@ def generate(con, count: int, user: dict, seed: int | None = None) -> dict:
                 made["leads"] += 1
                 _lead_life(con, k, g, today, rnd)
     return made
+
+
+def _roster(con, gid: int) -> int:
+    return con.execute("""SELECT COUNT(*) FROM enrollments e JOIN students s ON s.id=e.student_id
+                          WHERE e.group_id=? AND e.active=1 AND s.funnel='members' AND s.stage!='left'""", (gid,)).fetchone()[0]
+
+
+def _cap(con, g) -> int:
+    lim = con.execute("SELECT lesson_limit FROM branches WHERE id=?", (g["branch_id"],)).fetchone()[0]
+    return lim if lim else 10 ** 6  # без лимита филиала не ограничиваем (старый генератор для объёма)
 
 
 def _member_life(con, sid, ym, today, user, rnd, made):

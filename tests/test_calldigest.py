@@ -17,7 +17,8 @@ assert len(d["map"]) == 10 and d["focus_today"] and d["booked"] >= 1
 f = calldigest.focus_for(con, lst[0]["operator"])
 assert f and len(f["focus"]) == 3
 # tick: сводка за вчера уже есть с тем же числом звонков, повторно не строится
-assert calldigest.tick(con) == 0
+from datetime import datetime as _dt
+assert calldigest.tick(con, _dt.now().replace(hour=12)) == 0
 # parse_json терпит обёртку ```json
 assert ai.parse_json('```json\n{"a": 1}\n```') == {"a": 1}
 fakegen.remove(con)

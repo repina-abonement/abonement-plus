@@ -137,6 +137,8 @@ def add_enrollment(con, sid: int, group_id: int, weekdays: list[int] | None, tar
     eid = con.execute("INSERT INTO enrollments(student_id, group_id, weekdays, tariff, created_at) VALUES (?,?,?,?,?)",
                       (sid, group_id, days, "flex" if tariff == "flex" else "fixed", now_iso())).lastrowid
     sync_primary(con, sid)
+    from . import capacity
+    capacity.ensure_roster(con, group_id)
     log(con, sid, f"Добавлена группа {g['name']}" + (f" ({_days_label(days)})" if days else ""), user, "system")
     return eid
 
@@ -177,13 +179,16 @@ def update_enrollment(con, eid: int, data: dict, user) -> None:
 
 def book_makeup(con, sid: int, group_id: int, day: str, absence_id: int | None, user) -> dict:
     g = con.execute("SELECT * FROM groups WHERE id = ?", (group_id,)).fetchone()
-    if not g or not g["is_makeup"]:
-        raise ApiError("Это не группа отработок")
+    if not g:
+        raise ApiError("Группа не найдена")
     d = date.fromisoformat(day)
     if d < today():
         raise ApiError("Дата отработки уже прошла")
     if d.weekday() not in logic.parse_weekdays(g["weekdays"]):
-        raise ApiError("В этот день у группы отработок нет занятия")
+        raise ApiError("В этот день у группы нет занятия")
+    if not g["is_makeup"] and con.execute("""SELECT 1 FROM enrollments WHERE student_id=? AND group_id=? AND active=1""",
+                                          (sid, group_id)).fetchone():
+        raise ApiError("Ребёнок и так ходит в эту группу")
     counters = absence_counters(con, sid)
     ids = [a["id"] for a in counters["available_ids"]]
     if not ids:
@@ -198,6 +203,9 @@ def book_makeup(con, sid: int, group_id: int, day: str, absence_id: int | None, 
         raise ApiError("Ученик уже записан на эту отработку")
     mid = con.execute("INSERT INTO makeups(student_id, absence_id, group_id, date) VALUES (?,?,?,?)",
                       (sid, absence_id, group_id, day)).lastrowid
+    if not g["is_makeup"]:
+        from . import capacity
+        capacity.ensure(con, group_id, day, "записать на отработку")
     absence_date = con.execute("SELECT date FROM attendance WHERE id=?", (absence_id,)).fetchone()[0]
     con.execute("UPDATE students SET skip_stage='none' WHERE id=?", (sid,))
     log(con, sid, f"Записан на отработку {fmt_date(day)} ({g['name']}) за пропуск {fmt_date(absence_date)}", user, "makeup")
@@ -452,6 +460,8 @@ def move_card(con, sid: int, funnel: str, stage: str, user) -> None:
             if s["group_id"] and not enrollments_of(con, sid):
                 con.execute("INSERT INTO enrollments(student_id, group_id, weekdays, tariff, created_at) VALUES (?,?,?,?,?)",
                             (sid, s["group_id"], "", s["tariff"], now_iso()))
+                from . import capacity
+                capacity.ensure_roster(con, s["group_id"])
             log(con, sid, "Купил абонемент — переведён в учеников", user, "stage")
             return
         contacted = 1 if stage in ("how_was", "refused") else s["contacted_after_trial"]
@@ -562,6 +572,8 @@ def create_student(con, data: dict, user) -> int:
     if funnel == "members" and data.get("group_id"):
         con.execute("INSERT INTO enrollments(student_id, group_id, weekdays, tariff, created_at) VALUES (?,?,?,?,?)",
                     (sid, data["group_id"], "", tariff, now_iso()))
+        from . import capacity
+        capacity.ensure_roster(con, int(data["group_id"]))
     log(con, sid, "Карточка создана", user, "system")
     audit(con, user, "student.create", str(sid))
     return sid
@@ -597,6 +609,11 @@ def update_student(con, sid: int, data: dict, user) -> None:
             con.execute("UPDATE students SET trial_booked_at = COALESCE(trial_booked_at, ?) WHERE id=?", (now_iso(), sid))
         if data.get("trial_at") and s["stage"] in ("lead", "no_answer"):
             con.execute("UPDATE students SET stage='trial_booked', stage_changed_at=? WHERE id=?", (now_iso(), sid))
+    if ("trial_at" in changes or "group_id" in changes) and s["funnel"] == "sales":
+        cur = get_student_row(con, sid)
+        if cur["trial_at"] and cur["group_id"] and cur["trial_at"][:10] >= today().isoformat():
+            from . import capacity
+            capacity.ensure(con, cur["group_id"], cur["trial_at"][:10], "записать на пробное")
     names = {"name": "имя", "birth": "дата рождения", "group_id": "группа", "tariff": "тариф",
              "trial_at": "пробное", "source": "источник", "source_id": "источник", "refusal_reason": "причина отказа"}
     if changes:
@@ -642,11 +659,19 @@ def journal(con, group_id: int, day: str) -> dict:
                                 ORDER BY s.name""", (group_id,)).fetchall():
             if s["weekdays"] and d.weekday() not in logic.parse_weekdays(s["weekdays"]):
                 continue
-            a = con.execute("SELECT status, resolved FROM attendance WHERE student_id=? AND date=? AND group_id=?",
+            a = con.execute("SELECT status, resolved, warned, note FROM attendance WHERE student_id=? AND date=? AND group_id=?",
                             (s["id"], day, group_id)).fetchone()
             vac = logic.in_vacation(d, vacations_of(con, s["id"]))
             rows.append({"id": s["id"], "name": s["name"], "status": "vacation" if vac else (a["status"] if a else None),
-                         "resolved": a["resolved"] if a else None})
+                         "resolved": a["resolved"] if a else None, "warned": bool(a and a["warned"]) and not vac,
+                         "note": a["note"] if a else ""})
+        # отработки в обычной группе (на место того, кто предупредил)
+        for m in con.execute(
+                """SELECT m.id AS makeup_id, m.status AS mk_status, s.id, s.name, a.date AS absence_date,
+                          (SELECT g2.name FROM groups g2 WHERE g2.id = s.group_id) AS home_group
+                   FROM makeups m JOIN students s ON s.id=m.student_id JOIN attendance a ON a.id=m.absence_id
+                   WHERE m.group_id=? AND m.date=? AND m.status != 'cancelled' ORDER BY s.name""", (group_id, day)):
+            rows.append(dict(m) | {"status": "makeup"})
         # пробные на этот день
         for s in con.execute("""SELECT id, name, trial_at FROM students WHERE funnel='sales' AND group_id=? AND archived=0
                                 AND substr(trial_at,1,10)=?""", (group_id, day)):
@@ -688,7 +713,8 @@ def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -
             return
         if status == "present":
             con.execute("UPDATE makeups SET status='cancelled' WHERE absence_id=? AND status='booked'", (a["id"],))
-        con.execute("UPDATE attendance SET status=? WHERE id=?", (status, a["id"]))
+        con.execute("UPDATE attendance SET status=?, warned=CASE WHEN ?='present' THEN 0 ELSE warned END WHERE id=?",
+                    (status, status, a["id"]))
     else:
         con.execute("INSERT INTO attendance(student_id, group_id, date, status) VALUES (?,?,?,?)",
                     (sid, group_id, day, status))

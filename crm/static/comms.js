@@ -260,7 +260,7 @@ async function openChat(cid, keepScroll = false) {
       <div class="section">
         ${c.family_id ? `<div class="small muted">Семья ${esc(c.family_name)}</div>
           <div class="chips" style="margin-top:6px">${c.students.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}
-          <button class="chip" id="unlink">Отвязать</button></div>`
+          <button class="chip" id="unlink">Отвязать</button></div><div id="warn-box"></div>`
         : `<div class="small">Переписка не привязана к карточке</div>
           <div class="row" style="margin-top:8px"><input id="link-q" placeholder="Найти ученика или родителя"><button class="btn sm" id="new-lead" style="flex:0">+ Новый лид</button></div>
           <div id="link-res" class="chips" style="margin-top:6px"></div>`}
@@ -275,6 +275,7 @@ async function openChat(cid, keepScroll = false) {
   const feed = $("#chat-feed"); feed.scrollTop = feed.scrollHeight;
   const body = $("#drawer-body");
   body.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => { stopChatTimer(); openStudent(+b.dataset.open); }));
+  if (c.family_id) loadWarnBox(c.family_id, $("#warn-box"));
   if ($("#unlink")) $("#unlink").onclick = async () => { await api("POST", `/api/conversations/${cid}/link`, { family_id: null }).catch(fail); openChat(cid); };
   if ($("#new-lead")) $("#new-lead").onclick = () => { stopChatTimer(); openNewClient({ phone: c.phone, parent_name: c.title, conversation_id: cid }); };
   if ($("#link-q")) {

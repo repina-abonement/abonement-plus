@@ -280,6 +280,8 @@ function branchForm(b, done) {
     <form class="section" id="bf">
       <div class="field"><label>Название</label><input name="name" required value="${esc(b ? b.name : "")}"></div>
       <div class="field"><label>Адрес</label><input name="address" value="${esc(b ? b.address : "")}" placeholder="Подставляется в напоминания о пробном"></div>
+      <div class="field"><label>Не больше детей на одной тренировке</label><input name="lesson_limit" type="number" min="0" value="${b && b.lesson_limit ? b.lesson_limit : ""}" placeholder="Без ограничения">
+        <div class="small muted">CRM не даст записать больше: ни учеником, ни на пробное, ни на отработку. Кто предупредил, что не придёт, место не занимает</div></div>
       <div class="row"><button class="btn primary">Сохранить</button>${b ? `<button type="button" class="btn danger" id="b-arch">В архив</button>` : ""}</div>
     </form>`);
   $("#bf").onsubmit = async (e) => {

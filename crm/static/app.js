@@ -517,7 +517,8 @@ async function openStudent(id) {
       ${!isMember ? `<div class="field"><label>Тариф</label><select id="f-tariff"><option value="fixed" ${s.tariff === "fixed" ? "selected" : ""}>Негибкий</option><option value="flex" ${s.tariff === "flex" ? "selected" : ""}>Гибкий</option></select></div>` : ""}
     </div>
     ${!isMember ? `<div class="field"><label>Группа для пробного</label><select id="f-group"><option value="">— не выбрана —</option>${groups.map((x) => `<option value="${x.id}" ${x.id === s.group_id ? "selected" : ""}>${esc(x.name)} · ${esc(x.age)} лет</option>`).join("")}</select></div>
-    <div class="field"><label>Пробное занятие</label><input id="f-trial" type="datetime-local" value="${esc(s.trial_at || "")}"></div>` : ""}
+    <div class="field"><label>Пробное занятие</label><input id="f-trial" type="datetime-local" value="${esc(s.trial_at || "")}"></div>
+    <div id="trial-occ" class="small"></div><div id="trial-slots"></div>` : ""}
     <div class="field"><label>Откуда узнали</label>${sourceSelect("f-source", s.source_id, s.source)}</div>
   </div>
 
@@ -540,6 +541,7 @@ async function openStudent(id) {
       <div class="counter"><b>${c.made_up}</b><span>отработано</span></div>
       <div class="counter hl"><b>${c.available}</b><span>можно отработать</span></div>
     </div>
+    <div id="warn-box" style="margin-top:10px"></div>
     ${c.booked ? `<div class="small muted" style="margin-top:8px">Записан на отработку: ${c.booked}</div>` : ""}
     ${c.credited ? `<div class="small muted" style="margin-top:4px">Ушло в перерасчёт: ${c.credited}</div>` : ""}
     ${c.available ? `
@@ -547,7 +549,8 @@ async function openStudent(id) {
         <div class="field"><label>Группа отработок</label><select id="mk-group">${makeupGroups.map((x) => `<option value="${x.id}">${esc(x.name)} · ${esc(x.age)} лет</option>`).join("")}</select></div>
         <div class="field"><label>Дата</label><select id="mk-date">${nextSaturdays(5).map((x) => `<option value="${x}">${dShort(x)}</option>`).join("")}</select></div>
       </div>
-      <button class="btn primary sm" id="mk-book">Записать на отработку</button>` : ""}
+      <button class="btn primary sm" id="mk-book">Записать на отработку</button>
+      <div id="mk-slots"></div>` : ""}
     ${d.makeups.length ? `<ul class="history" style="margin-top:10px">${d.makeups.map((m) => `<li>${dShort(m.date)} · ${esc(m.group_name)} · за пропуск ${dShort(m.absence_date)} <span class="pill ${m.status === "done" ? "green" : m.status === "missed" ? "red" : ""}">${{ booked: "записан", done: "отработал", missed: "не пришёл", cancelled: "отменена" }[m.status]}</span>
       ${m.status === "booked" ? `<button class="btn sm" data-mk="${m.id}" data-st="cancelled">Отменить</button>` : ""}</li>`).join("")}</ul>` : ""}
   </div>` : ""}
@@ -640,6 +643,20 @@ async function openStudent(id) {
   loadFamilyComms(s.family_id, d.parents, id);
   wireConsent(d.family, reload);
 
+  if (isMember) loadWarnBox(s.family_id, $("#warn-box"), id);
+  if ($("#mk-slots")) loadSlots($("#mk-slots"), async (x) => {
+    if (!confirm(`Записать ${s.name} на отработку ${dayLabel(x.date)} ${x.time} в группу ${x.group}?`)) return;
+    try { await api("POST", `/api/students/${id}/makeups`, { group_id: x.group_id, date: x.date }); toast("Записан на отработку"); reload(); } catch (e) { fail(e); }
+  }, "Или на свободное место в обычной группе (жёлтые — освободились, потому что кто-то предупредил):", s.birth);
+  if ($("#trial-slots")) {
+    if (s.group_id && s.trial_at) api("GET", `/api/occupancy?group_id=${s.group_id}&date=${s.trial_at.slice(0, 10)}`).then((o) => {
+      if (o.limit) $("#trial-occ").innerHTML = `На эту тренировку записано <b>${o.count} из ${o.limit}</b>${o.warned.length ? ` (предупредили, что не придут: ${esc(o.warned.join(", "))})` : ""}`;
+    }).catch(() => {});
+    loadSlots($("#trial-slots"), async (x) => {
+      if (!confirm(`Записать на пробное ${dayLabel(x.date)} ${x.time}, группа ${x.group}?`)) return;
+      patch({ group_id: x.group_id, trial_at: `${x.date}T${x.time || "18:00"}` });
+    }, "Свободные места на пробное (подходят по возрасту):", s.birth);
+  }
   if ($("#mk-book")) $("#mk-book").onclick = async () => {
     try { await api("POST", `/api/students/${id}/makeups`, { group_id: +$("#mk-group").value, date: $("#mk-date").value }); toast("Записан на отработку"); reload(); } catch (e) { fail(e); }
   };
@@ -799,6 +816,9 @@ async function renderJournal(page) {
 }
 
 function journalRow(r) {
+  if (r.status === "makeup") return makeupRow({ ...r, status: r.mk_status, home_group: "отработка" + (r.home_group ? ", из группы " + r.home_group : "") });
+  if (r.warned) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${esc(r.name)} <span class="pill yellow">предупредил, не придёт</span>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ""}</div>
+    <div class="mark"><button data-att="present" data-sid="${r.id}">Всё-таки был</button></div></div>`;
   if (r.status === "vacation") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${esc(r.name)}</div><span class="pill yellow">Отпуск</span></div>`;
   if (r.status === "trial") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${esc(r.name)} <span class="pill green">пробное ${r.trial_at.slice(11, 16)}</span></div>
     <div class="mark"><button data-trial="1" data-sid="${r.id}" class="${r.trial_came === 1 ? "on-present" : ""}">Пришёл</button><button data-trial="0" data-sid="${r.id}" class="${r.trial_came === 0 ? "on-absent" : ""}">Не пришёл</button></div></div>`;

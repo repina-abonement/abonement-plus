@@ -671,3 +671,17 @@ h2.sub { font-size: 17px; }
   .drawer-back { border: 0; background: none; color: var(--accent); font-weight: 600; font-size: 16px; padding: 6px 4px; cursor: pointer; }
 }
 @media (min-width: 761px) { .drawer-back { display: none; } .drawer-top { display: contents; } }
+/* предупредил о пропуске, свободные места */
+.warn-box { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+.warn-head { font-weight: 600; font-size: 14px; margin-bottom: 6px; } .warn-head .small { font-weight: 400; display: block; }
+.warn-kid { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 4px 0; } .warn-kid b { min-width: 56px; font-size: 14px; }
+.warn-chip.off { background: #fde8e8; color: #b42318; border-color: #f5c2bd; text-decoration: line-through; }
+.warn-chip.sel { outline: 2px solid var(--accent); }
+.warn-chip[disabled] { opacity: .5; }
+.warn-note { margin-top: 8px; }
+.slots { display: grid; gap: 6px; } .slot-day { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; } .slot-day > b { min-width: 64px; font-size: 13px; }
+.chip.slot.hot { background: #fdf3d3; border-color: #f1dfa8; }
+@media (prefers-color-scheme: dark) { .warn-chip.off { background: rgba(180,35,24,.25); color: #f08a80; border-color: transparent; } .chip.slot.hot { background: rgba(184,134,11,.22); border-color: transparent; } }
+details.warn-box > summary { cursor: pointer; list-style: none; margin: 0; } details.warn-box > summary::-webkit-details-marker { display: none; }
+details.warn-box > summary::after { content: "›"; float: right; color: var(--ink-2); transition: transform .15s; } details.warn-box[open] > summary::after { transform: rotate(90deg); }
+details.warn-box[open] > summary { margin-bottom: 6px; }

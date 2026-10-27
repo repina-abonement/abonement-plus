@@ -191,6 +191,10 @@ def _lesson(con, g, day, today, sub=None, replaced=None) -> dict:
     for r in rows:
         if g["is_makeup"]:
             kids.append({"id": r["id"], "name": r["name"], "tag": "makeup", "note": r.get("home_group") or "", "status": r.get("status")})
+        elif r.get("status") == "makeup":
+            kids.append({"id": r["id"], "name": r["name"], "tag": "makeup", "note": r.get("home_group") or "", "status": r.get("mk_status")})
+        elif r.get("warned"):
+            kids.append({"id": r["id"], "name": r["name"], "tag": "warned", "note": r.get("note") or "", "status": "absent"})
         elif r.get("status") == "trial":
             trials.append({"id": r["id"], "name": r["name"], "tag": "trial", "status": r.get("trial_came"),
                            "note": (r.get("trial_at") or "")[11:16]})
@@ -202,11 +206,11 @@ def _lesson(con, g, day, today, sub=None, replaced=None) -> dict:
         info = sv.birthday_info(b[0], today) if b and b[0] else None
         if info:
             bdays.append({"name": r["name"], **info})
-    regular = [k for k in kids if k["tag"] != "makeup"]
-    come = [k for k in kids if k["tag"] != "vacation"]
+    regular = [k for k in kids if k["tag"] not in ("makeup", "warned")]
+    come = [k for k in kids if k["tag"] not in ("vacation", "warned")]
     counts = {"total": len(come) + len(trials), "paid": sum(k["tag"] == "paid" for k in kids),
               "single": sum(k["tag"] == "single" for k in kids), "unpaid": sum(k["tag"] == "unpaid" for k in kids),
-              "vacation": sum(k["tag"] == "vacation" for k in kids), "makeups": sum(k["tag"] == "makeup" for k in kids),
+              "vacation": sum(k["tag"] == "vacation" for k in kids), "warned": sum(k["tag"] == "warned" for k in kids), "makeups": sum(k["tag"] == "makeup" for k in kids),
               "trials": len(trials)}
     marked = sum(1 for r in come if r.get("status") in ("present", "absent", "done", "missed"))
     out = {"id": g["id"], "name": g["name"], "time": logic.group_time(g, date.fromisoformat(day).weekday()), "branch": g["branch"], "age": g["age"],

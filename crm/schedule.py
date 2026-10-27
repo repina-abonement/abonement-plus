@@ -98,10 +98,16 @@ def save_branch(con, data: dict, bid: int | None = None) -> int:
     if not name:
         raise SchedError("Укажите название филиала")
     addr = (data.get("address") or "").strip()
+    lim = data.get("lesson_limit")
+    lim = int(lim) if str(lim or "").strip().isdigit() else None
     if bid:
         con.execute("UPDATE branches SET name=?, address=? WHERE id=?", (name, addr, bid))
+        if lim is not None:
+            con.execute("UPDATE branches SET lesson_limit=? WHERE id=?", (lim, bid))
         return bid
-    return con.execute("INSERT INTO branches(name, address) VALUES (?,?)", (name, addr)).lastrowid
+    if lim is None:
+        lim = 10 if "небо" in name.lower() else 0  # в ТЦ «Небо» не больше 10 детей на тренировку
+    return con.execute("INSERT INTO branches(name, address, lesson_limit) VALUES (?,?,?)", (name, addr, lim)).lastrowid
 
 
 def set_branch_active(con, bid: int, active: bool):

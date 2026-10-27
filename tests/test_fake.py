@@ -15,7 +15,7 @@ def main():
     con = db.connect(os.path.join(tempfile.mkdtemp(), "f.sqlite3"))
     db.init_db(con)
     print("Выдуманные клиенты")
-    b = schedule.save_branch(con, {"name": "Небо"})
+    b = schedule.save_branch(con, {"name": "Небо", "lesson_limit": "0"})  # без лимита: проверяем объём
     for wd, t, age in (([0, 3], "16:45", "3–4"), ([1, 4], "17:45", "4–5"), ([5, 6], "10:00", "5–6")):
         schedule.save_group(con, {"name": f"Небо {t} {age}", "branch_id": b, "weekdays": wd, "time": t, "age": age})
     real = sv.create_student(con, {"name": "Настоящий", "parent_name": "Мама", "phone": "+7 900 111-11-11", "funnel": "sales"}, ADM)
