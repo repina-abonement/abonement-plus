@@ -830,3 +830,17 @@ html.theme-soft :is(.now, .list-row, .card, .now-item) :is(b, strong) { color: v
   cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; display: grid; place-items: center; }
 .pin-keys button:active { background: var(--surface-2); }
 .pin-keys .pin-link { font-size: 14px; line-height: 1.25; color: var(--ink); }
+/* вкладки крупным текстом: в одну строку с прокруткой вбок, без переносов */
+html.theme-soft .seg { display: flex; flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: none; -webkit-overflow-scrolling: touch; gap: 16px; }
+html.theme-soft .seg::-webkit-scrollbar { display: none; }
+html.theme-soft .seg button { font-size: 18px; white-space: nowrap; flex: 0 0 auto; }
+html.theme-soft .an-tabs { margin-bottom: 14px; }
+/* журнал: кнопки отметок как мягкие плашки */
+html.theme-soft .mark button { border: 0; background: var(--surface-2); border-radius: 12px; padding: 8px 14px; font-size: 14px; font-weight: 550; color: var(--ink); }
+html.theme-soft .mark button.on-present { background: var(--accent); color: var(--accent-ink); }
+html.theme-soft .mark button.on-absent { background: var(--red); color: #fff; }
+html.theme-soft .page-head { margin-bottom: 14px; }
+@media (max-width: 760px) { html.theme-soft h2 { font-size: 24px; } html.theme-soft .page-head .muted.small { flex-basis: 100%; } }
+html.theme-soft .chip { border: 0; background: var(--surface-2); }
+html.theme-soft .chip.day.on, html.theme-soft .chip.on { background: var(--accent); color: var(--accent-ink); }
+html.theme-soft .seg { flex-wrap: nowrap !important; }
