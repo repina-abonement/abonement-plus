@@ -190,6 +190,13 @@ def remove(con) -> int:
     """Удаляет всех выдуманных клиентов вместе с их оплатами, посещениями и историей."""
     init(con)
     con.execute("DELETE FROM calls WHERE external_id LIKE 'fake-call-%'")
+    try:  # отметки тренировок, где были только выдуманные дети
+        con.execute("""DELETE FROM lesson_marks WHERE EXISTS (SELECT 1 FROM attendance a JOIN students s ON s.id=a.student_id
+                         WHERE a.group_id=lesson_marks.group_id AND a.date=lesson_marks.date AND s.fake=1)
+                       AND NOT EXISTS (SELECT 1 FROM attendance a JOIN students s ON s.id=a.student_id
+                         WHERE a.group_id=lesson_marks.group_id AND a.date=lesson_marks.date AND s.fake=0)""")
+    except Exception:  # noqa: BLE001
+        pass
     try:
         con.execute("DELETE FROM ad_posts WHERE deal_id IN (SELECT id FROM ad_deals WHERE note='fake-demo')")
         con.execute("DELETE FROM ad_deals WHERE note='fake-demo'")
@@ -665,5 +672,26 @@ def realistic(con, user: dict, seed: int | None = 7, start_members: int = 150, m
                             (did, (paid + timedelta(days=2)).isoformat(), (paid + timedelta(days=2)).isoformat()))
     except Exception:  # noqa: BLE001 — без раздела рекламы просто без трат
         pass
+    # посещения сборной за прошлый и текущий месяц
+    for e in con.execute("""SELECT e.student_id, e.group_id, g.weekdays FROM enrollments e JOIN groups g ON g.id=e.group_id
+                            JOIN students s ON s.id=e.student_id WHERE g.program_id IS NOT NULL AND e.active=1 AND s.fake=1""").fetchall():
+        gd = logic.parse_weekdays(e["weekdays"])
+        for ym in (logic.shift_month(cur, -1), cur):
+            a, b = logic.month_bounds(ym)
+            d = a
+            while d <= b and d < today:
+                if d.weekday() in gd:
+                    con.execute("INSERT OR IGNORE INTO attendance(student_id, group_id, date, status) VALUES (?,?,?,?)",
+                                (e["student_id"], e["group_id"], d.isoformat(), "absent" if rnd.random() < 0.08 else "present"))
+                d += timedelta(days=1)
+    # когда тренеры отмечали тренировки: в основном до 30 минут, иногда позже
+    for gid, d in con.execute("""SELECT DISTINCT a.group_id, a.date FROM attendance a JOIN students s ON s.id=a.student_id
+                                 WHERE s.fake=1""").fetchall():
+        g = con.execute("SELECT * FROM groups WHERE id=?", (gid,)).fetchone()
+        t = logic.group_time(g, date.fromisoformat(d).weekday()) or "18:00"
+        end = datetime.combine(date.fromisoformat(d), datetime.strptime(t, "%H:%M").time()) + timedelta(minutes=60)
+        late = rnd.random() < 0.12
+        con.execute("INSERT OR IGNORE INTO lesson_marks(group_id, date, completed_at) VALUES (?,?,?)",
+                    (gid, d, (end + timedelta(minutes=rnd.randint(35, 180) if late else rnd.randint(-20, 25))).isoformat(timespec="minutes")))
     out["members_now"] = len(active)
     return out

@@ -24,7 +24,7 @@ function taskRow(t) {
     <span class="small muted when">${dtWhen(t.due_at)}</span>
     <div class="now-act">
       ${s.phone ? `<button class="btn sm" data-dial="${esc(s.phone)}">📞</button>` : ""}
-      <button class="btn sm" data-done>Выполнено</button>
+      ${t.kind === "rebook" ? `<button class="btn sm primary" data-rebook="${t.id}">Итог звонка</button>` : `<button class="btn sm" data-done>Выполнено</button>`}
       ${t.kind === "plan" && (S.tasks.canManage || t.created_by_id === S.user.id) ? `<button class="btn sm" data-tcancel="${t.id}" title="Убрать задачу">✕</button>` : ""}
     </div>
   </div>`;
@@ -59,7 +59,7 @@ function wireTasks(root) {
   }));
   root.querySelectorAll(".task").forEach((row) => {
     const id = row.dataset.task;
-    row.querySelector("[data-done]").onclick = () => { const f = row.querySelector(".task-done"); f.hidden = !f.hidden; if (!f.hidden) f.querySelector("input").focus(); };
+    if (row.querySelector("[data-done]")) row.querySelector("[data-done]").onclick = () => { const f = row.querySelector(".task-done"); f.hidden = !f.hidden; if (!f.hidden) f.querySelector("input").focus(); };
     const finish = async () => {
       try { await api("POST", `/api/tasks/${id}/done`, { result: row.querySelector("[data-result]").value }); toast("Задача выполнена"); render(); }
       catch (e) { fail(e); }
@@ -103,6 +103,8 @@ async function renderCoachToday(page, coachId, viewBar = "") {
   page.innerHTML = `${viewBar}
     <div class="page-head"><h2 class="grow">Привет, ${esc(first)}!</h2><span class="muted small">${dShort(d.date)}, ${wd(d.date)}</span></div>
     <div class="muted" style="margin:-6px 0 14px">${line}</div>
+    ${(d.missing_marks || []).map((m) => `<div class="alert" style="margin-bottom:10px"><b>Срочно отметь детей:</b> ${esc(m.group)}, ${dShort(m.date)} ${esc(m.time)}. Без отметки: ${m.missing}
+      <button class="btn sm primary" data-j="${m.group_id}" data-d="${m.date}" style="margin-left:8px">Отметить</button></div>`).join("")}
     ${d.today.length ? `<section class="now coach-sum"><div class="now-head"><h3>Сегодня ${d.today.length} ${d.today.length === 1 ? "тренировка" : d.today.length < 5 ? "тренировки" : "тренировок"}, ждём ${t.total} ${kidsWord(t.total)}</h3></div>
       <div class="cfacts">${fact(t.paid, "по абонементу", "green")}${fact(t.trials, "на пробном", "blue")}${fact(t.single, "разовое")}${fact(t.makeups, "на отработке")}${fact(t.unpaid, "без оплаты", "yellow")}${fact(t.vacation, "в отпуске, не придут")}</div></section>` : ""}
     ${checkinBox(d, !!coachId)}

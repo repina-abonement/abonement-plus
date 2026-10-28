@@ -321,7 +321,19 @@ async function renderDashboard(page) {
 const BOARD_TITLES = { sales: "Воронка продаж", members: "Ученики и продления", skips: "Пропуски и отработки" };
 
 function boardHtml(data) {
-  return `<div class="board">${data.columns.map((c) => `
+  let hidden = 0, later = 0;
+  if (data.funnel === "sales" && data.today_end) {
+    data = { ...data, columns: data.columns.map((c) => {
+      const cards = S.boardAll ? c.cards : c.cards.filter((k) => !k.due || k.due <= data.today_end);
+      hidden += c.cards.length - cards.length;
+      if (c.key === "later") later = c.cards.length;
+      return { ...c, cards };
+    }).filter((c) => S.boardAll || c.key !== "later" || c.cards.length) };
+  }
+  const bar = data.funnel === "sales" && data.today_end ? `<div class="board-bar small">
+      ${S.boardAll ? "Показаны все карточки" : "Показаны задачи на сегодня"}${!S.boardAll && hidden ? ` · отложено на другие дни: <b>${hidden}</b>` : ""}${later ? ` · «Пригласим позже»: ${later}` : ""}
+      <button class="linkish small" data-boardall>${S.boardAll ? "Только на сегодня" : "Показать все"}</button></div>` : "";
+  return `${bar}<div class="board">${data.columns.map((c) => `
       <section class="col" data-stage="${c.key}">
         <div class="col-head"><h3>${esc(c.title)}</h3>${c.auto ? `<span class="auto">сам</span>` : ""}<span class="count">${c.cards.length}</span></div>
         <div class="col-body">${c.cards.length ? c.cards.map((k) => cardHtml(k, data.draggable && !c.auto)).join("") : `<div class="empty">Пусто</div>`}</div>
@@ -330,6 +342,7 @@ function boardHtml(data) {
 }
 
 function wireBoard(page, funnel, data) {
+  page.querySelectorAll("[data-boardall]").forEach((b) => (b.onclick = () => { S.boardAll = !S.boardAll; render(); }));
   page.querySelectorAll(".card").forEach((el) => (el.onclick = () => openStudent(+el.dataset.id)));
   if (data.draggable) enableDrag(page, funnel, data.columns);
 }
@@ -394,6 +407,7 @@ async function renderWorkdesk(page) {
     ${spendDeskBox(d)}
     ${checkinReport(d.checkins)}
     ${merchAlerts(d.merch_alerts)}
+    ${marksBox(d)}
     ${needsSubsBox(d)}
     ${waitlistBox(d.waitlist)}
     ${schedHtml}
@@ -422,6 +436,7 @@ async function renderWorkdesk(page) {
   wireViewAs(page);
   wireNeedsSubs(page, d);
   wireWaitlist(page);
+  wireMarks(page);
   wireCheckinReport(page);
   wireSpend(page);
   wireMerchAlerts(page);
@@ -447,7 +462,15 @@ function cardHtml(k, draggable) {
     <div class="meta">${esc(sub)}</div>
     ${meta2 ? `<div class="meta">${esc(meta2)}</div>` : ""}
     ${k.badge ? `<span class="badge">${esc(k.badge)}</span>` : ""}
+    ${k.due ? `<div class="due ${k.due_color || ""}" title="${esc(k.due_title || "")}">⏰ ${dueText(k.due)}</div>` : ""}
   </article>`;
+}
+function dueText(iso) {
+  const t = S.meta.today;
+  const d = iso.slice(0, 10), hm = iso.slice(11, 16);
+  if (d < t) return `просрочено с ${dShort(d)} ${hm}`;
+  if (d === t) return (iso.slice(0, 16) < new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) ? "просрочено, " : "сегодня до ") + hm;
+  return `${dShort(d)} ${hm}`;
 }
 
 function enableDrag(page, funnel, columns) {
@@ -532,6 +555,7 @@ async function openStudent(id) {
     <button class="btn sm" style="margin-top:10px" id="add-sibling">+ Брат или сестра</button>
   </div>
 
+  ${puCardBlock(d)}
   <div class="section" id="comms-box"><h3>Связь с семьёй</h3><div class="muted small">Загружаю переписку…</div></div>
 
   ${isMember ? `
@@ -691,6 +715,7 @@ async function openStudent(id) {
   });
   wireProgramBlock(body, id, reload);
   wireWaitlistCard(body, id, reload);
+  wirePuCard(body, id, reload);
   if ($("#q-month")) { $("#q-month").onchange = loadQuotes; $("#q-disc").onchange = loadQuotes; loadQuotes(); }
   body.querySelectorAll("[data-inv]").forEach((b) => (b.onclick = async () => {
     try { const r = await api("POST", `/api/students/${id}/invoice`, { month: $("#q-month").value, enrollment_id: +b.dataset.inv, discount_id: $("#q-disc").value || null }); toast(`Счёт выставлен: ${rub(r.quote.total)}`); reload(); } catch (e) { fail(e); }
@@ -812,6 +837,7 @@ async function renderJournal(page) {
       <div class="field" style="flex:0 0 170px"><label>Дата</label><input id="j-date" type="date" value="${S.journal.date}"></div>
     </div>
     <div class="note">${esc(g.branch)} · ${g.weekdays.split(",").map((x) => WD[+x]).join(", ")} ${esc(g.time)} · ${esc(g.age)} лет${j.closed ? " · <b>праздник, занятия нет</b>" : j.has_lesson ? "" : " · <b>в этот день у группы нет занятия</b>"}</div>
+    ${j.overdue_marks ? `<div class="alert">🔴 Тренировка закончилась ${j.overdue_marks.minutes} мин назад, не отмечено детей: ${j.overdue_marks.missing}</div>` : ""}
     ${st ? `<div class="panel" style="padding:12px 14px;margin-bottom:12px">${staffPicker(st, st.coaches, "j")}</div>` : ""}
     <div class="list">${j.rows.length ? j.rows.map((r) => g.is_makeup ? makeupRow(r) : journalRow(r)).join("") : `<div class="list-row muted">${g.is_makeup ? "На эту дату никто не записан на отработку" : "В группе пока нет учеников"}</div>`}</div>`;
   if (st) wireStaffPicker(page, "j", g.id, S.journal.date, render);
@@ -900,10 +926,12 @@ async function renderSettings(page) {
       </div>
       <button class="btn primary">Сохранить</button>
     </form>
+    <div class="section" id="resp-settings"></div>
     <div id="program-settings"></div>
     <div class="section">
       <h3>Сотрудники</h3>
       <div class="list" style="box-shadow:none;margin-bottom:10px">${users.map((u) => `<div class="list-row"><div class="grow">${esc(u.name)} <span class="muted small">${esc(u.login)}</span></div>
+        <input data-tgu="${u.id}" value="${esc(u.tg_username ? "@" + u.tg_username : "")}" placeholder="@telegram" title="Ник в Telegram: CRM отметит сотрудника в рабочих чатах" style="flex:0 0 120px;padding:5px 8px">
         ${u.role === "coach" ? "" : `<input data-sip="${u.id}" value="${esc(u.sip_number || "")}" placeholder="вн. номер" title="Внутренний номер Sipuni: на него придёт звонок из карточки" inputmode="numeric" style="flex:0 0 96px;padding:5px 8px">`}
         <span class="pill">${{ admin: "админ", operator: "оператор", coach: "тренер" }[u.role]}</span>
         ${u.id !== S.user.id ? `<button class="icon-btn" data-upw="${u.id}" title="Задать новый пароль">🔑</button><button class="icon-btn" data-uarch="${u.id}" title="В архив">🗄</button>` : ""}</div>`).join("")}</div>
@@ -955,6 +983,7 @@ async function renderSettings(page) {
   if ($("#legal-settings")) renderLegalSettings($("#legal-settings")).catch(fail);
   if ($("#offers-settings") && !isCoach()) renderOffers($("#offers-settings")).catch(fail);
   if ($("#program-settings")) renderProgramSettings($("#program-settings")).catch(fail);
+  if ($("#resp-settings")) renderResponsibles($("#resp-settings")).catch(fail);
   else if ($("#offers-settings")) $("#offers-settings").remove();
   if ($("#structure-settings")) renderStructure($("#structure-settings"), users).catch(fail);
   if ($("#archive-settings")) renderArchive($("#archive-settings")).catch(fail);
@@ -966,6 +995,9 @@ async function renderSettings(page) {
   page.querySelectorAll("[data-uarch]").forEach((b) => (b.onclick = async () => {
     if (!confirm("Перенести сотрудника в архив? Он больше не сможет войти, вернуть можно в Архиве")) return;
     try { await api("PATCH", `/api/users/${b.dataset.uarch}`, { active: false }); toast("Сотрудник в архиве"); render(); } catch (e) { fail(e); }
+  }));
+  page.querySelectorAll("[data-tgu]").forEach((inp) => (inp.onchange = async () => {
+    try { await api("PATCH", `/api/users/${inp.dataset.tgu}`, { tg_username: inp.value }); toast("Ник в Telegram сохранён"); } catch (err) { fail(err); }
   }));
   page.querySelectorAll("[data-sip]").forEach((inp) => (inp.onchange = async () => {
     try { await api("PATCH", `/api/users/${inp.dataset.sip}`, { sip_number: inp.value }); toast("Внутренний номер сохранён"); S.meta = await api("GET", "/api/meta"); S.user = S.meta.user; } catch (err) { fail(err); }

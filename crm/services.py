@@ -21,11 +21,13 @@ SALES_STAGES = [
     ("trial_reminder", "Напоминание о пробном"),
     ("on_trial", "Сейчас на пробном"),
     ("trial_done", "Пробное закончилось"),
+    ("missed_trial", "Не дошёл до ПУ"),
     ("how_was", "Как прошло пробное?"),
     ("bought", "Купил абонемент"),
     ("refused", "Отказ"),
+    ("later", "Пригласим позже"),
 ]
-AUTO_SALES = {"on_trial", "trial_done"}
+AUTO_SALES = {"on_trial", "trial_done", "missed_trial", "later"}
 SALES_LABELS = dict(SALES_STAGES)
 
 
@@ -222,6 +224,8 @@ def set_makeup_status(con, mid: int, status: str, user) -> None:
     if not m:
         raise ApiError("Отработка не найдена", 404)
     con.execute("UPDATE makeups SET status = ? WHERE id = ?", (status, mid))
+    from . import pu
+    pu.record_lesson_mark(con, m["group_id"], m["date"])
     if status == "done":
         con.execute("UPDATE attendance SET resolved = 'makeup' WHERE id = ?", (m["absence_id"],))
     elif m["status"] == "done":
@@ -388,10 +392,24 @@ def board(con, funnel: str) -> dict:
                 card["color"] = "red"
                 mins = int((ref - datetime.fromisoformat(s["stage_changed_at"][:16])).total_seconds() // 60)
                 card["badge"] = "Заявка с сайта · " + (f"{mins} мин назад" if mins < 120 else f"{mins // 60} ч назад")
+            # дедлайн: ближайшая открытая задача по ребёнку или семье
+            t = con.execute("""SELECT due_at, title FROM tasks WHERE status='open' AND (student_id=? OR (kind='rebook' AND family_id=?))
+                               ORDER BY due_at LIMIT 1""", (s["id"], s["family_id"])).fetchone()
+            if t:
+                card["due"] = t["due_at"]
+                card["due_title"] = t["title"]
+                from . import pu as _pu
+                card["due_color"] = _pu.overdue_color(t["due_at"], ref)
+                if stage in ("missed_trial", "later") and card["due_color"]:
+                    card["color"] = card["due_color"]
+            if s["trial_at"] and s["trial_came"] is None and stage == "trial_done" and (mins or 0) >= 30:
+                card["no_mark"] = True
+                card["color"] = "red"
+                card["badge"] = "Нет отметки тренера"
             cols.get(stage, cols["lead"])["cards"].append(card)
         for c in cols.values():
-            c["cards"].sort(key=lambda k: (not k.get("priority"), not k.get("missed_call")))
-        return {"funnel": "sales", "columns": list(cols.values()), "draggable": True}
+            c["cards"].sort(key=lambda k: (not k.get("priority"), not k.get("missed_call"), k.get("due") or "9999"))
+        return {"funnel": "sales", "columns": list(cols.values()), "draggable": True, "today_end": today().isoformat() + "T23:59"}
 
     if funnel == "members":
         from .comms import missed_by_family
@@ -528,6 +546,7 @@ def student_detail(con, sid: int) -> dict:
         "stage_label": stage_label,
         "next_month": logic.shift_month(cur, 1), "cur_month": cur,
         "program": _program_out(con, sid),
+        "pu": __import__("crm.pu", fromlist=["card_info"]).card_info(con, sid),
         "waitlist": __import__("crm.waitlist", fromlist=["for_student"]).for_student(con, sid),
     }
 
@@ -713,6 +732,8 @@ def mark_trial(con, sid: int, came: bool, user) -> None:
         raise ApiError("У ученика нет пробного занятия")
     con.execute("UPDATE students SET trial_came=? WHERE id=?", (1 if came else 0, sid))
     log(con, sid, "Пришёл на пробное" if came else "Не пришёл на пробное", user, "attendance")
+    from . import pu
+    pu.on_trial_mark(con, sid, came, user)
 
 
 def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -> None:
@@ -745,6 +766,9 @@ def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -
     else:
         con.execute("INSERT INTO attendance(student_id, group_id, date, status) VALUES (?,?,?,?)",
                     (sid, group_id, day, status))
+    con.execute("UPDATE attendance SET marked_at=? WHERE student_id=? AND date=? AND group_id=?", (now_iso(), sid, day, group_id))
+    from . import pu
+    pu.record_lesson_mark(con, group_id, day)
     if status == "absent":
         if s["skip_stage"] == "refused":
             con.execute("UPDATE students SET skip_stage='none' WHERE id=?", (sid,))

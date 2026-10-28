@@ -227,6 +227,8 @@ def move(con, tid: int, user: dict, new_date: str):
         date.fromisoformat(new_date)
     except ValueError:
         raise PlanError("Неверная дата")
+    if t["kind"] == "rebook" and new_date > (date.today() + timedelta(days=14)).isoformat():
+        raise PlanError("Задачу «Перезаписать на ПУ» нельзя отодвинуть больше чем на 14 дней")
     con.execute("UPDATE tasks SET due_at=? WHERE id=?", (f"{new_date}T{t['due_at'][11:16]}", tid))
 
 

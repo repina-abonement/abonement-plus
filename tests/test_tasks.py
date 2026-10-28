@@ -54,9 +54,10 @@ def main():
 
     print("Не пришёл и перенос")
     sid2 = sv.create_student(con, {"name": "Глеб", "parent_name": "Света", "phone": "+7 900 888-88-88", "group_id": g}, {"name": "Т"})
-    con.execute("UPDATE students SET trial_at='2026-11-05T17:00', stage='trial_booked', trial_came=0 WHERE id=?", (sid2,))
+    con.execute("UPDATE students SET trial_at='2026-11-05T17:00', stage='trial_booked' WHERE id=?", (sid2,))
+    sv.mark_trial(con, sid2, False, {"name": "Тренер"})
     r = tasks.run(con, datetime(2026, 11, 5, 18, 20))
-    check(con.execute("SELECT 1 FROM tasks WHERE kind='no_show' AND student_id=?", (sid2,)).fetchone(), "Не пришёл: задача перезвонить")
+    check(con.execute("SELECT 1 FROM tasks WHERE kind='rebook' AND student_id=?", (sid2,)).fetchone(), "Не пришёл: этап «Не дошёл до ПУ» и задача «Перезаписать на ПУ»")
     check(not any("Как прошло" in (x or {}).get("text", "") and x.get("chat_id") != 4242 for x in SENT),
           "Не пришедшему «как понравилось» не пишем")
     a = con.execute("SELECT error FROM auto_messages WHERE student_id=?", (sid2,)).fetchall()

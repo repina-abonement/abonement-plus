@@ -694,3 +694,8 @@ details.warn-box[open] > summary { margin-bottom: 6px; }
 .wl-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; } @media (max-width: 700px) { .wl-cols { grid-template-columns: 1fr; } }
 .wl-row { display: flex; gap: 6px; align-items: center; padding: 4px 0; font-size: 14px; } .wl-row.click, .wl-row .click { cursor: pointer; }
 #wl-form .field, .prog-form .field { min-width: 150px; }
+.card .due { font-size: 12px; margin-top: 6px; color: var(--ink-2); } .card .due.yellow { color: #8a6400; font-weight: 600; } .card .due.red { color: #b42318; font-weight: 600; }
+.board-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 8px; color: var(--ink-2); }
+.rb-kid { padding: 8px 0; border-bottom: 1px solid var(--line); } .rb-kid:last-child { border-bottom: 0; }
+.rb-tabs button { padding: 6px 10px; }
+.red-box { border: 1px solid #f5c2bd; }

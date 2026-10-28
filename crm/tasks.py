@@ -18,6 +18,7 @@ KINDS = {
     "no_show": ("Не пришли на пробное", "🚫"),
     "not_marked": ("Тренер не отметил клиента на пробном", "📝"),
     "why_not_bought": ("Почему не купили", "🤔"),
+    "rebook": ("Перезаписать на ПУ", "🔁"),
     "manual": ("Задача", "✅"),
     "plan": ("Задача", "📌"),
     "bday": ("День рождения сотрудника", "🎂"),
@@ -186,6 +187,9 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     from . import planner, program
     planner.generate(con, now.date())
     program.apply_pending(con, now.date())
+    from . import pu, waitlist
+    pu.tick(con, now)
+    waitlist._sync_done(con)
     program.price_notice(con, now.date())
     st = {k: setting(con, k) for k in AUTO_SETTINGS}
     trial_min = int((con.execute("SELECT value FROM settings WHERE key='trial_minutes'").fetchone() or ["60"])[0])
@@ -204,13 +208,9 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
                                   auto_key=f"trial_confirm:{key}"))
         elif t.date() == now.date() and now < t and s["created_at"][:10] == now.date().isoformat():
             made += bool(add_task(con, "trial_today", s["id"], now, auto_key=f"trial_today:{key}"))
-        if now >= end + timedelta(minutes=10):
-            if s["trial_came"] == 0:
-                made += bool(add_task(con, "no_show", s["id"], end, auto_key=f"no_show:{key}"))
-            else:
-                made += bool(add_task(con, "how_was", s["id"], end + timedelta(minutes=10), auto_key=f"how_was:{key}"))
-        if s["trial_came"] is None and now >= end + timedelta(minutes=60):
-            made += bool(add_task(con, "not_marked", s["id"], end + timedelta(minutes=60), auto_key=f"not_marked:{key}"))
+        # «не пришёл» и «нет отметки 2 часа» ведёт этап «Не дошёл до ПУ» (crm/pu.py)
+        if now >= end + timedelta(minutes=10) and s["trial_came"] == 1:
+            made += bool(add_task(con, "how_was", s["id"], end + timedelta(minutes=10), auto_key=f"how_was:{key}"))
         # сообщения
         if send and st["auto_day_before"] == "1" and now >= day_before and now < t - timedelta(hours=3) and t.date() > now.date():
             sent += bool(send_auto(con, s, "day_before", "msg_day_before").get("ok"))
@@ -261,7 +261,10 @@ def my_tasks(con, user: dict, scope: str = "mine") -> dict:
     boss = planner.can_manage(con, user)
     where, args = "status='open' AND due_at <= ?", [end_tomorrow]
     if scope == "mine" or not boss:
-        where += " AND assignee_id=?"
+        if user.get("role") in ("admin", "operator"):  # «Перезаписать на ПУ» видят все админы и операторы
+            where += " AND (assignee_id=? OR kind='rebook')"
+        else:
+            where += " AND assignee_id=?"
         args.append(user["id"])
     rows = [_task_out(con, r) for r in con.execute(f"SELECT * FROM tasks WHERE {where} ORDER BY due_at", args)]
     groups = {"overdue": [], "today": [], "tomorrow": []}
@@ -289,6 +292,8 @@ def complete(con, tid: int, user: dict, result: str = "") -> None:
     t = con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
     if not t:
         raise comms.CommsError("Задача не найдена")
+    if t["kind"] == "rebook":
+        raise comms.CommsError("Эту задачу закрывают результатом: перезаписан, не дозвонились, перезвонить позже или отказ")
     con.execute("UPDATE tasks SET status='done', done_at=?, done_by=?, result=? WHERE id=?",
                 (_iso(_now()), user.get("name", ""), result.strip(), tid))
     if t["student_id"]:

@@ -82,7 +82,8 @@ def for_student(con, sid: int) -> list[dict]:
 def queue(con, group_id: int) -> list[dict]:
     return [dict(r) for r in con.execute(
         """SELECT w.*, s.name, s.family_id FROM waitlist w JOIN students s ON s.id=w.student_id
-           WHERE w.group_id=? AND w.status IN ('queued','offered') ORDER BY w.id""", (group_id,))]
+           WHERE w.group_id=? AND w.status IN ('queued','offered') AND NOT EXISTS (
+             SELECT 1 FROM enrollments e WHERE e.student_id=w.student_id AND e.group_id=w.group_id AND e.active=1) ORDER BY w.id""", (group_id,))]
 
 
 def funnel(con, today: date | None = None, force: bool = False) -> dict | None:
@@ -90,7 +91,6 @@ def funnel(con, today: date | None = None, force: bool = False) -> dict | None:
     from . import capacity, program
     today = today or date.today()
     deadline = int((con.execute("SELECT value FROM settings WHERE key='renewal_deadline_day'").fetchone() or ["25"])[0])
-    _sync_done(con)
     if today.day <= deadline and not force:
         n = con.execute("SELECT COUNT(*) FROM waitlist WHERE status IN ('queued','offered')").fetchone()[0]
         return {"active": False, "waiting": n} if n else None

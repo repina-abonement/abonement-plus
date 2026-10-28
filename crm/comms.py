@@ -389,6 +389,17 @@ def tg_hook(con, upd: dict, headers) -> None:
     if not m:
         return
     chat = m.get("chat") or {}
+    if chat.get("type") in ("group", "supergroup"):
+        # рабочие чаты сотрудников: команда в чате подключает его к уведомлениям CRM
+        cmd = (m.get("text") or "").split("@")[0].strip().lower()
+        names = {"/crm_coaches": ("tg_chat_coaches", "ТРЕНЕРЫ"), "/crm_care": ("tg_chat_care", "Служба заботы")}
+        if cmd in names:
+            put(con, names[cmd][0], str(chat.get("id")))
+            try:
+                tg_call(con, "sendMessage", {"chat_id": chat.get("id"), "text": f"✅ Чат подключён к CRM как «{names[cmd][1]}»"})
+            except CommsError:
+                pass
+        return
     if chat.get("type") != "private":
         return
     biz = m.get("business_connection_id")
@@ -808,9 +819,15 @@ def lead_hook(con, data: dict, create_student) -> dict:
     fam = family_by_phone(con, pn)
     sid = None
     if fam:
-        open_lead = con.execute("""SELECT id FROM students WHERE family_id=? AND funnel='sales'
+        open_lead = con.execute("""SELECT id, stage FROM students WHERE family_id=? AND funnel='sales'
                                    AND stage NOT IN ('bought','refused') ORDER BY id DESC LIMIT 1""", (fam,)).fetchone()
-        if open_lead:
+        if open_lead and open_lead["stage"] in ("missed_trial", "later"):
+            from . import pu
+            sid = open_lead[0]
+            con.execute("UPDATE students SET stage='missed_trial', stage_changed_at=? WHERE id=?", (ts_now()[:16], sid))
+            pu.repeat_request(con, sid)
+            _lead_note(con, sid, "Повторная заявка с сайта", details)
+        elif open_lead:
             sid = open_lead[0]
             con.execute("UPDATE students SET priority=1, stage='lead', stage_changed_at=? WHERE id=?",
                         (ts_now()[:16], sid))

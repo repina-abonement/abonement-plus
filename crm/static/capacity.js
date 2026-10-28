@@ -8,7 +8,8 @@ async function loadWarnBox(fid, box, onlySid) {
   let d;
   try { d = await api("GET", `/api/families/${fid}/lessons`); } catch (_) { box.innerHTML = ""; return; }
   const kids = d.kids.filter((k) => !onlySid || k.id === onlySid);
-  if (!kids.some((k) => k.lessons.length)) { box.innerHTML = ""; return; }
+  const trials = kids.filter((k) => k.trial);
+  if (!kids.some((k) => k.lessons.length) && !trials.length) { box.innerHTML = ""; return; }
   const warnedN = kids.reduce((n, k) => n + k.lessons.filter((l) => l.warned).length, 0);
   const open = onlySid || box.dataset.open === "1";
   box.innerHTML = `<details class="warn-box" ${open ? "open" : ""}>
@@ -18,10 +19,19 @@ async function loadWarnBox(fid, box, onlySid) {
       <div class="chips">${k.lessons.map((l) => `<button class="chip warn-chip ${l.warned ? "off" : ""}" ${l.vacation ? "disabled" : ""}
         data-wsid="${k.id}" data-wdate="${l.date}" data-wgid="${l.group_id}" data-won="${l.warned ? 1 : 0}"
         title="${esc(l.group)}${l.note ? ": " + esc(l.note) : ""}">${l.warned ? "✕ " : ""}${dayLabel(l.date)}${l.time ? " " + l.time : ""}${l.vacation ? " · отпуск" : ""}</button>`).join("")}</div></div>`).join("")}
+    ${trials.map((k) => `<div class="warn-kid"><b>${esc(k.name.split(" ")[0])}</b><span class="small">пробное ${dShort(k.trial.at.slice(0, 10))} ${k.trial.at.slice(11, 16)} ${esc(k.trial.group)}</span>
+      <button class="btn sm danger" data-tcancel-open="${k.id}">Отменить запись на ПУ</button>
+      <div class="row" data-tcancel-row="${k.id}" hidden style="width:100%"><input placeholder="Причина: заболел, уехали…"><button class="btn sm danger" data-tcancel-sid="${k.id}" style="flex:0">Отменить</button></div></div>`).join("")}
     <div class="warn-note row" hidden><input placeholder="Причина, например: заболел (можно пусто)"><button class="btn sm primary" style="flex:0">Отметить</button></div>
   </details>`;
   box.querySelector("details").ontoggle = (e) => { box.dataset.open = e.target.open ? "1" : ""; };
   const note = box.querySelector(".warn-note");
+  box.querySelectorAll("[data-tcancel-open]").forEach((b) => (b.onclick = () => { box.querySelector(`[data-tcancel-row="${b.dataset.tcancelOpen}"]`).hidden = false; b.hidden = true; }));
+  box.querySelectorAll("[data-tcancel-sid]").forEach((b) => (b.onclick = async () => {
+    const r = b.previousElementSibling.value;
+    if (!r || !r.trim()) return toast("Напишите причину отмены", true);
+    try { await api("POST", `/api/students/${b.dataset.tcancelSid}/cancel-trial`, { reason: r }); toast("Запись отменена: этап «Не дошёл до ПУ», задача перезаписать сегодня"); loadWarnBox(fid, box, onlySid); } catch (e) { fail(e); }
+  }));
   box.querySelectorAll("[data-wsid]").forEach((b) => (b.onclick = async () => {
     const body = { date: b.dataset.wdate, group_id: +b.dataset.wgid };
     if (b.dataset.won === "1") {

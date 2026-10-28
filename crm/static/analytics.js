@@ -1,6 +1,6 @@
 /* Аналитика бизнеса: вкладки дашборда «Филиалы и группы», «Тренеры», «Отток и продления», «Источники» */
 
-const AN_TABS = [["overview", "Обзор"], ["groups", "Филиалы и группы"], ["coaches", "Тренеры"], ["churn", "Отток и продления"], ["sources", "Источники"], ["program", "Сборная"]];
+const AN_TABS = [["overview", "Обзор"], ["groups", "Филиалы и группы"], ["coaches", "Тренеры"], ["churn", "Отток и продления"], ["sources", "Источники"], ["program", "Сборная"], ["pu", "ПУ и отметки"]];
 
 function anTabsHtml() {
   return `<div class="seg an-tabs">${AN_TABS.map(([k, t]) => `<button data-antab="${k}" class="${(S.dashTab || "overview") === k ? "active" : ""}">${t}</button>`).join("")}</div>`;
@@ -19,6 +19,7 @@ const anGood = (v, good, bad) => (v == null ? "" : v >= good ? "s-good" : v < ba
 
 async function renderAnalytics(box) {
   const part = S.dashTab;
+  if (part === "pu") return anPu(box, S.dashMonth);
   const q = `/api/analytics?part=${part}&month=${S.dashMonth}${S.dashBranch ? "&branch_id=" + S.dashBranch : ""}`;
   box.innerHTML = `<div class="muted" style="padding:20px">Считаю…</div>`;
   const d = await api("GET", q);

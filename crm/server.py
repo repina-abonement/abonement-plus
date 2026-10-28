@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import ai, calldigest, callstats, coaches, comms, db, expenses, fakegen, legal, merch, offers, money, planner, schedule, services as sv, sources, staff, tasks
+from . import logic, ai, calldigest, callstats, coaches, comms, db, expenses, fakegen, legal, merch, offers, money, planner, schedule, services as sv, sources, staff, tasks
 from .services import ApiError
 
 
@@ -129,7 +129,7 @@ def change_password(con, h, user, body, q):
 
 @route("GET", "/api/users", role="admin")
 def users_list(con, h, user, body, q):
-    return [dict(r) for r in con.execute("SELECT id, login, name, role, active, sip_number FROM users ORDER BY id")]
+    return [dict(r) for r in con.execute("SELECT id, login, name, role, active, sip_number, tg_username FROM users ORDER BY id")]
 
 
 @route("PATCH", "/api/users/{uid}", role="admin")
@@ -151,6 +151,9 @@ def users_patch(con, h, user, body, q, uid):
     if "sip_number" in body:
         sip = "".join(ch for ch in str(body["sip_number"] or "") if ch.isdigit())[:10]
         con.execute("UPDATE users SET sip_number=? WHERE id=?", (sip, int(uid)))
+    if "tg_username" in body:
+        tg = "".join(ch for ch in str(body["tg_username"] or "").strip().lstrip("@") if ch.isalnum() or ch == "_")[:40]
+        con.execute("UPDATE users SET tg_username=? WHERE id=?", (tg, int(uid)))
     return {"ok": True}
 
 
@@ -277,6 +280,8 @@ def workdesk(con, h, user, body, q):
             "checkins": staff.day_report(con) if checkin_reviewer(con, user) else None,
             "merch_alerts": merch_alerts(con),
             "waitlist": __import__("crm.waitlist", fromlist=["funnel"]).funnel(con),
+            "missing_marks": __import__("crm.pu", fromlist=["missing_marks"]).missing_marks(con),
+            "alerts": __import__("crm.pu", fromlist=["open_alerts"]).open_alerts(con),
             "call_focus": calldigest.focus_for(con, (con.execute("SELECT sip_number FROM users WHERE id=?",
                                                                  (int(q["as_user"]) if q.get("as_user") and user["role"] == "admin" else user["id"],)).fetchone() or [""])[0]),
             "bills_due": expenses.bills_due(con) if user["role"] == "admin" else [],
@@ -938,7 +943,16 @@ def makeup_status(con, h, user, body, q, mid):
 @route("GET", "/api/journal")
 def journal(con, h, user, body, q):
     coach_guard(con, user, int(q.get("group_id") or 0))
-    return sv.journal(con, int(q.get("group_id") or 0), q.get("date") or sv.today().isoformat())
+    j = sv.journal(con, int(q.get("group_id") or 0), q.get("date") or sv.today().isoformat())
+    from . import pu
+    from datetime import datetime as _dt
+    if j["has_lesson"]:
+        g = con.execute("SELECT * FROM groups WHERE id=?", (j["group"]["id"],)).fetchone()
+        end = pu._lesson_end(con, g, _dt.fromisoformat(j["date"]).date())
+        n = pu._unmarked(j["rows"])
+        if end and n and _dt.now() >= end + __import__("datetime").timedelta(minutes=30):
+            j["overdue_marks"] = {"missing": n, "minutes": int((_dt.now() - end).total_seconds() // 60)}
+    return j
 
 
 @route("POST", "/api/attendance")
@@ -960,6 +974,8 @@ def coach_today(con, h, user, body, q):
     out["merch"] = merch.my_shift(con, cid, out["date"])
     out["tasks"] = [tasks._task_out(con, r) for r in con.execute(
         "SELECT * FROM tasks WHERE status='open' AND assignee_id=? AND due_at<=? ORDER BY due_at", (cid, out["date"] + "T23:59"))]
+    from . import pu
+    out["missing_marks"] = [m for m in pu.missing_marks(con) if m["coach_id"] == cid]
     return out
 
 
@@ -1087,6 +1103,83 @@ def waitlist_status(con, h, user, body, q, wid):
 def waitlist_funnel(con, h, user, body, q):
     from . import waitlist
     return waitlist.funnel(con, force=bool(q.get("force"))) or {}
+
+
+@route("POST", "/api/students/{sid}/cancel-trial", role="operator")
+def cancel_trial(con, h, user, body, q, sid):
+    from . import pu
+    pu.cancel_trial(con, int(sid), body.get("reason") or "", user)
+    return {"ok": True}
+
+
+@route("POST", "/api/tasks/{tid}/rebook", role="operator")
+def task_rebook(con, h, user, body, q, tid):
+    from . import pu
+    return pu.complete(con, int(tid), body.get("result") or "", body, user)
+
+
+@route("POST", "/api/tasks/{tid}/assign", role="operator")
+def task_assign(con, h, user, body, q, tid):
+    from . import pu
+    pu.reassign(con, int(tid), int(body.get("user_id") or 0), user)
+    return {"ok": True}
+
+
+@route("GET", "/api/pu/task/{tid}", role="operator")
+def pu_task(con, h, user, body, q, tid):
+    from . import pu
+    t = con.execute("SELECT * FROM tasks WHERE id=?", (int(tid),)).fetchone()
+    if not t:
+        raise ApiError("Задача не найдена", 404)
+    kids = pu._family_kids(con, t["family_id"]) if t["family_id"] else []
+    if not kids and t["student_id"]:
+        kids = [dict(con.execute("SELECT id, name, group_id FROM students WHERE id=?", (t["student_id"],)).fetchone())]
+    for k in kids:
+        k.update({"misses": pu.card_info(con, k["id"])["misses"], "birth": con.execute("SELECT birth FROM students WHERE id=?", (k["id"],)).fetchone()[0]})
+    fam = con.execute("SELECT name FROM families WHERE id=?", (t["family_id"],)).fetchone() if t["family_id"] else None
+    staff_ = [dict(r) for r in con.execute("SELECT id, name FROM users WHERE active=1 AND role IN ('admin','operator') ORDER BY name")]
+    return {"task": dict(t), "kids": kids, "family": fam[0] if fam else "", "refusals": pu.REFUSALS, "staff": staff_,
+            "max_later": (__import__("datetime").date.today() + __import__("datetime").timedelta(days=14)).isoformat()}
+
+
+@route("GET", "/api/pu/report", role="operator")
+def pu_report(con, h, user, body, q):
+    from . import pu
+    from datetime import date as _d
+    ym = q.get("month") or _d.today().isoformat()[:7]
+    a, b = logic.month_bounds(ym)
+    return pu.report(con, a.isoformat(), b.isoformat(), int(q["branch_id"]) if q.get("branch_id") else None) | {
+        "marks": pu.marks_report(con, a, min(b, _d.today()))}
+
+
+@route("GET", "/api/alerts", role="operator")
+def alerts_list(con, h, user, body, q):
+    from . import pu
+    return {"items": pu.open_alerts(con), "missing_marks": pu.missing_marks(con)}
+
+
+@route("POST", "/api/alerts/{aid}/close", role="operator")
+def alert_close(con, h, user, body, q, aid):
+    from . import pu
+    pu.close_alert(con, int(aid), user)
+    return {"ok": True}
+
+
+@route("GET", "/api/responsibles", role="operator")
+def responsibles(con, h, user, body, q):
+    from . import pu
+    return {"items": pu.responsibles(con), "staff": [dict(r) for r in con.execute(
+        "SELECT id, name, role FROM users WHERE active=1 AND role IN ('admin','operator') ORDER BY role, name")]}
+
+
+@route("POST", "/api/responsibles", role="admin")
+def responsibles_set(con, h, user, body, q):
+    from . import pu
+    uid = int(body["user_id"]) if body.get("user_id") else None
+    if uid and not con.execute("SELECT 1 FROM users WHERE id=? AND role IN ('admin','operator')", (uid,)).fetchone():
+        raise ApiError("Ответственным может быть только админ или оператор")
+    pu.set_responsible(con, int(body.get("branch_id") or 0), uid)
+    return {"ok": True}
 
 
 @route("GET", "/api/closures", role="operator")

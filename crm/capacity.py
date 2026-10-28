@@ -140,6 +140,10 @@ def family_lessons(con, family_id: int, days: int = 15) -> list[dict]:
             les["marked"] = a["status"] if a and not a["warned"] else None
             lessons.append(les)
         out.append({"id": s["id"], "name": s["name"], "lessons": lessons[:5]})
+    for s in con.execute("""SELECT s.id, s.name, s.trial_at, g.name AS grp FROM students s LEFT JOIN groups g ON g.id=s.group_id
+                            WHERE s.family_id=? AND s.funnel='sales' AND s.archived=0 AND s.trial_at>=?
+                            AND s.stage IN ('trial_booked','trial_reminder')""", (family_id, datetime.now().strftime("%Y-%m-%dT%H:%M"))):
+        out.append({"id": s["id"], "name": s["name"], "lessons": [], "trial": {"at": s["trial_at"], "group": s["grp"] or ""}})
     return out
 
 
@@ -189,7 +193,7 @@ def free_slots(con, days: int = 14, branch_id: int | None = None, age_of: int | 
     now_t = datetime.now().strftime("%H:%M")
     out = []
     for g in con.execute("""SELECT g.*, b.name AS branch, b.lesson_limit FROM groups g JOIN branches b ON b.id=g.branch_id
-                            WHERE g.active=1 AND g.is_makeup=0 AND b.lesson_limit>0""" + (" AND g.branch_id=?" if branch_id else ""),
+                            WHERE g.active=1 AND g.is_makeup=0 AND b.lesson_limit>0 AND g.program_id IS NULL""" + (" AND g.branch_id=?" if branch_id else ""),
                          (branch_id,) if branch_id else ()).fetchall():
         wd = logic.parse_weekdays(g["weekdays"])
         for i in range(days):
