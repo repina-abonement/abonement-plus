@@ -255,7 +255,37 @@ def meta(con, h, user, body, q):
     if user["role"] == "coach":
         m["groups"] = [g for g in m["groups"] if schedule.coach_may(con, user["id"], g["id"])]
         m["settings"] = {}
+    from . import staffdocs
+    m["staff_docs_pending"] = staffdocs.pending(con, user)
     return m
+
+
+@route("GET", "/api/staff-docs")
+def staff_docs(con, h, user, body, q):
+    from . import staffdocs, legal
+    return {"docs": [d | {"html": legal._md(d["text"])} for d in staffdocs.docs_for(con, user, base_url(h))], "name": user["name"]}
+
+
+@route("POST", "/api/staff-docs/accept")
+def staff_docs_accept(con, h, user, body, q):
+    from . import staffdocs
+    ip = (h.headers.get("X-Forwarded-For") or h.client_address[0] or "").split(",")[0].strip()
+    n = staffdocs.accept(con, user, body.get("docs") or [], body.get("signed_name") or "", ip, h.headers.get("User-Agent") or "", base_url(h))
+    sv.audit(con, user, "staff_docs.accept", str(n))
+    return {"ok": True, "accepted": n}
+
+
+@route("GET", "/api/staff-docs/overview", role="admin")
+def staff_docs_overview(con, h, user, body, q):
+    from . import staffdocs
+    return {"items": staffdocs.overview(con)}
+
+
+@route("GET", "/api/staff-docs/log/{uid}", role="admin")
+def staff_docs_log(con, h, user, body, q, uid):
+    from . import staffdocs
+    u = con.execute("SELECT name FROM users WHERE id=?", (int(uid),)).fetchone()
+    return {"name": u[0] if u else "", "items": staffdocs.log(con, int(uid))}
 
 
 @route("PATCH", "/api/groups/{gid}", role="admin")

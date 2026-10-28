@@ -151,6 +151,7 @@ function go(view, fromHistory = false) {
 async function render() {
   const page = $("#page");
   if (!page) return;
+  if (S.meta && S.meta.staff_docs_pending) return renderStaffDocs(page);
   await renderView(page);
   if (navDepth() > 0 && !page.querySelector(".back-btn")) {
     page.insertAdjacentHTML("afterbegin", `<button class="back-btn" type="button">← Назад</button>`);
@@ -927,6 +928,7 @@ async function renderSettings(page) {
       <button class="btn primary">Сохранить</button>
     </form>
     <div class="section" id="backup-settings"></div>
+    <div class="section" id="staffdocs-settings"></div>
     <div class="section" id="resp-settings"></div>
     <div id="program-settings"></div>
     <div class="section">
@@ -991,6 +993,7 @@ async function renderSettings(page) {
   if ($("#program-settings")) renderProgramSettings($("#program-settings")).catch(fail);
   if ($("#resp-settings")) renderResponsibles($("#resp-settings")).catch(fail);
   if ($("#backup-settings")) renderBackup($("#backup-settings")).catch(() => { $("#backup-settings").remove(); });
+  if ($("#staffdocs-settings")) renderStaffDocsAdmin($("#staffdocs-settings")).catch(() => { $("#staffdocs-settings").remove(); });
   else if ($("#offers-settings")) $("#offers-settings").remove();
   if ($("#structure-settings")) renderStructure($("#structure-settings"), users).catch(fail);
   if ($("#archive-settings")) renderArchive($("#archive-settings")).catch(fail);
@@ -1076,6 +1079,44 @@ async function boot() {
 }
 boot();
 
+
+/* Первый вход сотрудника: принять документы (NDA, правила работы с данными, согласие, журнал, ПЭП) */
+async function renderStaffDocs(page) {
+  const d = await api("GET", "/api/staff-docs");
+  const need = d.docs.filter((x) => !x.accepted_at);
+  page.innerHTML = `<div class="sd-wrap"><h2>Добро пожаловать в CRM, ${esc(d.name.split(" ")[0])}!</h2>
+    <p class="muted">Перед началом работы прочитайте и примите документы. Они защищают данные наших клиентов и школу. Без этого CRM не откроется</p>
+    ${need.map((x, i) => `<div class="section sd-doc"><label class="sd-check"><input type="checkbox" data-sd="${x.slug}"> <b>${esc(x.title)}</b></label>
+      <details ${i === 0 ? "open" : ""}><summary class="linkish small">Прочитать полностью</summary><div class="legal-text">${x.html}</div></details></div>`).join("")}
+    <div class="section"><div class="field"><label>Впишите свои фамилию и имя: это ваша подпись</label><input id="sd-name" placeholder="${esc(d.name)}" autocomplete="off"></div>
+      <button class="btn primary" id="sd-ok" disabled>Принимаю и подписываю</button>
+      <div class="small muted" style="margin-top:6px">Мы сохраним дату, время и IP-адрес подписания. Копию документов можно попросить у руководителя</div></div></div>`;
+  const ok = $("#sd-ok");
+  const sync = () => { ok.disabled = !([...page.querySelectorAll("[data-sd]")].every((c) => c.checked) && $("#sd-name").value.trim().length > 2); };
+  page.querySelectorAll("[data-sd]").forEach((c) => (c.onchange = sync));
+  $("#sd-name").oninput = sync;
+  ok.onclick = async () => {
+    try {
+      await api("POST", "/api/staff-docs/accept", { docs: need.map((x) => x.slug), signed_name: $("#sd-name").value });
+      S.meta.staff_docs_pending = 0; toast("Спасибо! Документы подписаны"); render();
+    } catch (e) { fail(e); }
+  };
+}
+
+async function renderStaffDocsAdmin(box) {
+  const d = await api("GET", "/api/staff-docs/overview");
+  box.innerHTML = `<h3>Документы сотрудников</h3><div class="small muted">NDA, правила работы с данными, согласие, журнал действий, электронная подпись. Каждый подписывает при первом входе</div>
+    ${d.items.map((u) => `<div class="list-row"><div class="grow">${esc(u.name)}</div>
+      ${u.pending ? `<span class="pill red">не подписал${u.last ? " новую редакцию" : ""}</span>` : `<span class="pill green">подписал ${dtWhen(u.last)}</span>`}
+      ${u.last ? `<button class="btn sm" data-sdlog="${u.id}">Лист подписания</button>` : ""}</div>`).join("") || `<div class="small muted">Сотрудников пока нет</div>`}`;
+  box.querySelectorAll("[data-sdlog]").forEach((b) => (b.onclick = async () => {
+    const l = await api("GET", `/api/staff-docs/log/${b.dataset.sdlog}`);
+    openDrawer(`<h2>Лист подписания</h2><div class="muted">${esc(l.name)}</div>
+      <table class="tbl" style="margin-top:10px"><thead><tr><th>Документ</th><th>Подпись</th><th>Когда</th><th>IP</th><th>Отпечаток</th></tr></thead>
+      <tbody>${l.items.map((x) => `<tr><td>${esc(x.title)}</td><td>${esc(x.signed_name)}</td><td>${esc(x.accepted_at.replace("T", " "))}</td><td>${esc(x.ip)}</td><td><code>${esc(x.sha256.slice(0, 16))}</code></td></tr>`).join("")}</tbody></table>
+      <div class="small muted" style="margin-top:8px">Отпечаток подтверждает, какой именно текст подписан. Для печати: меню браузера → Печать</div>`);
+  }));
+}
 
 /* Настройки → Резервные копии */
 async function renderBackup(box) {
