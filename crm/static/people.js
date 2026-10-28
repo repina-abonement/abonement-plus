@@ -16,6 +16,11 @@ function avatar(id, name, size = 36) {
   return `<span class="ava ava-ini" style="${st};background:${AVA_COLORS[c]};color:${AVA_INK[c]}">${esc(ini)}</span>`;
 }
 
+function fmtPhone(p) {
+  const d = String(p || "").replace(/\D/g, "");
+  return d.length === 11 ? `+7 ${d.slice(1, 4)} ${d.slice(4, 7)}-${d.slice(7, 9)}-${d.slice(9)}` : p;
+}
+
 const ROLE_LABEL = { admin: "руководитель", operator: "администратор", coach: "тренер" };
 
 async function openStaffProfile(uid) {
@@ -24,7 +29,7 @@ async function openStaffProfile(uid) {
   const b = p.bio || {}, admin = S.user.role === "admin", mine = S.user.id === p.id;
   const row = (k) => b[k] ? `<div class="sp-row"><div class="small muted">${esc(p.fields[k])}</div><div>${esc(b[k])}</div></div>` : "";
   openDrawer(`
-    <div class="sp-head">${avatar(p.id, p.name, 96)}<div><h2>${esc(p.name)}</h2><div class="muted">${ROLE_LABEL[p.role] || ""}${p.phone ? " · " + esc(p.phone) : ""}${p.tg_username ? " · @" + esc(p.tg_username) : ""}</div></div></div>
+    <div class="sp-head">${avatar(p.id, p.name, 96)}<div><h2>${esc(p.name)}</h2><div class="muted">${ROLE_LABEL[p.role] || ""}${p.phone ? `<br>${esc(fmtPhone(p.phone))}` : ""}${p.tg_username ? `<br>@${esc(p.tg_username)}` : ""}</div></div></div>
     ${p.groups.length ? `<div class="section"><h3>Группы</h3>${p.groups.map((g) => `<div class="small">${esc(g.name)} <span class="muted">· ${esc(g.branch)}, ${g.role}</span></div>`).join("")}</div>` : ""}
     ${["education", "experience", "achievements", "branches"].some((k) => b[k]) || b.quote ? `<div class="section">
       ${row("education")}${row("experience")}${row("achievements")}${row("branches")}

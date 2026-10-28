@@ -897,3 +897,6 @@ html.theme-soft .col-body { overflow-y: auto; overscroll-behavior: contain; scro
   .dtile { min-width: 0; padding: 8px 12px; border-radius: 14px; column-gap: 6px; }
   .dtile span { font-size: 18px; } .dtile b { font-size: 17px; } .dtile small { font-size: 11.5px; }
 }
+.sp-head > div { min-width: 0; flex: 1; }
+.sp-head .muted { overflow-wrap: anywhere; line-height: 1.5; }
+.drawer-panel .section { overflow-wrap: anywhere; }
