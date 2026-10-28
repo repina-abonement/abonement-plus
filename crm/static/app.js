@@ -490,22 +490,29 @@ async function renderWorkdesk(page) {
   const wasOpen = page.querySelector(".sched-widget") ? page.querySelector(".sched-widget").open : null;
   const u = d.urgent, reds = u.filter((x) => x.level === "red").length;
   const scroll = page.querySelector(".board") ? page.querySelector(".board").scrollLeft : 0;
-  page.innerHTML = `
-    ${bar}
-    <div class="page-head"><h2 class="grow">Рабочий стол${S.viewAs ? `: ${esc(S.viewAs.name)}` : ""}</h2>
-      <span class="muted small">Обновляется сам каждые 20 секунд</span></div>
-    ${callFocusBox(d.call_focus)}
-    ${spendDeskBox(d)}
-    ${checkinReport(d.checkins)}
-    ${merchAlerts(d.merch_alerts)}
-    ${marksBox(d)}
-    ${needsSubsBox(d)}
-    ${waitlistBox(d.waitlist)}
-    ${schedHtml}
-    ${birthdaysBox(d.birthdays)}
-    ${tasksHtml}
-    <section class="now ${u.length ? "" : "calm"}" style="margin-top:14px">
-      <div class="now-head"><h3>${u.length ? (reds ? `Горит прямо сейчас: ${reds}` : "Ждут ответа") : "Всё обработано"}</h3>
+  // кто смотрит стол: руководитель, контролёр (проверяет приход тренеров) или администратор
+  const who = S.viewAs ? (d.checkins ? "control" : "operator") : S.user.role === "admin" ? "owner" : d.checkins ? "control" : "operator";
+  const W = {
+    call: { html: callFocusBox(d.call_focus), icon: "📞", label: "Звонки" },
+    spend: { html: spendDeskBox(d), icon: "💳", label: "Платежи", n: (d.bills_due || []).filter((x) => x.level).length, red: (d.bills_due || []).some((x) => x.level === "red") },
+    checkins: { html: checkinReport(d.checkins), icon: "🧑‍🏫", label: "Приход тренеров", n: d.checkins ? d.checkins.rows.filter((x) => x.state === "late" || x.state === "absent").length : 0, red: true },
+    merch: { html: merchAlerts(d.merch_alerts), icon: "👕", label: "Мерч", n: d.merch_alerts ? d.merch_alerts.qr_no_receipt.length + d.merch_alerts.missing_reports.length + d.merch_alerts.cash_not_handed.length : 0 },
+    marks: { html: marksBox(d), icon: "📋", label: "Отметки в журнале", n: (d.missing_marks || []).length, red: true },
+    subs: { html: needsSubsBox(d), icon: "🔁", label: "Замены", n: (d.needs_subs || []).length, red: true },
+    wait: { html: waitlistBox(d.waitlist), icon: "⏳", label: "Лист ожидания" },
+    sched: { html: schedHtml, icon: "📅", label: "Сегодня в филиалах" },
+    bday: { html: birthdaysBox(d.birthdays), icon: "🎂", label: "Дни рождения" },
+    tasks: { html: tasksHtml, icon: "✅", label: "Мои задачи" },
+  };
+  const ORDER = {
+    owner: ["spend", "marks", "subs", "checkins", "tasks", "call", "wait", "merch", "sched", "bday"],
+    control: ["marks", "checkins", "subs", "merch", "tasks", "wait", "sched", "bday", "call", "spend"],
+    operator: ["tasks", "call", "wait", "sched", "bday", "marks", "subs", "merch", "spend", "checkins"],
+  }[who];
+  const widgets = ORDER.filter((k) => W[k].html);
+  const tiles = widgets.filter((k) => W[k].n).map((k) => `<button class="dtile ${W[k].red ? "red" : "yellow"}" data-jump="dw-${k}"><span>${W[k].icon}</span><b>${W[k].n}</b><small>${W[k].label}</small></button>`);
+  const hot = `<section class="now ${u.length ? "" : "calm"}" id="dw-hot">
+      <div class="now-head"><h3>${u.length ? (reds ? `🔥 Горит прямо сейчас: ${reds}` : "Ждут ответа") : "Всё обработано"}</h3>
         ${u.length ? `<span class="muted small">Красное сначала, потом сообщения и пробные</span>` : ""}</div>
       ${u.length ? `<div class="now-list">${u.map((x, i) => `
         <div class="now-item ${x.level}">
@@ -518,9 +525,21 @@ async function renderWorkdesk(page) {
             ${x.kind === "missed_call" ? `<button class="btn sm" data-useen="${x.id}" title="Уже связались другим способом">Обработан</button>` : ""}
           </div>
         </div>`).join("")}</div>` : `<div class="muted small">Пропущенных звонков, новых заявок и непрочитанных сообщений нет. Можно выдохнуть ⚽</div>`}
-    </section>
-    <div class="page-head" style="margin-top:22px"><h2 class="grow sub">Воронка продаж</h2></div>
-    ${boardHtml(d.board)}`;
+    </section>`;
+  page.innerHTML = `
+    ${bar}
+    <div class="page-head"><h2 class="grow">Рабочий стол${S.viewAs ? `: ${esc(S.viewAs.name)}` : ""}</h2>
+      <span class="muted small">Обновляется сам каждые 20 секунд</span></div>
+    ${tiles.length ? `<div class="dtiles">${reds ? `<button class="dtile red" data-jump="dw-hot"><span>🔥</span><b>${reds}</b><small>Горит</small></button>` : ""}${tiles.join("")}</div>` : ""}
+    <div class="desk">
+      <div class="desk-main">
+        ${hot}
+        <div class="page-head" style="margin-top:18px"><h2 class="grow sub">Воронка продаж</h2></div>
+        ${boardHtml(d.board)}
+      </div>
+      <div class="desk-side">${widgets.map((k) => `<div class="dw" id="dw-${k}">${W[k].html}</div>`).join("")}</div>
+    </div>`;
+  page.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => { const el = document.getElementById(b.dataset.jump); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }));
   if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
   wireBoard(page, "sales", d.board);
   wireTasks(page);
