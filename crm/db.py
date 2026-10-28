@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
     login TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'admin',      -- admin | operator | coach
+    role TEXT NOT NULL DEFAULT 'admin',      -- admin | operator | coach | lawyer (см. perms.py)
     pw_hash TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1
 );
@@ -281,6 +281,8 @@ def init_db(con: sqlite3.Connection):
     from . import pin, profiles
     pin.init(con)
     profiles.init(con)
+    from . import perms
+    perms.init(con)
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sub_enr_month ON subscriptions(enrollment_id, month)")
     for k, v in DEFAULT_SETTINGS.items():
         con.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
