@@ -176,6 +176,22 @@ def users_list(con, h, user, body, q):
 
 # ---------------- фото и анкета сотрудника ----------------
 
+@route("GET", "/api/team")
+def team_view(con, h, user, body, q):
+    from . import team
+    v = team.view(con)
+    if user["role"] == "coach":
+        v["pay"] = {}
+    return v
+
+
+@route("PUT", "/api/team", role="admin")
+def team_save(con, h, user, body, q):
+    from . import team
+    team.save(con, body)
+    return {"ok": True}
+
+
 @route("GET", "/api/users/{uid}/photo")
 def user_photo(con, h, user, body, q, uid):
     from . import profiles

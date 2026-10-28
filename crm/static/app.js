@@ -146,9 +146,10 @@ async function renderLogin(force = false) {
 /* ---------- каркас ---------- */
 const VIEWS = [
   ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Ученики"], ["skips", "Пропуски"],
-  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["settings", "Настройки"],
+  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
+  team: '<circle cx="12" cy="6" r="2.5"/><circle cx="5.5" cy="17.5" r="2.5"/><circle cx="18.5" cy="17.5" r="2.5"/><path d="M12 8.5v3.5M5.5 15v-3h13v3"/>',
   sales: '<path d="M4 5h16v14H4z"/><path d="M9 5v14M15 5v14"/>',
   today: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   schedule: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4M8 14h3M13 14h3M8 17h3"/>',
@@ -263,6 +264,7 @@ async function renderView(page) {
     if (S.view === "coaches") return await renderCoaches(page);
     if (S.view === "journal") return await renderJournal(page);
     if (S.view === "meet") return await renderMeet(page);
+    if (S.view === "team") return await renderTeam(page);
     if (S.view === "search") return await renderSearch(page);
     if (S.view === "settings") return await renderSettings(page);
   } catch (e) { if (e.message !== "Нужно войти") page.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
