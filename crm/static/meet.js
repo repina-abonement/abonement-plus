@@ -1,6 +1,17 @@
 /* «Встречаю детей»: тренер с телефона отмечает пришедших крупными плитками в начале тренировки.
    Одно нажатие — пришёл (зелёная), ещё раз — снять отметку. В конце «Готово»: кого не отметили — не пришли. */
 
+/* тренировка уже прошла: дата в прошлом или прошло больше часа от начала */
+function lessonOver(date, time) {
+  if (date < S.meta.today) return true;
+  if (date > S.meta.today || !time) return false;
+  const [h, m] = time.split(":").map(Number), now = new Date();
+  return now.getHours() * 60 + now.getMinutes() >= h * 60 + m + 60;
+}
+function meetLabel(date, time, overdue) {
+  return lessonOver(date, time) ? (overdue ? "🔴 Отметить, кто был: тренировка прошла" : "✅ Отметить, кто был") : "👋 Встречаю детей";
+}
+
 function openMeet(groupId, date) {
   S.meet = { group: groupId, date: date || S.meta.today };
   go("meet");
@@ -52,7 +63,7 @@ async function renderMeet(page) {
         <div class="meet-count"><b id="m-yes">0</b><span>из ${kids.length}</span></div>
       </div>
       ${!j.has_lesson ? `<div class="alert">${j.closed ? "Сегодня праздник, тренировки нет" : "В этот день у группы нет тренировки"}</div>` : ""}
-      ${kids.length ? `<div class="small muted" style="margin:0 2px 10px">Нажмите на ребёнка, когда он пришёл. Ошиблись - нажмите ещё раз</div>
+      ${kids.length ? `<div class="small muted" style="margin:0 2px 10px">${lessonOver(date, g.time) ? "Тренировка прошла. Нажмите на тех, кто был, остальных отметит кнопка внизу" : "Нажмите на ребёнка, когда он пришёл"}. Ошиблись - нажмите ещё раз</div>
         <div class="meet-grid">${kids.map(tile).join("")}</div>` : `<div class="panel center" style="padding:24px">На эту тренировку никто не записан</div>`}
       ${away.length ? `<h3 class="meet-sub">Не придут</h3><div class="meet-grid away">${away.map((r) => `<button class="meet-tile none away" data-mi="${r._i}">
           <span class="meet-check">✓</span><span class="meet-name">${esc(r.name)}</span>

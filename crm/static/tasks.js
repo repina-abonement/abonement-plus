@@ -135,7 +135,7 @@ async function renderCoachToday(page, coachId, viewBar = "") {
         <div class="bar"><i style="width:${all ? Math.round(100 * done / all) : 0}%"></i></div>
         <div class="row" style="align-items:center;margin-top:6px"><div class="small grow">${all ? (done >= all ? "Все отмечены 👍" : `Отмечено ${done} из ${all}`) : "В группе пока нет детей"}</div>
           ${all ? `<button class="btn sm" data-j="${g.id}" data-d="${d.date}" style="flex:0">Журнал</button>` : ""}</div>
-        ${all ? `<button class="btn primary meet-open" data-meet="${g.id}" data-d="${d.date}">👋 Встречаю детей</button>` : ""}
+        ${all && done < all ? `<button class="btn primary meet-open ${lessonOver(d.date, g.time) ? "late" : ""}" data-meet="${g.id}" data-d="${d.date}">${meetLabel(d.date, g.time, lessonOver(d.date, g.time))}</button>` : ""}
       </div>`; }).join("")}</div>` : `<div class="panel center" style="padding:30px">Сегодня тренировок нет. Отдыхай 😎</div>`}
     ${up.covering.length || up.covered.length ? `<section class="now calm" style="margin-top:16px"><div class="now-head"><h3>Замены на ближайшие 2 недели</h3></div>
       ${up.covering.map((x) => `<div class="small">🔁 ${dShort(x.date)}, ${wd(x.date)}, ${esc(x.time || "")}: <b>ты выходишь</b> в ${esc(x.group_name)} (${esc(x.branch)}) вместо ${esc(x.own_name || "другого тренера")}</div>`).join("")}

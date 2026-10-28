@@ -861,3 +861,4 @@ html.theme-soft .col-body { overflow-y: auto; overscroll-behavior: contain; scro
 .fx-check { display: flex !important; align-items: flex-start; gap: 10px; text-align: left; margin: 6px 0 14px; font-weight: 400; }
 .fx-check input { width: 20px; height: 20px; flex: 0 0 20px; margin-top: 2px; }
 .chip { white-space: nowrap; }
+.meet-open.late { background: var(--red); border-color: var(--red); color: #fff; }
