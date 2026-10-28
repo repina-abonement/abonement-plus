@@ -1100,6 +1100,17 @@ def analytics_report(con, h, user, body, q):
     return analytics.report(con, q.get("month"), int(q["branch_id"]) if q.get("branch_id") else None, q.get("part") or "groups")
 
 
+@route("GET", "/api/salary")
+def salary_report(con, h, user, body, q):
+    """Зарплата тренеров за месяц. Тренер видит только свою."""
+    from . import salary
+    if user["role"] == "coach":
+        return salary.payroll(con, q.get("month"), None, user["id"])
+    if user["role"] != "admin":
+        raise ApiError("Нет доступа", 403)
+    return salary.payroll(con, q.get("month"), int(q["branch_id"]) if q.get("branch_id") else None)
+
+
 @route("GET", "/api/dashboard", role="admin")
 def dashboard(con, h, user, body, q):
     return sv.dashboard(con, q.get("month"), int(q["branch_id"]) if q.get("branch_id") else None)

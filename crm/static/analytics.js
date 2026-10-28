@@ -1,6 +1,6 @@
 /* Аналитика бизнеса: вкладки дашборда «Филиалы и группы», «Тренеры», «Отток и продления», «Источники» */
 
-const AN_TABS = [["overview", "Обзор"], ["groups", "Филиалы и группы"], ["coaches", "Тренеры"], ["churn", "Отток и продления"], ["sources", "Источники"], ["program", "Сборная"], ["pu", "ПУ и отметки"]];
+const AN_TABS = [["overview", "Обзор"], ["groups", "Филиалы и группы"], ["coaches", "Тренеры"], ["churn", "Отток и продления"], ["sources", "Источники"], ["program", "Сборная"], ["pu", "ПУ и отметки"], ["salary", "Зарплата"]];
 
 function anTabsHtml() {
   return `<div class="seg an-tabs">${AN_TABS.map(([k, t]) => `<button data-antab="${k}" class="${(S.dashTab || "overview") === k ? "active" : ""}">${t}</button>`).join("")}</div>`;
@@ -20,6 +20,10 @@ const anGood = (v, good, bad) => (v == null ? "" : v >= good ? "s-good" : v < ba
 async function renderAnalytics(box) {
   const part = S.dashTab;
   if (part === "pu") return anPu(box, S.dashMonth);
+  if (part === "salary") {
+    box.innerHTML = `<div class="muted" style="padding:20px">Считаю…</div>`;
+    return payBox(box, await api("GET", `/api/salary?month=${S.dashMonth}${S.dashBranch ? "&branch_id=" + S.dashBranch : ""}`), false);
+  }
   const q = `/api/analytics?part=${part}&month=${S.dashMonth}${S.dashBranch ? "&branch_id=" + S.dashBranch : ""}`;
   box.innerHTML = `<div class="muted" style="padding:20px">Считаю…</div>`;
   const d = await api("GET", q);
@@ -155,4 +159,33 @@ function anProgram(box, d) {
         <div class="small muted">Сюда попадают и те, кто ещё не оплатил этот месяц</div></section>
     </div>`;
   box.querySelectorAll("[data-sid]").forEach((el) => (el.onclick = () => openStudent(+el.dataset.sid)));
+}
+
+
+/* ---------- зарплата тренеров ---------- */
+function payBox(box, d, mine) {
+  const pctTxt = `вдвоём главный ${d.pct.main}%, помощник ${d.pct.assistant}%, один тренер ${d.pct.solo}% от выручки группы за месяц, поделённой на тренировки; отработки ${rub(d.makeup_fixed)} за тренировку, если кто-то пришёл`;
+  const person = (p) => `<details class="panel pay-p" ${mine ? "open" : ""}><summary class="row" style="align-items:center">
+      <b class="grow">${esc(p.name)}</b><span class="small muted">${p.lessons} трен.${p.planned ? `, ${p.planned} по расписанию` : ""}</span>
+      <b style="margin-left:10px">${rub(p.to_pay)}</b></summary>
+    ${p.fines ? `<div class="small">Начислено ${rub(p.total)}, штрафы −${rub(p.fines)}</div>` : ""}
+    ${p.fines_pending ? `<div class="small muted">Ещё ждут проверки штрафы на ${rub(p.fines_pending)}</div>` : ""}
+    <div class="an-scroll"><table class="tbl an-tbl"><thead><tr><th>Дата</th><th>Группа</th><th>Роль</th><th class="r">₽</th></tr></thead><tbody>
+    ${p.lines.map((l) => `<tr class="${l.planned ? "muted" : ""}"><td>${l.date ? dShort(l.date) : ""}</td><td>${esc(l.group)}</td><td>${esc(l.role)}${l.planned && l.amount > 0 ? " · по расписанию" : ""}</td><td class="r">${fmtNum(l.amount)}</td></tr>`).join("")}
+    </tbody></table></div></details>`;
+  if (mine) {
+    const p = d.coaches[0];
+    box.innerHTML = p ? `<div class="kpi-value">${rub(p.to_pay)}</div><div class="small muted" style="margin:4px 0 8px">${esc(d.month_label)}. Сумма растёт по мере оплат абонементов. Серые строки посчитаны по расписанию: отметь, кто вёл тренировку</div>${person(p)}`
+      : `<div class="small muted">В этом месяце начислений пока нет</div>`;
+    return;
+  }
+  box.innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><div class="kpi-head"><span>Зарплата тренеров · ${esc(d.month_label)}</span></div><div class="kpi-value">${rub(d.total)}</div>
+        <div class="kpi-note">${d.revenue ? `${Math.round(100 * d.total / d.revenue)}% от выручки ${rub(d.revenue)}` : ""}</div></div>
+    </div>
+    <div class="small muted" style="margin:6px 0 12px">Правило: ${pctTxt}. Сборная: процент направления от выручки всех её групп. Штраф за опоздание вычитается после подтверждения. Серые строки посчитаны по расписанию, пока не отмечено, кто вёл тренировку</div>
+    ${d.coaches.map(person).join("") || `<div class="panel muted">Нет начислений</div>`}
+    <section class="panel"><div class="panel-head">По группам</div><div class="an-scroll"><table class="tbl an-tbl"><thead><tr><th>Группа</th><th>Тренировок</th><th class="r">Выручка</th><th class="r">За тренировку</th><th class="r">Тренерам</th></tr></thead>
+    <tbody>${d.groups.map((g) => `<tr><td><b>${esc(g.name)}</b><div class="small muted">${esc(g.branch)}</div></td><td>${g.lessons ?? ""}</td><td class="r">${g.makeup ? "отработки" : rub(g.revenue)}</td><td class="r">${g.per_lesson != null && !g.makeup ? rub(g.per_lesson) : ""}</td><td class="r">${rub(g.pay)}</td></tr>`).join("")}</tbody></table></div></section>`;
 }

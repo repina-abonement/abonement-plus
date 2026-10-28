@@ -140,12 +140,19 @@ async function renderCoachToday(page, coachId, viewBar = "") {
       ${up.covering.map((x) => `<div class="small">🔁 ${dShort(x.date)}, ${wd(x.date)}, ${esc(x.time || "")}: <b>ты выходишь</b> в ${esc(x.group_name)} (${esc(x.branch)}) вместо ${esc(x.own_name || "другого тренера")}</div>`).join("")}
       ${up.covered.map((x) => `<div class="small muted">↪ ${dShort(x.date)}, ${wd(x.date)}, ${esc(x.time || "")}: ${esc(x.group_name)} ведёт ${esc(x.sub_name)}, у тебя выходной</div>`).join("")}</section>` : ""}
     ${merchShiftBox(d, !!coachId)}
+    ${coachId ? "" : `<details class="panel" id="my-pay" style="margin-top:14px"><summary><b>💰 Моя зарплата за месяц</b></summary><div class="my-pay-body small muted">Считаю…</div></details>`}
     <div class="small muted" style="margin-top:14px">Отмечай детей сразу после тренировки: от этого зависят отработки, перерасчёт абонементов и твоё место в таблице тренеров</div>`;
   page.querySelectorAll("[data-j]").forEach((b) => (b.onclick = () => { S.journal.group = +b.dataset.j; S.journal.date = b.dataset.d; go("journal"); }));
   wireCheckin(page);
   if (!coachId) wireTasks(page);
   wireMerchShift(page, d);
   d.today.forEach((g) => wireStaffPicker(page, "c" + g.id, g.id, d.date, render));
+  const mp = page.querySelector("#my-pay");
+  if (mp) mp.ontoggle = async () => {
+    if (!mp.open || mp.dataset.done) return;
+    mp.dataset.done = "1";
+    try { payBox(mp.querySelector(".my-pay-body"), await api("GET", "/api/salary"), true); } catch (e) { mp.querySelector(".my-pay-body").textContent = e.message; }
+  };
 }
 
 /* ---------- настройки задач (админ) ---------- */
