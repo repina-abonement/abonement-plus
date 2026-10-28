@@ -10,7 +10,7 @@ function avatar(id, name, size = 36) {
   const u = staffById(id) || { id, name: name || "" };
   const nm = name || u.name || "";
   const st = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.38)}px`;
-  const stk = u.sticker && size >= 28 ? `<i class="ava-stk" style="font-size:${Math.round(size * 0.42)}px">${esc(u.sticker)}</i>` : "";
+  const stk = u.sticker && size >= 28 ? `<i class="ava-stk" style="font-size:${Math.max(12, Math.round(size * 0.36))}px">${esc(u.sticker)}</i>` : "";
   // фото тренеров во весь рост: приближаем на лицо, чтобы голова была по центру круга
   if (u.photo_at) return `<span class="ava-wrap" style="width:${size}px;height:${size}px" title="${esc(u.nickname || "")}"><span class="ava-photo" style="background-image:url('/api/users/${u.id}/photo?v=${encodeURIComponent(u.photo_at)}')"></span>${stk}</span>`;
   const ini = nm.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
