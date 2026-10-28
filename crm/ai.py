@@ -388,9 +388,11 @@ def team_stats(con, start: str, end: str) -> dict:
     order = {k: i for i, (k, _) in enumerate(CHECKLIST)}
     known = [(v, -order[k], k) for k, v in team_pct.items() if v is not None]
     weakest = min(known)[2] if known else None
+    low = min(v for v, _, _ in known) if known else None
+    weakest_all = [k for k, _ in CHECKLIST if team_pct.get(k) is not None and team_pct[k] == low]  # все этапы с худшим процентом
     pending = con.execute("SELECT COUNT(*) FROM calls WHERE ai_status IN ('stt','llm')").fetchone()[0]
     return {"checklist": [{"key": k, "title": t} for k, t in CHECKLIST], "operators": op_list, "team": team_pct,
-            "weakest": weakest, "recent": recent, "analyzed": len(rows), "pending": pending,
+            "weakest": weakest, "weakest_all": weakest_all, "recent": recent, "analyzed": len(rows), "pending": pending,
             "enabled": enabled(con)}
 
 

@@ -468,14 +468,19 @@ function aiBlock(x) {
       <div class="row" style="align-items:center"><h3 class="grow" style="flex:1">Разбор разговоров</h3>
         <span class="small muted" style="flex:0 0 auto">Разобрано ${x.analyzed}${x.pending ? `, ещё ${x.pending} в работе` : ""}</span></div>
       ${!x.analyzed ? `<div class="small muted">Разборов за этот период пока нет</div>`
-        : weak && x.team[weak.key] < 80 ? `<div class="ai-weak">Чаще всего теряем клиента на этапе <b>«${esc(STEP_NOUN[weak.key] || weak.title)}»</b>: администраторы делают это только в ${x.team[weak.key]}% разговоров</div>`
+        : weak && x.team[weak.key] < 80 ? (() => {
+          const ks = (x.weakest_all && x.weakest_all.length ? x.weakest_all : [weak.key]);
+          const names = ks.map((k) => `<b>«${esc(STEP_NOUN[k] || k)}»</b>`);
+          const list = names.length > 1 ? names.slice(0, -1).join(", ") + " и " + names[names.length - 1] : names[0];
+          return `<div class="ai-weak">Чаще всего теряем клиента на ${ks.length > 1 ? "этапах" : "этапе"} ${list}: администраторы делают ${ks.length > 1 ? "каждый из них" : "это"} только в ${x.team[weak.key]}% разговоров</div>`;
+        })()
         : `<div class="ai-good" style="margin-top:8px">Все шаги разговора выполняются хорошо, так держать</div>`}
       ${x.operators.length ? `
       <div class="chips" style="margin:12px 0 8px"><span class="small muted" style="align-self:center">Показать:</span>
         <button class="chip ${!op ? "on-chip" : ""}" data-aiop="${I.aiOp || ""}">Вся команда</button>
         ${x.operators.map((o) => `<button class="chip ${op && op.number === o.number ? "on-chip" : ""}" data-aiop="${esc(o.number)}">${esc(o.name)} · ${o.avg ?? "—"}/10</button>`).join("")}</div>
       <div class="steps">${x.checklist.map((c) => { const v = steps[c.key]; return `
-        <div class="step ${c.key === x.weakest && !op ? "weak" : ""}"><span>${esc(c.title)}</span>
+        <div class="step ${(x.weakest_all || [x.weakest]).includes(c.key) && !op ? "weak" : ""}"><span>${esc(c.title)}</span>
           <div class="bar"><i style="width:${v ?? 0}%" class="${v == null ? "" : v >= 80 ? "s-good" : v >= 50 ? "s-mid" : "s-bad"}"></i></div>
           <b>${v == null ? "—" : v + "%"}</b></div>`; }).join("")}</div>` : ""}
     </section>
