@@ -867,7 +867,7 @@ def _conv_out(con, r) -> dict:
         f = con.execute("SELECT name FROM families WHERE id=?", (d["family_id"],)).fetchone()
         d["family_name"] = f[0] if f else ""
         d["students"] = [dict(x) for x in con.execute(
-            "SELECT id, name, funnel FROM students WHERE family_id=? ORDER BY id", (d["family_id"],))]
+            "SELECT id, name, funnel, stage, birth, group_id, trial_at FROM students WHERE family_id=? AND archived=0 ORDER BY id", (d["family_id"],))]
     d["demo"] = d["external_id"].startswith("demo-")
     return d
 

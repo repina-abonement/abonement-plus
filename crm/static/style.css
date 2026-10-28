@@ -699,3 +699,5 @@ details.warn-box[open] > summary { margin-bottom: 6px; }
 .rb-kid { padding: 8px 0; border-bottom: 1px solid var(--line); } .rb-kid:last-child { border-bottom: 0; }
 .rb-tabs button { padding: 6px 10px; }
 .red-box { border: 1px solid #f5c2bd; }
+.to-bar { margin-bottom: 6px; } .to-box { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
+.to-slot { display: flex; gap: 8px; align-items: center; padding: 5px 0; border-top: 1px solid var(--line); font-size: 14px; }

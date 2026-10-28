@@ -267,6 +267,8 @@ async function openChat(cid, keepScroll = false) {
       </div>
       <div class="feed chat-feed" id="chat-feed">${d.messages.map((m) => msgHtml(m)).join("") || `<div class="muted small">Сообщений нет</div>`}</div>
       <div class="composer sticky">
+        <div class="to-bar"><button class="btn sm" id="to-open">📅 Предложить ближайшие ПУ</button></div>
+        <div id="to-panel" hidden></div>
         <div class="row"><textarea id="chat-text" rows="2" placeholder="Ответ…">${esc(draft)}</textarea><button class="btn primary" id="chat-send" style="flex:0">Отправить</button></div>
         ${c.channel === "telegram" && !c.meta.biz ? `<div class="small muted">Ответ уйдёт от бота школы</div>` : ""}
       </div>
@@ -276,6 +278,7 @@ async function openChat(cid, keepScroll = false) {
   const body = $("#drawer-body");
   body.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => { stopChatTimer(); openStudent(+b.dataset.open); }));
   if (c.family_id) loadWarnBox(c.family_id, $("#warn-box"));
+  wireTrialOffer(c);
   if ($("#unlink")) $("#unlink").onclick = async () => { await api("POST", `/api/conversations/${cid}/link`, { family_id: null }).catch(fail); openChat(cid); };
   if ($("#new-lead")) $("#new-lead").onclick = () => { stopChatTimer(); openNewClient({ phone: c.phone, parent_name: c.title, conversation_id: cid }); };
   if ($("#link-q")) {
@@ -497,4 +500,47 @@ function aiSettingsHtml(v, inf, st) {
     ${inf.ai_last_error ? `<div class="error" style="margin-bottom:8px">Последняя ошибка: ${esc(inf.ai_last_error)}</div>` : ""}
     <button class="btn sm" id="ai-test">Сохранить и проверить</button>
   </div>`;
+}
+
+
+/* «Предложить ближайшие ПУ»: подбор групп по возрасту и ближайших дат со свободными местами, текст сразу в поле ответа */
+function wireTrialOffer(c) {
+  const btn = $("#to-open"), panel = $("#to-panel");
+  if (!btn) return;
+  const leads = (c.students || []).filter((x) => x.funnel === "sales");
+  const ageOf = (b) => (b ? parseInt(ageText(b)) : NaN);
+  btn.onclick = () => {
+    panel.hidden = !panel.hidden;
+    if (panel.hidden) return;
+    const kid = leads[0];
+    panel.innerHTML = `<div class="to-box">
+      <div class="row" style="flex-wrap:wrap;align-items:flex-end">
+        ${leads.length > 1 ? `<div class="field"><label>Ребёнок</label><select id="to-kid">${leads.map((k) => `<option value="${k.id}">${esc(k.name)}</option>`).join("")}</select></div>` : ""}
+        <div class="field" style="flex:0 0 110px"><label>Возраст, лет</label><input id="to-age" type="number" min="2" max="17" value="${kid && isFinite(ageOf(kid.birth)) ? ageOf(kid.birth) : ""}" placeholder="4"></div>
+        <div class="field"><label>Филиал</label><select id="to-br"><option value="">Любой, где раньше</option>${S.meta.branches.map((b) => `<option value="${b.id}">${esc(b.name)}</option>`).join("")}</select></div>
+        <button class="btn sm primary" id="to-go" style="flex:0">Подобрать</button></div>
+      <div id="to-res"></div></div>`;
+    const go = async () => {
+      const age = $("#to-age").value;
+      if (!age) return toast("Укажите возраст ребёнка", true);
+      const kidId = $("#to-kid") ? +$("#to-kid").value : (kid ? kid.id : null);
+      try {
+        const r = await api("GET", `/api/trial-offer?age=${age}${$("#to-br").value ? "&branch_id=" + $("#to-br").value : ""}`);
+        if (!r.slots.length) { $("#to-res").innerHTML = `<div class="small muted" style="margin-top:8px">${esc(r.error)}</div>`; return; }
+        $("#chat-text").value = r.text;
+        $("#to-res").innerHTML = `<div class="small muted" style="margin:8px 0 4px">Текст уже в поле ответа: проверьте и нажмите «Отправить». Когда родитель выберет, запишите одним нажатием:</div>
+          ${r.slots.map((x, i) => `<div class="to-slot"><span class="grow">${esc(x.label)} · ${esc(x.group)} · ${esc(x.branch)} <span class="small muted">мест ${x.free}</span></span>
+            ${kidId ? `<button class="btn sm" data-to-book="${i}">Записать</button>` : ""}</div>`).join("")}`;
+        $("#to-res").querySelectorAll("[data-to-book]").forEach((b) => (b.onclick = async () => {
+          const x = r.slots[+b.dataset.toBook];
+          try {
+            await api("PATCH", `/api/students/${kidId}`, { group_id: x.group_id, trial_at: `${x.date}T${x.time}` });
+            toast(`Записан на пробное: ${x.label}`); panel.hidden = true; loadWarnBox(c.family_id, $("#warn-box"));
+          } catch (e) { fail(e); }
+        }));
+      } catch (e) { fail(e); }
+    };
+    $("#to-go").onclick = go;
+    if ($("#to-age").value) go();
+  };
 }

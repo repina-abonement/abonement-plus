@@ -1105,6 +1105,20 @@ def waitlist_funnel(con, h, user, body, q):
     return waitlist.funnel(con, force=bool(q.get("force"))) or {}
 
 
+@route("GET", "/api/trial-offer", role="operator")
+def trial_offer(con, h, user, body, q):
+    from . import trialoffer
+    age = int(q["age"]) if str(q.get("age") or "").isdigit() else None
+    child = q.get("child") or ""
+    if q.get("student_id"):
+        s = con.execute("SELECT name, birth FROM students WHERE id=?", (int(q["student_id"]),)).fetchone()
+        if s:
+            child = child or s["name"]
+            if age is None:
+                age = trialoffer.years(s["birth"])
+    return trialoffer.offer(con, age, child, int(q["branch_id"]) if q.get("branch_id") else None)
+
+
 @route("POST", "/api/students/{sid}/cancel-trial", role="operator")
 def cancel_trial(con, h, user, body, q, sid):
     from . import pu

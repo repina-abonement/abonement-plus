@@ -308,12 +308,14 @@ def complete(con, tid: int, user: dict, result: str = "") -> None:
 def settings_view(con) -> dict:
     vals = {k: setting(con, k) for k in list(DEFAULT_TEMPLATES) + list(AUTO_SETTINGS)}
     vals[OWNER_KEY] = str(owner(con) or "")
+    from . import trialoffer
+    vals["msg_trial_offer"] = setting(con, "msg_trial_offer") or trialoffer.DEFAULT
     return {"values": vals, "erp_statuses": list(ERP_STATUSES)}
 
 
 def save_settings(con, data: dict):
     for k, v in data.items():
-        if k in DEFAULT_TEMPLATES or k in AUTO_SETTINGS or k == OWNER_KEY:
+        if k in DEFAULT_TEMPLATES or k in AUTO_SETTINGS or k in (OWNER_KEY, "msg_trial_offer"):
             comms.put(con, k, str(v or "").strip())
 
 
