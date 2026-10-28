@@ -849,3 +849,15 @@ html.theme-soft .board { align-items: flex-start; }
 html.theme-soft .col { display: flex; flex-direction: column; max-height: min(72vh, 680px); }
 html.theme-soft .col-body { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding-right: 2px; }
 @media (max-width: 760px) { html.theme-soft .col { flex-basis: 84vw; } }
+
+/* чеки 54-ФЗ */
+.chip.red { background: #fde8e6; border-color: #f3b5ae; color: #a3271a; cursor: default; }
+.chip.green { background: #e6f5ea; border-color: #b3dcbd; color: #1d6b33; cursor: default; }
+.fx-list { display: flex; flex-direction: column; gap: 8px; }
+.fx-item { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+.fx-item.bad { border-color: #f3b5ae; }
+.fx-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 17px; }
+.fx-act { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.fx-check { display: flex !important; align-items: flex-start; gap: 10px; text-align: left; margin: 6px 0 14px; font-weight: 400; }
+.fx-check input { width: 20px; height: 20px; flex: 0 0 20px; margin-top: 2px; }
+.chip { white-space: nowrap; }

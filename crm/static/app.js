@@ -146,7 +146,7 @@ async function renderLogin(force = false) {
 /* ---------- каркас ---------- */
 const VIEWS = [
   ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Ученики"], ["skips", "Пропуски"],
-  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["payments", "Оплаты"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["settings", "Настройки"],
+  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
   sales: '<path d="M4 5h16v14H4z"/><path d="M9 5v14M15 5v14"/>',
@@ -160,6 +160,7 @@ const NAV_ICONS = {
   dashboard: '<path d="M4 19V10M10 19V5M16 19v-7M21 19H3"/>',
   planner: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9l1.5 1.5L12 8M8 15l1.5 1.5L12 14M14 9.5h3M14 15.5h3"/>',
   spend: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2M7 3h10"/>',
+  fiscal: '<path d="M6 3h12v18l-2-1.5L14 21l-2-1.5L10 21l-2-1.5L6 21z"/><path d="M9 8h6M9 11.5h6M9 15h3"/>',
   merch: '<path d="M8 4l-4 3 2 3 2-1v11h8V9l2 1 2-3-4-3c-.5 1.5-2 2.5-4 2.5S8.5 5.5 8 4z"/>',
   payments: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h3"/>',
   search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
@@ -197,7 +198,7 @@ function shell() {
 }
 
 /* ---------- навигация «назад»: каждый переход пишется в историю браузера ---------- */
-const navSnap = () => JSON.parse(JSON.stringify({ meet: S.meet, journal: S.journal, sched: S.sched, planner: S.planner, spend: S.spend,
+const navSnap = () => JSON.parse(JSON.stringify({ meet: S.meet, journal: S.journal, sched: S.sched, planner: S.planner, spend: S.spend, fx: S.fx,
   inbox: S.inbox && { tab: S.inbox.tab, filter: S.inbox.filter } }));
 function navRestore(sub) {
   if (!sub) return;
@@ -206,6 +207,7 @@ function navRestore(sub) {
   if (sub.sched) S.sched = sub.sched;
   if (sub.planner) S.planner = sub.planner;
   if (sub.spend) S.spend = sub.spend;
+  if (sub.fx) S.fx = sub.fx;
   if (sub.inbox && S.inbox) Object.assign(S.inbox, sub.inbox);
 }
 const navDepth = () => (history.state && history.state.depth) || 0;
@@ -253,6 +255,7 @@ async function renderView(page) {
     if (S.view === "merch") return await renderMerch(page);
     if (S.view === "planner") return await renderPlanner(page);
     if (S.view === "spend") return await renderSpend(page);
+    if (S.view === "fiscal") return await renderFiscal(page);
     if (S.view === "schedule") return await renderSchedule(page);
     if (["members", "skips"].includes(S.view)) return await renderBoard(page, S.view);
     if (S.view === "dashboard") return await renderDashboard(page);

@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import logic, ai, calldigest, callstats, coaches, comms, db, expenses, fakegen, legal, merch, offers, money, planner, schedule, services as sv, sources, staff, tasks
+from . import logic, ai, calldigest, callstats, coaches, comms, db, expenses, fakegen, fiscal, legal, merch, offers, money, planner, schedule, services as sv, sources, staff, tasks
 from .services import ApiError
 
 
@@ -887,6 +887,47 @@ def user_birth(con, h, user, body, q, uid):
     if not planner.can_manage(con, user) and int(uid) != user["id"]:
         raise ApiError("Нет доступа", 403)
     px(planner.set_birth, con, int(uid), body.get("birth") or "")
+    return {"ok": True}
+
+
+# ---------------- чеки 54-ФЗ ----------------
+
+def fx(fn, *a, **kw):
+    try:
+        return fn(*a, **kw)
+    except fiscal.FxError as e:
+        raise ApiError(str(e))
+
+
+@route("GET", "/api/fiscal", role="operator")
+def fiscal_get(con, h, user, body, q):
+    v = fiscal.view(con, int(q.get("days") or 30))
+    if user["role"] != "admin":
+        v.pop("settings", None)
+    return v
+
+
+@route("PUT", "/api/fiscal/settings", role="admin")
+def fiscal_settings(con, h, user, body, q):
+    fiscal.save_settings(con, body)
+    sv.audit(con, user, "fiscal.settings", ",".join(sorted(k for k in body if k in fiscal.PLAIN_KEYS + fiscal.SECRET_KEYS)))
+    return fiscal.settings_view(con)
+
+
+@route("POST", "/api/fiscal/test", role="admin")
+def fiscal_test(con, h, user, body, q):
+    return fiscal.test_sources(con)
+
+
+@route("POST", "/api/fiscal/run", role="admin")
+def fiscal_run(con, h, user, body, q):
+    return fiscal.run(con)
+
+
+@route("POST", "/api/fiscal/{pid}/resolve", role="operator")
+def fiscal_resolve(con, h, user, body, q, pid):
+    fx(fiscal.resolve, con, int(pid), body.get("action") or "", user, (body.get("note") or "").strip())
+    sv.audit(con, user, "fiscal.resolve", f"{pid}:{body.get('action')}")
     return {"ok": True}
 
 
@@ -1806,6 +1847,7 @@ def main():
     con.close()
     ai.start_worker(db.connect)
     tasks.start_worker(db.connect)
+    fiscal.start_worker(db.connect)
     host = os.environ.get("CRM_HOST", "127.0.0.1")
     port = int(os.environ.get("CRM_PORT", "8000"))
     srv = ThreadingHTTPServer((host, port), Handler)
