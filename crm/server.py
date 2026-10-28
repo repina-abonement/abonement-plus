@@ -129,7 +129,9 @@ def change_password(con, h, user, body, q):
 
 @route("GET", "/api/users", role="admin")
 def users_list(con, h, user, body, q):
-    return [dict(r) for r in con.execute("SELECT id, login, name, role, active, sip_number, tg_username FROM users ORDER BY id")]
+    ucols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
+    ph = "phone" if "phone" in ucols else "'' AS phone"
+    return [dict(r) for r in con.execute(f"SELECT id, login, name, role, active, sip_number, tg_username, {ph} FROM users ORDER BY id")]
 
 
 @route("PATCH", "/api/users/{uid}", role="admin")
@@ -154,6 +156,17 @@ def users_patch(con, h, user, body, q, uid):
     if "tg_username" in body:
         tg = "".join(ch for ch in str(body["tg_username"] or "").strip().lstrip("@") if ch.isalnum() or ch == "_")[:40]
         con.execute("UPDATE users SET tg_username=? WHERE id=?", (tg, int(uid)))
+    if "phone" in body:
+        if "phone" not in {r[1] for r in con.execute("PRAGMA table_info(users)")}:
+            con.execute("ALTER TABLE users ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
+        d = "".join(ch for ch in str(body["phone"] or "") if ch.isdigit())
+        if len(d) == 11 and d[0] in "78":
+            d = "7" + d[1:]
+        elif len(d) == 10:
+            d = "7" + d
+        elif d:
+            raise ApiError("Телефон: 11 цифр, например +7 911 831-27-83")
+        con.execute("UPDATE users SET phone=? WHERE id=?", ("+" + d if d else "", int(uid)))
     return {"ok": True}
 
 
