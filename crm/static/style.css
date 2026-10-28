@@ -802,3 +802,11 @@ html.theme-soft .back-btn { color: var(--ink-2); font-weight: 500; }
 html.theme-soft .kpi-value { font-family: var(--font); font-weight: 700; letter-spacing: -.03em; }
 html.theme-soft .soft-violet, html.theme-soft .now.tasks-box { background: var(--soft-violet); }
 html.theme-soft .now.tasks-box .now-head h3 { color: var(--soft-violet-ink); }
+/* второстепенное — одним мягким серым, главное — почти чёрным */
+html.theme-soft { --ink-2: #9a9aa3; }
+@media (prefers-color-scheme: dark) { html.theme-soft { --ink-2: #8e8e97; } }
+html.theme-soft :is(.muted, .note, .meta, .kpi-note, .card .meta, .list-row .small, .now-item .small, .an-kv span, .page-head .muted, label, .field label) { color: var(--ink-2); }
+html.theme-soft .small.muted, html.theme-soft .muted.small { font-size: 13px; }
+html.theme-soft .now > div:not(.now-head):not(.now-list):not(.now-item):not(.row):not(.alert) { color: var(--ink-2); }
+html.theme-soft .field label { font-weight: 450; font-size: 13px; }
+html.theme-soft :is(.now, .list-row, .card, .now-item) :is(b, strong) { color: var(--ink); }
