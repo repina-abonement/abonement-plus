@@ -96,6 +96,62 @@ class FxError(ValueError):
     pass
 
 
+# ---------- сертификат Минцифры ----------
+# Точка (и часть российских сервисов) работает на сертификате «Russian Trusted Root CA», которого нет в стандартном
+# списке Python. Скачиваем его с сайта Госуслуг и принимаем, только если отпечаток совпал с опубликованным:
+# SHA-256 D26D2D02…CA8ECF31 (так же он указан у Сбера на developers.sber.ru). Подменить его по дороге нельзя.
+RU_CA_URL = "https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt"
+RU_CA_SHA256 = "d26d2d0231b7c39f92cc738512ba54103519e4405d68b5bd703e9788ca8ecf31"
+_CTX = None
+_CA_TRIED = 0.0
+
+
+def _ca_path() -> str:
+    import os
+    from . import db
+    d = os.path.join(os.path.dirname(os.path.abspath(db.DB_PATH)), "ca")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, "russian_trusted_root_ca.pem")
+
+
+def _pem_ok(pem: str) -> bool:
+    import hashlib
+    import ssl
+    try:
+        return hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem.strip())).hexdigest() == RU_CA_SHA256
+    except ValueError:
+        return False
+
+
+def ssl_ctx():
+    """Стандартные сертификаты + корневой сертификат Минцифры (проверенный по отпечатку)."""
+    global _CTX, _CA_TRIED
+    if _CTX is not None:
+        return _CTX
+    import os
+    import ssl
+    from urllib.request import urlopen
+    ctx = ssl.create_default_context()
+    path = _ca_path()
+    pem = open(path).read() if os.path.exists(path) else ""
+    if not _pem_ok(pem) and time.time() - _CA_TRIED > 600:
+        _CA_TRIED = time.time()
+        try:
+            raw = urlopen(RU_CA_URL, timeout=20, context=ssl._create_unverified_context()).read()  # noqa: S323 - проверяем отпечатком
+            txt = raw.decode("ascii", "ignore")
+            m = re.search(r"-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----", txt, re.S)
+            pem = m.group(0) if m else ssl.DER_cert_to_PEM_cert(raw)
+        except Exception:  # noqa: BLE001
+            pem = ""
+        if _pem_ok(pem):
+            with open(path, "w") as f:
+                f.write(pem.strip() + "\n")
+    if _pem_ok(pem):
+        ctx.load_verify_locations(cadata=pem)
+        _CTX = ctx
+    return ctx
+
+
 def init(con):
     con.executescript(SCHEMA)
 
@@ -136,7 +192,7 @@ def _log_run(con, source: str, ok: bool, msg: str = "", now: datetime | None = N
 
 def tochka_get(con, path: str, method: str = "GET", data=None):
     tok = cfg(con, "fx_tochka_token")
-    code, js = comms.http(method, TOCHKA_API + path, data=data, headers={"Authorization": f"Bearer {tok}"}, timeout=30)
+    code, js = comms.http(method, TOCHKA_API + path, data=data, headers={"Authorization": f"Bearer {tok}"}, timeout=30, context=ssl_ctx())
     if code >= 400:
         msg = json.dumps(js, ensure_ascii=False)[:200] if js else ""
         raise FxError(f"Точка ответила {code}{': ' + msg if msg else ''}")
@@ -204,7 +260,7 @@ def pk_call(con, path: str, params=None, form=None):
     auth = base64.b64encode(f"{cfg(con, 'fx_pk_user')}:{cfg(con, 'fx_pk_password')}".encode()).decode()
     url = server + path + ("?" + urlencode(params, doseq=True) if params else "")
     code, js = comms.http("POST" if form is not None else "GET", url, form=form,
-                          headers={"Authorization": "Basic " + auth}, timeout=30)
+                          headers={"Authorization": "Basic " + auth}, timeout=30, context=ssl_ctx())
     if code == 401:
         raise FxError("PayKeeper: неверный логин или пароль")
     if code >= 400:
@@ -259,7 +315,7 @@ def pk_reprint(con, failed: dict, attempt: int) -> str:
 
 def ofd_get(con, path: str, params=None):
     url = OFD_API + path + ("?" + urlencode(params) if params else "")
-    code, js = comms.http("GET", url, headers={"Token": cfg(con, "fx_ofd_token"), "Accept": "application/json"}, timeout=30)
+    code, js = comms.http("GET", url, headers={"Token": cfg(con, "fx_ofd_token"), "Accept": "application/json"}, timeout=30, context=ssl_ctx())
     if code in (401, 403):
         raise FxError("Платформа ОФД: токен не подошёл")
     if code >= 400:

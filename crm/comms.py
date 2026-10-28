@@ -217,7 +217,7 @@ def save_settings(con, data: dict):
 
 # ---------------- HTTP наружу ----------------
 
-def _http(method: str, url: str, *, data=None, form=None, headers=None, timeout: int = 12, raw: bool = False):
+def _http(method: str, url: str, *, data=None, form=None, headers=None, timeout: int = 12, raw: bool = False, context=None):
     h = {"User-Agent": "AbonementPlus/0.2"} | (headers or {})
     body = None
     if data is not None:
@@ -228,7 +228,7 @@ def _http(method: str, url: str, *, data=None, form=None, headers=None, timeout:
         h["Content-Type"] = "application/x-www-form-urlencoded"
     req = Request(url, data=body, method=method, headers=h)
     try:
-        with urlopen(req, timeout=timeout) as r:
+        with urlopen(req, timeout=timeout, context=context) as r:
             content = r.read()
             ctype = r.headers.get("Content-Type", "")
             status_code = r.status
