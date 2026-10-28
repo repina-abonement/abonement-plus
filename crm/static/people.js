@@ -11,7 +11,8 @@ function avatar(id, name, size = 36) {
   const nm = name || u.name || "";
   const st = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.38)}px`;
   const stk = u.sticker && size >= 28 ? `<i class="ava-stk" style="font-size:${Math.round(size * 0.42)}px">${esc(u.sticker)}</i>` : "";
-  if (u.photo_at) return `<span class="ava-wrap" style="width:${size}px;height:${size}px" title="${esc(u.nickname || "")}"><img class="ava ava-photo" src="/api/users/${u.id}/photo?v=${encodeURIComponent(u.photo_at)}" alt="" style="${st}" loading="lazy">${stk}</span>`;
+  // фото тренеров во весь рост: приближаем на лицо, чтобы голова была по центру круга
+  if (u.photo_at) return `<span class="ava-wrap" style="width:${size}px;height:${size}px" title="${esc(u.nickname || "")}"><span class="ava-photo" style="background-image:url('/api/users/${u.id}/photo?v=${encodeURIComponent(u.photo_at)}')"></span>${stk}</span>`;
   const ini = nm.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
   const c = (+id || 0) % AVA_COLORS.length;
   return `<span class="ava ava-ini" style="${st};background:${AVA_COLORS[c]};color:${AVA_INK[c]}">${esc(ini)}</span>`;
