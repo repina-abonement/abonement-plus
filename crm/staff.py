@@ -74,6 +74,9 @@ def planned(con, d: date) -> list[dict]:
                             WHERE g.active=1 AND b.active=1"""):
         if d.weekday() not in logic.parse_weekdays(g["weekdays"]):
             continue
+        from . import closures
+        if closures.is_closed(con, g["id"], d):
+            continue
         people = {}
         for role in ("main", "assistant"):
             sub = schedule.sub_on(con, g["id"], ds, role)

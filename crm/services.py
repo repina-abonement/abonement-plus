@@ -105,7 +105,8 @@ def unresolved_absences_in_month(con, sid: int, ym: str, group_id: int | None = 
 # ---------- группы ученика ----------
 
 def enrollments_of(con, sid: int, active_only: bool = True) -> list[dict]:
-    q = """SELECT e.*, g.name AS group_name, g.weekdays AS group_weekdays, g.time AS group_time, g.age AS group_age
+    q = """SELECT e.*, g.name AS group_name, g.weekdays AS group_weekdays, g.time AS group_time, g.age AS group_age,
+                  g.program_id, g.lesson_kind
            FROM enrollments e JOIN groups g ON g.id = e.group_id WHERE e.student_id = ?"""
     if active_only:
         q += " AND e.active = 1"
@@ -189,6 +190,8 @@ def book_makeup(con, sid: int, group_id: int, day: str, absence_id: int | None, 
     if not g["is_makeup"] and con.execute("""SELECT 1 FROM enrollments WHERE student_id=? AND group_id=? AND active=1""",
                                           (sid, group_id)).fetchone():
         raise ApiError("Ребёнок и так ходит в эту группу")
+    from . import program
+    program.check_makeup(con, sid, group_id, day)
     counters = absence_counters(con, sid)
     ids = [a["id"] for a in counters["available_ids"]]
     if not ids:
@@ -245,8 +248,13 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None) -> d
     st = settings(con)
     prices = {"fixed": st["price_fixed"], "flex": st["price_flex"]}
     prev_abs = unresolved_absences_in_month(con, sid, logic.shift_month(ym, -1), e["group_id"])
+    from . import closures, program
+    if program.program_of_group(con, e["group_id"]):
+        return program.quote(con, sid, ym, e, discount_id=discount_id)
+    ms, me = logic.month_bounds(ym)
     q = logic.quote(weekdays=enrollment_days(e), ym=ym, tariff=e["tariff"], prices=prices,
-                    vacations=vacations_of(con, sid), prev_unresolved_absences=len(prev_abs))
+                    vacations=vacations_of(con, sid), prev_unresolved_absences=len(prev_abs),
+                    closed=closures.closed_dates(con, e["group_id"], ms, me))
     q["credit_absence_ids"] = [a["id"] for a in prev_abs[:q["credit_lessons"]]]
     q["credit_absence_dates"] = [a["date"] for a in prev_abs[:q["credit_lessons"]]]
     total, fee = logic.apply_late_fee(q["total"], enabled=st["late_fee_enabled"] == "1",
@@ -263,6 +271,8 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None) -> d
     q["discount"] = {"id": disc["id"], "name": disc["name"], "percent": disc["percent"], "amount": off,
                      "auto": disc["rule"] != "manual"} if disc else None
     q["total"] = total
+    q["waitlist"] = con.execute("SELECT COUNT(*) FROM waitlist WHERE group_id=? AND status IN ('queued','offered')",
+                                (e["group_id"],)).fetchone()[0] if fee else 0
     q["tariff"] = e["tariff"]
     q["group"] = e["group_name"]
     q["enrollment_id"] = e["id"]
@@ -517,7 +527,19 @@ def student_detail(con, sid: int) -> dict:
         "discounts": _rows(con.execute("SELECT id, name, percent, rule FROM discounts WHERE active=1 AND rule='manual' ORDER BY name")),
         "stage_label": stage_label,
         "next_month": logic.shift_month(cur, 1), "cur_month": cur,
+        "program": _program_out(con, sid),
+        "waitlist": __import__("crm.waitlist", fromlist=["for_student"]).for_student(con, sid),
     }
+
+
+def _program_out(con, sid: int) -> dict:
+    from . import program
+    progs = []
+    for p in con.execute("SELECT id, name FROM programs WHERE active=1").fetchall():
+        progs.append({"id": p["id"], "name": p["name"], "tariffs": program.TARIFFS,
+                      "ofp_groups": [{"id": g["id"], "name": g["name"], "branch": g["branch"]} for g in program.groups(con, p["id"], "ofp")],
+                      "plan": program.plan_of(con, sid, p["id"])})
+    return {"programs": progs}
 
 
 def _balance_out(con, sid: int) -> dict:
@@ -643,7 +665,9 @@ def journal(con, group_id: int, day: str) -> dict:
     if not g:
         raise ApiError("Группа не найдена", 404)
     d = date.fromisoformat(day)
-    has_lesson = d.weekday() in logic.parse_weekdays(g["weekdays"])
+    from . import closures
+    closed = closures.is_closed(con, group_id, d)
+    has_lesson = d.weekday() in logic.parse_weekdays(g["weekdays"]) and not closed
     rows = []
     if g["is_makeup"]:
         for m in con.execute(
@@ -662,7 +686,10 @@ def journal(con, group_id: int, day: str) -> dict:
             a = con.execute("SELECT status, resolved, warned, note FROM attendance WHERE student_id=? AND date=? AND group_id=?",
                             (s["id"], day, group_id)).fetchone()
             vac = logic.in_vacation(d, vacations_of(con, s["id"]))
-            rows.append({"id": s["id"], "name": s["name"], "status": "vacation" if vac else (a["status"] if a else None),
+            unpaid = bool(g["program_id"]) and not con.execute(
+                "SELECT 1 FROM subscriptions WHERE student_id=? AND month=? AND status='paid' AND kind='month'",
+                (s["id"], day[:7])).fetchone()
+            rows.append({"id": s["id"], "name": s["name"], "unpaid": unpaid, "status": "vacation" if vac else (a["status"] if a else None),
                          "resolved": a["resolved"] if a else None, "warned": bool(a and a["warned"]) and not vac,
                          "note": a["note"] if a else ""})
         # отработки в обычной группе (на место того, кто предупредил)
@@ -677,7 +704,7 @@ def journal(con, group_id: int, day: str) -> dict:
                                 AND substr(trial_at,1,10)=?""", (group_id, day)):
             came = con.execute("SELECT trial_came FROM students WHERE id=?", (s["id"],)).fetchone()[0]
             rows.append({"id": s["id"], "name": s["name"], "status": "trial", "trial_at": s["trial_at"], "trial_came": came})
-    return {"group": dict(g), "date": day, "has_lesson": has_lesson, "rows": rows}
+    return {"group": dict(g), "date": day, "has_lesson": has_lesson, "closed": closed, "rows": rows}
 
 
 def mark_trial(con, sid: int, came: bool, user) -> None:

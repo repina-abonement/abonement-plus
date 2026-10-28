@@ -217,6 +217,9 @@ def day(con, d: date) -> dict:
                                 WHERE g.branch_id=? AND g.active=1 ORDER BY g.time, g.name""", (b["id"],)):
             if d.weekday() not in logic.parse_weekdays(g["weekdays"]):
                 continue
+            from . import closures
+            if closures.is_closed(con, g["id"], d):
+                continue
             j = sv.journal(con, g["id"], ds)
             kids = [r for r in j["rows"] if r.get("status") != "trial"]
             subs = {}
@@ -394,6 +397,9 @@ def needs_subs(con, today: date | None = None, horizon: int = 21) -> list[dict]:
         while d <= d2:
             for g in groups:
                 if d.weekday() not in logic.parse_weekdays(g["weekdays"]):
+                    continue
+                from . import closures
+                if closures.is_closed(con, g["id"], d):
                     continue
                 for role in ("main", "assistant"):
                     if _own(g, role) != a["user_id"] or sub_on(con, g["id"], d.isoformat(), role):

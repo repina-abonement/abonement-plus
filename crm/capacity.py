@@ -39,12 +39,32 @@ def limit_for(con, group_id: int) -> int:
     return int(r[0] or 0) if r and not r[1] else 0
 
 
+def _partners(con, group_id: int) -> list[int]:
+    """Группы, которые занимаются вместе на одном поле (например, ОФП 6–8 и сборная в субботу 17:00)."""
+    try:
+        r = con.execute("SELECT shared_with FROM groups WHERE id=?", (group_id,)).fetchone()
+        out = {group_id}
+        if r and r[0]:
+            out.add(r[0])
+        for x in con.execute("SELECT id FROM groups WHERE shared_with IN (%s) AND active=1" % ",".join("?" * len(out)), list(out)):
+            out.add(x[0])
+        return sorted(out)
+    except Exception:  # noqa: BLE001 — до миграции колонки нет
+        return [group_id]
+
+
 def occupancy(con, group_id: int, day: str) -> dict:
     """Сколько детей придёт на тренировку группы в дату и есть ли свободные места."""
     from . import services as sv
     j = sv.journal(con, group_id, day)
+    rows = list(j["rows"])
+    for pg in _partners(con, group_id):
+        if pg != group_id:
+            pj = sv.journal(con, pg, day)
+            if pj["has_lesson"]:
+                rows += pj["rows"]
     coming, warned, vacation = 0, [], 0
-    for r in j["rows"]:
+    for r in rows:
         if r.get("status") == "vacation":
             vacation += 1
         elif r.get("warned"):
@@ -88,9 +108,11 @@ def _student_lessons(con, sid: int, start: date, days: int) -> list[dict]:
                             FROM enrollments e JOIN groups g ON g.id=e.group_id WHERE e.student_id=? AND e.active=1 AND g.active=1""",
                          (sid,)).fetchall():
         wd = logic.parse_weekdays(e["weekdays"]) if e["weekdays"] else logic.parse_weekdays(e["gw"])
+        from . import closures
+        closed = closures.closed_dates(con, e["group_id"], start, start + timedelta(days=days))
         for i in range(days):
             d = start + timedelta(days=i)
-            if d.weekday() in wd:
+            if d.weekday() in wd and d.isoformat() not in closed:
                 out.append({"group_id": e["group_id"], "group": e["name"], "date": d.isoformat(),
                             "time": logic.group_time(dict(e) | {"weekdays": e["gw"]}, d.weekday())})
     out.sort(key=lambda x: (x["date"], x["time"] or ""))
@@ -178,7 +200,7 @@ def free_slots(con, days: int = 14, branch_id: int | None = None, age_of: int | 
             if i == 0 and t and t <= now_t:
                 continue
             o = occupancy(con, g["id"], d.isoformat())
-            if o["free"]:
+            if o["free"] and o["has_lesson"]:
                 out.append({"group_id": g["id"], "group": g["name"], "branch": g["branch"], "age": g["age"], "date": d.isoformat(),
                             "time": t, "free": o["free"], "count": o["count"], "limit": o["limit"], "warned": o["warned"]})
     out.sort(key=lambda x: (x["date"], x["time"]))

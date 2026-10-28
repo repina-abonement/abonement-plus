@@ -134,6 +134,8 @@ def add_payment(con, sid: int, amount: int, method: str, user: dict, *, subscrip
 
 
 def pay_subscription(con, sub_id: int, method: str, user: dict, amount: int | None = None) -> int:
+    from . import program
+    program.reprice(con, sub_id)  # сборная: цена зависит от даты оплаты
     sub = con.execute("SELECT * FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
     if not sub or sub["status"] == "cancelled":
         raise ValueError("Счёт не найден или отменён")
@@ -261,6 +263,9 @@ def archive_discount(con, did: int, active: bool) -> None:
 # ---------------- разовое занятие ----------------
 
 def sell_single(con, sid: int, user: dict, group_id: int | None = None) -> int:
+    from . import program
+    if program.only_program(con, sid):
+        raise ValueError("В сборной разовых занятий нет: абонемент только на месяц")
     price = (con.execute("SELECT value FROM settings WHERE key='price_single'").fetchone() or [""])[0]
     if not str(price).strip().isdigit():
         raise ValueError("Укажите цену разового занятия в Настройках → Цены и правила")

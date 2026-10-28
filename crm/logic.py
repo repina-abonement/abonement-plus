@@ -87,14 +87,14 @@ def in_vacation(d: date, vacations: list[tuple[date, date]]) -> bool:
 
 
 def quote(*, weekdays: list[int], ym: str, tariff: str, prices: dict,
-          vacations: list[tuple[date, date]], prev_unresolved_absences: int) -> dict:
+          vacations: list[tuple[date, date]], prev_unresolved_absences: int, closed: set | None = None) -> dict:
     """Цена абонемента на месяц ym.
 
     prev_unresolved_absences — неотработанные и не пересчитанные пропуски
     прошлого месяца (ym - 1). Учитываются только на гибком тарифе.
     """
     per = int(prices["flex" if tariff == "flex" else "fixed"])
-    all_dates = lesson_dates(weekdays, ym)
+    all_dates = [d for d in lesson_dates(weekdays, ym) if not closed or d.isoformat() not in closed]
     vac_dates = [d for d in all_dates if in_vacation(d, vacations)]
     paid_dates = [d for d in all_dates if not in_vacation(d, vacations)]
     credit_lessons = min(MAX_FLEX_CREDIT, prev_unresolved_absences) if tariff == "flex" else 0

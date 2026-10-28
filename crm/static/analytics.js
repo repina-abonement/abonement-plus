@@ -1,6 +1,6 @@
 /* Аналитика бизнеса: вкладки дашборда «Филиалы и группы», «Тренеры», «Отток и продления», «Источники» */
 
-const AN_TABS = [["overview", "Обзор"], ["groups", "Филиалы и группы"], ["coaches", "Тренеры"], ["churn", "Отток и продления"], ["sources", "Источники"]];
+const AN_TABS = [["overview", "Обзор"], ["groups", "Филиалы и группы"], ["coaches", "Тренеры"], ["churn", "Отток и продления"], ["sources", "Источники"], ["program", "Сборная"]];
 
 function anTabsHtml() {
   return `<div class="seg an-tabs">${AN_TABS.map(([k, t]) => `<button data-antab="${k}" class="${(S.dashTab || "overview") === k ? "active" : ""}">${t}</button>`).join("")}</div>`;
@@ -26,6 +26,7 @@ async function renderAnalytics(box) {
   if (part === "coaches") return anCoaches(box, d);
   if (part === "churn") return anChurn(box, d);
   if (part === "sources") return anSources(box, d);
+  if (part === "program") return anProgram(box, d);
 }
 
 function anGroups(box, d) {
@@ -111,4 +112,46 @@ function anSources(box, d) {
       <tr class="an-total"><td>Итого</td><td>${t.leads}</td><td>${t.trial}</td><td>${t.came}</td><td>${t.bought}</td><td>${anPct(t.conv)}</td><td class="r">${money(t.spend)}</td><td></td><td></td><td class="r">${money(t.revenue)}</td></tr></tbody></table></div>
       <div class="small muted" style="margin-top:8px">Лиды, пришедшие в этом месяце. «Принесли» — оплаченные абонементы тех, кто купил впервые в этом месяце</div>
     </section>`;
+}
+
+function anProgram(box, d) {
+  if (!d.program || d.empty) { box.innerHTML = `<div class="muted" style="padding:20px">Группы сборной пока не настроены</div>`; return; }
+  const L = d.loss, C = d.costs, P = d.program;
+  const lossRows = [["Не купили абонемент", L.not_bought], ["Неполный месяц (пришли в середине)", L.partial], ["Отказ от ОФП (только Арктика)", L.no_ofp],
+    ["Скидки", L.discounts], ["Долги (выставлено, не оплачено)", L.debts]].filter(([, v]) => v);
+  box.innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><div class="kpi-head"><span>Выручка за ${esc(d.month_label)}</span></div><div class="kpi-value">${fmtNum(d.actual)} <small>₽</small></div>
+        <div class="kpi-note">оплатили ${d.paid_kids} из ${d.kids} детей · сбор ${anPct(d.collect_pct)} от потенциала</div></div>
+      <div class="kpi"><div class="kpi-head"><span>Полный потенциал</span></div><div class="kpi-value">${fmtNum(d.potential)} <small>₽</small></div>
+        <div class="kpi-note">${d.kids} детей × ${rub(d.full_pkg)} (Арктика ${d.lessons.arena} × ${rub(d.prices.arena)} + ОФП ${d.lessons.ofp} × ${rub(d.prices.ofp)})</div></div>
+      <div class="kpi"><div class="kpi-head"><span>Прибыль</span></div><div class="kpi-value ${d.profit < 0 ? "s-bad" : ""}">${fmtNum(d.profit)} <small>₽</small></div>
+        <div class="kpi-note">после тренера, аренды, роялти и эквайринга</div></div>
+      <div class="kpi"><div class="kpi-head"><span>Безубыточность</span></div><div class="kpi-value">${d.breakeven ?? "—"} <small>${d.breakeven ? kidsWord(d.breakeven) : ""}</small></div>
+        <div class="kpi-note">столько оплативших детей покрывают аренду при среднем чеке ${rub(d.per_kid)}</div></div>
+    </div>
+    <div class="an-two">
+      <section class="panel"><div class="panel-head">Деньги</div>
+        <div class="an-kv"><span>Выручка (оплачено)</span><b>${rub(d.actual)}</b></div>
+        <div class="an-kv"><span>Тренер ${esc(d.coach_name)}, ${P.coach_pct}%</span><b>−${rub(C.coach)}</b></div>
+        <div class="an-kv"><span>Аренда Арктики: ${d.lessons.arena} × ${rub(P.arena_rent)}</span><b>−${rub(C.rent)}</b></div>
+        <div class="an-kv"><span>Роялти ${P.royalty_pct}%</span><b>−${rub(C.royalty)}</b></div>
+        <div class="an-kv"><span>Эквайринг ${P.acquiring_pct}%</span><b>−${rub(C.acquiring)}</b></div>
+        <div class="an-kv"><span><b>Прибыль</b></span><b class="${d.profit < 0 ? "s-bad" : "s-good"}">${rub(d.profit)}</b></div>
+        <div class="small muted" style="margin-top:6px">Долги не считаются полученными деньгами. Аренда Неба общая и сюда не входит</div></section>
+      <section class="panel"><div class="panel-head">Куда ушли деньги от потенциала</div>
+        ${lossRows.map(([k, v]) => `<div class="an-kv"><span>${k}</span><b>−${rub(v)}</b></div>`).join("") || `<div class="small muted">Потерь нет</div>`}
+        ${d.late_gain ? `<div class="an-kv"><span>Наценка за позднюю оплату</span><b class="s-good">+${rub(d.late_gain)}</b></div>` : ""}
+        <div class="panel-head" style="margin-top:12px">Тарифы</div>
+        ${Object.entries(d.by_tariff).map(([k, v]) => `<div class="an-kv"><span>${esc(k)}</span><b>${v}</b></div>`).join("")}
+      </section>
+    </div>
+    <div class="an-two">
+      <section class="panel"><div class="panel-head">Не оплатили ${esc(d.month_label)} · ${d.unpaid.length}</div>
+        <div class="list" style="box-shadow:none">${d.unpaid.map((x) => `<div class="list-row click" data-sid="${x.id}"><div class="grow">${esc(x.name)}</div><b>${rub(x.amount)}</b></div>`).join("") || `<div class="empty">Все оплатили</div>`}</div></section>
+      <section class="panel"><div class="panel-head">Отток: ушли после прошлого месяца · ${d.left.length}${d.churn != null ? ` (${d.churn}%)` : ""}</div>
+        <div class="list" style="box-shadow:none">${d.left.map((x) => `<div class="list-row click" data-sid="${x.id}"><div class="grow">${esc(x.name)}</div></div>`).join("") || `<div class="empty">Никто не ушёл</div>`}</div>
+        <div class="small muted">Сюда попадают и те, кто ещё не оплатил этот месяц</div></section>
+    </div>`;
+  box.querySelectorAll("[data-sid]").forEach((el) => (el.onclick = () => openStudent(+el.dataset.sid)));
 }

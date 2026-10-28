@@ -389,6 +389,57 @@ def _ts(d: date, rnd, lo=9, hi=21) -> str:
     return datetime.combine(d, datetime.min.time()).replace(hour=rnd.randint(lo, hi), minute=rnd.randint(0, 59)).isoformat(timespec="minutes")
 
 
+def _fake_sbornaya(con, user, rnd, new_kid, to_member, src, today, months) -> int:
+    from . import program, services as sv
+    p = con.execute("SELECT id FROM programs WHERE slug='sbornaya' AND active=1").fetchone()
+    if not p:
+        return 0
+    arena = program.groups(con, p[0], "arena")
+    ofp = program.groups(con, p[0], "ofp")
+    if not arena:
+        return 0
+    thu = next((g for g in ofp if g["weekdays"] == "3"), None)
+    sat = next((g for g in ofp if g["weekdays"] == "5"), None)
+    plans = [("pkg", thu)] * 6 + [("pkg", sat)] * 3 + [("arena_only", None)] * 3
+    cur = logic.month_of(today)
+    made = 0
+    for i, (tariff, og) in enumerate(plans):
+        if tariff == "pkg" and not og:
+            tariff, og = "arena_only", None
+        start = months[rnd.randint(0, max(0, len(months) - 3))]
+        y, m = map(int, start.split("-"))
+        joined = date(y, m, 1) - timedelta(days=rnd.randint(5, 20))
+        sid = new_kid(arena[0], _ts(joined, rnd), rnd.choice([s[0] for s in src]), "sales")
+        con.execute("UPDATE students SET birth=? WHERE id=?", ((today - timedelta(days=rnd.randint(8 * 365 + 30, 11 * 365))).isoformat(), sid))
+        to_member(sid, arena[0], _ts(joined, rnd))
+        try:
+            program.set_plan(con, sid, p[0], tariff, og["id"] if og else None, user)
+        except Exception:  # noqa: BLE001 — нет мест в субботу: только Арктика
+            program.set_plan(con, sid, p[0], "arena_only", None, user)
+        e = next(x for x in sv.enrollments_of(con, sid) if x["group_id"] == arena[0]["id"])
+        for ym in [x for x in months if x >= start] + [logic.shift_month(cur, 1)]:
+            nxt = ym > cur
+            if nxt and rnd.random() < 0.4:
+                on, paid = today, False          # ещё не продлили на следующий месяц (после 25 числа — в лист ожидания)
+            else:
+                y2, m2 = map(int, logic.shift_month(ym, -1).split("-"))
+                on, paid = min(date(y2, m2, rnd.randint(15, 25)), today), True
+            q = program.quote(con, sid, ym, e, on=on)
+            d = q["discount"] or {}
+            paid_at = _ts(on, rnd) if paid else None
+            sub = con.execute("""INSERT INTO subscriptions(student_id, enrollment_id, month, tariff, lessons, per_lesson, late_fee, price,
+                                 status, created_at, paid_at, discount_name, discount_amount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                              (sid, e["id"], ym, q["tariff"], q["lessons_paid"], q["per_lesson"], q["late_fee"], q["total"],
+                               "paid" if paid else "invoiced", _ts(on, rnd), paid_at, d.get("name", ""), d.get("amount", 0))).lastrowid
+            if paid:
+                con.execute("""INSERT INTO payments(student_id, amount, method, paid_at, comment, user_name, confirmed, confirmed_by,
+                               confirmed_at, subscription_id, created_at) VALUES (?,?,?,?,?,?,1,'Юлия',?,?,?)""",
+                            (sid, q["total"], rnd.choice(["sbp", "card", "online"]), paid_at, f"Сборная, {q['month_label']}", "Ольга",
+                             paid_at, sub, paid_at))
+        made += 1
+    return made
+
+
 def realistic(con, user: dict, seed: int | None = 7, start_members: int = 150, months_back: int = 18) -> dict:
     """Стирает прежних выдуманных и создаёт школу с историей за полтора года, похожую на настоящую."""
     from . import services as sv, sources
@@ -403,6 +454,11 @@ def realistic(con, user: dict, seed: int | None = 7, start_members: int = 150, m
     groups = [dict(g) for g in con.execute("""SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id
                                               WHERE g.active=1 AND b.active=1 AND g.is_makeup=0""")]
     groups = [g for g in groups if "взросл" not in (g["age"] or "").lower()] or groups
+    prog_groups = [g for g in groups if g.get("program_id")]
+    groups = [g for g in groups if not g.get("program_id")]  # сборную заполняем отдельно, по её правилам
+    for g in groups:  # группа делит поле со сборной (суббота 17:00) — оставляем места для сборной
+        if con.execute("SELECT 1 FROM groups WHERE shared_with=? AND active=1", (g["id"],)).fetchone():
+            g["capacity"] = max(0, min(g["capacity"], 10) - 4)
     if not groups:
         raise ValueError("Сначала нужны группы в расписании")
     src = [(sources.ensure_source(con, ch, nm), w, k) for ch, nm, w, k in REAL_SOURCES]
@@ -440,7 +496,7 @@ def realistic(con, user: dict, seed: int | None = 7, start_members: int = 150, m
         if not con.execute("SELECT 1 FROM enrollments WHERE student_id=?", (sid,)).fetchone():
             con.execute("INSERT INTO enrollments(student_id, group_id, weekdays, tariff, created_at) VALUES (?,?,?,?,?)",
                         (sid, g["id"], "", "fixed", when))
-        load[g["id"]] += 1
+        load[g["id"]] = load.get(g["id"], 0) + 1
 
     def invoice(sid, ym: str, paid_at: str | None):
         if con.execute("SELECT 1 FROM subscriptions WHERE student_id=? AND month=?", (sid, ym)).fetchone():
@@ -506,7 +562,7 @@ def realistic(con, user: dict, seed: int | None = 7, start_members: int = 150, m
             for sid, g in pool:
                 if rnd.random() < (0.3 if m == 9 else 0.2) and sid not in {a for a, _ in stay} and load[g["id"]] < g["capacity"]:
                     con.execute("UPDATE students SET stage='active', stage_changed_at=? WHERE id=?", (_ts(first - timedelta(days=5), rnd), sid))
-                    load[g["id"]] += 1
+                    load[g["id"]] = load.get(g["id"], 0) + 1
                     back.append((sid, g))
         out["returned"] += len(back)
         # 3) оплаты продления за месяц
@@ -586,6 +642,8 @@ def realistic(con, user: dict, seed: int | None = 7, start_members: int = 150, m
                     con.execute("INSERT OR IGNORE INTO attendance(student_id, group_id, date, status) VALUES (?,?,?,?)",
                                 (sid, g["id"], d.isoformat(), "absent" if rnd.random() < 0.11 else "present"))
                 d += timedelta(days=1)
+    # 6б) сборная: дети 8+ в Арктике по своим правилам (тарифы, день ОФП, цены по дате оплаты)
+    out["sbornaya"] = _fake_sbornaya(con, user, rnd, new_kid, to_member, src, today, months[-7:] if len(months) > 7 else months)
     # 7) траты на рекламу по месяцам — чтобы считалась цена лида и ученика
     try:
         ids = {nm: sid for (sid, _w, _k), (_c, nm, _x, _y) in zip(src, REAL_SOURCES)}

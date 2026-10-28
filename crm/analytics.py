@@ -205,4 +205,89 @@ def report(con, ym: str | None = None, branch_id: int | None = None, part: str =
         out.update(churn_report(con, ym, branch_id))
     elif part == "sources":
         out.update(sources_report(con, ym))
+    elif part == "program":
+        out.update(program_report(con, ym))
     return out
+
+
+def program_report(con, ym: str, slug: str = "sbornaya") -> dict:
+    """Отчёт по направлению (сборная) за месяц: потенциал, факт, потери по причинам, отток, прибыль, безубыточность."""
+    from . import program, services as sv
+    p = con.execute("SELECT * FROM programs WHERE slug=?", (slug,)).fetchone()
+    if not p:
+        return {"program": None}
+    pid = p["id"]
+    arena = program.groups(con, pid, "arena")
+    ofp = program.groups(con, pid, "ofp")
+    gids = [g["id"] for g in program.groups(con, pid)] + [r[0] for r in con.execute(
+        "SELECT id FROM groups WHERE program_id=? AND active=0", (pid,))]
+    if not arena:
+        return {"program": dict(p), "empty": True}
+    pr = program.prices_for(con, pid, ym)
+    n_arena = len(program._dates(con, arena[0]["id"], ym))
+    thu = next((g for g in ofp if g["weekdays"] == "3"), ofp[0] if ofp else None)
+    n_ofp_std = len(program._dates(con, thu["id"], ym)) if thu else 0
+    full_pkg = n_arena * pr["arena"] + n_ofp_std * pr["ofp"]
+    q = ",".join("?" * len(gids))
+    subs = [dict(r) for r in con.execute(
+        f"""SELECT x.*, s.name FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id JOIN students s ON s.id=x.student_id
+            WHERE e.group_id IN ({q}) AND x.month=? AND x.status!='cancelled' AND x.kind='month'""", (*gids, ym))]
+    kids = {r[0]: r[1] for r in con.execute(
+        f"""SELECT DISTINCT s.id, s.name FROM enrollments e JOIN students s ON s.id=e.student_id
+            WHERE e.group_id=? AND e.active=1 AND s.stage!='left' AND s.archived=0""", (arena[0]["id"],))}
+    for x in subs:
+        kids.setdefault(x["student_id"], x["name"])
+    paid = [x for x in subs if x["status"] == "paid"]
+    actual = sum(x["price"] for x in paid)
+    debts = sum(x["price"] for x in subs if x["status"] == "invoiced")
+    with_sub = {x["student_id"] for x in subs}
+    potential = full_pkg * len(kids)
+    loss = {"partial": 0, "no_ofp": 0, "discounts": 0, "debts": debts, "not_bought": 0}
+    late_gain = 0
+    for x in subs:
+        plan = program.plan_of(con, x["student_id"], pid)
+        tariff = x["tariff"] if x["tariff"] in program.TARIFFS else (plan["tariff"] if plan else "pkg")
+        full_t = n_arena * pr["arena_only"] if tariff == "arena_only" else full_pkg
+        if tariff == "arena_only":
+            loss["no_ofp"] += full_pkg - full_t
+        loss["discounts"] += x["discount_amount"] or 0
+        late_gain += x["late_fee"] or 0
+        base = x["price"] + (x["discount_amount"] or 0) - (x["late_fee"] or 0)
+        loss["partial"] += max(0, full_t - base)
+    for sid in kids:
+        if sid not in with_sub:
+            loss["not_bought"] += full_pkg
+    prev = logic.shift_month(ym, -1)
+    prev_paid = {r[0]: r[1] for r in con.execute(
+        f"""SELECT DISTINCT x.student_id, s.name FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id JOIN students s ON s.id=x.student_id
+            WHERE e.group_id IN ({q}) AND x.month=? AND x.status='paid'""", (*gids, prev))}
+    paid_ids = {x["student_id"] for x in paid}
+    left = [{"id": k, "name": v} for k, v in prev_paid.items() if k not in paid_ids]
+    coach = round(actual * p["coach_pct"] / 100)
+    rent = n_arena * p["arena_rent"]
+    royalty = round(actual * p["royalty_pct"] / 100)
+    acq = round(actual * p["acquiring_pct"] / 100)
+    profit = actual - coach - rent - royalty - acq
+    per_kid = actual / len(paid_ids) if paid_ids else full_pkg
+    margin = per_kid * (1 - (p["coach_pct"] + p["royalty_pct"] + p["acquiring_pct"]) / 100)
+    breakeven = -(-rent // margin) if margin > 0 else None
+    coach_name = (con.execute("SELECT u.name FROM groups g JOIN users u ON u.id=g.coach_id WHERE g.id=?", (arena[0]["id"],)).fetchone() or [""])[0]
+    by_tariff = {}
+    for x in paid:
+        plan = program.plan_of(con, x["student_id"], pid)
+        t = x["tariff"] if x["tariff"] in program.TARIFFS else (plan["tariff"] if plan else "pkg")
+        lab = program.TARIFFS[t]
+        if t == "pkg" and plan and plan["ofp_group_id"]:
+            lab += ", " + ("Чт" if any(g["id"] == plan["ofp_group_id"] and g["weekdays"] == "3" for g in ofp) else "Сб")
+        by_tariff[lab] = by_tariff.get(lab, 0) + 1
+    return {
+        "program": {"id": pid, "name": p["name"], "coach_pct": p["coach_pct"], "royalty_pct": p["royalty_pct"],
+                    "acquiring_pct": p["acquiring_pct"], "arena_rent": p["arena_rent"]},
+        "month": ym, "month_label": logic.month_label(ym), "prices": pr, "lessons": {"arena": n_arena, "ofp": n_ofp_std},
+        "full_pkg": full_pkg, "kids": len(kids), "paid_kids": len(paid_ids), "potential": potential, "actual": actual,
+        "collect_pct": round(actual * 100 / potential) if potential else None, "loss": loss, "late_gain": late_gain,
+        "left": left, "prev_kids": len(prev_paid), "churn": round(len(left) * 100 / len(prev_paid)) if prev_paid else None,
+        "costs": {"coach": coach, "rent": rent, "royalty": royalty, "acquiring": acq}, "coach_name": coach_name,
+        "profit": profit, "breakeven": int(breakeven) if breakeven else None, "per_kid": round(per_kid), "by_tariff": by_tariff,
+        "unpaid": [{"id": x["student_id"], "name": x["name"], "amount": x["price"]} for x in subs if x["status"] == "invoiced"],
+    }

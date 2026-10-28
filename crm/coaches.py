@@ -240,7 +240,8 @@ def coach_today(con, coach_id: int, today=None) -> dict:
         role = "main" if g["coach_id"] == coach_id else "assistant"
         partner = g["assistant_name"] if role == "main" else g["coach_name"]
         days = logic.parse_weekdays(g["weekdays"])
-        if today.weekday() in days:
+        from . import closures
+        if today.weekday() in days and not closures.is_closed(con, g["id"], today):
             sub = schedule.sub_on(con, g["id"], day, role)
             if sub:
                 replaced.append({"group_id": g["id"], "name": g["name"], "time": logic.group_time(g, today.weekday()),

@@ -276,6 +276,7 @@ def workdesk(con, h, user, body, q):
     return {"urgent": reds + rest, "board": board, "birthdays": sv.birthdays(con), "needs_subs": schedule.needs_subs(con),
             "checkins": staff.day_report(con) if checkin_reviewer(con, user) else None,
             "merch_alerts": merch_alerts(con),
+            "waitlist": __import__("crm.waitlist", fromlist=["funnel"]).funnel(con),
             "call_focus": calldigest.focus_for(con, (con.execute("SELECT sip_number FROM users WHERE id=?",
                                                                  (int(q["as_user"]) if q.get("as_user") and user["role"] == "admin" else user["id"],)).fetchone() or [""])[0]),
             "bills_due": expenses.bills_due(con) if user["role"] == "admin" else [],
@@ -1039,6 +1040,74 @@ def conv_send(con, h, user, body, q, cid):
 @route("POST", "/api/conversations/{cid}/link", role="operator")
 def conv_link(con, h, user, body, q, cid):
     cx(comms.link, con, int(cid), body.get("family_id"))
+    return {"ok": True}
+
+
+@route("POST", "/api/students/{sid}/program", role="operator")
+def student_program(con, h, user, body, q, sid):
+    from . import program
+    return program.set_plan(con, int(sid), int(body.get("program_id") or 0), body.get("tariff") or "",
+                            int(body["ofp_group_id"]) if body.get("ofp_group_id") else None, user)
+
+
+@route("GET", "/api/programs", role="operator")
+def programs_list(con, h, user, body, q):
+    from . import program
+    return {"programs": program.info(con)}
+
+
+@route("POST", "/api/programs/{pid}/prices", role="admin")
+def program_price(con, h, user, body, q, pid):
+    from . import program
+    program.save_price(con, int(pid), body)
+    return {"ok": True}
+
+
+@route("PATCH", "/api/programs/{pid}", role="admin")
+def program_patch(con, h, user, body, q, pid):
+    from . import program
+    program.save_program(con, int(pid), body)
+    return {"ok": True}
+
+
+@route("POST", "/api/students/{sid}/waitlist", role="operator")
+def waitlist_add(con, h, user, body, q, sid):
+    from . import waitlist
+    return {"id": waitlist.add(con, int(sid), int(body.get("group_id") or 0), body.get("month"), body, user)}
+
+
+@route("POST", "/api/waitlist/{wid}/status", role="operator")
+def waitlist_status(con, h, user, body, q, wid):
+    from . import waitlist
+    waitlist.set_status(con, int(wid), body.get("status") or "", user)
+    return {"ok": True}
+
+
+@route("GET", "/api/waitlist/funnel", role="operator")
+def waitlist_funnel(con, h, user, body, q):
+    from . import waitlist
+    return waitlist.funnel(con, force=bool(q.get("force"))) or {}
+
+
+@route("GET", "/api/closures", role="operator")
+def closures_list(con, h, user, body, q):
+    from . import closures
+    return {"items": closures.listing(con)}
+
+
+@route("POST", "/api/closures", role="admin")
+def closures_add(con, h, user, body, q):
+    from . import closures
+    try:
+        return {"id": closures.add(con, body, user)}
+    except closures.ClosureError as e:
+        raise ApiError(str(e))
+
+
+@route("DELETE", "/api/closures/{cid}", role="admin")
+def closures_del(con, h, user, body, q, cid):
+    from . import closures
+    closures.remove(con, int(cid))
     return {"ok": True}
 
 

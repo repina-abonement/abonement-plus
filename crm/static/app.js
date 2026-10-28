@@ -250,7 +250,7 @@ async function renderDashboard(page) {
     for (let i = 0; i < 18; i++) { const dt = new Date(S.meta.today); dt.setDate(1); dt.setMonth(dt.getMonth() - i); ms.push(isoDate(dt).slice(0, 7)); }
     page.innerHTML = `<div class="dash-filters">
       <select id="dash-month">${ms.map((x) => `<option value="${x}" ${x === S.dashMonth ? "selected" : ""}>${monthLabel(x)}</option>`).join("")}</select>
-      ${S.dashTab === "sources" ? "" : `<select id="dash-branch"><option value="">Все филиалы</option>${S.meta.branches.map((b) => `<option value="${b.id}" ${String(b.id) === String(S.dashBranch) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>`}
+      ${S.dashTab === "sources" || S.dashTab === "program" ? "" : `<select id="dash-branch"><option value="">Все филиалы</option>${S.meta.branches.map((b) => `<option value="${b.id}" ${String(b.id) === String(S.dashBranch) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>`}
       </div>${anTabsHtml()}<div id="an-box"></div>`;
     $("#dash-month").onchange = (e) => { S.dashMonth = e.target.value; render(); };
     if ($("#dash-branch")) $("#dash-branch").onchange = (e) => { S.dashBranch = e.target.value; render(); };
@@ -395,6 +395,7 @@ async function renderWorkdesk(page) {
     ${checkinReport(d.checkins)}
     ${merchAlerts(d.merch_alerts)}
     ${needsSubsBox(d)}
+    ${waitlistBox(d.waitlist)}
     ${schedHtml}
     ${birthdaysBox(d.birthdays)}
     ${tasksHtml}
@@ -420,6 +421,7 @@ async function renderWorkdesk(page) {
   wireTasks(page);
   wireViewAs(page);
   wireNeedsSubs(page, d);
+  wireWaitlist(page);
   wireCheckinReport(page);
   wireSpend(page);
   wireMerchAlerts(page);
@@ -498,7 +500,7 @@ async function openStudent(id) {
   let d;
   try { d = await api("GET", `/api/students/${id}`); } catch (e) { return fail(e); }
   const s = d.student, g = d.group, c = d.counters;
-  const groups = S.meta.groups.filter((x) => !x.is_makeup);
+  const groups = S.meta.groups.filter((x) => !x.is_makeup && !x.program_id);
   const makeupGroups = S.meta.groups.filter((x) => x.is_makeup);
   const isMember = s.funnel === "members";
 
@@ -557,10 +559,18 @@ async function openStudent(id) {
 
   <div class="section">
     <h3>${isMember ? "Группы и абонементы" : "Абонемент"}</h3>
+    ${waitlistCard(d)}
     ${isMember ? `
       <div class="row"><div class="field"><label>Месяц абонемента</label><select id="q-month">${[d.cur_month, d.next_month].map((m) => `<option value="${m}" ${m === d.next_month ? "selected" : ""}>${monthLabel(m)}</option>`).join("")}</select></div>
         <div class="field"><label>Скидка</label><select id="q-disc"><option value="">Без скидки (или по правилу)</option>${(d.discounts || []).map((x) => `<option value="${x.id}">${esc(x.name)}, ${x.percent}%</option>`).join("")}</select></div></div>
-      ${d.enrollments.length ? d.enrollments.map((e) => `
+      ${programBlock(d)}
+      ${d.enrollments.length ? d.enrollments.map((e) => e.lesson_kind === "ofp" ? `
+        <div class="enr"><div class="enr-head"><b>${esc(e.group_name)}</b><span class="muted small">входит в абонемент сборной</span></div></div>` : e.lesson_kind === "arena" ? `
+        <div class="enr">
+          <div class="enr-head"><b>${esc(e.group_name)}</b><span class="muted small">${esc(e.group_age)} лет</span></div>
+          <div class="quote muted" data-quote="${e.id}">Считаю…</div>
+          <button class="btn primary sm" data-inv="${e.id}">Выставить счёт</button>
+        </div>` : `
         <div class="enr">
           <div class="enr-head"><b>${esc(e.group_name)}</b><span class="muted small">${esc(e.group_age)} лет</span>
             <button class="icon-btn" data-enoff="${e.id}" title="Больше не ходит в эту группу">✕</button></div>
@@ -570,7 +580,7 @@ async function openStudent(id) {
           <button class="btn primary sm" data-inv="${e.id}">Выставить счёт</button>
         </div>`).join("") : `<div class="muted small">Ученик пока не ходит ни в одну группу.</div>`}
       <div class="row" style="margin-top:12px">
-        <div class="field"><label>Добавить группу</label><select id="en-group"><option value="">— выберите —</option>${groups.filter((x) => !d.enrollments.some((e) => e.group_id === x.id)).map((x) => `<option value="${x.id}">${esc(x.name)} · ${esc(x.age)} лет</option>`).join("")}</select></div>
+        <div class="field"><label>Добавить группу</label><select id="en-group"><option value="">— выберите —</option>${groups.filter((x) => !x.program_id && !d.enrollments.some((e) => e.group_id === x.id)).map((x) => `<option value="${x.id}">${esc(x.name)} · ${esc(x.age)} лет</option>`).join("")}</select></div>
         <div class="field" style="flex:0 0 130px"><label>Тариф</label><select id="en-tariff"><option value="fixed">Негибкий</option><option value="flex">Гибкий</option></select></div>
       </div>
       <button class="btn sm" id="en-add">+ Добавить группу</button>
@@ -669,14 +679,18 @@ async function openStudent(id) {
     try {
       const q = await api("GET", `/api/students/${id}/quote?month=${$("#q-month").value}&enrollment_id=${eid}${$("#q-disc").value ? "&discount_id=" + $("#q-disc").value : ""}`);
       box.classList.remove("muted");
+      if (q.program) { box.innerHTML = programQuoteHtml(q); return; }
       box.innerHTML = `<div class="total">${rub(q.total)}</div>
         <div class="small">${q.lessons_paid} занятий × ${rub(q.per_lesson)} = ${rub(q.base)}${q.days_label ? ` · только ${esc(q.days_label)}` : ""}${q.vacation_lessons ? ` · отпуск: −${q.vacation_lessons} зан.` : ""}</div>
         ${q.credit_lessons ? `<div class="small">Перерасчёт пропусков (${q.credit_absence_dates.map(dShort).join(", ")}): −${rub(q.credit)}</div>` : ""}
         ${q.late_fee ? `<div class="small">Наценка за оплату после ${S.meta.settings.renewal_deadline_day} числа: +${rub(q.late_fee)}</div>` : ""}
         ${q.discount ? `<div class="small">Скидка «${esc(q.discount.name)}» ${q.discount.percent}%: −${rub(q.discount.amount)}${q.discount.auto ? ". Действует при оплате сегодня" : ""}</div>` : ""}
-        <div class="small muted">Даты: ${q.dates.map(dShort).join(", ")}</div>`;
+        <div class="small muted">Даты: ${q.dates.map(dShort).join(", ")}</div>
+        ${q.waitlist ? `<div class="alert" style="margin-top:6px">Оплата после срока: место не гарантировано, в листе ожидания ${q.waitlist}</div>` : ""}`;
     } catch (e) { box.textContent = e.message; }
   });
+  wireProgramBlock(body, id, reload);
+  wireWaitlistCard(body, id, reload);
   if ($("#q-month")) { $("#q-month").onchange = loadQuotes; $("#q-disc").onchange = loadQuotes; loadQuotes(); }
   body.querySelectorAll("[data-inv]").forEach((b) => (b.onclick = async () => {
     try { const r = await api("POST", `/api/students/${id}/invoice`, { month: $("#q-month").value, enrollment_id: +b.dataset.inv, discount_id: $("#q-disc").value || null }); toast(`Счёт выставлен: ${rub(r.quote.total)}`); reload(); } catch (e) { fail(e); }
@@ -797,7 +811,7 @@ async function renderJournal(page) {
       <div class="field"><label>Группа</label><select id="j-group">${groups.map((x) => `<option value="${x.id}" ${x.id === S.journal.group ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>
       <div class="field" style="flex:0 0 170px"><label>Дата</label><input id="j-date" type="date" value="${S.journal.date}"></div>
     </div>
-    <div class="note">${esc(g.branch)} · ${g.weekdays.split(",").map((x) => WD[+x]).join(", ")} ${esc(g.time)} · ${esc(g.age)} лет${j.has_lesson ? "" : " · <b>в этот день у группы нет занятия</b>"}</div>
+    <div class="note">${esc(g.branch)} · ${g.weekdays.split(",").map((x) => WD[+x]).join(", ")} ${esc(g.time)} · ${esc(g.age)} лет${j.closed ? " · <b>праздник, занятия нет</b>" : j.has_lesson ? "" : " · <b>в этот день у группы нет занятия</b>"}</div>
     ${st ? `<div class="panel" style="padding:12px 14px;margin-bottom:12px">${staffPicker(st, st.coaches, "j")}</div>` : ""}
     <div class="list">${j.rows.length ? j.rows.map((r) => g.is_makeup ? makeupRow(r) : journalRow(r)).join("") : `<div class="list-row muted">${g.is_makeup ? "На эту дату никто не записан на отработку" : "В группе пока нет учеников"}</div>`}</div>`;
   if (st) wireStaffPicker(page, "j", g.id, S.journal.date, render);
@@ -822,8 +836,9 @@ function journalRow(r) {
   if (r.status === "vacation") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${esc(r.name)}</div><span class="pill yellow">Отпуск</span></div>`;
   if (r.status === "trial") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${esc(r.name)} <span class="pill green">пробное ${r.trial_at.slice(11, 16)}</span></div>
     <div class="mark"><button data-trial="1" data-sid="${r.id}" class="${r.trial_came === 1 ? "on-present" : ""}">Пришёл</button><button data-trial="0" data-sid="${r.id}" class="${r.trial_came === 0 ? "on-absent" : ""}">Не пришёл</button></div></div>`;
+  const unpaidPill = r.unpaid ? ` <span class="pill unpaid-flag">не оплачен, не допускать</span>` : "";
   const locked = r.resolved ? `<span class="pill">${r.resolved === "credit" ? "в перерасчёте" : "отработан"}</span>` : "";
-  return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${esc(r.name)} ${locked}</div>
+  return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${esc(r.name)} ${locked}${unpaidPill}</div>
     <div class="mark">
       <button data-att="present" data-sid="${r.id}" class="${r.status === "present" ? "on-present" : ""}">Был</button>
       <button data-att="absent" data-sid="${r.id}" class="${r.status === "absent" ? "on-absent" : ""}">Пропуск</button>
@@ -885,6 +900,7 @@ async function renderSettings(page) {
       </div>
       <button class="btn primary">Сохранить</button>
     </form>
+    <div id="program-settings"></div>
     <div class="section">
       <h3>Сотрудники</h3>
       <div class="list" style="box-shadow:none;margin-bottom:10px">${users.map((u) => `<div class="list-row"><div class="grow">${esc(u.name)} <span class="muted small">${esc(u.login)}</span></div>
@@ -938,6 +954,7 @@ async function renderSettings(page) {
   if ($("#source-settings")) renderSourceSettings($("#source-settings")).catch(fail);
   if ($("#legal-settings")) renderLegalSettings($("#legal-settings")).catch(fail);
   if ($("#offers-settings") && !isCoach()) renderOffers($("#offers-settings")).catch(fail);
+  if ($("#program-settings")) renderProgramSettings($("#program-settings")).catch(fail);
   else if ($("#offers-settings")) $("#offers-settings").remove();
   if ($("#structure-settings")) renderStructure($("#structure-settings"), users).catch(fail);
   if ($("#archive-settings")) renderArchive($("#archive-settings")).catch(fail);

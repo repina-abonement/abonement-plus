@@ -183,8 +183,10 @@ def send_auto(con, s: dict, kind: str, tpl: str) -> dict:
 def run(con, now: datetime | None = None, send: bool = True) -> dict:
     """Один проход: создать задачи по пробным, отправить автосообщения, закрыть неактуальные задачи."""
     now = now or _now()
-    from . import planner
+    from . import planner, program
     planner.generate(con, now.date())
+    program.apply_pending(con, now.date())
+    program.price_notice(con, now.date())
     st = {k: setting(con, k) for k in AUTO_SETTINGS}
     trial_min = int((con.execute("SELECT value FROM settings WHERE key='trial_minutes'").fetchone() or ["60"])[0])
     made = sent = 0
