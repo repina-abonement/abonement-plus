@@ -101,7 +101,7 @@ async function renderCoachToday(page, coachId, viewBar = "") {
   const up = d.upcoming || { covering: [], covered: [] };
   const fact = (n, label, cls = "") => n ? `<div class="cfact ${cls}"><b>${n}</b><span>${label}</span></div>` : "";
   page.innerHTML = `${viewBar}
-    <div class="page-head"><h2 class="grow">Привет, ${esc(first)}!</h2><span class="muted small">${dShort(d.date)}, ${wd(d.date)}</span></div>
+    <div class="page-head"><h2 class="grow hello-ava">${avatar((d.coach && d.coach.id) || S.user.id, (d.coach && d.coach.name) || S.user.name, 44)}<span>Привет, ${esc(first)}!</span></h2><span class="muted small">${dShort(d.date)}, ${wd(d.date)}</span></div>
     <div class="muted" style="margin:-6px 0 14px">${line}</div>
     ${(d.missing_marks || []).map((m) => `<div class="alert" style="margin-bottom:10px"><b>Срочно отметь детей:</b> ${esc(m.group)}, ${dShort(m.date)} ${esc(m.time)}. Без отметки: ${m.missing}
       <button class="btn sm primary" data-j="${m.group_id}" data-d="${m.date}" style="margin-left:8px">Отметить</button></div>`).join("")}

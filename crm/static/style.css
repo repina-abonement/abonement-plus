@@ -862,3 +862,16 @@ html.theme-soft .col-body { overflow-y: auto; overscroll-behavior: contain; scro
 .fx-check input { width: 20px; height: 20px; flex: 0 0 20px; margin-top: 2px; }
 .chip { white-space: nowrap; }
 .meet-open.late { background: var(--red); border-color: var(--red); color: #fff; }
+
+/* ---------- аватарки и карточка сотрудника ---------- */
+.ava { border-radius: 50%; object-fit: cover; flex: 0 0 auto; display: inline-grid; place-items: center; font-weight: 650; vertical-align: middle; background: var(--surface-2); }
+.ava-ini { letter-spacing: .02em; }
+.sp-head { display: flex; align-items: center; gap: 16px; margin-bottom: 6px; }
+.sp-head h2 { margin-bottom: 4px; }
+.sp-row { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.sp-row:last-of-type { border-bottom: 0; }
+.sp-quote { margin-top: 10px; padding: 12px 14px; background: var(--surface-2); border-radius: 14px; line-height: 1.5; }
+.sp-quote b { display: block; margin-bottom: 4px; }
+.who { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+.lrow .who .ava { margin-right: 2px; }
+.hello-ava { display: inline-flex; align-items: center; gap: 12px; }

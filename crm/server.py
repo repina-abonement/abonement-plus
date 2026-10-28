@@ -171,7 +171,54 @@ def change_password(con, h, user, body, q):
 def users_list(con, h, user, body, q):
     ucols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
     ph = "phone" if "phone" in ucols else "'' AS phone"
-    return [dict(r) for r in con.execute(f"SELECT id, login, name, role, active, sip_number, tg_username, {ph} FROM users ORDER BY id")]
+    return [dict(r) for r in con.execute(f"SELECT id, login, name, role, active, sip_number, tg_username, {ph}, photo_at FROM users ORDER BY id")]
+
+
+# ---------------- фото и анкета сотрудника ----------------
+
+@route("GET", "/api/users/{uid}/photo")
+def user_photo(con, h, user, body, q, uid):
+    from . import profiles
+    p = profiles.read_photo(int(uid))
+    if not p:
+        raise ApiError("Фото нет", 404)
+    return Raw(p[0], p[1])
+
+
+@route("POST", "/api/users/{uid}/photo", role="admin")
+def user_photo_set(con, h, user, body, q, uid):
+    from . import profiles
+    import base64
+    if body.get("remove"):
+        profiles.remove_photo(con, int(uid))
+    elif body.get("url"):
+        profiles.photo_from_url(con, int(uid), str(body["url"]))
+    elif body.get("data"):
+        raw = str(body["data"]).split(",", 1)[-1]
+        try:
+            profiles.save_photo(con, int(uid), base64.b64decode(raw))
+        except ValueError:
+            raise ApiError("Не удалось прочитать фото")
+    sv.audit(con, user, "user.photo", str(uid))
+    return {"ok": True}
+
+
+@route("GET", "/api/users/{uid}/profile")
+def user_profile(con, h, user, body, q, uid):
+    from . import profiles
+    p = profiles.profile(con, int(uid))
+    if user["role"] == "coach" and user["id"] != int(uid):
+        p["phone"] = ""
+    return p
+
+
+@route("PUT", "/api/users/{uid}/profile")
+def user_profile_save(con, h, user, body, q, uid):
+    from . import profiles
+    if user["role"] != "admin" and user["id"] != int(uid):
+        raise ApiError("Нет доступа", 403)
+    profiles.save_bio(con, int(uid), body.get("bio") or {})
+    return {"ok": True}
 
 
 @route("PATCH", "/api/users/{uid}", role="admin")
@@ -317,6 +364,7 @@ def meta(con, h, user, body, q):
         m["settings"] = {}
     from . import staffdocs
     m["staff_docs_pending"] = staffdocs.pending(con, user)
+    m["staff"] = [dict(r) for r in con.execute("SELECT id, name, role, photo_at FROM users WHERE active=1 ORDER BY name")]
     return m
 
 

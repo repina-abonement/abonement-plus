@@ -1055,7 +1055,7 @@ async function renderSettings(page) {
     <div id="program-settings"></div>
     <div class="section">
       <h3>Сотрудники</h3>
-      <div class="list" style="box-shadow:none;margin-bottom:10px">${users.map((u) => `<div class="list-row"><div class="grow">${esc(u.name)} <span class="muted small">${esc(u.login)}</span></div>
+      <div class="list" style="box-shadow:none;margin-bottom:10px">${users.map((u) => `<div class="list-row"><div class="grow"><span class="who" data-prof="${u.id}">${avatar(u.id, u.name, 34)}<span>${esc(u.name)} <span class="muted small">${esc(u.login)}</span></span></span></div>
         <input data-uph="${u.id}" value="${esc(u.phone || "")}" placeholder="телефон" title="Телефон сотрудника" inputmode="tel" style="flex:0 0 130px;padding:5px 8px">
         <input data-tgu="${u.id}" value="${esc(u.tg_username ? "@" + u.tg_username : "")}" placeholder="@telegram" title="Ник в Telegram: CRM отметит сотрудника в рабочих чатах" style="flex:0 0 120px;padding:5px 8px">
         ${u.role === "coach" ? "" : `<input data-sip="${u.id}" value="${esc(u.sip_number || "")}" placeholder="вн. номер" title="Внутренний номер Sipuni: на него придёт звонок из карточки" inputmode="numeric" style="flex:0 0 96px;padding:5px 8px">`}
@@ -1153,6 +1153,7 @@ async function renderSettings(page) {
       $("#bulk-copy").onclick = () => { navigator.clipboard.writeText(txt).then(() => toast("Скопировано")); };
     } catch (e) { fail(e); }
   };
+  page.querySelectorAll("[data-prof]").forEach((el) => (el.onclick = () => openStaffProfile(+el.dataset.prof)));
   page.querySelectorAll("[data-uph]").forEach((inp) => (inp.onchange = async () => {
     try { await api("PATCH", `/api/users/${inp.dataset.uph}`, { phone: inp.value }); toast("Телефон сохранён"); } catch (err) { fail(err); }
   }));

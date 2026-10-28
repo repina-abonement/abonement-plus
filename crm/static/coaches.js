@@ -66,6 +66,7 @@ async function renderCoaches(page) {
       </ul></details>`;
 
   page.querySelectorAll("[data-m]").forEach((b) => (b.onclick = () => { C.month = b.dataset.m; render(); }));
+  page.querySelectorAll("[data-prof]").forEach((el) => (el.onclick = () => openStaffProfile(+el.dataset.prof)));
   if ($("#as-coach")) $("#as-coach").onchange = (e) => { C.as = e.target.value || null; render(); };
 }
 
@@ -85,7 +86,7 @@ function leagueRow(r, top) {
   return `<div class="lrow ${r.is_me ? "me" : ""}">
     <div class="lplace">${MEDAL[r.place] || r.place}</div>
     <div class="lmain">
-      <div class="lname">${esc(r.name)}${r.is_me ? ` <span class="pill green">это ты</span>` : ""}</div>
+      <div class="lname"><span class="who" data-prof="${r.id}">${avatar(r.id, r.name, 30)}<span>${esc(r.name)}</span></span>${r.is_me ? ` <span class="pill green">это ты</span>` : ""}</div>
       <div class="lbar"><i style="width:${w}%"></i><b>${r.kids} ${kidsWord(r.kids)}</b>${r.delta ? `<em class="${r.delta > 0 ? "up" : "down"}">${r.delta > 0 ? "▲ +" : "▼ "}${r.delta}</em>` : ""}</div>
       <div class="lfacts">
         <span>👥 ${r.groups} ${r.groups === 1 ? "группа" : r.groups < 5 ? "группы" : "групп"}</span>
