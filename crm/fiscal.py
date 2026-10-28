@@ -284,7 +284,9 @@ def _pk_all(con, path: str, params: dict, key: str | None = None) -> list:
 def fetch_pk_payments(con, d_from: date, d_to: date) -> list[dict]:
     return _pk_all(con, "/info/payments/bydate/", {
         "start": d_from.isoformat(), "end": d_to.isoformat(),
-        "status[]": ["success", "obtained", "stuck"]})
+        "status[]": ["success", "obtained", "stuck"],
+        # PayKeeper без фильтра по платёжным системам отдаёт пусто; перечисляем все возможные номера
+        "payment_system_id[]": list(range(0, 201))})
 
 
 def pk_diag(con, d_from: date, d_to: date) -> str:
