@@ -258,6 +258,30 @@ def day(con, d: date) -> dict:
     return {"date": ds, "weekday": d.weekday(), "branches": out, "coaches": coaches}
 
 
+def week_days(con, start: date) -> dict:
+    """Неделя с понедельника: каждый день как в day() (заполненность, замены, праздники) + цвет пары дней группы."""
+    from . import closures
+    start = start - timedelta(days=start.weekday())
+    days = []
+    pats = {}
+    for g in con.execute("SELECT id, weekdays, is_makeup, name, program_id FROM groups WHERE active=1 ORDER BY branch_id, time"):
+        key = "makeup" if g["is_makeup"] else "ofp" if ("ОФП" in g["name"] or g["program_id"]) else g["weekdays"]
+        pats[g["id"]] = key
+    for i in range(7):
+        d = start + timedelta(days=i)
+        day_ = day(con, d)
+        for b in day_["branches"]:
+            for les in b["lessons"]:
+                les["pattern"] = pats.get(les["id"], "")
+        # праздники: какие группы в этот день закрыты
+        day_["closed"] = [g[0] for g in con.execute("SELECT id FROM groups WHERE active=1")
+                          if d.weekday() in logic.parse_weekdays(con.execute("SELECT weekdays FROM groups WHERE id=?", (g[0],)).fetchone()[0])
+                          and closures.is_closed(con, g[0], d)]
+        days.append(day_)
+    return {"start": start.isoformat(), "days": days,
+            "branches": [dict(r) for r in con.execute("SELECT id, name, address FROM branches WHERE active=1 ORDER BY id")]}
+
+
 def week(con) -> dict:
     rows = [dict(r) for r in con.execute(
         """SELECT g.id, g.name, g.weekdays, g.time, g.day_times, g.age, g.is_makeup, g.branch_id, b.name AS branch,

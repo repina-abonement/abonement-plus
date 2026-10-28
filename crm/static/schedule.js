@@ -1,7 +1,54 @@
 "use strict";
 /* Абонемент Плюс — расписание, конструктор филиалов и групп, смены, архив. */
 
-S.sched = { mode: "day", date: null };
+S.sched = { mode: "week", date: null, branch: null };
+
+/* ---------- неделя «как постер»: колонки по дням, у каждой пары дней свой цвет ---------- */
+const PAT_COLORS = [["#efe4f6", "#9b59b6"], ["#e3e8fb", "#3f56b8"], ["#fbefc9", "#d99a0b"], ["#dcf1f0", "#2a9d9b"], ["#fde4e0", "#d1553f"], ["#e6eefc", "#2c6fd1"]];
+const PAT_SPECIAL = { makeup: ["#e2f3e1", "#2e8b57"], ofp: ["#ece6fa", "#7a5bc7"] };
+
+function patColor(pattern, order) {
+  if (PAT_SPECIAL[pattern]) return PAT_SPECIAL[pattern];
+  let i = order.indexOf(pattern);
+  if (i < 0) { order.push(pattern); i = order.length - 1; }
+  return PAT_COLORS[i % PAT_COLORS.length];
+}
+
+
+function weekPoster(w, branchId) {
+  const order = [];
+  const cols = w.days.map((d, i) => {
+    const b = d.branches.find((x) => x.id === branchId);
+    const lessons = b ? b.lessons : [];
+    const main = lessons.filter((l) => !l.is_makeup && l.pattern !== "ofp");
+    const color = lessons.length ? patColor((main[0] || lessons[0]).pattern || "", order) : ["#f2f2f5", "#b4b4bc"];
+    const team = [...new Set(main.flatMap((l) => [l.coach, l.assistant]).filter(Boolean))];
+    return { d, i, lessons, color, team };
+  });
+  // цвета раздаём в порядке появления пар дней, чтобы Пн и Чт (одна пара) были одного цвета
+  const col = (c) => `<div class="wk-col ${c.d.date === S.meta.today ? "today" : ""}" style="--hd:${c.color[1]};--bg:${c.color[0]}">
+      <button class="wk-head" data-wday="${c.d.date}">
+        <span class="wk-dn">${WD[c.i]}</span><span class="wk-date">${dShort(c.d.date)}</span>
+        <span class="wk-team">${c.team.length ? c.team.map((n) => esc(shortName(n))).join(" / ") : "&nbsp;"}</span></button>
+      <div class="wk-body">${c.lessons.length ? c.lessons.map((l) => {
+        const [bg, fg] = patColor(l.pattern, order);
+        const need = Object.values(l.subs || {}).some((x) => x.missing);
+        const pct = l.capacity && !l.is_makeup ? Math.min(100, Math.round(100 * l.kids / l.capacity)) : null;
+        return `<button class="wk-cell ${need ? "need" : ""}" data-wday="${c.d.date}" style="--cb:${bg};--cf:${fg}">
+          <b>${esc(l.time || "—")}</b>
+          <span class="wk-age">${l.is_makeup ? "отработки " : l.pattern === "ofp" ? "ОФП " : ""}${esc(l.age ? (/\d$/.test(l.age) ? l.age + " лет" : l.age) : "")}</span>
+          <span class="wk-fill">${l.is_makeup ? `${l.kids} зап.` : `${l.kids}/${l.capacity}`}${l.trials ? ` · 🎯${l.trials}` : ""}</span>
+          ${pct != null ? `<i class="wk-bar"><i style="width:${pct}%"></i></i>` : ""}
+          ${need ? `<span class="wk-warn">⚠️ нужна замена</span>` : ""}</button>`;
+      }).join("") : `<div class="wk-empty">${(w.days[c.i].closed || []).length ? "праздник" : "нет занятий"}</div>`}</div></div>`;
+  cols.forEach((c) => c.lessons.forEach((l) => patColor(l.pattern, order)));
+  const weekdays = cols.slice(0, 5), weekend = cols.slice(5);
+  return `<div class="wk-poster">
+    <section class="wk-block"><h3>Будни</h3><div class="wk-grid wk5">${weekdays.map(col).join("")}</div></section>
+    <section class="wk-block"><h3>Выходные</h3><div class="wk-grid wk2">${weekend.map(col).join("")}</div></section>
+  </div>
+  <div class="small muted" style="margin-top:8px">Цвет - пара дней одной группы. В ячейке: время, возраст, сколько детей из мест, 🎯 пробные. Нажмите на день, чтобы открыть его подробно: замены, кто на смене, журнал</div>`;
+}
 const WD_FULL = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"];
 const BR_COLORS = ["#1d8a57", "#2f6fdb", "#c2410c", "#7c3aed", "#0891b2", "#b45309"];
 
@@ -33,15 +80,29 @@ async function renderSchedule(page) {
   const C = S.sched;
   if (!C.date) C.date = S.meta.today;
   page.innerHTML = `<div class="page-head"><h2 class="grow">Расписание</h2>
-    <div class="seg"><button data-mode="day" class="${C.mode === "day" ? "active" : ""}">День</button><button data-mode="week" class="${C.mode === "week" ? "active" : ""}">Неделя</button></div></div>
+    <div class="seg"><button data-mode="week" class="${C.mode === "week" ? "active" : ""}">Неделя</button><button data-mode="day" class="${C.mode === "day" ? "active" : ""}">День</button></div></div>
     <div id="sched-body"></div>`;
   page.querySelectorAll("[data-mode]").forEach((b) => (b.onclick = () => { step(() => { C.mode = b.dataset.mode; }); }));
   const body = $("#sched-body");
   if (C.mode === "week") {
-    const w = await api("GET", "/api/schedule/week");
-    const brs = [...new Set(w.days.flat().map((x) => x.branch_id))];
-    body.innerHTML = `<div class="week">${w.days.map((list, i) => `<div class="week-col"><h4>${WD_FULL[i]}</h4>
-      ${list.map((x) => `<button class="week-l" data-jg="${x.id}" data-wd="${i}" style="--br:${BR_COLORS[brs.indexOf(x.branch_id) % BR_COLORS.length]}"><b>${esc(x.time || "")}</b> ${esc(x.name)}<span>${esc(x.branch)}${x.coach ? ` · ${esc(x.coach)}` : ""}${x.assistant ? ` / ${esc(x.assistant)}` : ""}</span></button>`).join("") || `<div class="small muted">Нет</div>`}</div>`).join("")}</div>`;
+    const monday = addDays(C.date, -((new Date(C.date + "T00:00").getDay() + 6) % 7));
+    const w = await api("GET", "/api/schedule/week?start=" + monday);
+    if (!C.branch || !w.branches.some((b) => b.id === C.branch)) C.branch = w.branches.length ? w.branches[0].id : null;
+    const end = addDays(w.start, 6), thisMon = addDays(S.meta.today, -((new Date(S.meta.today + "T00:00").getDay() + 6) % 7));
+    body.innerHTML = `<div class="wk-nav">
+        <button class="btn sm" id="w-prev">←</button>
+        <b>${dShort(w.start)} – ${dShort(end)}</b>
+        <button class="btn sm" id="w-next">→</button>
+        ${w.start !== thisMon ? `<button class="btn sm" id="w-now">Эта неделя</button>` : ""}
+      </div>
+      <div class="seg wk-br">${w.branches.map((b) => `<button data-wbr="${b.id}" class="${b.id === C.branch ? "active" : ""}">${esc(b.name)}</button>`).join("")}</div>
+      ${weekPoster(w, C.branch)}`;
+    $("#w-prev").onclick = () => { C.date = addDays(w.start, -7); render(); };
+    $("#w-next").onclick = () => { C.date = addDays(w.start, 7); render(); };
+    if ($("#w-now")) $("#w-now").onclick = () => { C.date = S.meta.today; render(); };
+    body.querySelectorAll("[data-wbr]").forEach((b) => (b.onclick = () => { C.branch = +b.dataset.wbr; render(); }));
+    body.querySelectorAll("[data-wday]").forEach((b) => (b.onclick = () => { step(() => { C.mode = "day"; C.date = b.dataset.wday; }); }));
+    return;
   } else {
     const d = await api("GET", "/api/schedule/day?date=" + C.date);
     body.innerHTML = `<div class="row" style="max-width:520px;margin-bottom:12px;align-items:center">

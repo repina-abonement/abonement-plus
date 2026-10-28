@@ -1107,6 +1107,13 @@ def fake_remove(con, h, user, body, q):
 
 @route("GET", "/api/schedule/week")
 def schedule_week(con, h, user, body, q):
+    if q.get("start"):
+        from datetime import date as _d
+        try:
+            st = _d.fromisoformat(q["start"])
+        except ValueError:
+            raise ApiError("Неверная дата")
+        return schedule.week_days(con, st)
     return schedule.week(con)
 
 

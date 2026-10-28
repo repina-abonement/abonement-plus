@@ -907,3 +907,42 @@ html.theme-soft .col-body { overflow-y: auto; overscroll-behavior: contain; scro
   filter: saturate(1.15) contrast(1.03); }
 .ava-stk { position: absolute; right: -6%; bottom: -6%; font-style: normal; line-height: 1; filter: drop-shadow(0 1px 1px rgba(0,0,0,.25)); }
 .sp-nick { color: #23a26d; font-weight: 600; margin: -2px 0 4px; }
+
+/* ---------- Расписание: неделя «как постер» ---------- */
+.wk-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.wk-nav b { font-size: 16px; min-width: 120px; text-align: center; }
+.wk-br { margin-bottom: 14px; }
+.wk-poster { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 2.2fr); gap: 16px; align-items: stretch; }
+.wk-block { background: var(--surface); border-radius: 22px; padding: 16px; box-shadow: var(--shadow); }
+.wk-block h3 { font-size: 15px; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); margin: 0 0 12px; }
+.wk-grid { display: grid; gap: 10px; }
+.wk5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.wk2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.wk-col { border: 1px solid var(--line); border-radius: 18px; overflow: hidden; background: var(--surface); display: flex; flex-direction: column; min-height: 100%; }
+.wk-col.today { box-shadow: 0 0 0 2px var(--hd); }
+.wk-head { all: unset; cursor: pointer; display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 2px 8px; padding: 10px 12px; background: var(--hd); color: #fff; }
+.wk-dn { font-size: 22px; font-weight: 800; letter-spacing: .02em; }
+.wk-date { justify-self: end; font-size: 12px; opacity: .9; }
+.wk-team { grid-column: 1 / -1; font-size: 11px; opacity: .95; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wk-body { padding: 8px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.wk-cell { all: unset; cursor: pointer; display: grid; grid-template-columns: 1fr auto; gap: 1px 6px; align-items: baseline; padding: 8px 10px;
+  border-radius: 12px; background: var(--cb); text-align: center; }
+.wk-cell:hover { filter: brightness(.97); }
+.wk-cell b { grid-column: 1 / -1; font-size: 15px; }
+.wk-age { grid-column: 1 / -1; font-size: 12.5px; color: #3a3a40; }
+.wk-fill { grid-column: 1 / -1; font-size: 11px; color: var(--cf); font-weight: 600; }
+.wk-bar { grid-column: 1 / -1; display: block; height: 4px; border-radius: 3px; background: rgba(0,0,0,.08); overflow: hidden; margin-top: 2px; }
+.wk-bar i { display: block; height: 100%; background: var(--cf); }
+.wk-cell.need { box-shadow: inset 0 0 0 2px var(--red); }
+.wk-warn { grid-column: 1 / -1; font-size: 11px; color: var(--red); font-weight: 600; }
+.wk-empty { color: var(--ink-2); font-size: 12px; text-align: center; padding: 14px 0; }
+@media (prefers-color-scheme: dark) { .wk-age { color: var(--ink); } }
+@media (max-width: 1100px) { .wk-poster { grid-template-columns: 1fr; } }
+/* телефон: дни листаются вбок, по 2 колонки на экран */
+@media (max-width: 760px) {
+  .wk-block { padding: 12px; border-radius: 18px; }
+  .wk-grid { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
+  .wk-grid::-webkit-scrollbar { display: none; }
+  .wk-col { flex: 0 0 46%; scroll-snap-align: start; }
+}
+.wk-block { min-width: 0; } .wk-poster { min-width: 0; }
