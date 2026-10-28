@@ -926,6 +926,7 @@ async function renderSettings(page) {
       </div>
       <button class="btn primary">Сохранить</button>
     </form>
+    <div class="section" id="backup-settings"></div>
     <div class="section" id="resp-settings"></div>
     <div id="program-settings"></div>
     <div class="section">
@@ -942,6 +943,11 @@ async function renderSettings(page) {
           <div class="field"><label>Роль</label><select name="role"><option value="operator">Оператор</option><option value="coach">Тренер</option><option value="admin">Админ</option></select></div></div>
         <button class="btn sm">Добавить сотрудника</button>
       </form>
+      <details style="margin-top:12px"><summary class="linkish small">Завести команду списком (пароли создаст CRM)</summary>
+        <div class="small muted" style="margin:6px 0">По строке на человека: Имя Фамилия; роль; телефон. Роль: оператор, тренер, админ или контролёр. Если человек уже есть, ему просто выдастся новый пароль</div>
+        <textarea id="bulk-users" rows="6" placeholder="Ольга Авлахова; оператор; +7 911 831-27-83"></textarea>
+        <button class="btn sm primary" id="bulk-go" style="margin-top:6px">Завести и выдать пароли</button>
+        <div id="bulk-res"></div></details>
     </div>
     <div class="section" id="structure-settings"><h3>Филиалы, группы и смены</h3><div class="muted small">Загружаю…</div></div>
     <div class="section" id="archive-settings"><h3>Архив</h3><div class="muted small">Загружаю…</div></div>
@@ -984,6 +990,7 @@ async function renderSettings(page) {
   if ($("#offers-settings") && !isCoach()) renderOffers($("#offers-settings")).catch(fail);
   if ($("#program-settings")) renderProgramSettings($("#program-settings")).catch(fail);
   if ($("#resp-settings")) renderResponsibles($("#resp-settings")).catch(fail);
+  if ($("#backup-settings")) renderBackup($("#backup-settings")).catch(() => { $("#backup-settings").remove(); });
   else if ($("#offers-settings")) $("#offers-settings").remove();
   if ($("#structure-settings")) renderStructure($("#structure-settings"), users).catch(fail);
   if ($("#archive-settings")) renderArchive($("#archive-settings")).catch(fail);
@@ -996,6 +1003,16 @@ async function renderSettings(page) {
     if (!confirm("Перенести сотрудника в архив? Он больше не сможет войти, вернуть можно в Архиве")) return;
     try { await api("PATCH", `/api/users/${b.dataset.uarch}`, { active: false }); toast("Сотрудник в архиве"); render(); } catch (e) { fail(e); }
   }));
+  if ($("#bulk-go")) $("#bulk-go").onclick = async () => {
+    try {
+      const r = await api("POST", "/api/users/bulk", { text: $("#bulk-users").value });
+      const txt = r.users.map((u) => `${u.name}\nЛогин: ${u.login}\nПароль: ${u.password}`).join("\n\n");
+      $("#bulk-res").innerHTML = `<div class="alert" style="margin-top:8px">Пароли показываются только сейчас. Скопируйте и раздайте сотрудникам лично</div>
+        <table class="tbl"><thead><tr><th>Сотрудник</th><th>Логин</th><th>Пароль</th><th></th></tr></thead><tbody>${r.users.map((u) => `<tr><td>${esc(u.name)}</td><td><b>${esc(u.login)}</b></td><td><code>${esc(u.password)}</code></td><td class="small muted">${esc(u.status)}</td></tr>`).join("")}</tbody></table>
+        <button class="btn sm" id="bulk-copy" style="margin-top:6px">Копировать всё</button>`;
+      $("#bulk-copy").onclick = () => { navigator.clipboard.writeText(txt).then(() => toast("Скопировано")); };
+    } catch (e) { fail(e); }
+  };
   page.querySelectorAll("[data-tgu]").forEach((inp) => (inp.onchange = async () => {
     try { await api("PATCH", `/api/users/${inp.dataset.tgu}`, { tg_username: inp.value }); toast("Ник в Telegram сохранён"); } catch (err) { fail(err); }
   }));
@@ -1058,3 +1075,26 @@ async function boot() {
   if (!isCoach()) { pollCounts(); setInterval(pollCounts, 20000); }
 }
 boot();
+
+
+/* Настройки → Резервные копии */
+async function renderBackup(box) {
+  const d = await api("GET", "/api/backup");
+  box.innerHTML = `<h3>Резервные копии</h3>
+    <div class="small">На сервере: каждую ночь, хранится ${d.local_count} ${d.local_count === 1 ? "копия" : "копий"}${d.last_local ? `, последняя ${dtWhen(d.last_local)}` : ""}</div>
+    <div class="small">${d.yadisk ? `На Яндекс Диске (зашифрованные): ${d.last_remote ? "последняя " + esc(d.last_remote) : "ещё не было"}` : `<b style="color:#b42318">Яндекс Диск не подключён: копии только на этом сервере</b>`}</div>
+    ${d.last_error ? `<div class="alert" style="margin-top:6px">${esc(d.last_error)}</div>` : ""}
+    <div class="field" style="margin-top:10px"><label>Токен Яндекс Диска</label>
+      <div class="row"><input id="bk-token" type="password" placeholder="${d.yadisk ? "подключён, вставьте новый, чтобы заменить" : "вставьте токен"}"><button class="btn sm" id="bk-save" style="flex:0">Сохранить</button></div>
+      <div class="small muted">Как получить: откройте yandex.ru/dev/disk/poligon под аккаунтом, где хотите хранить копии, нажмите «Получить OAuth-токен», скопируйте его и вставьте сюда</div></div>
+    <div class="field"><label>Пароль шифрования копий</label><div class="row"><code id="bk-key" style="flex:1;padding:8px;background:var(--surface-2);border-radius:8px">${esc(d.key)}</code>
+      <button class="btn sm" id="bk-copy" style="flex:0">Копировать</button></div>
+      <div class="small" style="color:#b42318">Сохраните этот пароль отдельно от CRM, например в заметках телефона. Без него копию с Диска не открыть</div></div>
+    <button class="btn sm primary" id="bk-run">Сделать копию сейчас</button>`;
+  $("#bk-copy").onclick = () => navigator.clipboard.writeText(d.key).then(() => toast("Пароль скопирован"));
+  $("#bk-save").onclick = async () => { try { await api("POST", "/api/backup", { yadisk_token: $("#bk-token").value }); toast("Сохранено"); renderBackup(box); } catch (e) { fail(e); } };
+  $("#bk-run").onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = "Делаю копию…";
+    try { const r = await api("POST", "/api/backup", { run: true }); toast(r.result.error ? "Копия на сервере есть, на Диск не ушла" : r.result.remote ? "Копия сохранена и отправлена на Яндекс Диск" : "Копия сохранена на сервере"); renderBackup(box); } catch (err) { fail(err); }
+  };
+}

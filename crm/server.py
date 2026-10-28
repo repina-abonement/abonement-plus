@@ -157,6 +157,72 @@ def users_patch(con, h, user, body, q, uid):
     return {"ok": True}
 
 
+@route("GET", "/api/backup", role="admin")
+def backup_status(con, h, user, body, q):
+    from . import backup
+    return backup.status(con)
+
+
+@route("POST", "/api/backup", role="admin")
+def backup_save(con, h, user, body, q):
+    from . import backup, comms
+    if "yadisk_token" in body:
+        comms.put(con, "backup_yadisk_token", (body.get("yadisk_token") or "").strip())
+        sv.audit(con, user, "backup.token", "")
+    if body.get("run"):
+        con.commit()  # копия должна включать всё, что уже сохранено
+        r = backup.run(con)
+        return backup.status(con) | {"result": r}
+    return backup.status(con)
+
+
+@route("POST", "/api/users/bulk", role="admin")
+def users_bulk(con, h, user, body, q):
+    """Завести команду списком: «Имя Фамилия; роль; телефон» по строке. Пароли генерируются и показываются один раз."""
+    import secrets
+    from . import schedule
+    alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    roles = {"оператор": "operator", "админ": "admin", "администратор": "admin", "тренер": "coach", "контролёр": "operator",
+             "контролер": "operator", "руководитель": "admin"}
+    ucols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
+    if "phone" not in ucols:
+        con.execute("ALTER TABLE users ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
+    norm = lambda x: frozenset(w for w in x.lower().replace("ё", "е").split() if w)
+    existing = {norm(r["name"]): dict(r) for r in con.execute("SELECT id, name, login, role FROM users WHERE active=1")}
+    out = []
+    for line in (body.get("text") or "").splitlines():
+        parts = [p.strip() for p in line.split(";")]
+        name = parts[0] if parts else ""
+        if not name:
+            continue
+        role_word = (parts[1] if len(parts) > 1 else "").lower()
+        phone = parts[2] if len(parts) > 2 else ""
+        pw = "".join(secrets.choice(alphabet) for _ in range(10))
+        ex = existing.get(norm(name))
+        if ex:
+            con.execute("UPDATE users SET pw_hash=? WHERE id=?", (db.hash_password(pw), ex["id"]))
+            con.execute("DELETE FROM sessions WHERE user_id=?", (ex["id"],))
+            uid, login_, status = ex["id"], ex["login"], "новый пароль"
+            if phone:
+                con.execute("UPDATE users SET phone=? WHERE id=?", (phone, uid))
+            role = ex["role"]
+        else:
+            role = roles.get(role_word, "coach" if "тренер" in role_word else "operator")
+            base = schedule._login(name.replace(" ", "")) or "user"
+            login_, i = base, 2
+            while con.execute("SELECT 1 FROM users WHERE login=?", (login_,)).fetchone():
+                login_, i = f"{base}{i}", i + 1
+            uid = con.execute("INSERT INTO users(login, name, role, pw_hash, phone) VALUES (?,?,?,?,?)",
+                              (login_, name, role, db.hash_password(pw), phone)).lastrowid
+            status = "заведён"
+        if role_word.startswith("контрол"):
+            for k in ("planner_controller", "checkin_reviewer"):
+                con.execute("INSERT INTO settings(key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, str(uid)))
+        out.append({"name": name, "login": login_, "password": pw, "role": role, "status": status})
+        sv.audit(con, user, "user.bulk", login_)
+    return {"users": out}
+
+
 @route("POST", "/api/users", role="admin")
 def users_create(con, h, user, body, q):
     login_ = (body.get("login") or "").strip()
