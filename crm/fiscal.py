@@ -287,6 +287,31 @@ def fetch_pk_payments(con, d_from: date, d_to: date) -> list[dict]:
         "status[]": ["success", "obtained", "stuck"]})
 
 
+def pk_diag(con, d_from: date, d_to: date) -> str:
+    """Без персональных данных: только тип ответа, ключи и количество строк при разных фильтрах."""
+    base = {"start": d_from.isoformat(), "end": d_to.isoformat(), "limit": 100, "from": 0}
+    variants = {"без фильтров": {}, "статус success": {"status[]": ["success"]},
+                "все системы": {"status[]": ["success", "obtained", "stuck"], "payment_system_id[]": list(range(1, 60))}}
+    parts = []
+    for name, extra in variants.items():
+        try:
+            js = pk_call(con, "/info/payments/bydate/", base | extra)
+            if isinstance(js, list):
+                parts.append(f"{name}: {len(js)} шт")
+            elif isinstance(js, dict):
+                parts.append(f"{name}: объект {sorted(js)[:6]}")
+            else:
+                parts.append(f"{name}: {type(js).__name__}")
+        except Exception as e:  # noqa: BLE001
+            parts.append(f"{name}: {e}")
+    try:
+        js = pk_call(con, "/info/payments/bydatecount/", {"start": base["start"], "end": base["end"]})
+        parts.append("счётчик: " + json.dumps(js, ensure_ascii=False)[:200])
+    except Exception as e:  # noqa: BLE001
+        parts.append(f"счётчик: {e}")
+    return "; ".join(parts)
+
+
 def fetch_pk_receipts(con, d_from: date, d_to: date) -> list[dict]:
     return _pk_all(con, "/info/receipts/bydate/", {
         "start": d_from.isoformat(), "end": d_to.isoformat(),
@@ -687,7 +712,10 @@ def test_sources(con) -> dict:
             out["tochka"] = f"ошибка: {e}"
     if on["paykeeper"]:
         try:
-            out["paykeeper"] = f"ок, платежей за неделю: {len(fetch_pk_payments(con, today - timedelta(days=7), today))}"
+            n = len(fetch_pk_payments(con, today - timedelta(days=7), today))
+            out["paykeeper"] = f"ок, платежей за неделю: {n}"
+            if n == 0:
+                out["paykeeper"] += " | разбор: " + pk_diag(con, today - timedelta(days=7), today)
         except Exception as e:  # noqa: BLE001
             out["paykeeper"] = f"ошибка: {e}"
     if on["ofd"]:
