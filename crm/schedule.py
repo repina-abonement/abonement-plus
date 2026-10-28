@@ -153,9 +153,14 @@ def save_group(con, data: dict, gid: int | None = None) -> int:
         for eid, wd in con.execute("SELECT id, weekdays FROM enrollments WHERE group_id=? AND weekdays != ''", (gid,)).fetchall():
             keep = [x for x in wd.split(",") if x in allowed]
             con.execute("UPDATE enrollments SET weekdays=? WHERE id=?", (",".join(keep) if keep and len(keep) < len(allowed) else "", eid))
+        if "trial_ok" in data:
+            con.execute("UPDATE groups SET trial_ok=? WHERE id=?", (1 if data.get("trial_ok") else 0, gid))
         return gid
-    return con.execute("""INSERT INTO groups(branch_id, name, weekdays, time, age, is_makeup, coach_id, capacity,
+    new_id = con.execute("""INSERT INTO groups(branch_id, name, weekdays, time, age, is_makeup, coach_id, capacity,
                           assistant_id, day_times, note) VALUES (?,?,?,?,?,?,?,?,?,?,?)""", vals).lastrowid
+    if "trial_ok" in data:
+        con.execute("UPDATE groups SET trial_ok=? WHERE id=?", (1 if data.get("trial_ok") else 0, new_id))
+    return new_id
 
 
 def set_group_active(con, gid: int, active: bool):

@@ -26,11 +26,45 @@ def init(con):
         con.execute("UPDATE branches SET lesson_limit=10 WHERE name LIKE '%Небо%'")
         con.execute("""UPDATE groups SET capacity=10 WHERE capacity>10 AND is_makeup=0
                        AND branch_id IN (SELECT id FROM branches WHERE lesson_limit=10)""")
+    gcols = {r[1] for r in con.execute("PRAGMA table_info(groups)")}
+    if "trial_ok" not in gcols:
+        con.execute("ALTER TABLE groups ADD COLUMN trial_ok INTEGER NOT NULL DEFAULT 1")
+        # Юлия 28.10.2026: пробные только в обычные группы. В Небе Вт/Пт, Ср/Вс, Сб/Вс и из Пн/Чт только 16:45.
+        # Не на ОФП, сборную и отработки
+        con.execute("UPDATE groups SET trial_ok=0 WHERE is_makeup=1 OR name LIKE '%ОФП%' OR name LIKE '%Сборная%'")
+        con.execute("""UPDATE groups SET trial_ok=0 WHERE name LIKE '%Пн/Чт%' AND time!='16:45'
+                       AND branch_id IN (SELECT id FROM branches WHERE name LIKE '%Небо%')""")
+    scols = {r[1] for r in con.execute("PRAGMA table_info(students)")}
+    if "branch_id" not in scols:  # филиал лида, пока не выбрана группа (из заявки с сайта или вручную)
+        con.execute("ALTER TABLE students ADD COLUMN branch_id INTEGER REFERENCES branches(id)")
     acols = {r[1] for r in con.execute("PRAGMA table_info(attendance)")}
     if "warned" not in acols:
         con.execute("ALTER TABLE attendance ADD COLUMN warned INTEGER NOT NULL DEFAULT 0")
     if "note" not in acols:
         con.execute("ALTER TABLE attendance ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+
+
+BRANCH_WORDS = {"небо": ["небо", "солнцево", "трц"], "западн": ["западн", "чоботов", "новопеределкин"],
+                "арктик": ["арктик"]}
+
+
+def match_branch(con, text: str) -> int | None:
+    """Филиал по тексту из заявки: «ТРЦ Небо», «Чоботовская», «СК Западный» и т.п."""
+    t = (text or "").lower().replace("ё", "е")
+    if not t.strip():
+        return None
+    for b in con.execute("SELECT id, name FROM branches WHERE active=1 ORDER BY id").fetchall():
+        n = b["name"].lower().replace("ё", "е")
+        words = [w for k, ws in BRANCH_WORDS.items() if k in n for w in ws] + [n]
+        if any(w in t for w in words):
+            return b["id"]
+    return None
+
+
+def check_trial_group(con, group_id: int):
+    r = con.execute("SELECT name, trial_ok, is_makeup FROM groups WHERE id=?", (group_id,)).fetchone()
+    if r and (not r["trial_ok"] or r["is_makeup"]):
+        raise CapacityError(f"В группу «{r['name']}» на пробное не записываем. Выберите другую группу")
 
 
 def limit_for(con, group_id: int) -> int:

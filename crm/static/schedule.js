@@ -248,6 +248,7 @@ function groupForm(gid, branchId, d, coaches, done) {
         <div class="field"><label>Помощник</label><select name="assistant_id"><option value="">— без помощника —</option>${coaches.map((u) => `<option value="${u.id}" ${u.id === g.assistant_id ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select></div></div>
       <div class="field"><label>Заметка</label><input name="note" value="${esc(g.note || "")}" placeholder="Например: ОФП в недели без турнира"></div>
       <label class="check"><input type="checkbox" name="is_makeup" ${g.is_makeup ? "checked" : ""}> Это группа отработок</label>
+      <label class="check"><input type="checkbox" name="trial_ok" ${g.trial_ok === 0 ? "" : "checked"}> Можно записывать на пробное</label>
       <div class="row" style="margin-top:14px"><button class="btn primary">Сохранить</button>
         ${gid ? `<a class="btn" href="/api/groups/${gid}/export">Список в Excel</a><button type="button" class="btn danger" id="g-arch">В архив</button>` : ""}</div>
     </form>`);
@@ -265,6 +266,7 @@ function groupForm(gid, branchId, d, coaches, done) {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(f));
     data.is_makeup = f.elements.is_makeup.checked;
+    data.trial_ok = f.elements.trial_ok.checked;
     data.weekdays = [...f.querySelectorAll("[data-gd].on")].map((x) => +x.dataset.gd);
     data.day_times = Object.fromEntries([...f.querySelectorAll("[data-dt]")].filter((x) => x.value).map((x) => [x.dataset.dt, x.value]));
     try { await api(gid ? "PUT" : "POST", gid ? `/api/groups/${gid}` : "/api/groups", data); toast("Группа сохранена"); closeDrawer(); done(); } catch (err) { fail(err); }

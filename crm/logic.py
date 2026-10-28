@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+import math
+
 import calendar
 from datetime import date, datetime, timedelta
 
@@ -126,7 +128,7 @@ def apply_late_fee(total: int, *, enabled: bool, percent: float, today: date,
     y, m = parse_month(prev)
     deadline = date(y, m, deadline_day)
     if today > deadline:
-        fee = round(total * percent / 100)
+        fee = math.ceil(total * percent / 100 - 1e-9)  # копейки округляем вверх
         return total + fee, fee
     return total, 0
 

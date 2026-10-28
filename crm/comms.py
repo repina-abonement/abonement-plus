@@ -843,6 +843,10 @@ def lead_hook(con, data: dict, create_student) -> dict:
             body |= {"parent_name": name or "Родитель", "phone": phone, "messenger": ""}
         sid = create_student(con, body, {"name": "Заявка с сайта"})
         con.execute("UPDATE students SET priority=1 WHERE id=?", (sid,))
+        from . import capacity
+        bid = capacity.match_branch(con, " ".join(str(data.get(k) or "") for k in ("branch", "city", "comment")))
+        if bid:
+            con.execute("UPDATE students SET branch_id=? WHERE id=?", (bid, sid))
         _lead_note(con, sid, "Заявка с сайта", details)
         relink_phone(con, phone, con.execute("SELECT family_id FROM students WHERE id=?", (sid,)).fetchone()[0])
     if ext:

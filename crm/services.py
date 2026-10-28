@@ -356,7 +356,15 @@ def card_summary(con, s: dict, st: dict) -> dict:
         "group": grp["name"] if grp else "", "tariff": s["tariff"], "siblings": sib,
         "stage": s["stage"], "stage_changed_at": s["stage_changed_at"], "trial_at": s["trial_at"],
         "priority": s.get("priority", 0),
+        "branch": "" if grp else _branch_name(con, s.get("branch_id")),
     }
+
+
+def _branch_name(con, bid) -> str:
+    if not bid:
+        return ""
+    r = con.execute("SELECT name FROM branches WHERE id=?", (bid,)).fetchone()
+    return r[0] if r else ""
 
 
 def effective_sales_stage(s: dict, st: dict, ref: datetime) -> tuple[str, str | None, int | None]:
@@ -620,7 +628,7 @@ def create_student(con, data: dict, user) -> int:
     return sid
 
 
-UPDATABLE = {"name", "birth", "group_id", "tariff", "trial_at", "source", "source_id", "refusal_reason"}
+UPDATABLE = {"name", "birth", "group_id", "branch_id", "tariff", "trial_at", "source", "source_id", "refusal_reason"}
 
 
 def update_student(con, sid: int, data: dict, user) -> None:
@@ -637,7 +645,7 @@ def update_student(con, sid: int, data: dict, user) -> None:
             except ValueError:
                 raise ApiError("Неверная дата пробного")
         if v == "":
-            v = None if k in ("group_id", "trial_at") else ""
+            v = None if k in ("group_id", "trial_at", "branch_id") else ""
         if s.get(k) != v:
             con.execute(f"UPDATE students SET {k} = ? WHERE id = ?", (v, sid))
             changes.append(k)
@@ -654,8 +662,9 @@ def update_student(con, sid: int, data: dict, user) -> None:
         cur = get_student_row(con, sid)
         if cur["trial_at"] and cur["group_id"] and cur["trial_at"][:10] >= today().isoformat():
             from . import capacity
+            capacity.check_trial_group(con, cur["group_id"])
             capacity.ensure(con, cur["group_id"], cur["trial_at"][:10], "записать на пробное")
-    names = {"name": "имя", "birth": "дата рождения", "group_id": "группа", "tariff": "тариф",
+    names = {"name": "имя", "birth": "дата рождения", "group_id": "группа", "branch_id": "филиал", "tariff": "тариф",
              "trial_at": "пробное", "source": "источник", "source_id": "источник", "refusal_reason": "причина отказа"}
     if changes:
         log(con, sid, "Изменено: " + ", ".join(names[c] for c in changes), user, "system")

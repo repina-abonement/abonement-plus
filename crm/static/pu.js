@@ -8,7 +8,7 @@ document.addEventListener("click", (e) => {
 async function openRebook(tid) {
   let d;
   try { d = await api("GET", `/api/pu/task/${tid}`); } catch (e) { return fail(e); }
-  const t = d.task, groups = S.meta.groups.filter((g) => !g.is_makeup && !g.program_id);
+  const t = d.task, groups = S.meta.groups.filter((g) => !g.is_makeup && !g.program_id && g.trial_ok !== 0);
   const kidHtml = (k) => {
     const n = k.misses.length, last = k.misses[0];
     return `<div class="rb-kid"><b>${esc(k.name)}</b> <button class="linkish small" data-open="${k.id}">карточка</button>

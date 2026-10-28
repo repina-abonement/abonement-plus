@@ -14,6 +14,8 @@
 """
 from __future__ import annotations
 
+import math
+
 import json
 from datetime import date, datetime, timedelta
 
@@ -211,7 +213,7 @@ def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = N
     po = pr["ofp"]
 
     def bump(p, pct):
-        return round(p * (1 + pct / 100))
+        return math.ceil(p * (1 + pct / 100) - 1e-9)
     la, lo = bump(pa, pr["late_pct"]), bump(po, pr["late_pct"])
     base = len(arena_dates) * pa + len(ofp_dates) * po          # при оплате до срока
     late_total = len(arena_dates) * la + len(ofp_dates) * lo     # при оплате после срока
@@ -226,7 +228,7 @@ def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = N
     sib = next((d for d in money.auto_discounts(con, sid, on) if d["rule"] == "sibling"), None)
     if sib and not late:
         disc = sib
-        off = round(base * int(sib["percent"]) / 100)
+        off = math.floor(base * int(sib["percent"]) / 100 + 1e-9)
     elif sib and late:
         disc_note = "Оплата после срока: скидка второму ребёнку не действует"
     total = gross - off
@@ -236,7 +238,7 @@ def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = N
     if ofp_dates:
         lines.append({"label": f"ОФП, {logic.WEEKDAY_NAMES[int(ofp_g['weekdays'])].lower() if ofp_g and ofp_g['weekdays'].isdigit() else ''}".rstrip(", "),
                       "n": len(ofp_dates), "price": use_o, "sum": len(ofp_dates) * use_o})
-    on_time_total = base - (round(base * int(sib["percent"]) / 100) if sib else 0)
+    on_time_total = base - (math.floor(base * int(sib["percent"]) / 100 + 1e-9) if sib else 0)
     return {
         "month": ym, "month_label": logic.month_label(ym), "per_lesson": use_a, "lessons_total": len(arena_dates) + len(ofp_dates),
         "vacation_lessons": 0, "lessons_paid": len(arena_dates) + len(ofp_dates), "base": base, "credit_lessons": 0, "credit": 0,

@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import math
+
 from datetime import date, datetime
 
 from . import logic
@@ -241,7 +243,7 @@ def auto_discount(con, sid: int, today: date | None = None) -> dict | None:
 def apply_discount(total: int, d: dict | None) -> tuple[int, int]:
     if not d or not d.get("percent"):
         return total, 0
-    off = round(total * int(d["percent"]) / 100)
+    off = math.floor(total * int(d["percent"]) / 100 + 1e-9)  # цена после скидки — вверх до рубля
     return total - off, off
 
 

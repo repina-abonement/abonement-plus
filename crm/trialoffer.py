@@ -39,7 +39,7 @@ def slots(con, age: int, branch_id: int | None = None, limit: int = 4, days: int
     now = datetime.now()
     out = []
     for g in con.execute("""SELECT g.*, b.name AS branch, b.address, b.lesson_limit FROM groups g JOIN branches b ON b.id=g.branch_id
-                            WHERE g.active=1 AND b.active=1 AND g.is_makeup=0 AND g.program_id IS NULL"""
+                            WHERE g.active=1 AND b.active=1 AND g.is_makeup=0 AND g.program_id IS NULL AND g.trial_ok=1"""
                          + (" AND g.branch_id=?" if branch_id else ""), (branch_id,) if branch_id else ()).fetchall():
         r = age_range(g["age"])
         if not r or not r[0] <= age <= r[1] or "взросл" in (g["age"] or "").lower() or "пап" in g["name"].lower() \

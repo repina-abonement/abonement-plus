@@ -1219,13 +1219,16 @@ def trial_offer(con, h, user, body, q):
     from . import trialoffer
     age = int(q["age"]) if str(q.get("age") or "").isdigit() else None
     child = q.get("child") or ""
+    bid = int(q["branch_id"]) if q.get("branch_id") else None
     if q.get("student_id"):
-        s = con.execute("SELECT name, birth FROM students WHERE id=?", (int(q["student_id"]),)).fetchone()
+        s = con.execute("SELECT name, birth, branch_id, group_id FROM students WHERE id=?", (int(q["student_id"]),)).fetchone()
         if s:
+            if bid is None and s["branch_id"] and not s["group_id"]:
+                bid = s["branch_id"]
             child = child or s["name"]
             if age is None:
                 age = trialoffer.years(s["birth"])
-    return trialoffer.offer(con, age, child, int(q["branch_id"]) if q.get("branch_id") else None)
+    return trialoffer.offer(con, age, child, bid)
 
 
 @route("POST", "/api/students/{sid}/cancel-trial", role="operator")
