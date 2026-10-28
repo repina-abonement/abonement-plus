@@ -458,6 +458,8 @@ function aiBlock(x) {
       <div class="small muted" style="margin-top:8px">${S.user.role === "admin" ? "Включается в Настройках → Связь с клиентами → Расшифровка и разбор звонков" : "Включает администратор в Настройках"}</div>
     </section>`;
   const I = S.inbox;
+  const STEP_NOUN = { hello: "Приветствие", child: "Знакомство с ребёнком", needs: "Выяснение потребностей", place: "Подбор филиала и времени",
+    value: "Рассказ о пользе занятий", trial: "Запись на пробное", objection: "Работа с сомнениями и возражениями", next: "Договорённость о следующем шаге" };
   const weak = x.checklist.find((c) => c.key === x.weakest);
   const op = I.aiOp ? x.operators.find((o) => o.number === I.aiOp) : null;
   const steps = op ? op.steps : x.team;
@@ -466,7 +468,7 @@ function aiBlock(x) {
       <div class="row" style="align-items:center"><h3 class="grow" style="flex:1">Разбор разговоров</h3>
         <span class="small muted" style="flex:0 0 auto">Разобрано ${x.analyzed}${x.pending ? `, ещё ${x.pending} в работе` : ""}</span></div>
       ${!x.analyzed ? `<div class="small muted">Разборов за этот период пока нет</div>`
-        : weak && x.team[weak.key] < 80 ? `<div class="ai-weak">Чаще всего теряем клиента на шаге: <b>${esc(weak.title.toLowerCase())}</b>. Делают только в ${x.team[weak.key]}% разговоров</div>`
+        : weak && x.team[weak.key] < 80 ? `<div class="ai-weak">Чаще всего теряем клиента на этапе <b>«${esc(STEP_NOUN[weak.key] || weak.title)}»</b>: администраторы делают это только в ${x.team[weak.key]}% разговоров</div>`
         : `<div class="ai-good" style="margin-top:8px">Все шаги разговора выполняются хорошо, так держать</div>`}
       ${x.operators.length ? `
       <div class="chips" style="margin:12px 0 8px"><span class="small muted" style="align-self:center">Показать:</span>
