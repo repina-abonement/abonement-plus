@@ -36,9 +36,91 @@ function toast(msg, err = false) {
 }
 const fail = (e) => toast(e.message || "Ошибка", true);
 
-/* ---------- вход ---------- */
-function renderLogin() {
+/* ---------- быстрый вход по коду ---------- */
+function deviceToken(create = false) {
+  try {
+    let t = localStorage.getItem("crm.device");
+    if (!t && create) {
+      const a = new Uint8Array(32); crypto.getRandomValues(a);
+      t = [...a].map((x) => x.toString(16).padStart(2, "0")).join("");
+      localStorage.setItem("crm.device", t);
+    }
+    return t || "";
+  } catch (_) { return ""; }
+}
+
+/* экран с цифровой клавиатурой; onCode(code, pad) вызывается после 4 цифр */
+function pinPad({ title, sub, onCode, left }) {
   closeDrawer();
+  app.innerHTML = `<div class="pin-wrap">
+    <div class="pin-logo">Абонемент <span>Плюс</span></div>
+    <div class="pin-mid"><h1 class="pin-title">${esc(title)}</h1><div class="pin-sub" id="pin-sub">${esc(sub)}</div>
+      <div class="pin-dots" id="pin-dots">${"<i></i>".repeat(4)}</div><div class="pin-err" id="pin-err"></div></div>
+    <div class="pin-keys">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button data-k="${n}">${n}</button>`).join("")}
+      <button class="pin-link" id="pin-left">${esc(left.label)}</button><button data-k="0">0</button>
+      <button id="pin-del" aria-label="Стереть"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M9 5h11v14H9l-6-7 6-7Z"/><path d="m12 9 5 6m0-6-5 6"/></svg></button></div>
+  </div>`;
+  let code = "";
+  const pad = {
+    draw() { app.querySelectorAll("#pin-dots i").forEach((d, i) => d.classList.toggle("on", i < code.length)); },
+    reset(err = "") { code = ""; pad.draw(); $("#pin-err").textContent = err; if (err) { const d = $("#pin-dots"); d.classList.remove("shake"); void d.offsetWidth; d.classList.add("shake"); if (navigator.vibrate) navigator.vibrate(120); } },
+    sub(t) { $("#pin-sub").textContent = t; },
+    busy: false,
+  };
+  const press = async (k) => {
+    if (pad.busy || code.length >= 4) return;
+    code += k; pad.draw(); $("#pin-err").textContent = "";
+    if (code.length === 4) { pad.busy = true; try { await onCode(code, pad); } finally { pad.busy = false; } }
+  };
+  app.querySelectorAll("[data-k]").forEach((b) => (b.onclick = () => press(b.dataset.k)));
+  $("#pin-del").onclick = () => { code = code.slice(0, -1); pad.draw(); };
+  $("#pin-left").onclick = left.fn;
+  document.onkeydown = (e) => { if (!$("#pin-dots")) { document.onkeydown = null; return; } if (/^\d$/.test(e.key)) press(e.key); if (e.key === "Backspace") $("#pin-del").click(); };
+  return pad;
+}
+
+async function renderPinLogin(name) {
+  pinPad({
+    title: `Здравствуйте, ${name}!`, sub: "Введите код быстрого входа",
+    left: { label: "Войти по паролю", fn: () => renderLogin(true) },
+    onCode: async (code, pad) => {
+      const r = await fetch("/api/pin/login", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device: deviceToken(), pin: code }) }).then((x) => x.json()).catch(() => ({ error: "Нет связи, попробуйте ещё раз" }));
+      if (r.ok) { document.onkeydown = null; return boot(); }
+      if (r.need_password) { toast(r.error, true); return renderLogin(true); }
+      pad.reset(r.error || "Неверный код");
+    },
+  });
+}
+
+/* после входа по паролю: предложить придумать код (один раз на устройстве, можно пропустить) */
+async function offerPin() {
+  const dev = deviceToken(true);
+  try { if (localStorage.getItem("crm.pin_skip") === "1") return; } catch (_) {}
+  try { if ((await api("GET", "/api/pin?device=" + dev)).has_pin) return; } catch (_) { return; }
+  await new Promise((resolve) => {
+    let first = "";
+    const done = () => { document.onkeydown = null; resolve(); };
+    pinPad({
+      title: "Быстрый вход", sub: "Придумайте код из 4 цифр. В следующий раз войдёте по нему, без пароля",
+      left: { label: "Пропустить", fn: () => { try { localStorage.setItem("crm.pin_skip", "1"); } catch (_) {} done(); } },
+      onCode: async (code, pad) => {
+        if (!first) { first = code; pad.reset(); pad.sub("Повторите код"); return; }
+        if (code !== first) { first = ""; pad.reset("Коды не совпали"); pad.sub("Придумайте код из 4 цифр"); return; }
+        try { await api("POST", "/api/pin", { device: dev, pin: code }); toast("Готово! Теперь можно входить по коду"); done(); }
+        catch (e) { first = ""; pad.reset(e.message); pad.sub("Придумайте код из 4 цифр"); }
+      },
+    });
+  });
+}
+
+/* ---------- вход ---------- */
+async function renderLogin(force = false) {
+  closeDrawer();
+  if (!force && deviceToken()) {
+    const h = await fetch("/api/pin/hello?device=" + encodeURIComponent(deviceToken())).then((r) => r.json()).catch(() => ({}));
+    if (h && h.name) return renderPinLogin(h.name);
+  }
   app.innerHTML = `
   <div class="login-wrap"><div class="login">
     <div class="login-mark" aria-hidden="true">⚽</div>
@@ -56,7 +138,7 @@ function renderLogin() {
   $("#login-form").onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    try { await api("POST", "/api/login", { login: f.get("login"), password: f.get("password") }); boot(); }
+    try { await api("POST", "/api/login", { login: f.get("login"), password: f.get("password") }); await offerPin(); boot(); }
     catch (err) { $("#login-err").textContent = err.message; }
   };
 }
@@ -945,6 +1027,7 @@ async function renderSettings(page) {
     <div class="section"><h3>Внешний вид</h3>
       <label class="check"><input type="checkbox" id="theme-soft" ${document.documentElement.classList.contains("theme-soft") ? "checked" : ""}> Новый дизайн (проба)</label>
       <div class="small muted" style="margin-top:6px">Светлый спокойный вид. Включается только на этом устройстве, выключить можно здесь же в любой момент</div></div>
+    <div class="section"><h3>Быстрый вход по коду</h3><div id="pin-set" class="small muted">…</div></div>
     ${admin ? `
     <form class="section" id="set">
       <h3>Цены и правила</h3>
@@ -1021,6 +1104,15 @@ async function renderSettings(page) {
     e.preventDefault();
     try { await api("POST", "/api/users", Object.fromEntries(new FormData(e.target))); toast("Сотрудник добавлен"); render(); } catch (err) { fail(err); }
   };
+  (async () => {
+    const box = $("#pin-set"); if (!box) return;
+    const dev = deviceToken(true);
+    const has = (await api("GET", "/api/pin?device=" + dev).catch(() => ({}))).has_pin;
+    box.innerHTML = `<div style="margin-bottom:8px">${has ? "На этом устройстве вход по коду из 4 цифр включён" : "Вход по коду на этом устройстве выключен"}</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn sm primary" id="pin-new">${has ? "Сменить код" : "Включить"}</button>${has ? `<button class="btn sm" id="pin-off">Отключить</button>` : ""}</div>`;
+    $("#pin-new").onclick = async () => { try { localStorage.removeItem("crm.pin_skip"); } catch (_) {} if (has) await api("POST", "/api/pin", { device: dev, remove: true }); await offerPin(); shell(); render(); };
+    if ($("#pin-off")) $("#pin-off").onclick = async () => { await api("POST", "/api/pin", { device: dev, remove: true }); try { localStorage.setItem("crm.pin_skip", "1"); } catch (_) {} toast("Вход по коду отключён"); render(); };
+  })();
   if ($("#theme-soft")) $("#theme-soft").onchange = (e) => {
     const t = e.target.checked ? "soft" : "";
     try { localStorage.setItem("crm.theme", t); } catch (_) {}

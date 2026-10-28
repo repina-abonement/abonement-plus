@@ -85,11 +85,7 @@ def current_user(con, handler) -> dict | None:
     return dict(r)
 
 
-@route("POST", "/api/login", role="public")
-def login(con, h, user, body, q):
-    u = con.execute("SELECT * FROM users WHERE login=? AND active=1", ((body.get("login") or "").strip(),)).fetchone()
-    if not u or not db.check_password(body.get("password") or "", u["pw_hash"]):
-        raise ApiError("Неверный логин или пароль", 401)
+def _start_session(con, h, u) -> None:
     tok = secrets.token_urlsafe(32)
     con.execute("INSERT INTO sessions(token, user_id, created_at) VALUES (?,?,?)", (tok, u["id"], db.now_iso()))
     sv.audit(con, dict(u), "login")
@@ -97,7 +93,51 @@ def login(con, h, user, body, q):
     if SECURE_COOKIE:
         cookie += "; Secure"
     h.extra_headers.append(("Set-Cookie", cookie))
+
+
+@route("POST", "/api/login", role="public")
+def login(con, h, user, body, q):
+    u = con.execute("SELECT * FROM users WHERE login=? AND active=1", ((body.get("login") or "").strip(),)).fetchone()
+    if not u or not db.check_password(body.get("password") or "", u["pw_hash"]):
+        raise ApiError("Неверный логин или пароль", 401)
+    _start_session(con, h, u)
     return {"ok": True, "user": {"name": u["name"], "role": u["role"]}}
+
+
+# ---------------- быстрый вход по коду ----------------
+
+@route("GET", "/api/pin/hello", role="public")
+def pin_hello(con, h, user, body, q):
+    from . import pin
+    return pin.hello(con, q.get("device") or "") or {}
+
+
+@route("POST", "/api/pin/login", role="public")
+def pin_login(con, h, user, body, q):
+    from . import pin
+    u, err = pin.login(con, body.get("device") or "", str(body.get("pin") or ""))
+    if err:
+        return {"ok": False} | err
+    _start_session(con, h, u)
+    sv.audit(con, u, "login.pin")
+    return {"ok": True}
+
+
+@route("GET", "/api/pin")
+def pin_status(con, h, user, body, q):
+    from . import pin
+    return {"has_pin": pin.has_pin(con, user, q.get("device") or "")}
+
+
+@route("POST", "/api/pin")
+def pin_set(con, h, user, body, q):
+    from . import pin
+    if body.get("remove"):
+        pin.remove(con, user, body.get("device") or "")
+        return {"ok": True}
+    pin.set_pin(con, user, body.get("device") or "", str(body.get("pin") or ""))
+    sv.audit(con, user, "pin.set")
+    return {"ok": True}
 
 
 @route("POST", "/api/logout")
@@ -149,10 +189,17 @@ def users_patch(con, h, user, body, q, uid):
             raise ApiError("Пароль от 8 символов")
         con.execute("UPDATE users SET pw_hash=? WHERE id=?", (db.hash_password(body["password"]), int(uid)))
         con.execute("DELETE FROM sessions WHERE user_id=? AND ?!=?", (int(uid), int(uid), user["id"]))
+        from . import pin
+        pin.remove_all(con, int(uid))
         sv.audit(con, user, "user.password", str(uid))
     if "sip_number" in body:
         sip = "".join(ch for ch in str(body["sip_number"] or "") if ch.isdigit())[:10]
         con.execute("UPDATE users SET sip_number=? WHERE id=?", (sip, int(uid)))
+    if body.get("name"):
+        nm = " ".join(str(body["name"]).split())[:80]
+        if len(nm) < 2:
+            raise ApiError("Укажите имя")
+        con.execute("UPDATE users SET name=? WHERE id=?", (nm, int(uid)))
     if "tg_username" in body:
         tg = "".join(ch for ch in str(body["tg_username"] or "").strip().lstrip("@") if ch.isalnum() or ch == "_")[:40]
         con.execute("UPDATE users SET tg_username=? WHERE id=?", (tg, int(uid)))

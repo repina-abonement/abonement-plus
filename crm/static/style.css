@@ -810,3 +810,23 @@ html.theme-soft .small.muted, html.theme-soft .muted.small { font-size: 13px; }
 html.theme-soft .now > div:not(.now-head):not(.now-list):not(.now-item):not(.row):not(.alert) { color: var(--ink-2); }
 html.theme-soft .field label { font-weight: 450; font-size: 13px; }
 html.theme-soft :is(.now, .list-row, .card, .now-item) :is(b, strong) { color: var(--ink); }
+
+/* ---------- быстрый вход по коду ---------- */
+.pin-wrap { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; background: var(--surface);
+  padding: max(28px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom)); color: var(--ink); }
+.pin-logo { font-family: var(--display); font-weight: 700; font-size: 20px; letter-spacing: -.02em; }
+.pin-logo span { color: var(--accent); }
+.pin-mid { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 10px; max-width: 360px; }
+.pin-title { font-size: 28px; font-weight: 600; letter-spacing: -.02em; font-family: var(--font); }
+.pin-sub { color: var(--ink-2); font-size: 15px; line-height: 1.4; }
+.pin-dots { display: flex; gap: 18px; margin-top: 26px; }
+.pin-dots i { width: 14px; height: 14px; border-radius: 50%; background: var(--line); transition: background .12s, transform .12s; }
+.pin-dots i.on { background: var(--ink); transform: scale(1.08); }
+.pin-dots.shake { animation: pinshake .35s; }
+@keyframes pinshake { 20%, 60% { transform: translateX(-8px); } 40%, 80% { transform: translateX(8px); } }
+.pin-err { color: var(--red); font-size: 14px; min-height: 20px; }
+.pin-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 22px; width: 100%; max-width: 330px; }
+.pin-keys button { border: 0; background: none; font: 400 34px var(--font); color: var(--ink); height: 76px; border-radius: 50%;
+  cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; display: grid; place-items: center; }
+.pin-keys button:active { background: var(--surface-2); }
+.pin-keys .pin-link { font-size: 14px; line-height: 1.25; color: var(--ink); }
