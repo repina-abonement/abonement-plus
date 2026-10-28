@@ -440,7 +440,7 @@ def workdesk(con, h, user, body, q):
             "alerts": __import__("crm.pu", fromlist=["open_alerts"]).open_alerts(con),
             "call_focus": calldigest.focus_for(con, (con.execute("SELECT sip_number FROM users WHERE id=?",
                                                                  (int(q["as_user"]) if q.get("as_user") and user["role"] == "admin" else user["id"],)).fetchone() or [""])[0]),
-            "bills_due": expenses.bills_due(con) if user["role"] == "admin" else [],
+            "bills_due": expenses.bills_upcoming(con) if user["role"] == "admin" else [],
             "ads_alerts": expenses.ads_alerts(con) if user["role"] == "admin" else [],
             "absences": schedule.absences(con),
             "coaches": [dict(r) for r in con.execute("SELECT id, name FROM users WHERE role='coach' AND active=1 ORDER BY name")],

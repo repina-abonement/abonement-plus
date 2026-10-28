@@ -49,3 +49,18 @@ def main():
 if __name__ == "__main__":
     main()
     print("\nВсе проверки расходов пройдены")
+
+
+def _upcoming():
+    import tempfile as _t
+    from datetime import date as _d
+    from crm import db as _db, expenses as _e
+    con = _db.connect(os.path.join(_t.mkdtemp(), "u.sqlite3")); _db.init_db(con)
+    _e.save_bill(con, {"title": "Сервер CRM", "category": "crm", "amount": 990, "next_due": "2026-11-20", "remind_days": 5})
+    _e.save_bill(con, {"title": "Домен", "category": "crm", "amount": 300, "period": "yearly", "next_due": "2027-10-01"})
+    up = _e.bills_upcoming(con, _d(2026, 10, 28))
+    assert [b["title"] for b in up] == ["Сервер CRM"] and up[0]["level"] == "" and up[0]["category_label"] == "Для работы CRM"
+    print("✓ на столе платежи на 30 дней вперёд, дальние не мешают")
+
+
+_upcoming()

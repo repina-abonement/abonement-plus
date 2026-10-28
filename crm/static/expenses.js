@@ -6,13 +6,18 @@ const leftText = (n) => n < 0 ? `просрочено на ${-n} дн.` : n === 
 
 /* ---------- на рабочем столе ---------- */
 function spendDeskBox(d) {
-  const b = d.bills_due || [], a = d.ads_alerts || [];
-  if (!b.length && !a.length) return "";
-  return `<section class="now" style="margin-bottom:14px"><div class="now-head"><h3>💳 Платежи и реклама</h3><button class="btn sm" style="margin-left:auto" data-go-spend>Все расходы</button></div>
+  const all = d.bills_due || [], a = d.ads_alerts || [];
+  if (!all.length && !a.length) return "";
+  const b = all.filter((x) => x.level), soon = all.filter((x) => !x.level);
+  const sum = (xs) => xs.reduce((s, x) => s + (x.amount || 0), 0);
+  return `<section class="now" style="margin-bottom:14px"><div class="now-head"><h3>💳 Платежи и подписки</h3><button class="btn sm" style="margin-left:auto" data-go-spend>Все платежи</button></div>
     <div class="now-list">
     ${b.map((x) => `<div class="now-item ${x.level}"><span class="ref-card ${x.level}"></span>
-      <div class="grow"><b>${esc(x.title)}</b> · ${rub(x.amount)}<div class="small">${esc(x.category_label)}, оплатить ${dShort(x.next_due)}: <b>${leftText(x.left)}</b>${x.pay_where ? `, ${esc(x.pay_where)}` : ""}</div></div>
+      <div class="grow"><b>${esc(x.title)}</b> · ${x.amount ? rub(x.amount) : "сумма не указана"}<div class="small">${esc(x.category_label)}, оплатить ${dShort(x.next_due)}: <b>${leftText(x.left)}</b>${x.pay_where ? `, ${esc(x.pay_where)}` : ""}</div></div>
       <div class="now-act"><button class="btn sm ${x.level === "red" ? "primary" : ""}" data-bpay="${x.id}" data-amt="${x.amount}">Оплачено</button></div></div>`).join("")}
+    ${soon.length ? `<details class="bills-soon" ${b.length ? "" : "open"}><summary class="small">Скоро, в ближайшие 30 дней: ${soon.length}${sum(soon) ? ` на ${rub(sum(soon))}` : ""}</summary>
+      ${soon.map((x) => `<div class="list-row" style="padding:8px 4px"><div class="grow"><b>${esc(x.title)}</b><div class="small muted">${esc(x.category_label)}${x.pay_where ? `, ${esc(x.pay_where)}` : ""}</div></div>
+        <div style="text-align:right"><div>${x.amount ? rub(x.amount) : "—"}</div><div class="small muted">${dShort(x.next_due)}, ${leftText(x.left)}</div></div></div>`).join("")}</details>` : ""}
     ${a.map((x) => `<div class="now-item ${x.level}"><span class="ref-card ${x.level}"></span>
       <div class="grow"><b>📣 ${esc(x.place)}</b><div class="small">${esc(x.text)}${x.contact ? `, админ: ${esc(x.contact)}` : ""}</div></div>
       <div class="now-act">${x.kind === "post" ? `<button class="btn sm primary" data-apost="${x.post_id}">Вышел</button><button class="btn sm" data-amove="${x.post_id}">Перенести</button>` : `<button class="btn sm" data-go-spend-ads>Открыть</button>`}</div></div>`).join("")}

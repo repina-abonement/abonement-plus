@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS ad_posts (
     status TEXT NOT NULL DEFAULT 'planned'      -- planned | posted | cancelled
 );
 """
-CATEGORIES = {"rent": "Аренда", "service": "Сервисы и подписки", "ads": "Реклама", "tax": "Налоги и банк", "other": "Другое"}
+CATEGORIES = {"rent": "Аренда", "crm": "Для работы CRM", "service": "Сервисы и подписки", "ads": "Реклама", "tax": "Налоги и банк", "other": "Другое"}
 PERIODS = {"monthly": "каждый месяц", "yearly": "каждый год", "weekly": "каждую неделю", "once": "один раз"}
 
 
@@ -161,6 +161,11 @@ def bills_view(con, today: date | None = None) -> dict:
         """SELECT p.*, b.title FROM bill_payments p JOIN bills b ON b.id=p.bill_id ORDER BY p.id DESC LIMIT 30""")]
     return {"bills": rows, "per_month": month, "per_month_total": sum(month.values()), "paid_this_month": paid_month,
             "history": history, "categories": CATEGORIES, "periods": PERIODS}
+
+
+def bills_upcoming(con, today: date | None = None, days: int = 30) -> list[dict]:
+    """Для рабочего стола: всё, что платить в ближайшие 30 дней (и просроченное), чтобы ничего не упустить."""
+    return [b for b in bills_view(con, today)["bills"] if b["left"] <= days]
 
 
 def bills_due(con, today: date | None = None) -> list[dict]:
