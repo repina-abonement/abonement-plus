@@ -740,3 +740,65 @@ details.warn-box[open] > summary { margin-bottom: 6px; }
 @media (min-width: 761px) { .meet-foot { left: var(--side); bottom: 0; } }
 @media (max-width: 380px) { .meet-grid { grid-template-columns: 1fr 1fr; } .meet-name { font-size: 16px; } }
 @media (max-width: 760px) { .meet-head { top: 62px; } }
+
+/* ===================================================================
+   «Новый дизайн (проба)»: включается в Настройках, класс theme-soft на <html>.
+   Выключили — работает прежний вид. Светлый нейтральный фон, белые карточки
+   без рамок, крупные цифры, спокойные мягкие цвета, светлые шапка и нижнее меню.
+   =================================================================== */
+html.theme-soft {
+  --bg: #f2f2f5; --surface: #ffffff; --surface-2: #efeff3; --ink: #1d1d22; --ink-2: #8b8b94; --line: #ececf0;
+  --accent: #23a26d; --accent-ink: #ffffff; --accent-soft: #e6f6ee;
+  --yellow: #e8b21a; --yellow-soft: #fdf4d9; --red: #e5484d; --red-soft: #fdecec;
+  --radius: 20px; --shadow: none;
+  --display: "Onest", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --soft-violet: #e9e6fb; --soft-violet-ink: #4b3fb0;
+}
+@media (prefers-color-scheme: dark) {
+  html.theme-soft { --bg: #111114; --surface: #1c1c21; --surface-2: #26262c; --ink: #f1f1f4; --ink-2: #9a9aa3; --line: #2b2b31;
+    --accent: #3cc287; --accent-ink: #06210f; --accent-soft: #163327; --yellow-soft: #3a3115; --red-soft: #3b1c1e;
+    --soft-violet: #2a2640; --soft-violet-ink: #c9c1ff; }
+}
+html.theme-soft body { background: var(--bg); color: var(--ink); }
+html.theme-soft h2 { font-weight: 700; letter-spacing: -.025em; font-size: 26px; }
+html.theme-soft h3, html.theme-soft .now-head h3 { font-weight: 650; font-size: 17px; letter-spacing: -.01em; }
+/* шапка и меню: светлые, как в банковских приложениях */
+html.theme-soft .topbar { background: var(--surface); color: var(--ink); background-image: none; border-right: 1px solid var(--line); }
+html.theme-soft .brand { color: var(--ink); font-weight: 700; }
+html.theme-soft .brand span { color: var(--accent); }
+html.theme-soft .brand i { background: var(--accent-soft); }
+html.theme-soft .topbar .nav button { color: var(--ink-2); }
+html.theme-soft .topbar .nav button.active { background: var(--surface-2); color: var(--ink); }
+html.theme-soft .topbar #new-client { background: var(--accent); color: #fff; border-radius: 14px; }
+html.theme-soft .tabbar { background: var(--surface); border-top: 1px solid var(--line); }
+html.theme-soft .tabbar button { color: #a3a3ab; font-weight: 500; }
+html.theme-soft .tabbar button.active, html.theme-soft .tabbar button.active svg { color: var(--accent); }
+/* карточки: белые, без рамок и теней, крупные скругления, воздух */
+html.theme-soft .now, html.theme-soft .panel, html.theme-soft .kpi, html.theme-soft .section, html.theme-soft .list {
+  border: 0; box-shadow: none; border-radius: var(--radius); }
+html.theme-soft .now { padding: 18px 18px 16px; }
+html.theme-soft .now + .now, html.theme-soft section + section { margin-top: 12px; }
+html.theme-soft .now-item { border-radius: 16px; padding: 12px 14px; }
+html.theme-soft .now.calm { background: var(--accent-soft); }
+html.theme-soft .now:has(.now-item.red) { background: var(--red-soft); }
+html.theme-soft .now:has(.now-item.red) .now-item.red { background: var(--surface); }
+html.theme-soft .list-row { border-bottom-color: var(--line); padding: 14px 16px; }
+html.theme-soft .card { border-radius: 16px; box-shadow: none; border: 0; }
+html.theme-soft .col { border-radius: 22px; }
+/* кнопки: основная зелёная, второстепенные серые без рамки */
+html.theme-soft .btn { border: 0; background: var(--surface-2); color: var(--ink); border-radius: 14px; padding: 10px 16px; font-weight: 550; }
+html.theme-soft .btn.sm { border-radius: 12px; padding: 7px 13px; }
+html.theme-soft .btn.primary { background: var(--accent); color: var(--accent-ink); }
+html.theme-soft .btn:hover { filter: brightness(.97); border: 0; }
+html.theme-soft .seg { background: transparent; padding: 0; gap: 18px; }
+html.theme-soft .seg button { padding: 4px 0; font-size: 20px; font-weight: 700; color: #c4c4cc; background: none; box-shadow: none; }
+html.theme-soft .seg button.active { color: var(--ink); background: none; box-shadow: none; }
+html.theme-soft input, html.theme-soft select, html.theme-soft textarea { border: 1px solid var(--line); background: var(--surface); border-radius: 14px; }
+html.theme-soft :is(.now, .panel, .section, .list, .drawer-panel, .kpi) :is(input, select, textarea) { border-color: transparent; background: var(--surface-2); }
+html.theme-soft input:focus, html.theme-soft select:focus, html.theme-soft textarea:focus { background: var(--surface); border-color: var(--accent); }
+html.theme-soft .pill { border-radius: 10px; padding: 3px 9px; }
+html.theme-soft .alert { border-radius: 16px; padding: 12px 14px; }
+html.theme-soft .back-btn { color: var(--ink-2); font-weight: 500; }
+html.theme-soft .kpi-value { font-family: var(--font); font-weight: 700; letter-spacing: -.03em; }
+html.theme-soft .soft-violet, html.theme-soft .now.tasks-box { background: var(--soft-violet); }
+html.theme-soft .now.tasks-box .now-head h3 { color: var(--soft-violet-ink); }

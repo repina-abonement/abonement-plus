@@ -1,6 +1,9 @@
 "use strict";
 /* Абонемент Плюс — интерфейс без сборки и зависимостей. */
 
+/* Новый дизайн (проба): хранится в этом браузере, по умолчанию выключен */
+function applyTheme(t) { document.documentElement.classList.toggle("theme-soft", t === "soft"); }
+try { applyTheme(localStorage.getItem("crm.theme")); } catch (_) {}
 const S = { meta: null, user: null, view: "sales", journal: { group: null, date: null }, search: "" };
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = $("#app");
@@ -939,6 +942,9 @@ async function renderSettings(page) {
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Настройки</h2><button class="btn sm" id="logout">Выйти</button></div>
     <div style="max-width:780px">
+    <div class="section"><h3>Внешний вид</h3>
+      <label class="check"><input type="checkbox" id="theme-soft" ${document.documentElement.classList.contains("theme-soft") ? "checked" : ""}> Новый дизайн (проба)</label>
+      <div class="small muted" style="margin-top:6px">Светлый спокойный вид. Включается только на этом устройстве, выключить можно здесь же в любой момент</div></div>
     ${admin ? `
     <form class="section" id="set">
       <h3>Цены и правила</h3>
@@ -1014,6 +1020,11 @@ async function renderSettings(page) {
   if ($("#nu")) $("#nu").onsubmit = async (e) => {
     e.preventDefault();
     try { await api("POST", "/api/users", Object.fromEntries(new FormData(e.target))); toast("Сотрудник добавлен"); render(); } catch (err) { fail(err); }
+  };
+  if ($("#theme-soft")) $("#theme-soft").onchange = (e) => {
+    const t = e.target.checked ? "soft" : "";
+    try { localStorage.setItem("crm.theme", t); } catch (_) {}
+    applyTheme(t); toast(t ? "Новый дизайн включён" : "Вернули прежний вид");
   };
   if ($("#comms-settings")) renderCommsSettings($("#comms-settings"), users).catch(fail);
   if ($("#task-settings")) renderTaskSettings($("#task-settings"), users).catch(fail);
