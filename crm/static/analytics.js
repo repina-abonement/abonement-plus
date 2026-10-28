@@ -164,7 +164,8 @@ function anProgram(box, d) {
 
 /* ---------- зарплата тренеров ---------- */
 function payBox(box, d, mine) {
-  const pctTxt = `вдвоём главный ${d.pct.main}%, помощник ${d.pct.assistant}%, один тренер ${d.pct.solo}% от выручки группы за месяц, поделённой на тренировки; отработки ${rub(d.makeup_fixed)} за тренировку, если кто-то пришёл`;
+  const pc = (v) => String(v).replace(".", ",");
+  const pctTxt = `вдвоём главный ${pc(d.pct.main)}%, помощник ${pc(d.pct.assistant)}%, один тренер ${pc(d.pct.solo)}% от выручки группы за месяц, поделённой на тренировки; отработки ${rub(d.makeup_fixed)} за тренировку, если кто-то пришёл`;
   const person = (p) => `<details class="panel pay-p" ${mine ? "open" : ""}><summary class="row" style="align-items:center">
       <b class="grow">${esc(p.name)}</b><span class="small muted">${p.lessons} трен.${p.planned ? `, ${p.planned} по расписанию` : ""}</span>
       <b style="margin-left:10px">${rub(p.to_pay)}</b></summary>
