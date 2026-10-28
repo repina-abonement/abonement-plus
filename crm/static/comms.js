@@ -335,6 +335,7 @@ async function renderCommsSettings(box, users) {
 
     <div class="int"><div class="int-head"><b>Telegram</b>${ok(st.telegram)}${inf.tg_business_enabled ? `<span class="pill green">бизнес-аккаунт</span>` : ""}</div>
       <div class="field"><label>Токен бота от @BotFather</label><input data-k="tg_token" value="${esc(v.tg_token)}"></div>
+      <div class="field"><label>Мост для Telegram (если сервер в России)</label><input data-k="tg_relay" value="${esc(v.tg_relay || "")}" placeholder="https://…"></div>
       ${inf.tg_bot ? `<div class="small">Бот: ${esc(inf.tg_bot)}</div>` : ""}${inf.tg_error ? `<div class="error">${esc(inf.tg_error)}</div>` : ""}
       <button class="btn sm" data-connect="telegram">Сохранить и подключить</button>
     </div>

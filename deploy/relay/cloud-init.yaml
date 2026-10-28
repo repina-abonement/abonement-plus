@@ -1,0 +1,45 @@
+#cloud-config
+# Мост для Telegram: сервер CRM в Москве не видит api.telegram.org, этот маленький сервер за границей передаёт запросы.
+#  /tg/...           -> https://api.telegram.org/...           (только с IP сервера CRM)
+#  /hook/telegram/.. -> https://<CRM>/hooks/telegram/..        (только с адресов Telegram)
+# Базы и данных клиентов здесь нет, только проброс.
+package_update: true
+packages: [nginx, certbot, python3-certbot-nginx, curl]
+write_files:
+  - path: /root/relay.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -e
+      CRM_IP=185.207.65.245
+      CRM_HOST=185-207-65-245.sslip.io
+      IP=$(curl -s4 https://ifconfig.me || hostname -I | awk '{print $1}')
+      HOST=$(echo "$IP" | tr . -).sslip.io
+      cat > /etc/nginx/sites-available/relay <<NGX
+      server {
+        listen 80;
+        server_name $HOST;
+        client_max_body_size 50m;
+        location /tg/ {
+          allow $CRM_IP; deny all;
+          proxy_pass https://api.telegram.org/;
+          proxy_ssl_server_name on;
+          proxy_set_header Host api.telegram.org;
+          proxy_read_timeout 120s;
+        }
+        location /hook/ {
+          allow 149.154.160.0/20; allow 91.108.4.0/22; deny all;
+          proxy_pass https://$CRM_HOST/hooks/;
+          proxy_ssl_server_name on;
+          proxy_set_header Host $CRM_HOST;
+        }
+        location = / { return 200 "ok\n"; }
+      }
+      NGX
+      ln -sf /etc/nginx/sites-available/relay /etc/nginx/sites-enabled/relay
+      rm -f /etc/nginx/sites-enabled/default
+      nginx -t && systemctl reload nginx
+      certbot --nginx -d "$HOST" --non-interactive --agree-tos --register-unsafely-without-email --redirect || true
+      echo "https://$HOST" > /root/relay-url.txt
+runcmd:
+  - bash /root/relay.sh

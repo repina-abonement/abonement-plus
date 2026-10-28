@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS hook_log (
 """
 
 SECRET_KEYS = {"sipuni_secret", "tg_token", "max_token", "wazzup_key", "yc_api_key"}
-EDITABLE_KEYS = {"sipuni_user", "sipuni_secret", "tg_token", "max_token", "max_api", "wazzup_key", "bot_greeting",
+EDITABLE_KEYS = {"sipuni_user", "sipuni_secret", "tg_token", "tg_relay", "max_token", "max_api", "wazzup_key", "bot_greeting",
                  "yc_api_key", "yc_folder", "ai_enabled", "ai_mode", "ai_model", "ai_min_talk"}
 DEFAULT_GREETING = ("Здравствуйте! Вы написали в нашу школу. Задайте вопрос здесь, администратор скоро ответит.\n"
                     "Чтобы мы сразу нашли вашу карточку, нажмите кнопку «Поделиться номером» ниже")
@@ -207,8 +207,10 @@ def save_settings(con, data: dict):
         if k in SECRET_KEYS and v.startswith("••••"):
             continue  # не меняли
         put(con, k, v)
-        if k == "tg_token":
+        if k in ("tg_token", "tg_relay"):
             put(con, "tg_ok", "0")
+        if k == "tg_relay" and v and not v.startswith("https://"):
+            raise CommsError("Адрес моста должен начинаться с https://")
         if k == "max_token":
             put(con, "max_ok", "0")
 
@@ -332,11 +334,17 @@ def log_hook(con, source: str, payload, error: str = ""):
 TG_API = "https://api.telegram.org"
 
 
+def tg_api(con) -> str:
+    """Адрес Telegram API. Если задан мост (tg_relay) - запросы идут через него: из России Telegram API недоступен."""
+    relay = (get(con, "tg_relay") or "").rstrip("/")
+    return f"{relay}/tg" if relay else TG_API
+
+
 def tg_call(con, method: str, payload: dict | None = None, token: str | None = None) -> dict:
     tok = token or get(con, "tg_token")
     if not tok:
         raise CommsError("Telegram не подключён")
-    code, js = http("POST", f"{TG_API}/bot{tok}/{method}", data=payload or {})
+    code, js = http("POST", f"{tg_api(con)}/bot{tok}/{method}", data=payload or {})
     if not isinstance(js, dict) or not js.get("ok"):
         desc = (js or {}).get("description") if isinstance(js, dict) else None
         raise CommsError(f"Telegram: {desc or 'ошибка ' + str(code)}")
@@ -347,7 +355,8 @@ def tg_connect(con, base_url: str) -> dict:
     try:
         me = tg_call(con, "getMe")
         tg_call(con, "setWebhook", {
-            "url": f"{base_url}/hooks/telegram/{get(con, 'hook_token')}",
+            "url": (f"{get(con, 'tg_relay').rstrip('/')}/hook/telegram/{get(con, 'hook_token')}" if get(con, "tg_relay")
+                    else f"{base_url}/hooks/telegram/{get(con, 'hook_token')}"),
             "secret_token": get(con, "tg_secret"),
             "allowed_updates": ["message", "edited_message", "business_connection", "business_message"],
             "drop_pending_updates": False,
@@ -699,7 +708,7 @@ def media_for(con, mid: int) -> tuple[bytes, str]:
     media = r[0]
     if media.startswith("tg:"):
         f = tg_call(con, "getFile", {"file_id": media[3:]})
-        url = f"{TG_API}/file/bot{get(con, 'tg_token')}/{f['file_path']}"
+        url = f"{tg_api(con)}/file/bot{get(con, 'tg_token')}/{f['file_path']}"
     elif media.startswith("https://"):
         url = media
     else:
