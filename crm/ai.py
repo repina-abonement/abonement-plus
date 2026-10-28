@@ -384,8 +384,10 @@ def team_stats(con, start: str, end: str) -> dict:
                         "steps": {k: pct(v) for k, v in o["steps"].items()}})
     op_list.sort(key=lambda o: -(o["avg"] or 0))
     team_pct = {k: pct(v) for k, v in team.items()}
-    known = [(v, k) for k, v in team_pct.items() if v is not None]
-    weakest = min(known)[1] if known else None
+    # самый слабый шаг; при равенстве - тот, что ближе к продаже (потеря там дороже)
+    order = {k: i for i, (k, _) in enumerate(CHECKLIST)}
+    known = [(v, -order[k], k) for k, v in team_pct.items() if v is not None]
+    weakest = min(known)[2] if known else None
     pending = con.execute("SELECT COUNT(*) FROM calls WHERE ai_status IN ('stt','llm')").fetchone()[0]
     return {"checklist": [{"key": k, "title": t} for k, t in CHECKLIST], "operators": op_list, "team": team_pct,
             "weakest": weakest, "recent": recent, "analyzed": len(rows), "pending": pending,
