@@ -16,7 +16,7 @@ async function renderFiscal(page) {
     <div id="fx-body"></div>`;
   page.querySelectorAll("[data-ft]").forEach((b) => (b.onclick = () => step(() => { C.tab = b.dataset.ft; })));
   const run = $("#fx-run");
-  if (run) run.onclick = async () => { run.disabled = true; try { const r = await api("POST", "/api/fiscal/run"); toast(r.skipped ? "Сверка выключена в «Подключении»" : (r.errors || []).length ? "Есть ошибки: " + r.errors.join("; ") : "Проверено"); render(); } catch (e) { fail(e); run.disabled = false; } };
+  if (run) run.onclick = async () => { run.disabled = true; try { const r = await api("POST", "/api/fiscal/run", {}); toast(r.skipped ? "Сверка выключена в «Подключении»" : (r.errors || []).length ? "Есть ошибки: " + r.errors.join("; ") : "Проверено"); render(); } catch (e) { fail(e); run.disabled = false; } };
   if (C.tab === "setup" && admin) return fxSetup($("#fx-body"), d);
   fxList($("#fx-body"), d);
 }
@@ -76,7 +76,7 @@ async function fxSetup(box, d) {
   $("#fx-test").onclick = async () => {
     try {
       await api("PUT", "/api/fiscal/settings", collect());
-      const r = await api("POST", "/api/fiscal/test");
+      const r = await api("POST", "/api/fiscal/test", {});
       $("#fx-test-res").innerHTML = Object.keys(r).length ? Object.entries(r).map(([k, t]) => `${FX_SRC[k]}: ${esc(t)}`).join("<br>") : "Ничего не подключено";
     } catch (e) { fail(e); }
   };
