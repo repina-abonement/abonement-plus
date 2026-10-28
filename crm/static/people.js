@@ -15,7 +15,8 @@ function avatar(id, name, size = 36) {
   if (u.photo_at) return `<span class="ava-wrap" style="width:${size}px;height:${size}px" title="${esc(u.nickname || "")}"><span class="ava-photo" style="background-image:url('/api/users/${u.id}/photo?v=${encodeURIComponent(u.photo_at)}')"></span>${stk}</span>`;
   const ini = nm.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
   const c = (+id || 0) % AVA_COLORS.length;
-  return `<span class="ava ava-ini" style="${st};background:${AVA_COLORS[c]};color:${AVA_INK[c]}">${esc(ini)}</span>`;
+  const ini_ = `<span class="ava ava-ini" style="${st};background:${AVA_COLORS[c]};color:${AVA_INK[c]}">${esc(ini)}</span>`;
+  return stk ? `<span class="ava-wrap" style="width:${size}px;height:${size}px" title="${esc(u.nickname || "")}">${ini_}${stk}</span>` : ini_;
 }
 
 function fmtPhone(p) {
