@@ -16,3 +16,29 @@ if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
     echo "Новая версия не прошла проверку, оставлена прежняя" >&2
   fi
 fi
+
+# Свои домены CRM: перечислены в deploy/domains.txt (по одному в строке). Когда домен уже указывает на этот сервер,
+# добавляем его в nginx и получаем сертификат https. Проверка дешёвая, работает при каждом запуске таймера.
+NGX=/etc/nginx/sites-available/abonement-plus
+if [ -f "$DIR/deploy/domains.txt" ] && [ -f "$NGX" ]; then
+  MYIP=$(curl -s -4 --max-time 5 https://ifconfig.me || true)
+  while read -r D; do
+    D=$(echo "$D" | tr -d '[:space:]')
+    [ -z "$D" ] && continue
+    case "$D" in \#*) continue ;; esac
+    grep -q "server_name.*\b$D\b" "$NGX" && continue
+    IP=$(getent ahostsv4 "$D" | awk 'NR==1{print $1}' || true)
+    if [ -n "$IP" ] && [ "$IP" = "$MYIP" ]; then
+      sed -i "0,/server_name /s/server_name \(.*\);/server_name \1 $D;/" "$NGX"
+      if nginx -t -q 2>/dev/null; then
+        systemctl reload nginx
+        NAMES=$(grep -m1 "server_name" "$NGX" | sed 's/.*server_name //; s/;//')
+        FIRST=$(echo "$NAMES" | awk '{print $1}')
+        ARGS=""; for N in $NAMES; do ARGS="$ARGS -d $N"; done
+        # один сертификат на все имена: старый адрес продолжает работать
+        certbot --nginx --expand --cert-name "$FIRST" $ARGS --non-interactive --agree-tos --register-unsafely-without-email --redirect -q \
+          && echo "Домен $D подключён с https" || echo "Домен $D: сертификат не получился" >&2
+      fi
+    fi
+  done < "$DIR/deploy/domains.txt"
+fi
