@@ -27,6 +27,11 @@ SALES_STAGES = [
     ("refused", "Отказ"),
     ("later", "Пригласим позже"),
 ]
+# Почему не купили после пробного (Юлия, 28.10.2026). Две последние — не отказ, а задача
+TRIAL_REFUSALS = ["Дорого", "Неудобные дни или время", "Далеко ездить", "Ребёнку не понравилось",
+                  "Ребёнок пока не готов (маленький, стеснялся)", "Выбрали другую секцию",
+                  "Думают, посоветуются", "Заболели или уезжают", "Другое"]
+REFUSAL_THINKING, REFUSAL_LATER = "Думают, посоветуются", "Заболели или уезжают"
 AUTO_SALES = {"on_trial", "trial_done", "missed_trial", "later"}
 SALES_LABELS = dict(SALES_STAGES)
 
@@ -485,11 +490,13 @@ def board(con, funnel: str) -> dict:
     raise ApiError("Неизвестная воронка", 404)
 
 
-def move_card(con, sid: int, funnel: str, stage: str, user) -> None:
+def move_card(con, sid: int, funnel: str, stage: str, user, reason: str = "", comment: str = "") -> dict | None:
     s = get_student_row(con, sid)
     if funnel == "sales":
         if stage not in SALES_LABELS or stage in AUTO_SALES:
             raise ApiError("В этот этап карточка попадает сама")
+        if stage == "refused":
+            return _refuse(con, s, (reason or "").strip(), (comment or "").strip(), user)
         if stage == "bought":
             con.execute("""UPDATE students SET funnel='members', stage='active', stage_changed_at=?, priority=0,
                            converted_at=COALESCE(converted_at, ?) WHERE id=?""", (now_iso(), now_iso(), sid))
@@ -517,6 +524,36 @@ def move_card(con, sid: int, funnel: str, stage: str, user) -> None:
         log(con, sid, "Ушёл" if stage == "left" else "Вернулся", user, "stage")
     else:
         raise ApiError("Неизвестная воронка")
+
+
+def _refuse(con, s: dict, reason: str, comment: str, user) -> dict:
+    """Отказ с причиной. «Думают» — перезвонить через 2 дня, «заболели или уезжают» — «Пригласим позже»."""
+    from . import pu, tasks
+    if reason not in TRIAL_REFUSALS:
+        raise ApiError("Выберите, почему не купили")
+    if reason == "Другое" and not comment:
+        raise ApiError("Напишите причину")
+    text = reason + (f": {comment}" if comment else "")
+    sid, now = s["id"], datetime.now()
+    who = pu.responsible(con, s["group_id"])
+    if reason == REFUSAL_THINKING:
+        due = pu.next_day_start(con, now, 2)
+        con.execute("UPDATE students SET stage='how_was', contacted_after_trial=1, refusal_reason=?, stage_changed_at=?, priority=0 WHERE id=?",
+                    (text, now_iso(), sid))
+        tasks.add_task(con, "manual", sid, due, title="Перезвонить: думали после пробного", assignee=who, source="manual",
+                       note=text, auto_key=f"think:{sid}:{due:%Y-%m-%d}")
+        log(con, sid, f"Думают после пробного. Перезвоним {due:%d.%m}", user, "stage")
+        return {"stage": "how_was", "due": due.isoformat(timespec="minutes")}
+    if reason == REFUSAL_LATER:
+        again = min(pu.next_day_start(con, now, 91), pu.window(now))
+        con.execute("UPDATE students SET stage='later', refusal_reason=?, stage_changed_at=?, priority=0 WHERE id=?", (text, now_iso(), sid))
+        pu.ensure_task(con, sid, again, now, title=f"Пригласить снова на ПУ (раньше: {text})")
+        log(con, sid, f"Пока не могут: {text}. Пригласим снова {again:%d.%m.%Y}", user, "stage")
+        return {"stage": "later", "due": again.isoformat(timespec="minutes")}
+    con.execute("UPDATE students SET stage='refused', refusal_reason=?, stage_changed_at=?, contacted_after_trial=1, priority=0 WHERE id=?",
+                (text, now_iso(), sid))
+    log(con, sid, f"Отказ: {text}", user, "stage")
+    return {"stage": "refused"}
 
 
 def student_detail(con, sid: int) -> dict:
@@ -790,6 +827,7 @@ def meta(con) -> dict:
         "groups": _rows(con.execute("""SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id
                                       WHERE g.active=1 ORDER BY g.is_makeup, b.id, g.name""")),
         "sales_stages": [{"key": k, "title": t, "auto": k in AUTO_SALES} for k, t in SALES_STAGES],
+        "trial_refusals": TRIAL_REFUSALS,
         "ad": __import__("crm.sources", fromlist=["listing"]).listing(con),
         "settings": settings(con),
         "today": today().isoformat(),

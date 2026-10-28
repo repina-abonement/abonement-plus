@@ -412,8 +412,8 @@ def board_skips(con, h, user, body, q):
 
 @route("POST", "/api/students/{sid}/move", role="operator")
 def move(con, h, user, body, q, sid):
-    sv.move_card(con, int(sid), body.get("funnel"), body.get("stage"), user)
-    return {"ok": True}
+    r = sv.move_card(con, int(sid), body.get("funnel"), body.get("stage"), user, body.get("reason") or "", body.get("comment") or "")
+    return {"ok": True} | (r or {})
 
 
 @route("GET", "/api/students", role="operator")

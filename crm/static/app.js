@@ -490,13 +490,36 @@ function enableDrag(page, funnel, columns) {
     col.addEventListener("drop", async (e) => {
       e.preventDefault(); col.classList.remove("drop");
       if (!dragId) return;
-      try { await api("POST", `/api/students/${dragId}/move`, { funnel, stage }); render(); }
-      catch (err) { fail(err); }
+      try {
+        if (funnel === "sales" && stage === "refused") return askRefusal(dragId, render);
+        await api("POST", `/api/students/${dragId}/move`, { funnel, stage }); render();
+      } catch (err) { fail(err); }
     });
   });
 }
 
 /* ---------- карточка ---------- */
+/* Почему не купили после пробного: причина обязательна. «Думают» и «заболели/уезжают» — не отказ, а задача */
+function askRefusal(sid, done) {
+  const rs = S.meta.trial_refusals || [];
+  openDrawer(`<h2>Почему не купили?</h2>
+    <form class="section" id="rf">
+      <div class="chips" style="flex-direction:column;align-items:stretch">${rs.map((r, i) => `<label class="check"><input type="radio" name="reason" value="${esc(r)}" ${i ? "" : "checked"}> ${esc(r)}</label>`).join("")}</div>
+      <div class="small muted" style="margin:8px 0">«Думают» - CRM поставит задачу перезвонить через 2 дня. «Заболели или уезжают» - карточка уйдёт в «Пригласим позже» с задачей пригласить снова. Остальное - отказ</div>
+      <div class="field"><label>Комментарий</label><input name="comment" placeholder="Что сказал родитель"></div>
+      <button class="btn primary">Сохранить</button>
+    </form>`);
+  $("#rf").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    try {
+      const r = await api("POST", `/api/students/${sid}/move`, { funnel: "sales", stage: "refused", reason: f.reason, comment: f.comment });
+      toast(r.stage === "how_was" ? "Задача: перезвонить " + dShort(r.due.slice(0, 10)) : r.stage === "later" ? "Пригласим снова " + dShort(r.due.slice(0, 10)) : "Отказ сохранён");
+      closeDrawer(); done();
+    } catch (err) { fail(err); }
+  };
+}
+
 function openDrawer(html) {
   $("#drawer-body").innerHTML = html; $("#drawer").hidden = false; document.body.style.overflow = "hidden";
   if (!drawerInHistory) { try { history.pushState({ ...(history.state || {}), drawer: true }, ""); drawerInHistory = true; } catch (_) {} }
@@ -655,6 +678,7 @@ async function openStudent(id) {
   const patch = async (data) => { try { await api("PATCH", `/api/students/${id}`, data); reload(); } catch (e) { fail(e); } };
 
   $("#f-stage").onchange = async (e) => {
+    if (s.funnel === "sales" && e.target.value === "refused") return askRefusal(id, reload);
     try { await api("POST", `/api/students/${id}/move`, { funnel: s.funnel, stage: e.target.value }); reload(); } catch (err) { fail(err); }
   };
   if ($("#f-tariff")) $("#f-tariff").onchange = (e) => patch({ tariff: e.target.value });
