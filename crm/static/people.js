@@ -24,7 +24,7 @@ function fmtPhone(p) {
   return d.length === 11 ? `+7 ${d.slice(1, 4)} ${d.slice(4, 7)}-${d.slice(7, 9)}-${d.slice(9)}` : p;
 }
 
-const ROLE_LABEL = { admin: "руководитель", operator: "администратор", coach: "тренер" };
+const ROLE_LABEL = { admin: "Руководитель", operator: "Администратор", coach: "Тренер" };
 
 async function openStaffProfile(uid) {
   let p;

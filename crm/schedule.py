@@ -235,7 +235,7 @@ def day(con, d: date) -> dict:
                 if sub:
                     subs[role] = {"id": sub["id"], "coach_id": sub["coach_id"], "name": sub["coach_name"], "instead": own_name or "",
                                   "note": sub["note"], "solo": sub["solo"]}
-                elif own_id and absent_on(con, own_id, ds):
+                elif own_id and d >= date.today() and absent_on(con, own_id, ds):  # прошедшим дням замена уже не нужна
                     subs[role] = {"missing": True, "instead": own_name or ""}
             m, a2 = subs.get("main"), subs.get("assistant")
             lessons.append({"id": g["id"], "name": g["name"], "time": logic.group_time(g, d.weekday()), "age": g["age"],

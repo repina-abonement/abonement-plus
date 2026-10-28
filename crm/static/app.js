@@ -1080,7 +1080,7 @@ async function renderSettings(page) {
         <input data-uph="${u.id}" value="${esc(u.phone || "")}" placeholder="телефон" title="Телефон сотрудника" inputmode="tel" style="flex:0 0 130px;padding:5px 8px">
         <input data-tgu="${u.id}" value="${esc(u.tg_username ? "@" + u.tg_username : "")}" placeholder="@telegram" title="Ник в Telegram: CRM отметит сотрудника в рабочих чатах" style="flex:0 0 120px;padding:5px 8px">
         ${u.role === "coach" ? "" : `<input data-sip="${u.id}" value="${esc(u.sip_number || "")}" placeholder="вн. номер" title="Внутренний номер Sipuni: на него придёт звонок из карточки" inputmode="numeric" style="flex:0 0 96px;padding:5px 8px">`}
-        <span class="pill">${{ admin: "админ", operator: "оператор", coach: "тренер" }[u.role]}</span>
+        <span class="pill">${{ admin: "Руководитель", operator: "Администратор", coach: "Тренер" }[u.role]}</span>
         ${u.id !== S.user.id ? `<button class="icon-btn" data-upw="${u.id}" title="Задать новый пароль">🔑</button><button class="icon-btn" data-uarch="${u.id}" title="В архив">🗄</button>` : ""}</div>`).join("")}</div>
       <div class="small muted" style="margin:-4px 0 10px">Внутренний номер Sipuni нужен, чтобы звонить клиенту прямо из карточки</div>
       <form id="nu">

@@ -1,4 +1,4 @@
-/* Раздел «Команда»: 01 оргструктура, 02 зоны ответственности, 03 модели оплаты */
+/* Раздел «Команда»: оргструктура, зоны ответственности, модели оплаты */
 
 const BR_DOT = ["#23a26d", "#2c6fd1", "#d99a0b", "#7a5bc7", "#d1553f", "#2a9d9b"];
 
@@ -23,27 +23,26 @@ async function renderTeam(page) {
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Команда</h2>${admin ? `<button class="btn sm" id="tm-edit">Изменить</button>` : ""}</div>
 
-    <section class="tm-sec"><div class="tm-h"><span class="tm-n">01</span><div><b>Оргструктура</b><small>кто кому подчиняется</small></div></div>
+    <section class="tm-sec"><div class="tm-h"><div><b>Оргструктура</b><small>кто кому подчиняется</small></div></div>
       <div class="tm-tree">
-        ${node(ids("owner")[0], "руководитель", true)}
-        ${ids("control").length ? `<i class="tm-line"></i>${node(ids("control")[0], "контролёр")}` : ""}
+        ${node(ids("owner")[0], "Руководитель", true)}
+        ${ids("control").length ? `<i class="tm-line"></i>${node(ids("control")[0], "Контролёр")}` : ""}
         <i class="tm-line"></i>
         <div class="tm-depts">
-          ${dept("admins", "Администрирование", "#d99a0b", "администратор")}
-          ${dept("coaches", "Тренеры", "#23a26d", "тренер")}
-          ${dept("promoters", "Промоутеры", "#2c6fd1", "промоутер")}
+          ${dept("admins", "Администрирование", "#d99a0b", "Администратор")}
+          ${dept("coaches", "Тренеры", "#23a26d", "Тренер")}
+          ${dept("promoters", "Промоутеры", "#2c6fd1", "Промоутер")}
         </div>
       </div>
-      <div class="tm-legend small muted">${t.branches.map((b, i) => `<span><i class="tm-dot" style="background:${BR_DOT[i % BR_DOT.length]}"></i>${esc(b.name)}</span>`).join("")}<span>· точки показывают, в каких филиалах работает тренер</span></div>
     </section>
 
-    <section class="tm-sec"><div class="tm-h"><span class="tm-n">02</span><div><b>Зоны ответственности</b><small>к кому идти с вопросом</small></div></div>
+    <section class="tm-sec"><div class="tm-h"><div><b>Зоны ответственности</b><small>к кому идти с вопросом</small></div></div>
       <div class="tm-zones">${t.zones.map((z) => `<div class="tm-zone" style="--zc:${z.color}">
         <div class="tm-zone-h"><i></i><b>${esc(z.title)}</b>${stack(z.key)}</div>
         <ul>${z.items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`).join("")}</div>
     </section>
 
-    ${t.pay && Object.keys(t.pay).length ? `<section class="tm-sec"><div class="tm-h"><span class="tm-n">03</span><div><b>Модели оплаты</b><small>как считается вознаграждение</small></div></div>
+    ${t.pay && Object.keys(t.pay).length ? `<section class="tm-sec"><div class="tm-h"><div><b>Модели оплаты</b><small>как считается вознаграждение</small></div></div>
       <div class="tm-paygrid">
         <div class="tm-paycard wide"><div class="tm-pay-h">Тренеры ${stack("coaches")}</div>
           <div class="tm-tiles">
