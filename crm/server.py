@@ -364,7 +364,12 @@ def meta(con, h, user, body, q):
         m["settings"] = {}
     from . import staffdocs
     m["staff_docs_pending"] = staffdocs.pending(con, user)
-    m["staff"] = [dict(r) for r in con.execute("SELECT id, name, role, photo_at FROM users WHERE active=1 ORDER BY name")]
+    import json as _json
+    m["staff"] = []
+    for r in con.execute("SELECT id, name, role, photo_at, bio FROM users WHERE active=1 ORDER BY name"):
+        b = _json.loads(r["bio"] or "{}") if r["bio"] else {}
+        m["staff"].append({"id": r["id"], "name": r["name"], "role": r["role"], "photo_at": r["photo_at"],
+                           "sticker": b.get("sticker", ""), "nickname": b.get("nickname", "")})
     return m
 
 

@@ -10,7 +10,8 @@ function avatar(id, name, size = 36) {
   const u = staffById(id) || { id, name: name || "" };
   const nm = name || u.name || "";
   const st = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.38)}px`;
-  if (u.photo_at) return `<img class="ava" src="/api/users/${u.id}/photo?v=${encodeURIComponent(u.photo_at)}" alt="" style="${st}" loading="lazy">`;
+  const stk = u.sticker && size >= 28 ? `<i class="ava-stk" style="font-size:${Math.round(size * 0.42)}px">${esc(u.sticker)}</i>` : "";
+  if (u.photo_at) return `<span class="ava-wrap" style="width:${size}px;height:${size}px" title="${esc(u.nickname || "")}"><img class="ava ava-photo" src="/api/users/${u.id}/photo?v=${encodeURIComponent(u.photo_at)}" alt="" style="${st}" loading="lazy">${stk}</span>`;
   const ini = nm.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
   const c = (+id || 0) % AVA_COLORS.length;
   return `<span class="ava ava-ini" style="${st};background:${AVA_COLORS[c]};color:${AVA_INK[c]}">${esc(ini)}</span>`;
@@ -29,7 +30,7 @@ async function openStaffProfile(uid) {
   const b = p.bio || {}, admin = S.user.role === "admin", mine = S.user.id === p.id;
   const row = (k) => b[k] ? `<div class="sp-row"><div class="small muted">${esc(p.fields[k])}</div><div>${esc(b[k])}</div></div>` : "";
   openDrawer(`
-    <div class="sp-head">${avatar(p.id, p.name, 96)}<div><h2>${esc(p.name)}</h2><div class="muted">${ROLE_LABEL[p.role] || ""}${p.phone ? `<br>${esc(fmtPhone(p.phone))}` : ""}${p.tg_username ? `<br>@${esc(p.tg_username)}` : ""}</div></div></div>
+    <div class="sp-head">${avatar(p.id, p.name, 96)}<div><h2>${esc(p.name)}</h2>${b.nickname ? `<div class="sp-nick">«${esc(b.nickname)}»</div>` : ""}<div class="muted">${ROLE_LABEL[p.role] || ""}${p.phone ? `<br>${esc(fmtPhone(p.phone))}` : ""}${p.tg_username ? `<br>@${esc(p.tg_username)}` : ""}</div></div></div>
     ${p.groups.length ? `<div class="section"><h3>Группы</h3>${p.groups.map((g) => `<div class="small">${esc(g.name)} <span class="muted">· ${esc(g.branch)}, ${g.role}</span></div>`).join("")}</div>` : ""}
     ${["education", "experience", "achievements", "branches"].some((k) => b[k]) || b.quote ? `<div class="section">
       ${row("education")}${row("experience")}${row("achievements")}${row("branches")}

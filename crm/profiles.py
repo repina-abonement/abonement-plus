@@ -15,7 +15,7 @@ from .services import ApiError
 PHOTO_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "photos")
 MAX_PHOTO = 4 * 1024 * 1024
 ALLOWED_HOSTS = ("https://msk.footbolika.ru/", "https://footbolika.ru/")
-BIO_FIELDS = {"education": "Образование", "experience": "Стаж", "achievements": "Спортивные заслуги",
+BIO_FIELDS = {"nickname": "Прозвище (для аватарки)", "sticker": "Наклейка на аватарке (один эмодзи)", "education": "Образование", "experience": "Стаж", "achievements": "Спортивные заслуги",
               "quote_title": "Заголовок слов о школе", "quote": "Слова о школе", "branches": "Филиалы", "site_url": "Страница на сайте"}
 
 
