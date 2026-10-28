@@ -844,3 +844,8 @@ html.theme-soft .page-head { margin-bottom: 14px; }
 html.theme-soft .chip { border: 0; background: var(--surface-2); }
 html.theme-soft .chip.day.on, html.theme-soft .chip.on { background: var(--accent); color: var(--accent-ink); }
 html.theme-soft .seg { flex-wrap: nowrap !important; }
+/* воронка: колонка не длиннее экрана, карточки листаются внутри неё */
+html.theme-soft .board { align-items: flex-start; }
+html.theme-soft .col { display: flex; flex-direction: column; max-height: min(72vh, 680px); }
+html.theme-soft .col-body { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding-right: 2px; }
+@media (max-width: 760px) { html.theme-soft .col { flex-basis: 84vw; } }
