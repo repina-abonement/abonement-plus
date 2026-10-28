@@ -84,7 +84,7 @@ const NAV_ICONS = {
 const navIcon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NAV_ICONS[k] || ""}</svg>`;
 
 const isCoach = () => S.user && S.user.role === "coach";
-const COACH_VIEWS = ["today", "journal", "planner", "coaches", "settings"];
+const COACH_VIEWS = ["today", "journal", "planner", "coaches", "settings", "meet"];
 const visibleViews = () => isCoach() ? VIEWS.filter(([k]) => COACH_VIEWS.includes(k)).map(([k, t]) => [k, k === "coaches" ? "Мои результаты" : t])
   : VIEWS.filter(([k]) => k !== "today" && (S.user.role === "admin" || !["dashboard", "payments", "spend"].includes(k)));
 const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
@@ -112,11 +112,12 @@ function shell() {
 }
 
 /* ---------- навигация «назад»: каждый переход пишется в историю браузера ---------- */
-const navSnap = () => JSON.parse(JSON.stringify({ journal: S.journal, sched: S.sched, planner: S.planner, spend: S.spend,
+const navSnap = () => JSON.parse(JSON.stringify({ meet: S.meet, journal: S.journal, sched: S.sched, planner: S.planner, spend: S.spend,
   inbox: S.inbox && { tab: S.inbox.tab, filter: S.inbox.filter } }));
 function navRestore(sub) {
   if (!sub) return;
   if (sub.journal) S.journal = sub.journal;
+  if (sub.meet) S.meet = sub.meet;
   if (sub.sched) S.sched = sub.sched;
   if (sub.planner) S.planner = sub.planner;
   if (sub.spend) S.spend = sub.spend;
@@ -173,6 +174,7 @@ async function renderView(page) {
     if (S.view === "inbox") return await renderInbox(page);
     if (S.view === "coaches") return await renderCoaches(page);
     if (S.view === "journal") return await renderJournal(page);
+    if (S.view === "meet") return await renderMeet(page);
     if (S.view === "search") return await renderSearch(page);
     if (S.view === "settings") return await renderSettings(page);
   } catch (e) { if (e.message !== "Нужно войти") page.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
@@ -864,10 +866,12 @@ async function renderJournal(page) {
       <div class="field" style="flex:0 0 170px"><label>Дата</label><input id="j-date" type="date" value="${S.journal.date}"></div>
     </div>
     <div class="note">${esc(g.branch)} · ${g.weekdays.split(",").map((x) => WD[+x]).join(", ")} ${esc(g.time)} · ${esc(g.age)} лет${j.closed ? " · <b>праздник, занятия нет</b>" : j.has_lesson ? "" : " · <b>в этот день у группы нет занятия</b>"}</div>
+    ${j.has_lesson && !g.is_makeup && S.journal.date <= S.meta.today ? `<button class="btn primary meet-open" id="j-meet">👋 Встречаю детей: отметить крупными кнопками</button>` : ""}
     ${j.overdue_marks ? `<div class="alert">🔴 Тренировка закончилась ${j.overdue_marks.minutes} мин назад, не отмечено детей: ${j.overdue_marks.missing}</div>` : ""}
     ${st ? `<div class="panel" style="padding:12px 14px;margin-bottom:12px">${staffPicker(st, st.coaches, "j")}</div>` : ""}
     <div class="list">${j.rows.length ? j.rows.map((r) => g.is_makeup ? makeupRow(r) : journalRow(r)).join("") : `<div class="list-row muted">${g.is_makeup ? "На эту дату никто не записан на отработку" : "В группе пока нет учеников"}</div>`}</div>`;
   if (st) wireStaffPicker(page, "j", g.id, S.journal.date, render);
+  if ($("#j-meet")) $("#j-meet").onclick = () => openMeet(g.id, S.journal.date);
   $("#j-group").onchange = (e) => { step(() => { S.journal.group = +e.target.value; }); };
   $("#j-date").onchange = (e) => { step(() => { S.journal.date = e.target.value; }); };
   if (!isCoach()) page.querySelectorAll("[data-who]").forEach((el) => (el.onclick = () => openStudent(+el.dataset.who)));

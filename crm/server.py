@@ -1121,7 +1121,10 @@ def trial_mark(con, h, user, body, q, sid):
     s = sv.get_student_row(con, int(sid))
     if s["group_id"]:
         coach_guard(con, user, s["group_id"])
-    sv.mark_trial(con, int(sid), bool(body.get("came")), user)
+    if body.get("came") is None:  # «Встречаю детей»: сняли отметку «пришёл»
+        sv.clear_trial_mark(con, int(sid), user)
+    else:
+        sv.mark_trial(con, int(sid), bool(body.get("came")), user)
     return {"ok": True}
 
 

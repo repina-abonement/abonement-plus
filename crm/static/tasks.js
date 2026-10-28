@@ -134,7 +134,8 @@ async function renderCoachToday(page, coachId, viewBar = "") {
         ${g.staff && g.time && (d.date < S.meta.today || (new Date().toTimeString().slice(0, 5) >= g.time)) ? staffPicker(g.staff, d.coaches, "c" + g.id) : ""}
         <div class="bar"><i style="width:${all ? Math.round(100 * done / all) : 0}%"></i></div>
         <div class="row" style="align-items:center;margin-top:6px"><div class="small grow">${all ? (done >= all ? "Все отмечены 👍" : `Отмечено ${done} из ${all}`) : "В группе пока нет детей"}</div>
-          ${all ? `<button class="btn sm primary" data-j="${g.id}" data-d="${d.date}" style="flex:0">Отметить</button>` : ""}</div>
+          ${all ? `<button class="btn sm" data-j="${g.id}" data-d="${d.date}" style="flex:0">Журнал</button>` : ""}</div>
+        ${all ? `<button class="btn primary meet-open" data-meet="${g.id}" data-d="${d.date}">👋 Встречаю детей</button>` : ""}
       </div>`; }).join("")}</div>` : `<div class="panel center" style="padding:30px">Сегодня тренировок нет. Отдыхай 😎</div>`}
     ${up.covering.length || up.covered.length ? `<section class="now calm" style="margin-top:16px"><div class="now-head"><h3>Замены на ближайшие 2 недели</h3></div>
       ${up.covering.map((x) => `<div class="small">🔁 ${dShort(x.date)}, ${wd(x.date)}, ${esc(x.time || "")}: <b>ты выходишь</b> в ${esc(x.group_name)} (${esc(x.branch)}) вместо ${esc(x.own_name || "другого тренера")}</div>`).join("")}
@@ -143,6 +144,7 @@ async function renderCoachToday(page, coachId, viewBar = "") {
     ${coachId ? "" : `<details class="panel" id="my-pay" style="margin-top:14px"><summary><b>💰 Моя зарплата за месяц</b></summary><div class="my-pay-body small muted">Считаю…</div></details>`}
     <div class="small muted" style="margin-top:14px">Отмечай детей сразу после тренировки: от этого зависят отработки, перерасчёт абонементов и твоё место в таблице тренеров</div>`;
   page.querySelectorAll("[data-j]").forEach((b) => (b.onclick = () => { S.journal.group = +b.dataset.j; S.journal.date = b.dataset.d; go("journal"); }));
+  page.querySelectorAll("[data-meet]").forEach((b) => (b.onclick = () => openMeet(+b.dataset.meet, b.dataset.d)));
   wireCheckin(page);
   if (!coachId) wireTasks(page);
   wireMerchShift(page, d);

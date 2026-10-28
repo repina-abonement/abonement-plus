@@ -772,6 +772,14 @@ def journal(con, group_id: int, day: str) -> dict:
     return {"group": dict(g), "date": day, "has_lesson": has_lesson, "closed": closed, "rows": rows}
 
 
+def clear_trial_mark(con, sid: int, user) -> None:
+    """Снять ошибочную отметку «пришёл на пробное» (только «пришёл»: «не пришёл» запускает задачи, его меняют на «пришёл»)."""
+    s = get_student_row(con, sid)
+    if s["trial_came"] == 1:
+        con.execute("UPDATE students SET trial_came=NULL WHERE id=?", (sid,))
+        log(con, sid, "Снята отметка «пришёл на пробное»", user, "attendance")
+
+
 def mark_trial(con, sid: int, came: bool, user) -> None:
     s = get_student_row(con, sid)
     if not s["trial_at"]:

@@ -112,7 +112,8 @@ def docs_for(con, user: dict, base_url: str = "") -> list[dict]:
     out = []
     for slug, title, t in DOCS:
         text = _render(con, user, t, base_url)
-        h = hashlib.sha256(text.encode()).hexdigest()
+        # отпечаток считаем по тексту без адреса сайта из запроса: иначе проверка (без запроса) и подпись дают разное
+        h = hashlib.sha256(_render(con, user, t, "").encode()).hexdigest()
         acc = con.execute("SELECT accepted_at FROM staff_acceptances WHERE user_id=? AND doc=? AND sha256=? ORDER BY id DESC LIMIT 1",
                           (user["id"], slug, h)).fetchone()
         out.append({"slug": slug, "title": title, "text": text, "sha256": h, "accepted_at": acc[0] if acc else None})
