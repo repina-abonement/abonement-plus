@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS hook_log (
 
 SECRET_KEYS = {"sipuni_secret", "tg_token", "max_token", "wazzup_key", "yc_api_key"}
 EDITABLE_KEYS = {"sipuni_user", "sipuni_secret", "tg_token", "tg_relay", "max_token", "max_api", "wazzup_key", "bot_greeting",
-                 "yc_api_key", "yc_folder", "ai_enabled", "ai_mode", "ai_model", "ai_min_talk"}
+                 "yc_api_key", "yc_folder", "ai_enabled", "ai_mode", "ai_model", "ai_min_talk", "lead_notify"}
 DEFAULT_GREETING = ("Здравствуйте! Вы написали в нашу школу. Задайте вопрос здесь, администратор скоро ответит.\n"
                     "Чтобы мы сразу нашли вашу карточку, нажмите кнопку «Поделиться номером» ниже")
 CHANNEL_LABELS = {"telegram": "Telegram", "max": "MAX", "whatsapp": "WhatsApp"}
@@ -885,6 +885,11 @@ def lead_hook(con, data: dict, create_student) -> dict:
         relink_phone(con, phone, con.execute("SELECT family_id FROM students WHERE id=?", (sid,)).fetchone()[0])
     if ext:
         con.execute("INSERT OR IGNORE INTO lead_imports(ext_id, student_id, ts) VALUES (?,?,?)", (ext, sid, ts_now()))
+    if get(con, "lead_notify") == "1":  # сообщение в «Службу заботы» шлёт сама CRM (вместо Google-скрипта)
+        from . import pu
+        pu.notify_chat(con, "care", "\n".join(["⚠️ Срочно! Упала заявка с сайта!", "", f"Имя: {name or '—'}", f"Телефон: {phone}",
+                                                f"Город: {data.get('city') or '—'}", f"Филиал: {data.get('branch') or '—'}", "",
+                                                "Она уже в CRM: «Новый лид», красная карточка. Обработать"]))
     return {"ok": True, "student_id": sid}
 
 

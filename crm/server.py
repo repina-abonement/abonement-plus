@@ -413,7 +413,7 @@ def coach_guard(con, user, group_id: int):
 def meta(con, h, user, body, q):
     user["sip_number"] = con.execute("SELECT sip_number FROM users WHERE id=?", (user["id"],)).fetchone()[0]
     user |= {"perms": perms.view_of(user), "title": perms.title(user)}
-    m = sv.meta(con) | {"user": user, "demo": os.environ.get("CRM_DEMO", "1") == "1", "comms": comms.status(con)}
+    m = sv.meta(con) | {"user": user, "demo": os.environ.get("CRM_DEMO", "1") == "1" and not perms.real_staff(con), "comms": comms.status(con)}
     if user["role"] == "coach":
         m["groups"] = [g for g in m["groups"] if schedule.coach_may(con, user["id"], g["id"])]
         m["settings"] = {}
@@ -1588,8 +1588,8 @@ def trial_mark(con, h, user, body, q, sid):
 
 @route("POST", "/api/demo/reset", role="admin")
 def demo_reset(con, h, user, body, q):
-    if os.environ.get("CRM_DEMO", "1") != "1":
-        raise ApiError("Тестовый режим выключен — стирать данные нельзя", 403)
+    if os.environ.get("CRM_DEMO", "1") != "1" or perms.real_staff(con):
+        raise ApiError("В CRM работает настоящая команда: пересоздавать тестовые данные нельзя", 403)
     db.reset_demo(con)
     con.execute("COMMIT")
     db.seed_demo(con)
@@ -2202,7 +2202,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     con = db.connect()
     db.init_db(con)
-    if os.environ.get("CRM_DEMO", "1") == "1":
+    if os.environ.get("CRM_DEMO", "1") == "1" and not perms.real_staff(con):  # при настоящей команде выдуманных не заводим
         db.seed_demo(con)
         coaches.seed_demo_coaches(con)
         money.init(con)

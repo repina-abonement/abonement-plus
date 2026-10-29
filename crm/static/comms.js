@@ -354,8 +354,12 @@ async function renderCommsSettings(box, users) {
     </div>
 
     <div class="int"><div class="int-head"><b>Заявки с сайта</b>${ok(!!inf.lead_last, "ждём первую заявку")}</div>
-      <div class="field"><label>Адрес для заявок (уже вписан в скрипт Google)</label><div class="copy"><input readonly value="${esc(d.hooks.lead)}"><button class="btn sm" data-copy="${esc(d.hooks.lead)}">Копировать</button></div></div>
+      <div class="field"><label>Адрес для заявок: вставляется в форму сайта (webhook) или в скрипт Google</label><div class="copy"><input readonly value="${esc(d.hooks.lead)}"><button class="btn sm" data-copy="${esc(d.hooks.lead)}">Копировать</button></div></div>
       <div class="small muted">Последняя заявка: ${inf.lead_last ? dtShort(inf.lead_last) : "ещё не было"}</div>
+      <div class="field" style="margin-top:8px"><label>Сообщение о заявке в чат «Служба заботы»</label><select data-k="lead_notify">
+        <option value="0" ${v.lead_notify !== "1" ? "selected" : ""}>Шлёт Google-скрипт (как сейчас)</option>
+        <option value="1" ${v.lead_notify === "1" ? "selected" : ""}>Шлёт CRM (после отключения Google-скрипта)</option></select>
+        <div class="small muted">Включайте «Шлёт CRM», только когда сайт отправляет заявки прямо в CRM, бот подключён к чату, а Google-скрипт выключен. Иначе сообщения задвоятся</div></div>
     </div>
 
     ${aiSettingsHtml(v, inf, st)}
