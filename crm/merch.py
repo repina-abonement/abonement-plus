@@ -54,6 +54,10 @@ class MerchError(ValueError):
 
 def init(con):
     con.executescript(SCHEMA)
+    cols = {r[1] for r in con.execute("PRAGMA table_info(merch_items)")}
+    for col in ("norm INTEGER NOT NULL DEFAULT 0", "stock INTEGER", "stock_at TEXT", "stock_by TEXT NOT NULL DEFAULT ''"):
+        if col.split()[0] not in cols:  # пересчёт склада: норма, сколько есть, когда и кто считал
+            con.execute(f"ALTER TABLE merch_items ADD COLUMN {col}")
     if not con.execute("SELECT 1 FROM merch_items").fetchone():
         for i, (n, p) in enumerate(PRICE):
             con.execute("INSERT INTO merch_items(name, price, sort) VALUES (?,?,?)", (n, p, i))
@@ -65,6 +69,32 @@ def _now():
 
 def items(con, all_=False) -> list[dict]:
     return [dict(r) for r in con.execute(f"SELECT * FROM merch_items {'' if all_ else 'WHERE active=1'} ORDER BY sort, name")]
+
+
+def stock_count(con, rows: list, user: dict, can_norm: bool) -> dict:
+    """Пересчёт мерча (общий склад): вписали, сколько есть, CRM считает, что заказать, и ставит задачу руководителю.
+    Например, кружки 5 при норме 15: заказать 10. Норму меняют руководитель и старший администратор."""
+    from . import planner
+    now = _now().isoformat(timespec="minutes")
+    for r in rows:
+        iid = int(r.get("id") or 0)
+        if not con.execute("SELECT 1 FROM merch_items WHERE id=?", (iid,)).fetchone():
+            continue
+        if can_norm and r.get("norm") not in (None, ""):
+            con.execute("UPDATE merch_items SET norm=? WHERE id=?", (max(0, int(r["norm"])), iid))
+        if r.get("stock") not in (None, ""):
+            con.execute("UPDATE merch_items SET stock=?, stock_at=?, stock_by=? WHERE id=?", (max(0, int(r["stock"])), now, user.get("name", ""), iid))
+    order = [{"name": i["name"], "qty": i["norm"] - i["stock"], "stock": i["stock"], "norm": i["norm"]}
+             for i in con.execute("SELECT * FROM merch_items WHERE active=1 AND stock IS NOT NULL AND norm > stock ORDER BY sort, name")]
+    task = None
+    if order:
+        owner = con.execute("SELECT id FROM users WHERE role='admin' AND active=1 ORDER BY id LIMIT 1").fetchone()
+        if owner:
+            title = "Заказать мерч: " + ", ".join(f"{o['name']} {o['qty']}" for o in order)
+            note = f"Пересчёт {now[8:10]}.{now[5:7]} ({user.get('name', '')}). " + "; ".join(f"{o['name']}: есть {o['stock']} из {o['norm']}" for o in order)
+            # задачу руководителю ставит сама CRM, поэтому и администратор, который считал, может её создать
+            task = planner.add(con, user | {"role": "admin"}, {"title": title[:300], "assignee_id": owner[0], "note": note})
+    return {"order": order, "task": task}
 
 
 def save_item(con, data: dict, iid: int | None = None) -> int:

@@ -909,7 +909,17 @@ def mex(fn, *a, **kw):
 
 @route("GET", "/api/merch/items")
 def merch_items(con, h, user, body, q):
-    return {"items": merch.items(con, all_=user["role"] == "admin" and q.get("all") == "1"), "methods": merch.METHODS}
+    return {"items": merch.items(con, all_=user["role"] == "admin" and q.get("all") == "1"), "methods": merch.METHODS,
+            "can_norm": perms.can(user, "schedule", "full")}
+
+
+@route("POST", "/api/merch/stock", role="merch:full")
+def merch_stock(con, h, user, body, q):
+    """Пересчёт склада мерча: остатки, норма, список к заказу и задача руководителю в Планер."""
+    try:
+        return merch.stock_count(con, body.get("items") or [], user, perms.can(user, "schedule", "full"))
+    except planner.PlanError as e:
+        raise ApiError(str(e))
 
 
 @route("POST", "/api/merch/items", role="admin")

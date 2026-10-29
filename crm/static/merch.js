@@ -109,6 +109,7 @@ async function renderMerch(page) {
       <section class="panel" style="padding:14px;flex:1 1 280px"><h3 style="margin-top:0">По товарам</h3>${r.by_item.length ? r.by_item.map((x) => `<div class="kid-row"><span class="grow">${esc(x.name)}</span><span class="small muted">${x.qty} шт.</span><b>${rub(x.amount)}</b></div>`).join("") : `<div class="muted small">Продаж нет</div>`}</section>
       <section class="panel" style="padding:14px;flex:1 1 280px"><h3 style="margin-top:0">По продавцам</h3>${r.by_seller.length ? r.by_seller.map((x) => `<div class="kid-row"><span class="grow">${esc(x.name)}</span><b>${rub(x.amount)}</b>${x.cash_not_handed ? `<span class="pill yellow">наличные не сданы ${rub(x.cash_not_handed)}</span>` : ""}</div>`).join("") : `<div class="muted small">Продаж нет</div>`}</section>
     </div>
+    ${can("merch", "full") ? merchStockHtml(it) : ""}
     <h3 style="margin:18px 0 8px">Все продажи</h3>
     <div class="list">${r.rows.length ? r.rows.map((x) => `<div class="list-row ${x.status === "cancelled" ? "muted" : ""}">
       <div class="grow"><b>${esc(x.item_name)}</b> × ${x.qty} · ${rub(x.amount)} · ${MERCH_METHODS[x.method]}${x.status === "cancelled" ? " · <b>отменена</b>" : ""}
@@ -119,6 +120,7 @@ async function renderMerch(page) {
     </div>`).join("") : `<div class="list-row muted">За этот период продаж нет</div>`}</div>
     ${S.user.role === "admin" ? `<h3 style="margin:18px 0 8px">Прайс</h3><div class="list">${it.items.map((i) => `<div class="list-row"><input data-in="${i.id}" value="${esc(i.name)}" style="flex:1"><input data-ip="${i.id}" type="number" value="${i.price}" style="width:110px;flex:0 0 110px"><label class="check" style="flex:0 0 auto"><input type="checkbox" data-ia="${i.id}" ${i.active ? "checked" : ""}> в продаже</label><button class="btn sm" data-isave="${i.id}">Сохранить</button></div>`).join("")}
       <div class="list-row"><input id="i-new-n" placeholder="Новый товар" style="flex:1"><input id="i-new-p" type="number" placeholder="Цена" style="width:110px;flex:0 0 110px"><button class="btn sm primary" id="i-add">Добавить</button></div></div>` : ""}`;
+  wireMerchStock(page, it);
   $("#m-from").onchange = (e) => { C.from = e.target.value; render(); };
   $("#m-to").onchange = (e) => { C.to = e.target.value; render(); };
   $("#m-new").onclick = () => {
@@ -141,5 +143,40 @@ async function renderMerch(page) {
   }));
   if ($("#i-add")) $("#i-add").onclick = async () => {
     try { await api("POST", "/api/merch/items", { name: $("#i-new-n").value, price: $("#i-new-p").value }); render(); } catch (e) { fail(e); }
+  };
+}
+
+/* Пересчёт склада (общий): сколько есть, норма, сколько заказать. Сохранение ставит задачу руководителю в Планер */
+function merchStockHtml(it) {
+  const items = it.items.filter((i) => i.active);
+  const last = items.filter((i) => i.stock_at).sort((a, b) => (a.stock_at < b.stock_at ? 1 : -1))[0];
+  return `<section class="panel" style="padding:14px;margin-top:14px"><h3 style="margin-top:0">Пересчёт и заказ</h3>
+    <div class="small muted" style="margin-bottom:8px">${last ? `Последний пересчёт ${dShort(last.stock_at)} ${esc(last.stock_by)}. ` : ""}Впишите, сколько есть на складе. Что заказать, CRM посчитает сама и поставит задачу руководителю</div>
+    <table class="tbl"><thead><tr><th>Товар</th><th>Есть</th><th>Норма</th><th>Заказать</th></tr></thead><tbody>
+    ${items.map((i) => `<tr><td>${esc(i.name)}</td><td><input type="number" min="0" inputmode="numeric" data-mst="${i.id}" value="${i.stock ?? ""}" style="width:80px"></td>
+      <td>${it.can_norm ? `<input type="number" min="0" inputmode="numeric" data-mno="${i.id}" value="${i.norm || ""}" style="width:80px">` : i.norm || "—"}</td>
+      <td><b data-mor="${i.id}"></b></td></tr>`).join("")}</tbody></table>
+    <button class="btn primary" id="mst-save" style="margin-top:10px">Сохранить пересчёт</button></section>`;
+}
+
+function wireMerchStock(page, it) {
+  const btn = page.querySelector("#mst-save");
+  if (!btn) return;
+  const calc = () => it.items.forEach((i) => {
+    const st = page.querySelector(`[data-mst="${i.id}"]`), no = page.querySelector(`[data-mno="${i.id}"]`), out = page.querySelector(`[data-mor="${i.id}"]`);
+    if (!st || !out) return;
+    const norm = no ? +no.value || 0 : i.norm || 0, n = norm - (+st.value || 0);
+    out.textContent = st.value !== "" && n > 0 ? `${n} шт.` : st.value !== "" ? "хватает" : "";
+  });
+  page.querySelectorAll("[data-mst],[data-mno]").forEach((x) => (x.oninput = calc));
+  calc();
+  btn.onclick = async () => {
+    const items = it.items.filter((i) => i.active).map((i) => ({ id: i.id, stock: page.querySelector(`[data-mst="${i.id}"]`).value,
+      norm: page.querySelector(`[data-mno="${i.id}"]`) ? page.querySelector(`[data-mno="${i.id}"]`).value : undefined }));
+    try {
+      const r = await api("POST", "/api/merch/stock", { items });
+      toast(r.order.length ? `Заказать: ${r.order.map((o) => `${o.name} ${o.qty}`).join(", ")}. Задача руководителю в Планере` : "Всего хватает, заказывать нечего 👍");
+      render();
+    } catch (e) { fail(e); }
   };
 }
