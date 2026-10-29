@@ -807,8 +807,33 @@ def record_for(con, call_id: int) -> tuple[bytes, str]:
 
 # ---------------- заявки с сайта ----------------
 
+LEAD_KEYS = {  # формы сайтов называют поля по-разному: «Name», «Телефон», «Возраст ребёнка»...
+    "name": ("name", "имя", "fio", "фио", "parent", "родитель", "имя родителя"),
+    "phone": ("phone", "телефон", "tel", "номер", "номер телефона"),
+    "child": ("child", "ребенок", "ребёнок", "имя ребенка", "имя ребёнка"),
+    "age": ("age", "возраст", "возраст ребенка", "возраст ребёнка"),
+    "branch": ("branch", "филиал", "адрес", "площадка"),
+    "city": ("city", "город"),
+    "comment": ("comment", "комментарий", "сообщение", "message"),
+    "id": ("id", "ext_id", "tranid", "leadid", "lead_id", "request_id"),
+}
+
+
+def lead_fields(data: dict) -> dict:
+    low = {str(k).strip().lower(): v for k, v in data.items()}
+    out = {}
+    for key, names in LEAD_KEYS.items():
+        v = next((low[n] for n in names if low.get(n) not in (None, "")), None)
+        if v is not None:
+            out[key] = str(v)
+    return out
+
+
 def lead_hook(con, data: dict, create_student) -> dict:
     """Заявка с сайта → карточка в «Новый лид», красная (высокий приоритет)."""
+    if {str(k).lower(): v for k, v in data.items()} == {"test": "test"}:
+        return {"ok": True, "test": True}  # проверка адреса при подключении формы (Tilda и др.)
+    data = data | lead_fields(data)
     put(con, "lead_last", ts_now())
     ext = str(data.get("id") or data.get("ext_id") or "").strip()
     if ext:
