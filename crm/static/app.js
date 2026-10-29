@@ -15,7 +15,9 @@ const monthLabel = (ym) => { const [y, m] = ym.split("-").map(Number); return `$
 const dShort = (iso) => { if (!iso) return ""; const [y, m, d] = iso.slice(0, 10).split("-"); return `${d}.${m}`; };
 const dtShort = (iso) => iso ? `${dShort(iso)} ${iso.slice(11, 16)}` : "";
 const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
-const PAY_METHODS = { cash: "Наличные", card: "Картой", sbp: "СБП", online: "Онлайн-оплата", transfer: "Перевод", unknown: "Перенесено" };
+const PAY_METHODS = { cash: "Наличные", card: "Картой", sbp: "СБП", online: "Онлайн-оплата", transfer: "Перевод", unknown: "Перенесено",
+  balance: "Перенос с баланса", refund: "Возврат" };
+const PAY_INTERNAL = ["unknown", "balance", "refund"];  // ставит сама CRM, при приёме оплаты не выбираются
 
 async function api(method, url, body) {
   const opt = { method, headers: {}, credentials: "same-origin" };
@@ -764,6 +766,7 @@ async function openStudent(id) {
       <span class="pill ${x.status === "paid" ? "green" : x.status === "cancelled" ? "" : "yellow"}">${x.status === "invoiced" && cov ? `оплачено ${rub(cov)} из ${rub(x.price)}` : { paid: "оплачен", invoiced: "ждёт оплаты", cancelled: "отменён" }[x.status]}</span>
       ${x.corrected ? `<span class="pill">корректировка</span>` : ""}
       ${x.status === "invoiced" ? `<button class="btn sm primary" data-pay="${x.id}" data-left="${x.price - cov}">Принять оплату</button> <button class="btn sm danger" data-cancel="${x.id}">Отменить</button>` : ""}
+      ${x.status === "paid" ? `<button class="btn sm danger" data-pcanc="${x.id}" data-paid="${cov}">Отменить</button>` : ""}
       ${x.status !== "cancelled" && x.kind === "month" && can("members", "full") ? `<button class="btn sm" data-corr="${x.id}" data-price="${x.price}" title="Исключение из правил с обязательной причиной: попадёт в отчёт">Корректировка</button>` : ""}</li>`; }).join("")}</ul>` : ""}
   </div>
 
@@ -774,12 +777,22 @@ async function openStudent(id) {
       ${d.balance.upcoming ? `<span class="pill yellow">К оплате за следующий месяц ${rub(d.balance.upcoming)}</span>` : ""}
       ${d.balance.deposit ? `<span class="pill green">Депозит ${rub(d.balance.deposit)}</span>` : ""}
     </div>
-    <div class="row" style="margin-top:10px"><button class="btn sm" id="pay-free" style="flex:0">+ Принять оплату</button><button class="btn sm" id="sell-single" style="flex:0">Разовое занятие</button></div>
+    <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:6px"><button class="btn sm" id="pay-free" style="flex:0">+ Принять оплату</button>
+      ${d.family_kids.length ? `<button class="btn sm" id="pay-fam" style="flex:0" title="Один платёж закроет счета всех детей семьи, остаток на баланс">Оплата за семью</button>` : ""}
+      ${d.balance.deposit && d.family_kids.length ? `<button class="btn sm" id="bal-move" style="flex:0">Перенести с баланса</button>` : ""}
+      ${d.balance.deposit && can("payments", "view") ? `<button class="btn sm" id="bal-refund" style="flex:0">Вернуть деньги</button>` : ""}
+      <button class="btn sm" id="sell-single" style="flex:0">Разовое занятие</button></div>
     <div id="pay-form"></div>
     ${d.payments.length ? `<ul class="history pay-list ${d.payments.length > 4 ? "folded" : ""}" style="margin-top:10px">${d.payments.map((p) => `<li class="${p.cancelled ? "struck" : ""}"><b>${rub(p.amount)}</b> · ${esc(PAY_METHODS[p.method] || p.method)} · ${dtShort(p.paid_at)}${p.comment ? " · " + esc(p.comment) : ""}
       <div class="when">${esc(p.user_name)}${p.cancelled ? ` · отменён (${esc(p.cancelled_by)})` : p.confirmed ? "" : " · ждёт подтверждения"}</div>
       ${S.user.role === "admin" && !p.cancelled && p.method !== "unknown" ? `${p.confirmed ? "" : `<button class="btn sm" data-pconf="${p.id}">Подтвердить</button> `}<button class="btn sm danger" data-pcancel="${p.id}">Отменить платёж</button>` : ""}</li>`).join("")}</ul>
       ${d.payments.length > 4 ? `<button class="linkish small" id="pay-more">Показать все платежи (${d.payments.length})</button>` : ""}` : ""}
+    ${d.ledger.length ? `<details style="margin-top:10px"><summary class="linkish small">Лента баланса: все поступления и списания</summary>
+      <table class="tbl" style="margin-top:6px"><thead><tr><th>Когда</th><th>Что</th><th>Сумма</th><th>Остаток</th></tr></thead><tbody>
+      ${d.ledger.map((e) => `<tr class="${e.cancelled ? "muted" : ""}"><td>${dtShort(e.at)}</td><td>${esc(e.text)}</td>
+        <td class="${e.amount < 0 ? "" : "s-good"}" style="white-space:nowrap">${e.cancelled ? "отменён" : (e.amount > 0 ? "+" : "−") + rub(Math.abs(e.amount))}</td>
+        <td style="white-space:nowrap"><b>${e.rest < 0 ? "−" : ""}${rub(Math.abs(e.rest))}</b></td></tr>`).join("")}</tbody></table>
+      <div class="small muted">Остаток плюс: переплата на балансе, минус: долг. Переплата сама закрывает следующий счёт</div></details>` : ""}
   </div>
 
   <div class="section">
@@ -887,7 +900,7 @@ async function openStudent(id) {
   const payForm = (title, amount, onSubmit) => {
     $("#pay-form").innerHTML = `<div class="quote" style="margin-top:10px"><b>${esc(title)}</b>
       <div class="row" style="margin-top:8px"><div class="field"><label>Сумма, ₽</label><input id="pf-sum" type="number" min="1" value="${amount || ""}"></div>
-        <div class="field"><label>Способ</label><select id="pf-m">${Object.entries(PAY_METHODS).filter(([k]) => k !== "unknown").map(([k, t]) => `<option value="${k}">${t}</option>`).join("")}</select></div></div>
+        <div class="field"><label>Способ</label><select id="pf-m">${Object.entries(PAY_METHODS).filter(([k]) => !PAY_INTERNAL.includes(k)).map(([k, t]) => `<option value="${k}">${t}</option>`).join("")}</select></div></div>
       <div class="field"><label>Комментарий</label><input id="pf-c" placeholder="Необязательно"></div>
       <button class="btn primary sm" id="pf-ok">Принять ${amount ? rub(amount) : "оплату"}</button></div>`;
     $("#pf-sum").oninput = () => { $("#pf-ok").textContent = "Принять " + rub($("#pf-sum").value); };
@@ -902,6 +915,35 @@ async function openStudent(id) {
   $("#sell-single").onclick = async () => { try { await api("POST", `/api/students/${id}/single`, {}); toast("Разовое занятие выставлено"); reload(); } catch (e) { fail(e); } };
   body.querySelectorAll("[data-pconf]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/payments/${b.dataset.pconf}/confirm`, {}); reload(); } catch (e) { fail(e); } }));
   body.querySelectorAll("[data-pcancel]").forEach((b) => (b.onclick = async () => { if (!confirm("Отменить платёж? Он останется в реестре как отменённый.")) return; try { await api("POST", `/api/payments/${b.dataset.pcancel}/cancel`, {}); reload(); } catch (e) { fail(e); } }));
+  body.querySelectorAll("[data-pcanc]").forEach((b) => (b.onclick = () => {  // оплаченный: куда деньги
+    const box = document.createElement("div"); box.className = "quote"; box.style.marginTop = "8px";
+    box.innerHTML = `<b>Отменить оплаченный абонемент (${rub(+b.dataset.paid)})</b><div class="small muted">Пропуски из перерасчёта вернутся. Куда деньги?</div>
+      <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button class="btn sm primary" data-cx="bal">На баланс ребёнка</button>
+      ${can("payments", "view") ? `<button class="btn sm danger" data-cx="ref">Вернуть родителю</button>` : ""}<button class="btn sm" data-cx="no">Не отменять</button></div>`;
+    b.closest("li").appendChild(box); b.disabled = true;
+    box.querySelectorAll("[data-cx]").forEach((x) => (x.onclick = async () => {
+      if (x.dataset.cx === "no") { box.remove(); b.disabled = false; return; }
+      let comment = "";
+      if (x.dataset.cx === "ref") { comment = prompt("Почему возврат и как вернули деньги (наличными, на карту)?"); if (!comment) return; }
+      try { await api("POST", `/api/subscriptions/${b.dataset.pcanc}/cancel`, { refund: x.dataset.cx === "ref", comment });
+        toast(x.dataset.cx === "ref" ? "Отменён, возврат записан. Пробейте чек возврата" : "Отменён, деньги на балансе"); reload(); } catch (e) { fail(e); }
+    }));
+  }));
+  if ($("#pay-fam")) $("#pay-fam").onclick = () => payForm("Оплата за семью: закроет счета всех детей, остаток на баланс", 0,
+    async (amount, method, comment) => { const r = await api("POST", `/api/students/${id}/pay-family`, { amount, method, comment });
+      toast(r.parts.map((p) => `${p.name} ${rub(p.amount)}`).join(", ")); });
+  if ($("#bal-move")) $("#bal-move").onclick = async () => {
+    const kids = d.family_kids, pick = kids.length === 1 ? kids[0] : kids.find((k) => k.name === prompt("Кому перенести? " + kids.map((k) => k.name).join(", ")));
+    if (!pick) return;
+    const sum = prompt(`Сколько перенести на ${pick.name}? На балансе ${rub(d.balance.deposit)}`, d.balance.deposit);
+    if (!sum) return;
+    try { await api("POST", `/api/students/${id}/move-balance`, { to: pick.id, amount: +sum }); toast("Перенесено"); reload(); } catch (e) { fail(e); }
+  };
+  if ($("#bal-refund")) $("#bal-refund").onclick = async () => {
+    const sum = prompt(`Сколько вернуть родителю? На балансе ${rub(d.balance.deposit)}`, d.balance.deposit); if (!sum) return;
+    const comment = prompt("Почему возврат и как вернули деньги?"); if (!comment) return;
+    try { await api("POST", `/api/students/${id}/refund`, { amount: +sum, comment }); toast("Возврат записан. Пробейте чек возврата"); reload(); } catch (e) { fail(e); }
+  };
   body.querySelectorAll("[data-cancel]").forEach((b) => (b.onclick = async () => {
     if (!confirm("Отменить счёт? Пропуски из перерасчёта вернутся.")) return;
     try { await api("POST", `/api/subscriptions/${b.dataset.cancel}/cancel`, {}); reload(); } catch (e) { fail(e); }

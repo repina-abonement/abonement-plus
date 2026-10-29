@@ -13,7 +13,8 @@ from datetime import date, datetime
 from . import logic
 
 METHODS = {"cash": "Наличные", "card": "Картой", "sbp": "СБП", "online": "Онлайн-оплата", "transfer": "Перевод",
-           "unknown": "Перенесено"}
+           "unknown": "Перенесено", "balance": "Перенос с баланса", "refund": "Возврат"}
+INTERNAL = ("unknown", "balance", "refund")  # их не выбирают при приёме оплаты: ставит сама CRM
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS payments (
@@ -52,6 +53,9 @@ def _now() -> str:
 
 def init(con):
     con.executescript(SCHEMA)
+    pcols = {r[1] for r in con.execute("PRAGMA table_info(payments)")}
+    if "batch" not in pcols:  # части одного платежа (за семью) и переносы между детьми
+        con.execute("ALTER TABLE payments ADD COLUMN batch TEXT NOT NULL DEFAULT ''")
     cols = {r[1] for r in con.execute("PRAGMA table_info(subscriptions)")}
     for col in ("kind TEXT NOT NULL DEFAULT 'month'", "discount_name TEXT NOT NULL DEFAULT ''",
                 "discount_amount INTEGER NOT NULL DEFAULT 0"):
@@ -120,7 +124,7 @@ def add_payment(con, sid: int, amount: int, method: str, user: dict, *, subscrip
     amount = int(amount)
     if amount <= 0:
         raise ValueError("Сумма должна быть больше нуля")
-    if method not in METHODS or method == "unknown":
+    if method not in METHODS or method in INTERNAL:
         raise ValueError("Выберите способ оплаты")
     confirmed = 1 if user.get("role") == "admin" or method in ("online", "sbp") else 0
     pid = con.execute("""INSERT INTO payments(student_id, amount, method, paid_at, comment, user_name, confirmed,
@@ -133,6 +137,99 @@ def add_payment(con, sid: int, amount: int, method: str, user: dict, *, subscrip
                 (sid, _now(), user.get("name", ""), "payment",
                  f"Принята оплата {amount} ₽, {METHODS[method].lower()}" + (f": {comment.strip()}" if comment.strip() else "")))
     return pid
+
+
+def _row(con, sid: int, amount: int, method: str, user: dict, comment: str, batch: str = "") -> int:
+    """Служебная строка платежа (перенос, возврат): может быть отрицательной, подтверждена сразу."""
+    pid = con.execute("""INSERT INTO payments(student_id, amount, method, paid_at, comment, user_name, confirmed, confirmed_by,
+                         confirmed_at, created_at, batch) VALUES (?,?,?,?,?,?,1,?,?,?,?)""",
+                      (sid, amount, method, _now(), comment, user.get("name", ""), user.get("name", ""), _now(), _now(), batch)).lastrowid
+    reconcile(con, sid)
+    return pid
+
+
+def _family(con, sid: int) -> list[int]:
+    f = con.execute("SELECT family_id FROM students WHERE id=?", (sid,)).fetchone()
+    return [r[0] for r in con.execute("SELECT id FROM students WHERE family_id=? AND archived=0 ORDER BY id", (f[0],))] if f else []
+
+
+def pay_family(con, sid: int, amount: int, method: str, user: dict, comment: str = "") -> dict:
+    """Один платёж на несколько счетов семьи (СБП по QR, наличные): закрывает неоплаченные счета всех детей семьи
+    от старых к новым, остаток уходит на баланс ребёнка, из карточки которого принимали. Приход в реестре один раз:
+    части одного платежа связаны общим номером batch и в сумме дают ровно внесённую сумму."""
+    amount = int(amount)
+    if amount <= 0:
+        raise ValueError("Сумма должна быть больше нуля")
+    if method not in METHODS or method in INTERNAL:
+        raise ValueError("Выберите способ оплаты")
+    import secrets
+    batch = "fam-" + secrets.token_hex(4)
+    left, parts = amount, {}
+    for x in con.execute(f"""SELECT x.id, x.student_id, x.price, x.month FROM subscriptions x WHERE x.status='invoiced'
+                             AND x.student_id IN ({','.join('?' * len(_family(con, sid)))}) ORDER BY x.month, x.id""", _family(con, sid)).fetchall():
+        need = x["price"] - balance(con, x["student_id"])["covered"].get(x["id"], 0) - parts.get(x["student_id"], 0)
+        take = min(left, max(0, need))
+        if take:
+            parts[x["student_id"]] = parts.get(x["student_id"], 0) + take
+            left -= take
+        if not left:
+            break
+    if left:
+        parts[sid] = parts.get(sid, 0) + left  # остаток на баланс
+    names = dict(con.execute(f"SELECT id, name FROM students WHERE id IN ({','.join('?' * len(parts))})", list(parts)).fetchall())
+    note = f"Платёж за семью {amount} ₽: " + ", ".join(f"{names[k]} {v} ₽" for k, v in parts.items())
+    for k, v in parts.items():
+        pid = add_payment(con, k, v, method, user, comment=(comment.strip() + ". " if comment.strip() else "") + note)
+        con.execute("UPDATE payments SET batch=? WHERE id=?", (batch, pid))
+    return {"batch": batch, "parts": [{"student_id": k, "name": names[k], "amount": v} for k, v in parts.items()]}
+
+
+def move_balance(con, from_sid: int, to_sid: int, amount: int, user: dict) -> None:
+    """Перенос с баланса (переплаты) одного ребёнка на другого в той же семье. Новых денег не появляется."""
+    amount = int(amount)
+    if from_sid == to_sid or to_sid not in _family(con, from_sid):
+        raise ValueError("Переносить можно только между детьми одной семьи")
+    if amount <= 0 or amount > balance(con, from_sid)["deposit"]:
+        raise ValueError("Сумма должна быть не больше переплаты на балансе")
+    import secrets
+    batch = "mv-" + secrets.token_hex(4)
+    names = dict(con.execute("SELECT id, name FROM students WHERE id IN (?,?)", (from_sid, to_sid)).fetchall())
+    _row(con, from_sid, -amount, "balance", user, f"Перенос на баланс: {names[to_sid]}", batch)
+    _row(con, to_sid, amount, "balance", user, f"Перенос с баланса: {names[from_sid]}", batch)
+    for s, t in ((from_sid, f"Перенесено {amount} ₽ с баланса на {names[to_sid]}"), (to_sid, f"Пришло {amount} ₽ с баланса {names[from_sid]}")):
+        con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)", (s, _now(), user.get("name", ""), "payment", t))
+
+
+def refund(con, sid: int, amount: int, user: dict, comment: str) -> None:
+    """Возврат родителю из переплаты. Отдельная операция: в реестре минусом, нужен чек возврата."""
+    amount = int(amount)
+    if not (comment or "").strip():
+        raise ValueError("Напишите, почему возврат и как вернули деньги")
+    if amount <= 0 or amount > balance(con, sid)["deposit"]:
+        raise ValueError("Вернуть можно не больше переплаты на балансе")
+    _row(con, sid, -amount, "refund", user, comment.strip())
+    con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
+                (sid, _now(), user.get("name", ""), "payment", f"Возврат {amount} ₽: {comment.strip()}. Пробейте чек возврата"))
+
+
+def ledger(con, sid: int) -> list[dict]:
+    """Лента баланса: поступления, переносы, возвраты и абонементы по времени, с остатком после каждой строки."""
+    months = dict(con.execute("SELECT id, month FROM subscriptions WHERE student_id=?", (sid,)).fetchall())
+    ev = [{"at": p["paid_at"], "kind": "pay", "ord": (months.get(p["subscription_id"], "9999"), 1, p["id"]), "text": f"{METHODS.get(p['method'], p['method'])}" + (f": {p['comment']}" if p["comment"] else ""),
+           "amount": p["amount"], "cancelled": bool(p["cancelled"])}
+          for p in con.execute("SELECT * FROM payments WHERE student_id=? ORDER BY paid_at, id", (sid,))]
+    for x in con.execute("""SELECT x.*, g.name AS gname FROM subscriptions x LEFT JOIN enrollments e ON e.id=x.enrollment_id
+                            LEFT JOIN groups g ON g.id=e.group_id WHERE x.student_id=? ORDER BY x.created_at, x.id""", (sid,)):
+        label = "Разовое занятие" if x["kind"] == "single" else f"Абонемент {logic.month_label(x['month']).lower()}" + (f", {x['gname']}" if x["gname"] else "")
+        ev.append({"at": x["created_at"], "kind": "sub", "ord": (x["month"], 0, x["id"]), "text": label + (" (отменён)" if x["status"] == "cancelled" else ""),
+                   "amount": -x["price"], "cancelled": x["status"] == "cancelled"})
+    ev.sort(key=lambda e: ((e["at"] or "")[:16], e.pop("ord")))  # в одну минуту: сначала счёт, потом оплата по нему
+    rest = 0
+    for e in ev:
+        if not e["cancelled"]:
+            rest += e["amount"]
+        e["rest"] = rest
+    return ev[::-1]
 
 
 def pay_subscription(con, sub_id: int, method: str, user: dict, amount: int | None = None) -> int:
@@ -165,7 +262,7 @@ def confirm_payment(con, pid: int, user: dict) -> None:
 
 
 def registry(con, start: str, end: str, method: str = "", only_unconfirmed: bool = False) -> dict:
-    where = ["p.paid_at BETWEEN ? AND ?"]
+    where = ["p.paid_at BETWEEN ? AND ?", "p.method != 'balance'"]  # перенос между детьми семьи не приход
     args = [start, end + "T23:59"]
     if method:
         where.append("p.method=?")

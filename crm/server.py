@@ -1293,7 +1293,28 @@ def subscription_correct(con, h, user, body, q, sub):
 
 @route("POST", "/api/subscriptions/{sub}/cancel", role="operator")
 def cancel(con, h, user, body, q, sub):
-    sv.cancel_subscription(con, int(sub), user)
+    refund = bool(body.get("refund"))
+    if refund and not perms.can(user, "payments", "view"):
+        raise ApiError("Возврат делают руководитель или старший администратор", 403)
+    sv.cancel_subscription(con, int(sub), user, refund, body.get("comment") or "")
+    return {"ok": True}
+
+
+@route("POST", "/api/students/{sid}/pay-family", role="operator")
+def pay_family(con, h, user, body, q, sid):
+    sv.get_student_row(con, int(sid))
+    return mx(money.pay_family, con, int(sid), int(body.get("amount") or 0), body.get("method") or "", user, body.get("comment") or "")
+
+
+@route("POST", "/api/students/{sid}/move-balance", role="operator")
+def move_balance(con, h, user, body, q, sid):
+    mx(money.move_balance, con, int(sid), int(body.get("to") or 0), int(body.get("amount") or 0), user)
+    return {"ok": True}
+
+
+@route("POST", "/api/students/{sid}/refund", role="payments:view")
+def refund(con, h, user, body, q, sid):
+    mx(money.refund, con, int(sid), int(body.get("amount") or 0), user, body.get("comment") or "")
     return {"ok": True}
 
 

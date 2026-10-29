@@ -332,19 +332,28 @@ def pay_subscription(con, sub_id: int, user, method: str = "cash", amount=None) 
         raise ApiError(str(e))
 
 
-def cancel_subscription(con, sub_id: int, user) -> None:
+def cancel_subscription(con, sub_id: int, user, refund: bool = False, comment: str = "") -> None:
+    """Отмена абонемента. Оплаченное остаётся на балансе ребёнка, а с refund=True возвращается родителю (возврат)."""
     sub = con.execute("SELECT * FROM subscriptions WHERE id = ?", (sub_id,)).fetchone()
     if not sub:
         raise ApiError("Абонемент не найден", 404)
+    from . import money
+    paid = money.balance(con, sub["student_id"])["covered"].get(sub_id, 0)
+    if refund and not (comment or "").strip():
+        raise ApiError("Напишите, почему возврат и как вернули деньги")
     con.execute("UPDATE subscriptions SET status='cancelled' WHERE id=?", (sub_id,))
     con.execute("""UPDATE attendance SET resolved=NULL, resolved_month=NULL
                    WHERE student_id=? AND resolved='credit' AND resolved_month=?
                      AND (? IS NULL OR group_id = (SELECT group_id FROM enrollments WHERE id = ?))""",
                 (sub["student_id"], sub["month"], sub["enrollment_id"], sub["enrollment_id"]))
-    from . import money
     money.reconcile(con, sub["student_id"])
+    if refund and paid:
+        try:
+            money.refund(con, sub["student_id"], min(paid, money.balance(con, sub["student_id"])["deposit"]), user, comment)
+        except ValueError as e:
+            raise ApiError(str(e))
     log(con, sub["student_id"], f"Счёт на {logic.month_label(sub['month'])} отменён, пропуски возвращены"
-        + (" (оплата осталась на депозите)" if sub["status"] == "paid" else ""), user, "payment")
+        + ((" (оплата возвращена родителю)" if refund else " (оплата осталась на балансе)") if paid else ""), user, "payment")
 
 
 # ---------- карточки ----------
@@ -596,6 +605,8 @@ def student_detail(con, sid: int) -> dict:
         "subscriptions": subs, "vacations": vacs, "enrollments": enrollments_of(con, sid), "makeups": makeups, "history": hist,
         "counters": absence_counters(con, sid) if s["funnel"] == "members" else None,
         "balance": _balance_out(con, sid),
+        "ledger": __import__("crm.money", fromlist=["ledger"]).ledger(con, sid),
+        "family_kids": _rows(con.execute("SELECT id, name FROM students WHERE family_id=? AND id!=? AND archived=0", (s["family_id"], sid))),
         "payments": _rows(con.execute("SELECT * FROM payments WHERE student_id=? ORDER BY paid_at DESC, id DESC LIMIT 30", (sid,))),
         "discounts": _rows(con.execute("SELECT id, name, percent, rule FROM discounts WHERE active=1 AND rule='manual' ORDER BY name")),
         "stage_label": stage_label,
