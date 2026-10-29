@@ -63,6 +63,7 @@ python3 -m tests.test_transfer # проверка перевода в другу
 python3 -m tests.test_perms    # проверка прав по должностям
 python3 -m tests.test_pricing  # проверка цен: +5% и без скидок после 25 числа, корректировка, новичок
 python3 -m tests.test_mypay    # проверка «Моей зарплаты»: на сегодня, весь месяц, цель
+python3 -m tests.test_coachreport # проверка отчёта тренера о смене
 ```
 
 Пароль администратора задаётся переменной `CRM_ADMIN_PASSWORD`, иначе генерируется

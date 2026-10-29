@@ -1015,3 +1015,40 @@ h1, h2, h3, h4, b, strong, th { font-weight: 800; }
 .crop-view canvas { width: 280px; height: 280px; display: block; cursor: grab; }
 .crop-ring { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 999px rgba(0,0,0,.45); border: 2px solid #23a26d; pointer-events: none; }
 .crop-zoom { width: 100%; }
+/* отчёт тренера о смене: телефон, большие кнопки */
+.rep-card { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 12px; width: 100%; padding: 16px; margin: 0 0 12px;
+  border-radius: 18px; background: var(--surface); border: 2px solid var(--line); }
+.rep-card.go { background: #23a26d; border-color: #23a26d; color: #fff; }
+.rep-card.done { background: #e5f4e4; border-color: #bfe3c4; }
+.rep-card b { display: block; font-size: 18px; } .rep-card small { display: block; font-size: 13px; opacity: .85; }
+.rep-ico { font-size: 30px; }
+.rep-modal { position: fixed; inset: 0; z-index: 900; background: var(--bg); overflow: auto; }
+.rep-sheet { max-width: 560px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; padding: 12px 16px 0; box-sizing: border-box; }
+.rep-top { display: flex; align-items: center; gap: 10px; } .rep-top small { display: block; color: var(--ink-2); font-size: 12.5px; }
+.rep-dots { display: flex; gap: 5px; margin: 12px 0 6px; } .rep-dots button { flex: 1; height: 6px; border: 0; border-radius: 3px; background: var(--line); padding: 0; cursor: pointer; }
+.rep-dots button.ok { background: #23a26d; } .rep-dots button.cur { outline: 2px solid var(--ink); outline-offset: 1px; }
+.rep-body { flex: 1; padding-bottom: 16px; }
+.rep-h { text-align: center; margin: 14px 0 16px; } .rep-h > span { font-size: 44px; } .rep-h h2 { margin: 4px 0; font-size: 24px; } .rep-h p { margin: 0; color: var(--ink-2); }
+.rep-big { display: block; width: 100%; box-sizing: border-box; min-height: 58px; margin: 0 0 10px; padding: 12px 16px; border-radius: 16px; border: 2px solid var(--line);
+  background: var(--surface); font: 800 17px/1.25 var(--font); color: var(--ink); cursor: pointer; text-align: left; }
+.rep-big small { display: block; font: 400 13px/1.3 var(--font); color: var(--ink-2); margin-top: 2px; }
+.rep-big.on { border-color: #23a26d; background: #e5f4e4; } .rep-big.sm { min-height: 46px; font-size: 15px; text-align: center; }
+.rep-big.go { background: #23a26d; border-color: #23a26d; color: #fff; text-align: center; font-size: 20px; min-height: 64px; }
+.rep-big:disabled { opacity: .5; cursor: default; }
+.rep-btns { display: flex; gap: 8px; flex-wrap: wrap; } .rep-btns .rep-big { flex: 1 1 30%; margin: 0; text-align: center; }
+.rep-item { background: var(--surface); border-radius: 16px; padding: 12px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px; }
+.rep-item small, .rep-row small { display: block; color: var(--ink-2); font-size: 13px; }
+.rep-row { display: flex; align-items: center; gap: 10px; background: var(--surface); border-radius: 14px; padding: 12px; margin-bottom: 8px; border-left: 5px solid var(--line); }
+.rep-row.ok { border-left-color: #23a26d; } .rep-row.bad { border-left-color: #d14343; } .rep-ok { font-size: 22px; }
+.rep-row .btn { min-height: 44px; }
+.rep-form { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; } .rep-form input, .rep-form select { min-height: 48px; font-size: 16px; }
+.rep-empty { text-align: center; padding: 24px; background: var(--surface); border-radius: 16px; font-size: 17px; }
+.rep-ph { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+.rep-thumb { position: relative; } .rep-thumb img { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; display: block; cursor: zoom-in; }
+.rep-thumb button { position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: #1d1d22; color: #fff; font-size: 11px; cursor: pointer; }
+.rep-photo-btn { min-height: 48px; display: inline-flex; align-items: center; font-weight: 800; } .rep-photo-btn.busy { opacity: .5; pointer-events: none; }
+.rep-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.rep-slot { background: var(--surface); border-radius: 14px; padding: 10px; border: 2px solid var(--line); } .rep-slot.ok { border-color: #23a26d; }
+.rep-slot b { font-size: 14px; }
+.rep-nav { position: sticky; bottom: 0; display: flex; gap: 10px; padding: 12px 0 16px; background: var(--bg); }
+.rep-nav .btn { flex: 1; min-height: 52px; font-size: 16px; }

@@ -108,6 +108,7 @@ async function renderCoachToday(page, coachId, viewBar = "") {
     ${d.today.length ? `<section class="now coach-sum"><div class="now-head"><h3>Сегодня ${d.today.length} ${d.today.length === 1 ? "тренировка" : d.today.length < 5 ? "тренировки" : "тренировок"}, ждём ${t.total} ${kidsWord(t.total)}</h3></div>
       <div class="cfacts">${fact(t.paid, "по абонементу", "green")}${fact(t.trials, "на пробном", "blue")}${fact(t.single, "разовое")}${fact(t.makeups, "на отработке")}${fact(t.unpaid, "без оплаты", "yellow")}${fact(t.vacation, "в отпуске, не придут")}</div></section>` : ""}
     ${checkinBox(d, !!coachId)}
+    ${coachId ? "" : `<div id="rep-cards"></div>`}
     ${(d.tasks || []).length ? `<section class="now tasks-box" style="margin-bottom:12px"><div class="now-head"><h3>Задачи на сегодня: ${d.tasks.length}</h3></div>${d.tasks.map(taskRow).join("")}</section>` : ""}
     ${d.away ? `<section class="now calm"><div class="now-head"><h3>🏖 Ты сейчас отдыхаешь до ${dShort(d.away.date_to)}</h3></div><div class="small">Тренировки на эти дни передаём другим тренерам</div></section>` : ""}
     ${d.replaced.length ? `<section class="now calm" style="margin-top:12px"><div class="now-head"><h3>Сегодня тебя заменяют</h3></div>
@@ -147,6 +148,7 @@ async function renderCoachToday(page, coachId, viewBar = "") {
   page.querySelectorAll("[data-meet]").forEach((b) => (b.onclick = () => openMeet(+b.dataset.meet, b.dataset.d)));
   wireCheckin(page);
   if (!coachId) wireTasks(page);
+  if ($("#rep-cards")) coachReportCards($("#rep-cards"));
   wireMerchShift(page, d);
   d.today.forEach((g) => wireStaffPicker(page, "c" + g.id, g.id, d.date, render));
   const mp = page.querySelector("#my-pay");

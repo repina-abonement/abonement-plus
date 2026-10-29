@@ -513,11 +513,13 @@ async function renderWorkdesk(page) {
     sched: { html: schedHtml, icon: "📅", label: "Сегодня в филиалах" },
     bday: { html: birthdaysBox(d.birthdays), icon: "🎂", label: "Дни рождения" },
     tasks: { html: tasksHtml, icon: "✅", label: "Мои задачи" },
+    reports: { html: shiftReportsBox(d.shift_reports), icon: "📝", label: "Отчёты о смене",
+      n: d.shift_reports ? d.shift_reports.late.length + d.shift_reports.issues.length : 0, red: true },
   };
   const ORDER = {
-    owner: ["spend", "marks", "subs", "checkins", "tasks", "call", "wait", "merch", "sched", "bday"],
-    control: ["marks", "checkins", "subs", "merch", "tasks", "wait", "sched", "bday", "call", "spend"],
-    operator: ["tasks", "call", "wait", "sched", "bday", "marks", "subs", "merch", "spend", "checkins"],
+    owner: ["spend", "reports", "marks", "subs", "checkins", "tasks", "call", "wait", "merch", "sched", "bday"],
+    control: ["reports", "marks", "checkins", "subs", "merch", "tasks", "wait", "sched", "bday", "call", "spend"],
+    operator: ["tasks", "call", "wait", "sched", "bday", "marks", "subs", "merch", "spend", "checkins", "reports"],
   }[who];
   const widgets = ORDER.filter((k) => W[k].html);
   const tiles = widgets.filter((k) => W[k].n).map((k) => `<button class="dtile ${W[k].red ? "red" : "yellow"}" data-jump="dw-${k}"><span>${W[k].icon}</span><b>${W[k].n}</b><small>${W[k].label}</small></button>`);
@@ -558,6 +560,7 @@ async function renderWorkdesk(page) {
   wireWaitlist(page);
   wireMarks(page);
   wireCheckinReport(page);
+  wireShiftReports(page, d);
   wireSpend(page);
   wireMerchAlerts(page);
   if (page.querySelector(".sched-widget")) { if (wasOpen === false) page.querySelector(".sched-widget").open = false; wireSchedule(page.querySelector(".sched-widget"), S.meta.today); }

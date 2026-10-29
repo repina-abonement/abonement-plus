@@ -553,6 +553,8 @@ def workdesk(con, h, user, body, q):
             "bills_due": expenses.bills_upcoming(con) if user["role"] == "admin" else [],
             "ads_alerts": expenses.ads_alerts(con) if user["role"] == "admin" else [],
             "absences": schedule.absences(con),
+            "shift_reports": __import__("crm.coachreport", fromlist=["desk"]).desk(con, user["role"] == "admin")
+            if perms.can(user, "schedule", "full") else None,
             "coaches": [dict(r) for r in con.execute("SELECT id, name FROM users WHERE role='coach' AND active=1 ORDER BY name")],
             **comms.counts(con)}
 
@@ -1358,6 +1360,135 @@ def coach_kids(con, h, user, body, q):
             kids.append({"id": s["id"], "name": s["name"], "birth": s["birth"] or "", "parents": parents})
         out.append({"id": g["id"], "name": g["name"], "age": g["age"], "branch": g["branch"], "main": g["coach_id"] == cid, "kids": kids})
     return {"groups": out}
+
+
+# ---------------- отчёт тренера о смене (coachreport.py) ----------------
+
+def crx(fn, *a, **kw):
+    from . import coachreport
+    try:
+        return fn(*a, **kw)
+    except coachreport.ReportError as e:
+        raise ApiError(str(e))
+
+
+def _report_access(con, user, rid):
+    from . import coachreport
+    return crx(coachreport.check_access, con, int(rid), user, perms.can(user, "schedule", "full"))
+
+
+@route("GET", "/api/coach-report", role="today|schedule:full")
+def coach_report_get(con, h, user, body, q):
+    from . import coachreport
+    from datetime import date as _d
+    d = _d.fromisoformat(q.get("date") or _d.today().isoformat())
+    manager = perms.can(user, "schedule", "full")
+    return crx(coachreport.get_or_create, con, int(q.get("branch_id") or 0), d, user, manager,
+               int(q["main_id"]) if q.get("main_id") and manager else None)
+
+
+@route("GET", "/api/coach-shifts", role="today")
+def coach_shifts(con, h, user, body, q):
+    """Смены тренера сегодня и вчера (вчерашний несданный отчёт тоже можно сдать) со статусом отчёта."""
+    from . import coachreport
+    from datetime import date as _d, timedelta as _td
+    out = []
+    for d in (_d.today() - _td(days=1), _d.today()):
+        for s in coachreport.my_shifts(con, user["id"], d):
+            r = con.execute("SELECT id, status FROM coach_reports WHERE branch_id=? AND date=? AND main_id=?",
+                            (s["branch_id"], d.isoformat(), s["main_id"])).fetchone()
+            if d < _d.today() and r and r["status"] == "done":
+                continue
+            out.append({"branch_id": s["branch_id"], "branch": s["branch"], "date": d.isoformat(), "main": s["main_id"] == user["id"],
+                        "end": s["end"].isoformat(timespec="minutes") if s["end"] else None, "groups": len(s["groups"]),
+                        "status": r["status"] if r else "none"})
+    return {"shifts": out}
+
+
+@route("POST", "/api/coach-report/{rid}", role="today|schedule:full")
+def coach_report_patch(con, h, user, body, q, rid):
+    from . import coachreport
+    _report_access(con, user, rid)
+    crx(coachreport.update, con, int(rid), body)
+    r, s = _report_access(con, user, rid)
+    return coachreport.view(con, r, s)
+
+
+@route("POST", "/api/coach-report/{rid}/photo", role="today|schedule:full")
+def coach_report_photo(con, h, user, body, q, rid):
+    from . import coachreport
+    import base64
+    r, s = _report_access(con, user, rid)
+    if r["status"] == "done":
+        raise ApiError("Отчёт уже сдан")
+    if body.get("remove"):
+        if con.execute("SELECT 1 FROM report_photos WHERE id=? AND kind='report' AND ref_id=?", (int(body["remove"]), r["id"])).fetchone():
+            coachreport.remove_photo(con, int(body["remove"]))
+    else:
+        try:
+            raw = base64.b64decode(str(body.get("data") or "").split(",", 1)[-1])
+        except ValueError:
+            raise ApiError("Не удалось прочитать фото")
+        crx(coachreport.add_photo, con, "report", r["id"], str(body.get("slot") or ""), raw)
+    return coachreport.view(con, coachreport._row(con, r["id"]), s)
+
+
+@route("POST", "/api/coach-report/{rid}/submit", role="today")
+def coach_report_submit(con, h, user, body, q, rid):
+    from . import coachreport
+    return crx(coachreport.submit, con, int(rid), user)
+
+
+@route("GET", "/api/report-photo/{pid}", role="today|schedule:full|operator")
+def report_photo(con, h, user, body, q, pid):
+    from . import coachreport
+    try:
+        with open(coachreport.photo_path(int(pid)), "rb") as f:
+            return Raw(f.read(), "image/jpeg")
+    except FileNotFoundError:
+        raise ApiError("Фото нет", 404)
+
+
+@route("POST", "/api/report-tasks", role="schedule:full")
+def report_task_add(con, h, user, body, q):
+    from . import coachreport
+    import base64
+    tid = crx(coachreport.add_task, con, int(body.get("coach_id") or 0), str(body.get("date") or ""), body.get("text") or "", user)
+    if body.get("photo"):
+        try:
+            raw = base64.b64decode(str(body["photo"]).split(",", 1)[-1])
+        except ValueError:
+            raise ApiError("Не удалось прочитать фото")
+        crx(coachreport.add_photo, con, "task", tid, "", raw)
+    return {"id": tid}
+
+
+@route("POST", "/api/report-tasks/{tid}/done", role="today|schedule:full")
+def report_task_done(con, h, user, body, q, tid):
+    from . import coachreport
+    t = con.execute("SELECT coach_id, date FROM report_tasks WHERE id=?", (int(tid),)).fetchone()
+    if not t:
+        raise ApiError("Задание не найдено", 404)
+    if not perms.can(user, "schedule", "full"):  # тренер отмечает задания своей смены (свои и помощника/главного)
+        from datetime import date as _d
+        mine = coachreport.my_shifts(con, user["id"], _d.fromisoformat(t["date"]))
+        if not any(t["coach_id"] in (s["main_id"], *s["assistants"]) for s in mine):
+            raise ApiError("Это не твоё задание", 403)
+    crx(coachreport.task_done, con, int(tid), user)
+    return {"ok": True}
+
+
+@route("DELETE", "/api/report-tasks/{tid}", role="schedule:full")
+def report_task_del(con, h, user, body, q, tid):
+    con.execute("DELETE FROM report_tasks WHERE id=? AND done_at IS NULL", (int(tid),))
+    return {"ok": True}
+
+
+@route("POST", "/api/inventory/{iid}/close", role="schedule:full")
+def inventory_close(con, h, user, body, q, iid):
+    con.execute("UPDATE inventory_issues SET closed_at=?, closed_by=? WHERE id=?",
+                (__import__("datetime").datetime.now().isoformat(timespec="minutes"), user.get("name", ""), int(iid)))
+    return {"ok": True}
 
 
 @route("GET", "/api/coaches/board", role="coaches")
