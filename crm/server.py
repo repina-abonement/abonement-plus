@@ -1381,6 +1381,32 @@ def salary_report(con, h, user, body, q):
     return salary.payroll(con, q.get("month"), int(q["branch_id"]) if q.get("branch_id") else None)
 
 
+@route("GET", "/api/my-pay", role="pay")
+def my_pay(con, h, user, body, q):
+    """«Моя зарплата»: на сегодня, прогноз на месяц, цель. Руководитель может открыть любого (user_id)."""
+    from . import mypay
+    who = user
+    if q.get("user_id") and perms.can(user, "pay", "full"):
+        r = con.execute("SELECT id, name, role, is_senior, is_promoter FROM users WHERE id=?", (int(q["user_id"]),)).fetchone()
+        if not r:
+            raise ApiError("Сотрудник не найден", 404)
+        who = dict(r)
+    return mypay.view(con, who, q.get("month")) | {"name": who.get("name", "")}
+
+
+@route("POST", "/api/my-pay", role="pay")
+def my_pay_set(con, h, user, body, q):
+    from . import mypay
+    ym = body.get("month") or logic.month_of(__import__("datetime").date.today())
+    if "goal" in body:
+        mypay.set_goal(con, user["id"], ym, body["goal"])
+    if "contacts" in body:
+        if "promoter" not in perms.roles_of(user):
+            raise ApiError("Контакты вписывает промоутер", 403)
+        mypay.set_contacts(con, user["id"], ym, body["contacts"])
+    return mypay.view(con, user, ym)
+
+
 @route("GET", "/api/dashboard", role="admin")
 def dashboard(con, h, user, body, q):
     return sv.dashboard(con, q.get("month"), int(q["branch_id"]) if q.get("branch_id") else None)

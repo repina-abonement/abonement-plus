@@ -508,7 +508,8 @@ def move_card(con, sid: int, funnel: str, stage: str, user, reason: str = "", co
             return _refuse(con, s, (reason or "").strip(), (comment or "").strip(), user)
         if stage == "bought":
             con.execute("""UPDATE students SET funnel='members', stage='active', stage_changed_at=?, priority=0,
-                           converted_at=COALESCE(converted_at, ?) WHERE id=?""", (now_iso(), now_iso(), sid))
+                           converted_at=COALESCE(converted_at, ?), converted_by=COALESCE(converted_by, ?) WHERE id=?""",
+                        (now_iso(), now_iso(), (user or {}).get("id"), sid))  # кто продал: 200 ₽ администратору
             if s["group_id"] and not enrollments_of(con, sid):
                 con.execute("INSERT INTO enrollments(student_id, group_id, weekdays, tariff, created_at) VALUES (?,?,?,?,?)",
                             (sid, s["group_id"], "", s["tariff"], now_iso()))
@@ -701,7 +702,8 @@ def update_student(con, sid: int, data: dict, user) -> None:
     if "trial_at" in changes:
         con.execute("UPDATE students SET contacted_after_trial = 0, trial_came = NULL WHERE id=?", (sid,))
         if data.get("trial_at"):
-            con.execute("UPDATE students SET trial_booked_at = COALESCE(trial_booked_at, ?) WHERE id=?", (now_iso(), sid))
+            con.execute("UPDATE students SET trial_booked_at = COALESCE(trial_booked_at, ?), trial_booked_by = COALESCE(trial_booked_by, ?) WHERE id=?",
+                        (now_iso(), (user or {}).get("id"), sid))  # кто записал: 200 ₽ администратору (mypay.py)
         if data.get("trial_at") and s["stage"] in ("lead", "no_answer"):
             con.execute("UPDATE students SET stage='trial_booked', stage_changed_at=? WHERE id=?", (now_iso(), sid))
     if ("trial_at" in changes or "group_id" in changes) and s["funnel"] == "sales":

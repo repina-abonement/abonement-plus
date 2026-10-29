@@ -993,3 +993,10 @@ html.theme-soft .col-body { overflow-y: auto; overscroll-behavior: contain; scro
 .no-copy .page input, .no-copy .page textarea, .no-copy .drawer input, .no-copy .drawer textarea { -webkit-user-select: text; user-select: text; }
 .staff-row { flex-wrap: wrap; row-gap: 8px; }
 .staff-row > .grow { flex: 1 1 100%; }
+/* «Моя зарплата» */
+.mp-big { font: 800 36px/1.1 var(--display); letter-spacing: -.02em; margin-top: 4px; }
+.mp-bar { position: relative; height: 10px; border-radius: 6px; background: var(--line); margin: 14px 0 26px; }
+.mp-bar > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; background: #23a26d; }
+.mp-bar > span { position: absolute; top: 14px; transform: translateX(-50%); white-space: nowrap; font-size: 12px; color: var(--ink-2); }
+.mp-goal { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: #e5f4e4; font-size: 14px; }
+.mp-goal div { margin-top: 4px; }

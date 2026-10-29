@@ -67,6 +67,43 @@ async function renderTeam(page) {
       </div></section>` : ""}`;
   page.querySelectorAll("[data-prof]").forEach((el) => (el.onclick = () => openStaffProfile(+el.dataset.prof)));
   if ($("#tm-edit")) $("#tm-edit").onclick = () => editTeam(t);
+  if (!admin) {  // сотрудник: «Моя зарплата» сверху, над оргструктурой
+    page.querySelector(".page-head").insertAdjacentHTML("afterend", `<section class="tm-sec" id="my-pay"><div class="muted small">Считаю зарплату…</div></section>`);
+    renderMyPay($("#my-pay")).catch((e) => { $("#my-pay").remove(); });
+  }
+}
+
+/* «Моя зарплата» (mypay.py): переключатель «Где я сейчас / Весь месяц», полоса месяца, цель */
+async function renderMyPay(box, mode) {
+  const d = await api("GET", "/api/my-pay");
+  mode = mode || box.dataset.mode || "now";
+  box.dataset.mode = mode;
+  const P = d.parts, big = mode === "now" ? d.now : d.forecast;
+  const pos = Math.round(100 * d.day / d.days);
+  const rows = [];
+  if (P.coach) rows.push(["Тренировки", mode === "now" ? `${P.coach.lessons_done} из ${P.coach.lessons}` : `${P.coach.lessons} за месяц`, mode === "now" ? P.coach.now : P.coach.month]);
+  if (P.coach && P.coach.fines) rows.push(["Штрафы за опоздание", "", -P.coach.fines]);
+  if (P.admin) rows.push(["Смены", mode === "now" ? `${P.admin.shifts_done} из ${P.admin.shifts}` : `${P.admin.shifts} по графику`, (mode === "now" ? P.admin.shifts_done : P.admin.shifts) * P.admin.rates.shift],
+    ["Записи на пробное", String(P.admin.trials), P.admin.trials * P.admin.rates.trial], ["Покупки после пробного", String(P.admin.sales), P.admin.sales * P.admin.rates.sale]);
+  if (P.promoter) rows.push(["Контакты", String(P.promoter.contacts), P.promoter.now]);
+  const n = d.need || {};
+  const goalTxt = !d.goal ? "" : n.gap <= 0 && !(n.contacts > 0) ? `<div class="mp-goal ok">Цель ${rub(d.goal)} уже в кармане по прогнозу 🎉</div>` : `<div class="mp-goal">
+      До цели ${rub(d.goal)} не хватает <b>${rub(n.gap || Math.max(0, d.goal - d.now))}</b>.
+      ${n.kids ? `<div>Это ещё <b>${n.kids}</b> ${n.kids % 10 === 1 && n.kids % 100 !== 11 ? "ребёнок" : [2, 3, 4].includes(n.kids % 10) && ![12, 13, 14].includes(n.kids % 100) ? "ребёнка" : "детей"} в твои группы. Свободные места: ${n.groups.filter((g) => g.free).map((g) => `${esc(g.group)} - ${g.free}`).join(", ") || "пока нет"}</div>` : ""}
+      ${n.contacts ? `<div>Это ещё <b>${n.contacts}</b> контактов, примерно <b>${n.per_day}</b> в день до конца месяца</div>` : ""}
+      ${n.trials ? `<div>Это примерно ещё <b>${n.trials}</b> записей на пробное или продаж</div>` : ""}</div>`;
+  box.innerHTML = `<div class="tm-h"><div><b>Моя зарплата</b><small>${esc(d.month_label.toLowerCase())}</small></div></div>
+    <div class="seg" style="margin-bottom:12px"><button data-mpm="now" class="${mode === "now" ? "active" : ""}">Где я сейчас</button><button data-mpm="month" class="${mode === "month" ? "active" : ""}">Весь месяц</button></div>
+    <div class="mp-big">${rub(big)}</div>
+    <div class="small muted">${mode === "now" ? `заработано с 1 числа по сегодня` : `прогноз на весь месяц по графику и оплаченным абонементам`}</div>
+    <div class="mp-bar"><i style="width:${mode === "now" ? pos : 100}%"></i><span style="${pos > 75 ? "right:0;transform:none" : pos < 25 ? "left:0;transform:none" : `left:${pos}%`}">вы здесь · ${d.day} из ${d.days}</span></div>
+    <div class="list" style="box-shadow:none;margin-top:6px">${rows.map(([a, b, c]) => `<div class="list-row"><div class="grow">${a}${b ? ` <span class="muted small">${b}</span>` : ""}</div><b>${rub(c)}</b></div>`).join("")}</div>
+    ${P.promoter ? `<div class="row" style="margin-top:10px;align-items:flex-end"><div class="field"><label>Собрал контактов в этом месяце</label><input type="number" min="0" id="mp-c" value="${P.promoter.contacts}"></div><button class="btn sm" id="mp-cs" style="flex:0 0 auto">Сохранить</button></div>` : ""}
+    <div class="row" style="margin-top:10px;align-items:flex-end"><div class="field"><label>Сколько хочу получить в этом месяце, ₽</label><input type="number" min="0" step="1000" id="mp-g" value="${d.goal || ""}" placeholder="например, 40000"></div><button class="btn sm primary" id="mp-gs" style="flex:0 0 auto">Посчитать</button></div>
+    ${goalTxt}`;
+  box.querySelectorAll("[data-mpm]").forEach((b) => (b.onclick = () => renderMyPay(box, b.dataset.mpm)));
+  $("#mp-gs").onclick = async () => { try { await api("POST", "/api/my-pay", { goal: +$("#mp-g").value || 0 }); renderMyPay(box); } catch (e) { fail(e); } };
+  if ($("#mp-cs")) $("#mp-cs").onclick = async () => { try { await api("POST", "/api/my-pay", { contacts: +$("#mp-c").value || 0 }); toast("Сохранено"); renderMyPay(box); } catch (e) { fail(e); } };
 }
 
 function editTeam(t) {
