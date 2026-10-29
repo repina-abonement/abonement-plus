@@ -78,7 +78,7 @@ def absence_counters(con, sid: int, ref: date | None = None) -> dict:
     prev = logic.shift_month(cur, -1)
     w_start, w_end = logic.makeup_window(ref)
     rows = _rows(con.execute(
-        """SELECT a.id, a.date, a.resolved,
+        """SELECT a.id, a.date, a.resolved, a.cert,
                   (SELECT m.id FROM makeups m WHERE m.absence_id = a.id AND m.status = 'booked') AS booked_id
            FROM attendance a WHERE a.student_id = ? AND a.status = 'absent' AND a.date BETWEEN ? AND ?
            ORDER BY a.date""", (sid, w_start.isoformat(), w_end.isoformat())))
@@ -94,13 +94,15 @@ def absence_counters(con, sid: int, ref: date | None = None) -> dict:
             c["booked"] += 1
         else:
             c["available"] += 1
-            c["available_ids"].append({"id": r["id"], "date": r["date"]})
+            c["available_ids"].append({"id": r["id"], "date": r["date"], "cert": r["cert"]})
     return c
 
 
-def unresolved_absences_in_month(con, sid: int, ym: str, group_id: int | None = None) -> list[dict]:
+def unresolved_absences_in_month(con, sid: int, ym: str, group_id: int | None = None, cert_only: bool = False) -> list[dict]:
     start, end = logic.month_bounds(ym)
     extra, args = ("AND a.group_id = ?", (group_id,)) if group_id else ("", ())
+    if cert_only:
+        extra += " AND a.cert = 1"
     return _rows(con.execute(
         f"""SELECT a.id, a.date FROM attendance a
            WHERE a.student_id = ? AND a.status = 'absent' AND a.resolved IS NULL
@@ -254,7 +256,9 @@ def _pick_enrollment(con, sid: int, enrollment_id) -> dict:
 def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None) -> dict:
     get_student_row(con, sid)
     e = _pick_enrollment(con, sid, enrollment_id)
-    prev_abs = unresolved_absences_in_month(con, sid, logic.shift_month(ym, -1), e["group_id"])
+    cert_from = (con.execute("SELECT value FROM settings WHERE key='cert_required_from'").fetchone() or ["9999"])[0]
+    # перерасчёт на «Гибком»: с декабря 2026 только пропуски со справкой, не больше 3 и только при оплате следующего месяца
+    prev_abs = unresolved_absences_in_month(con, sid, logic.shift_month(ym, -1), e["group_id"], cert_only=ym >= cert_from)
     from . import closures, pricing, program
     if program.program_of_group(con, e["group_id"]):
         return program.quote(con, sid, ym, e, discount_id=discount_id)

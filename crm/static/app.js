@@ -717,6 +717,9 @@ async function openStudent(id) {
       <div class="counter"><b>${c.made_up}</b><span>отработано</span></div>
       <div class="counter hl"><b>${c.available}</b><span>можно отработать</span></div>
     </div>
+    ${c.available_ids.length ? `<div class="small" style="margin-top:8px"><b>Неотработанные пропуски:</b> ${c.available_ids.map((a) => `<label class="check small" style="display:inline-flex;margin-right:10px">
+      <input type="checkbox" data-cert="${a.id}" ${a.cert ? "checked" : ""}> ${dShort(a.date)} справка</label>`).join("")}
+      <div class="muted">На «Гибком» в перерасчёт идут только пропуски со справкой, не больше 3 и только при оплате следующего месяца</div></div>` : ""}
     <div id="warn-box" style="margin-top:10px"></div>
     ${c.booked ? `<div class="small muted" style="margin-top:8px">Записан на отработку: ${c.booked}</div>` : ""}
     ${c.credited ? `<div class="small muted" style="margin-top:4px">Ушло в перерасчёт: ${c.credited}</div>` : ""}
@@ -930,6 +933,9 @@ async function openStudent(id) {
       try { await api("POST", `/api/subscriptions/${b.dataset.pcanc}/cancel`, { refund: x.dataset.cx === "ref", comment });
         toast(x.dataset.cx === "ref" ? "Отменён, возврат записан. Пробейте чек возврата" : "Отменён, деньги на балансе"); reload(); } catch (e) { fail(e); }
     }));
+  }));
+  body.querySelectorAll("[data-cert]").forEach((x) => (x.onchange = async () => {
+    try { await api("POST", `/api/attendance/${x.dataset.cert}/cert`, { cert: x.checked }); toast(x.checked ? "Справка отмечена" : "Справка снята"); } catch (e) { fail(e); x.checked = !x.checked; }
   }));
   if ($("#pay-fam")) $("#pay-fam").onclick = () => payForm("Оплата за семью: закроет счета всех детей, остаток на баланс", 0,
     async (amount, method, comment) => { const r = await api("POST", `/api/students/${id}/pay-family`, { amount, method, comment });

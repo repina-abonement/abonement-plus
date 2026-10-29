@@ -231,6 +231,10 @@ def init_db(con: sqlite3.Connection):
     cols = {r[1] for r in con.execute("PRAGMA table_info(groups)")}
     if "coach_id" not in cols:
         con.execute("ALTER TABLE groups ADD COLUMN coach_id INTEGER REFERENCES users(id)")
+    acols = {r[1] for r in con.execute("PRAGMA table_info(attendance)")}
+    if "cert" not in acols:  # у пропуска есть медсправка: только такие идут в перерасчёт на «Гибком» (с декабря 2026)
+        con.execute("ALTER TABLE attendance ADD COLUMN cert INTEGER NOT NULL DEFAULT 0")
+    con.execute("INSERT OR IGNORE INTO settings(key, value) VALUES ('cert_required_from', '2026-12')")
     scols = {r[1] for r in con.execute("PRAGMA table_info(students)")}
     for col in ("converted_at TEXT", "trial_booked_at TEXT", "trial_came INTEGER"):
         if col.split()[0] not in scols:

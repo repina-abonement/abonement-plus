@@ -5,6 +5,9 @@
    в папку приложения на Диске. На Диске хранятся последние 30 копий. Без пароля шифрования копию не открыть,
    поэтому пароль показывается админу в Настройках, его нужно сохранить отдельно от сервера.
 
+3. Фото (аватарки сотрудников, отчёты тренеров о смене): каждое новое фото один раз шифруется тем же паролем
+   и загружается в папку photos на Диске. Список отправленных хранится в настройке backup_photos_sent.
+
 Восстановление (на любом компьютере с openssl):
     openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in crm-ДАТА.sqlite3.gz.enc -out crm.sqlite3.gz -pass pass:ПАРОЛЬ
     gunzip crm.sqlite3.gz      → получится файл базы crm.sqlite3
@@ -107,6 +110,54 @@ def upload(con, local: str) -> str:
     return name
 
 
+def _encrypt(con, src: str, dst: str) -> None:
+    r = subprocess.run(["openssl", "enc", "-aes-256-cbc", "-salt", "-pbkdf2", "-iter", "200000", "-in", src, "-out", dst,
+                        "-pass", "pass:" + ensure_key(con)], capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        raise RuntimeError("Не удалось зашифровать фото: " + (r.stderr or "")[:200])
+
+
+def upload_photos(con, limit: int = 300) -> int:
+    """Новые фото на Яндекс Диск, каждое один раз. Аватарку при замене загружаем заново (имя с датой изменения)."""
+    import json
+    from urllib.request import Request, urlopen
+    from .profiles import PHOTO_DIR
+    token = _get(con, "backup_yadisk_token")
+    if not token or not os.path.isdir(PHOTO_DIR):
+        return 0
+    sent = set(json.loads(_get(con, "backup_photos_sent") or "[]"))
+    todo = []
+    for name in sorted(os.listdir(PHOTO_DIR)):
+        path = os.path.join(PHOTO_DIR, name)
+        key = f"{name}@{int(os.path.getmtime(path))}"
+        if os.path.isfile(path) and key not in sent:
+            todo.append((name, path, key))
+    if not todo:
+        return 0
+    try:
+        _yd(con, "PUT", f"/resources?path={quote('app:/photos')}", token)
+    except RuntimeError:
+        pass  # папка уже есть
+    n = 0
+    for name, path, key in todo[:limit]:
+        enc = os.path.join(DIR, name + ".enc")
+        os.makedirs(DIR, exist_ok=True)
+        _encrypt(con, path, enc)
+        try:
+            remote = f"app:/photos/{key.replace('@', '_')}.enc"
+            up = _yd(con, "GET", f"/resources/upload?path={quote(remote)}&overwrite=true", token)
+            with open(enc, "rb") as f:
+                with urlopen(Request(up["href"], data=f.read(), method=up.get("method", "PUT")), timeout=120) as resp:
+                    if resp.status >= 400:
+                        raise RuntimeError(f"Яндекс Диск не принял фото ({resp.status})")
+        finally:
+            os.remove(enc)
+        sent.add(key)
+        n += 1
+    _put(con, "backup_photos_sent", json.dumps(sorted(sent)))
+    return n
+
+
 def run(con=None) -> dict:
     """Сделать копию сейчас: локально и, если подключено, на Яндекс Диск. Статус пишется в настройки."""
     own = con is None
@@ -118,7 +169,9 @@ def run(con=None) -> dict:
         if _get(con, "backup_yadisk_token"):
             try:
                 out["remote"] = upload(con, out["local"])
-                _put(con, "backup_last_remote", datetime.now().isoformat(timespec="minutes") + " · " + out["remote"])
+                out["photos"] = upload_photos(con)
+                _put(con, "backup_last_remote", datetime.now().isoformat(timespec="minutes") + " · " + out["remote"]
+                     + (f", фото: +{out['photos']}" if out["photos"] else ""))
                 _put(con, "backup_last_error", "")
             except Exception as e:  # noqa: BLE001
                 out["error"] = str(e)[:300]

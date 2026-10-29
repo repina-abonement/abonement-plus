@@ -1299,6 +1299,17 @@ def subscription_correct(con, h, user, body, q, sub):
     return {"ok": True}
 
 
+@route("POST", "/api/attendance/{aid}/cert", role="operator")
+def attendance_cert(con, h, user, body, q, aid):
+    """Отметка «есть медсправка» на пропуске: только такие пропуски идут в перерасчёт на «Гибком»."""
+    a = con.execute("SELECT student_id, date FROM attendance WHERE id=? AND status='absent'", (int(aid),)).fetchone()
+    if not a:
+        raise ApiError("Пропуск не найден", 404)
+    con.execute("UPDATE attendance SET cert=? WHERE id=?", (1 if body.get("cert") else 0, int(aid)))
+    sv.log(con, a["student_id"], f"Пропуск {a['date'][8:]}.{a['date'][5:7]}: {'есть медсправка' if body.get('cert') else 'справка снята'}", user, "system")
+    return {"ok": True}
+
+
 @route("POST", "/api/subscriptions/{sub}/cancel", role="operator")
 def cancel(con, h, user, body, q, sub):
     refund = bool(body.get("refund"))
