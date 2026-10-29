@@ -1,6 +1,6 @@
 /* Аналитика бизнеса: вкладки дашборда «Филиалы и группы», «Тренеры», «Отток и продления», «Источники» */
 
-const AN_TABS = [["overview", "Обзор"], ["groups", "Филиалы и группы"], ["coaches", "Тренеры"], ["churn", "Отток и продления"], ["sources", "Источники"], ["program", "Сборная"], ["pu", "ПУ и отметки"], ["salary", "Зарплата"]];
+const AN_TABS = [["overview", "Обзор"], ["groups", "Филиалы и группы"], ["coaches", "Тренеры"], ["churn", "Отток и продления"], ["sources", "Источники"], ["program", "Сборная"], ["pu", "ПУ и отметки"], ["trials", "Пробные"], ["salary", "Зарплата"]];
 
 function anTabsHtml() {
   return `<div class="seg an-tabs">${AN_TABS.map(([k, t]) => `<button data-antab="${k}" class="${(S.dashTab || "overview") === k ? "active" : ""}">${t}</button>`).join("")}</div>`;
@@ -32,6 +32,7 @@ async function renderAnalytics(box) {
   if (part === "churn") return anChurn(box, d);
   if (part === "sources") return anSources(box, d);
   if (part === "program") return anProgram(box, d);
+  if (part === "trials") return anTrials(box, d);
 }
 
 function anGroups(box, d) {
@@ -189,4 +190,24 @@ function payBox(box, d, mine) {
     ${d.coaches.map(person).join("") || `<div class="panel muted">Нет начислений</div>`}
     <section class="panel"><div class="panel-head">По группам</div><div class="an-scroll"><table class="tbl an-tbl"><thead><tr><th>Группа</th><th>Тренировок</th><th class="r">Выручка</th><th class="r">За тренировку</th><th class="r">Тренерам</th></tr></thead>
     <tbody>${d.groups.map((g) => `<tr><td><b>${esc(g.name)}</b><div class="small muted">${esc(g.branch)}</div></td><td>${g.lessons ?? ""}</td><td class="r">${g.makeup ? "отработки" : rub(g.revenue)}</td><td class="r">${g.per_lesson != null && !g.makeup ? rub(g.per_lesson) : ""}</td><td class="r">${rub(g.pay)}</td></tr>`).join("")}</tbody></table></div></section>`;
+}
+
+/* Конверсия пробных: записано → пришли → купили (в день пробного / позже) */
+function anTrials(box, d) {
+  const t = d.total;
+  const table = (title, rows) => rows.length ? `<section class="panel" style="padding:14px;margin-top:12px"><h3 style="margin-top:0">${title}</h3>
+    <div class="table-wrap"><table class="optable"><thead><tr><th></th><th>Записано</th><th>Пришли</th><th>Купили в день пробного</th><th>Купили позже</th><th>Пришли, %</th><th>Купили из пришедших, %</th></tr></thead>
+    <tbody>${rows.map((r) => `<tr><td><b>${esc(r.name)}</b></td><td>${r.booked}</td><td>${r.came}</td><td>${r.bought_same_day}</td><td>${r.bought_later}</td>
+      <td class="${anGood(r.came_pct, 80, 60)}">${anPct(r.came_pct)}</td><td class="${anGood(r.bought_pct, 60, 35)}">${anPct(r.bought_pct)}</td></tr>`).join("")}</tbody></table></div></section>` : "";
+  box.innerHTML = `<div class="cfacts" style="margin-bottom:6px">
+      <div class="cfact"><b>${t.booked}</b><span>записано на пробное</span></div>
+      <div class="cfact"><b>${t.came}</b><span>пришли · ${anPct(t.came_pct)}</span></div>
+      <div class="cfact green"><b>${t.bought_same_day}</b><span>купили в день пробного</span></div>
+      <div class="cfact green"><b>${t.bought_later}</b><span>купили позже</span></div>
+      <div class="cfact"><b>${anPct(t.bought_pct)}</b><span>купили из пришедших</span></div></div>
+    <div class="small muted">По дате пробного занятия в выбранном месяце</div>
+    ${table("По филиалам", d.branches)}${table("По тренерам", d.coaches)}${table("По группам", d.groups)}
+    <div class="row" style="gap:12px;flex-wrap:wrap;align-items:flex-start">
+    ${d.reasons.length ? `<section class="panel" style="padding:14px;margin-top:12px;flex:1 1 280px"><h3 style="margin-top:0">Почему не купили</h3>${d.reasons.map((r) => `<div class="kid-row"><span class="grow">${esc(r.reason)}</span><b>${r.n}</b></div>`).join("")}</section>` : ""}
+    ${d.coach_says.length ? `<section class="panel" style="padding:14px;margin-top:12px;flex:1 1 280px"><h3 style="margin-top:0">Что отметили тренеры в отчётах</h3>${d.coach_says.map((r) => `<div class="kid-row"><span class="grow">${esc(r.label)}</span><b>${r.n}</b></div>`).join("")}</section>` : ""}</div>`;
 }

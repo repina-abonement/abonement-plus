@@ -207,7 +207,48 @@ def report(con, ym: str | None = None, branch_id: int | None = None, part: str =
         out.update(sources_report(con, ym))
     elif part == "program":
         out.update(program_report(con, ym))
+    elif part == "trials":
+        out.update(trials_report(con, ym, branch_id))
     return out
+
+
+def trials_report(con, ym: str, branch_id: int | None = None) -> dict:
+    """Конверсия пробных за месяц (по дате пробного): записано → пришли → купили в день пробного → купили позже.
+    В разрезе филиалов, групп и тренеров, с причинами отказа и итогами, которые тренер отметил в отчёте о смене."""
+    import json as _json
+    rows = [dict(r) for r in con.execute(
+        """SELECT s.id, s.trial_at, s.trial_came, s.converted_at, s.stage, s.funnel, s.refusal_reason,
+                  g.id AS gid, g.name AS gname, b.id AS bid, b.name AS branch, u.name AS coach
+           FROM students s JOIN groups g ON g.id=s.group_id JOIN branches b ON b.id=g.branch_id LEFT JOIN users u ON u.id=g.coach_id
+           WHERE s.trial_at IS NOT NULL AND substr(s.trial_at,1,7)=? AND s.archived=0""" + (" AND b.id=?" if branch_id else ""),
+        (ym, branch_id) if branch_id else (ym,))]
+    coach_says = {}
+    for r in con.execute("SELECT data FROM coach_reports WHERE substr(date,1,7)=? AND status='done'", (ym,)):
+        coach_says.update((_json.loads(r[0] or "{}").get("trials") or {}))
+
+    def agg(items):
+        booked = len(items)
+        came = sum(1 for x in items if x["trial_came"] == 1)
+        same = sum(1 for x in items if x["converted_at"] and x["converted_at"][:10] <= x["trial_at"][:10])
+        later = sum(1 for x in items if x["converted_at"] and x["converted_at"][:10] > x["trial_at"][:10])
+        return {"booked": booked, "came": came, "bought_same_day": same, "bought_later": later,
+                "came_pct": round(100 * came / booked) if booked else None,
+                "bought_pct": round(100 * (same + later) / came) if came else None}
+    by = lambda key, label: sorted(({"name": k, **agg([x for x in rows if x[key] == k])} for k in {x[key] for x in rows if x[key]}),
+                                   key=lambda r: -r["booked"])
+    reasons = {}
+    for x in rows:
+        if x["refusal_reason"]:
+            reasons[x["refusal_reason"]] = reasons.get(x["refusal_reason"], 0) + 1
+    from .coachreport import TRIAL
+    says = {}
+    for x in rows:
+        v = coach_says.get(str(x["id"]))
+        if v in TRIAL:
+            says[TRIAL[v]] = says.get(TRIAL[v], 0) + 1
+    return {"total": agg(rows), "branches": by("branch", "Филиал"), "groups": by("gname", "Группа"), "coaches": by("coach", "Тренер"),
+            "reasons": sorted(({"reason": k, "n": v} for k, v in reasons.items()), key=lambda r: -r["n"]),
+            "coach_says": [{"label": k, "n": v} for k, v in says.items()]}
 
 
 def program_report(con, ym: str, slug: str = "sbornaya") -> dict:

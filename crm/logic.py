@@ -88,6 +88,27 @@ def in_vacation(d: date, vacations: list[tuple[date, date]]) -> bool:
     return any(s <= d <= e for s, e in vacations)
 
 
+def age_warning(birth: str, age_txt: str, branch: str = "", on: date | None = None) -> str:
+    """Подходит ли ребёнок группе по возрасту (Юлия, 28.10): «3-5» - от 3 до 5 полных лет включительно.
+    Исключение: в Чоботовской в группу 6-8 можно до 10 лет. Пустая строка - подходит или не знаем."""
+    import re
+    n = [int(x) for x in re.findall(r"\d+", age_txt or "")]
+    if not birth or not n:
+        return ""
+    try:
+        b = date.fromisoformat(birth[:10])
+    except ValueError:
+        return ""
+    on = on or date.today()
+    months = (on.year - b.year) * 12 + on.month - b.month - (on.day < b.day)
+    y, lo, hi = months // 12, n[0], n[-1]
+    if "чобот" in (branch or "").lower() and (lo, hi) == (6, 8):
+        hi = 9
+    if lo <= y <= hi:
+        return ""
+    return f"не по возрасту: {y} {'год' if y % 10 == 1 and y % 100 != 11 else 'года' if y % 10 in (2, 3, 4) and y % 100 not in (12, 13, 14) else 'лет'} {months % 12} мес., группа {age_txt}"
+
+
 def quote(*, weekdays: list[int], ym: str, tariff: str, prices: dict,
           vacations: list[tuple[date, date]], prev_unresolved_absences: int, closed: set | None = None) -> dict:
     """Цена абонемента на месяц ym.

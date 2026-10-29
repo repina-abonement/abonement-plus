@@ -113,8 +113,8 @@ def unresolved_absences_in_month(con, sid: int, ym: str, group_id: int | None = 
 
 def enrollments_of(con, sid: int, active_only: bool = True) -> list[dict]:
     q = """SELECT e.*, g.name AS group_name, g.weekdays AS group_weekdays, g.time AS group_time, g.age AS group_age,
-                  g.program_id, g.lesson_kind
-           FROM enrollments e JOIN groups g ON g.id = e.group_id WHERE e.student_id = ?"""
+                  g.program_id, g.lesson_kind, b.name AS branch_name
+           FROM enrollments e JOIN groups g ON g.id = e.group_id JOIN branches b ON b.id = g.branch_id WHERE e.student_id = ?"""
     if active_only:
         q += " AND e.active = 1"
     return _rows(con.execute(q + " ORDER BY e.id", (sid,)))
@@ -602,7 +602,9 @@ def student_detail(con, sid: int) -> dict:
     cur = logic.month_of(today())
     return {
         "student": s, "family": fam, "parents": parents, "siblings": siblings, "group": grp,
-        "subscriptions": subs, "vacations": vacs, "enrollments": enrollments_of(con, sid), "makeups": makeups, "history": hist,
+        "subscriptions": subs, "vacations": vacs,
+        "enrollments": [e | {"age_warn": logic.age_warning(s["birth"], e["group_age"], e["branch_name"])} for e in enrollments_of(con, sid)],
+        "trial_age_warn": logic.age_warning(s["birth"], grp["age"], _branch_name(con, grp["branch_id"])) if grp and s["funnel"] == "sales" else "", "makeups": makeups, "history": hist,
         "counters": absence_counters(con, sid) if s["funnel"] == "members" else None,
         "balance": _balance_out(con, sid),
         "ledger": __import__("crm.money", fromlist=["ledger"]).ledger(con, sid),

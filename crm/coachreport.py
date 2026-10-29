@@ -297,12 +297,33 @@ def submit(con, rid: int, user: dict) -> dict:
         con.execute("INSERT INTO inventory_issues(report_id, branch_id, date, note, created_at) VALUES (?,?,?,?,?)",
                     (rid, r["branch_id"], r["date"], v["data"].get("inv_note", ""), now))
         pu.notify_chat(con, "care", f"🔴 {_managers(con)} Неисправный инвентарь, {s['branch']}: {v['data'].get('inv_note', '')}. Фото в CRM")
+    trial_tasks(con, v)
     merch.report_shift(con, {"id": s["main_id"], "name": v["main"]}, r["branch_id"], v["data"].get("merch") == "yes", r["date"])
     for a in s["assistants"]:  # помощник тоже ответил про мерч: отчёт общий
         merch.report_shift(con, {"id": a, "name": ""}, r["branch_id"], v["data"].get("merch") == "yes", r["date"])
     con.execute("UPDATE alerts SET closed_at=? WHERE key LIKE ? AND closed_at IS NULL", (now, f"rep%:{rid}:%"))
     pu.notify_chat(con, "coaches", text(con, view(con, _row(con, rid), s)))
     return view(con, _row(con, rid), s)
+
+
+TRIAL_TASK = {"bought": "Купили на месте у тренера: оформить абонемент", "think": "Думают после пробного: перезвонить",
+              "no": "Не подошло после пробного: узнать причину"}
+
+
+def trial_tasks(con, v: dict) -> int:
+    """Итог пробного от тренера сразу становится задачей ответственному за филиал, со словами тренера."""
+    from . import pu, tasks
+    n = 0
+    gid = {g["name"]: g["id"] for g in v["groups"]}
+    for t in v["trials"]:
+        out = (v["data"].get("trials") or {}).get(str(t["id"]))
+        if t["came"] != 1 or out not in TRIAL_TASK:
+            continue
+        due = _iso(_now() + timedelta(hours=2 if out == "bought" else 20))
+        note = f"Тренер {v['main']} в отчёте о смене {v['date'][8:]}.{v['date'][5:7]}: «{TRIAL[out]}», группа {t['group']}"
+        n += bool(tasks.add_task(con, "manual", t["id"], due, title=TRIAL_TASK[out], assignee=pu.responsible(con, gid.get(t["group"])),
+                                 source="manual", note=note, auto_key=f"trial_out:{t['id']}:{v['date']}"))
+    return n
 
 
 def _managers(con) -> str:

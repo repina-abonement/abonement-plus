@@ -681,7 +681,7 @@ async function openStudent(id) {
 
   const html = `
   <h2>${esc(s.name)}</h2>
-  <div class="muted small" style="margin-top:4px">${esc(d.stage_label)}${s.birth ? " · " + esc(ageText(s.birth)) : ""}</div>
+  <div class="muted small" style="margin-top:4px">${esc(d.stage_label)}${s.birth ? " · " + esc(ageText(s.birth)) : ` · <span style="color:#b42318">нет даты рождения: без неё CRM не проверит возраст</span>`}</div>
   ${s.priority ? `<div class="alert">Заявка с сайта, обработать в первую очередь. Карточка перестанет быть красной, когда вы смените этап или добавите комментарий с итогом звонка</div>` : ""}
 
   <div class="section">
@@ -691,6 +691,7 @@ async function openStudent(id) {
     </div>
     ${!isMember ? `<div class="field"><label>Филиал</label><select id="f-branch"><option value="">— не выбран —</option>${S.meta.branches.filter((b) => b.active).map((b) => `<option value="${b.id}" ${b.id === s.branch_id ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : ""}
     ${!isMember ? `<div class="field"><label>Группа для пробного</label><select id="f-group"><option value="">— не выбрана —</option>${groups.filter((x) => x.trial_ok !== 0 || x.id === s.group_id).map((x) => `<option value="${x.id}" ${x.id === s.group_id ? "selected" : ""}>${esc(x.name)} · ${esc(x.age)} лет</option>`).join("")}</select></div>
+    ${d.trial_age_warn ? `<div class="alert" style="margin-bottom:8px">⚠️ Группа для пробного ${esc(d.trial_age_warn)}. Проверьте, точно ли сюда</div>` : ""}
     <div class="field"><label>Пробное занятие</label><input id="f-trial" type="datetime-local" value="${esc(s.trial_at || "")}"></div>
     <div id="trial-occ" class="small"></div><div id="trial-slots"></div>` : ""}
     <div class="field"><label>Откуда узнали</label>${sourceSelect("f-source", s.source_id, s.source)}</div>
@@ -746,6 +747,7 @@ async function openStudent(id) {
         </div>` : `
         <div class="enr">
           <div class="enr-head"><b>${esc(e.group_name)}</b><span class="muted small">${esc(e.group_age)} лет</span>
+            ${e.age_warn ? `<span class="pill red" title="Проверьте группу">⚠️ ${esc(e.age_warn)}</span>` : ""}
             ${e.start_date && e.start_date > S.meta.today ? `<span class="pill yellow">ходит с ${dShort(e.start_date)}</span>` : ""}
             <button class="btn sm" data-entr="${e.id}" title="Перевести в другую группу вместе с абонементом">Перевести</button>
             <button class="icon-btn" data-enoff="${e.id}" title="Больше не ходит в эту группу">✕</button></div>
