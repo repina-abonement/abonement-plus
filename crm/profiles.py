@@ -27,6 +27,8 @@ def init(con):
         con.execute("ALTER TABLE users ADD COLUMN photo_at TEXT NOT NULL DEFAULT ''")
     if "bio" not in cols:
         con.execute("ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT '{}'")
+    if "photo_sq" not in cols:  # 1 - фото уже обрезано по лицу при загрузке (квадрат), 0 - фото во весь рост с сайта
+        con.execute("ALTER TABLE users ADD COLUMN photo_sq INTEGER NOT NULL DEFAULT 0")
 
 
 def _path(uid: int) -> str:
@@ -43,7 +45,7 @@ def _kind(data: bytes) -> str | None:
     return None
 
 
-def save_photo(con, uid: int, data: bytes):
+def save_photo(con, uid: int, data: bytes, square: bool = False):
     if not data or len(data) > MAX_PHOTO:
         raise ApiError("Фото до 4 МБ")
     if not _kind(data):
@@ -51,7 +53,7 @@ def save_photo(con, uid: int, data: bytes):
     os.makedirs(PHOTO_DIR, exist_ok=True)
     with open(_path(uid), "wb") as f:
         f.write(data)
-    con.execute("UPDATE users SET photo_at=? WHERE id=?", (datetime.now().isoformat(timespec="seconds"), uid))
+    con.execute("UPDATE users SET photo_at=?, photo_sq=? WHERE id=?", (datetime.now().isoformat(timespec="seconds"), 1 if square else 0, uid))
 
 
 def photo_from_url(con, uid: int, url: str):

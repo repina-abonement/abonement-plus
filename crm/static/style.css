@@ -1007,3 +1007,11 @@ html.theme-soft .col-body { overflow-y: auto; overscroll-behavior: contain; scro
 .mp-goal div { margin-top: 4px; }
 /* Nunito: заголовки и жирное 800 */
 h1, h2, h3, h4, b, strong, th { font-weight: 800; }
+/* аватарка, обрезанная при загрузке: квадрат по лицу */
+.ava-photo.sq { background-size: cover; background-position: center; }
+.crop-modal { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.crop-card { background: var(--surface); border-radius: 18px; padding: 16px; width: 100%; max-width: 320px; display: flex; flex-direction: column; gap: 10px; }
+.crop-view { position: relative; width: 280px; height: 280px; margin: 0 auto; border-radius: 12px; overflow: hidden; touch-action: none; }
+.crop-view canvas { width: 280px; height: 280px; display: block; cursor: grab; }
+.crop-ring { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 999px rgba(0,0,0,.45); border: 2px solid #23a26d; pointer-events: none; }
+.crop-zoom { width: 100%; }

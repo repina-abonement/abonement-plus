@@ -11,8 +11,8 @@ function avatar(id, name, size = 36) {
   const nm = name || u.name || "";
   const st = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.38)}px`;
   const stk = u.sticker && size >= 28 ? `<i class="ava-stk" style="font-size:${Math.max(12, Math.round(size * 0.36))}px">${esc(u.sticker)}</i>` : "";
-  // фото тренеров во весь рост: приближаем на лицо, чтобы голова была по центру круга
-  if (u.photo_at) return `<span class="ava-wrap" style="width:${size}px;height:${size}px" title="${esc(u.nickname || "")}"><span class="ava-photo" style="background-image:url('/api/users/${u.id}/photo?v=${encodeURIComponent(u.photo_at)}')"></span>${stk}</span>`;
+  // фото во весь рост с сайта: приближаем на лицо; обрезанное при загрузке (photo_sq) показываем целиком
+  if (u.photo_at) return `<span class="ava-wrap" style="width:${size}px;height:${size}px" title="${esc(u.nickname || "")}"><span class="ava-photo${u.photo_sq ? " sq" : ""}" style="background-image:url('/api/users/${u.id}/photo?v=${encodeURIComponent(u.photo_at)}')"></span>${stk}</span>`;
   const ini = nm.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
   const c = (+id || 0) % AVA_COLORS.length;
   const ini_ = `<span class="ava ava-ini" style="${st};background:${AVA_COLORS[c]};color:${AVA_INK[c]}">${esc(ini)}</span>`;
@@ -53,9 +53,54 @@ async function openStaffProfile(uid) {
   if ($("#sp-file")) $("#sp-file").onchange = (e) => {
     const f = e.target.files[0]; if (!f) return;
     if (f.size > 4 * 1024 * 1024) return toast("Фото до 4 МБ", true);
-    const r = new FileReader();
-    r.onload = async () => { try { await api("POST", `/api/users/${uid}/photo`, { data: r.result }); toast("Фото сохранено"); refresh(); } catch (err) { fail(err); } };
-    r.readAsDataURL(f);
+    cropFace(f, async (data) => { try { await api("POST", `/api/users/${uid}/photo`, { data, square: true }); toast("Фото сохранено"); refresh(); } catch (err) { fail(err); } });
+    e.target.value = "";
   };
   if ($("#sp-del")) $("#sp-del").onclick = async () => { try { await api("POST", `/api/users/${uid}/photo`, { remove: true }); refresh(); } catch (err) { fail(err); } };
+}
+
+/* Кадрирование при загрузке: человек двигает фото и приближает, пока лицо не встанет в кружок.
+   На сервер уходит готовый квадрат 480×480, поэтому новые аватарки сразу по центру. */
+function cropFace(file, onDone) {
+  const url = URL.createObjectURL(file), img = new Image();
+  img.onerror = () => { URL.revokeObjectURL(url); toast("Не получилось открыть фото. Нужен JPG или PNG (фото с iPhone: сделайте скриншот)", true); };
+  img.onload = () => {
+    const V = 280;  // окно предпросмотра
+    const base = Math.max(V / img.width, V / img.height);
+    let zoom = 1.6, x = 0, y = 0;  // смещение центра фото от центра окна, в пикселях окна
+    const box = document.createElement("div");
+    box.className = "crop-modal";
+    box.innerHTML = `<div class="crop-card"><b>Наведите кружок на лицо</b><div class="small muted">Двигайте фото пальцем или мышкой, ползунком приближайте</div>
+      <div class="crop-view"><canvas width="${V * 2}" height="${V * 2}"></canvas><i class="crop-ring"></i></div>
+      <input type="range" min="1" max="5" step="0.01" value="${zoom}" class="crop-zoom" aria-label="Приближение">
+      <div class="row" style="gap:8px"><button class="btn" data-cx>Отмена</button><button class="btn primary" data-cok>Сохранить</button></div></div>`;
+    document.body.appendChild(box);
+    const cv = box.querySelector("canvas"), ctx = cv.getContext("2d");
+    const draw = (c, size) => {
+      const s = base * zoom * size / V;
+      c.fillStyle = "#fff"; c.fillRect(0, 0, size, size);
+      c.drawImage(img, size / 2 + x * size / V - img.width * s / 2, size / 2 + y * size / V - img.height * s / 2, img.width * s, img.height * s);
+    };
+    const clamp = () => {  // фото не должно уходить из кружка пустым краем
+      const w = img.width * base * zoom, h = img.height * base * zoom;
+      x = Math.max(-(w - V) / 2, Math.min((w - V) / 2, x)); y = Math.max(-(h - V) / 2, Math.min((h - V) / 2, y));
+    };
+    const render = () => { clamp(); draw(ctx, V * 2); };
+    y = img.height > img.width ? img.height * base * zoom * 0.25 : 0;  // фото во весь рост: начинаем с верхней части
+    render();
+    let drag = null;
+    cv.onpointerdown = (e) => { drag = { x: e.clientX - x, y: e.clientY - y }; cv.setPointerCapture(e.pointerId); };
+    cv.onpointermove = (e) => { if (!drag) return; x = e.clientX - drag.x; y = e.clientY - drag.y; render(); };
+    cv.onpointerup = () => { drag = null; };
+    box.querySelector(".crop-zoom").oninput = (e) => { const k = +e.target.value / zoom; zoom = +e.target.value; x *= k; y *= k; render(); };
+    const close = () => { box.remove(); URL.revokeObjectURL(url); };
+    box.querySelector("[data-cx]").onclick = close;
+    box.querySelector("[data-cok]").onclick = () => {
+      const out = document.createElement("canvas"); out.width = out.height = 480;
+      draw(out.getContext("2d"), 480);
+      const data = out.toDataURL("image/jpeg", 0.9);
+      close(); onDone(data);
+    };
+  };
+  img.src = url;
 }

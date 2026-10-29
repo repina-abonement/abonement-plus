@@ -233,7 +233,7 @@ def user_photo_set(con, h, user, body, q, uid):
     elif body.get("data"):
         raw = str(body["data"]).split(",", 1)[-1]
         try:
-            profiles.save_photo(con, int(uid), base64.b64decode(raw))
+            profiles.save_photo(con, int(uid), base64.b64decode(raw), bool(body.get("square")))
         except ValueError:
             raise ApiError("Не удалось прочитать фото")
     sv.audit(con, user, "user.photo", str(uid))
@@ -423,9 +423,9 @@ def meta(con, h, user, body, q):
     m["staff_docs_pending"] = staffdocs.pending(con, user)
     import json as _json
     m["staff"] = []
-    for r in con.execute("SELECT id, name, role, photo_at, bio FROM users WHERE active=1 ORDER BY name"):
+    for r in con.execute("SELECT id, name, role, photo_at, photo_sq, bio FROM users WHERE active=1 ORDER BY name"):
         b = _json.loads(r["bio"] or "{}") if r["bio"] else {}
-        m["staff"].append({"id": r["id"], "name": r["name"], "role": r["role"], "photo_at": r["photo_at"],
+        m["staff"].append({"id": r["id"], "name": r["name"], "role": r["role"], "photo_at": r["photo_at"], "photo_sq": r["photo_sq"],
                            "sticker": b.get("sticker", ""), "nickname": b.get("nickname", "")})
     return m
 
