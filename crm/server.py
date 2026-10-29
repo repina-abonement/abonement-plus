@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import logic, ai, calldigest, callstats, coaches, comms, db, expenses, fakegen, fiscal, legal, merch, offers, money, planner, schedule, services as sv, sources, staff, tasks
+from . import logic, perms, ai, calldigest, callstats, coaches, comms, db, expenses, fakegen, fiscal, legal, merch, offers, money, planner, schedule, services as sv, sources, staff, tasks
 from .services import ApiError
 
 
@@ -75,7 +75,7 @@ def current_user(con, handler) -> dict | None:
     tok = c.get("crm_session")
     if not tok:
         return None
-    r = con.execute("""SELECT u.id, u.login, u.name, u.role, s.created_at FROM sessions s
+    r = con.execute("""SELECT u.id, u.login, u.name, u.role, u.is_senior, u.is_promoter, s.created_at FROM sessions s
                        JOIN users u ON u.id=s.user_id WHERE s.token=? AND u.active=1""", (tok.value,)).fetchone()
     if not r:
         return None
@@ -123,13 +123,13 @@ def pin_login(con, h, user, body, q):
     return {"ok": True}
 
 
-@route("GET", "/api/pin")
+@route("GET", "/api/pin", role="all")
 def pin_status(con, h, user, body, q):
     from . import pin
     return {"has_pin": pin.has_pin(con, user, q.get("device") or "")}
 
 
-@route("POST", "/api/pin")
+@route("POST", "/api/pin", role="all")
 def pin_set(con, h, user, body, q):
     from . import pin
     if body.get("remove"):
@@ -140,7 +140,7 @@ def pin_set(con, h, user, body, q):
     return {"ok": True}
 
 
-@route("POST", "/api/logout")
+@route("POST", "/api/logout", role="all")
 def logout(con, h, user, body, q):
     c = SimpleCookie(h.headers.get("Cookie") or "")
     if c.get("crm_session"):
@@ -149,12 +149,12 @@ def logout(con, h, user, body, q):
     return {"ok": True}
 
 
-@route("GET", "/api/me")
+@route("GET", "/api/me", role="all")
 def me(con, h, user, body, q):
-    return user
+    return user | {"perms": perms.view_of(user), "title": perms.title(user)}
 
 
-@route("POST", "/api/me/password")
+@route("POST", "/api/me/password", role="all")
 def change_password(con, h, user, body, q):
     u = con.execute("SELECT pw_hash FROM users WHERE id=?", (user["id"],)).fetchone()
     if not db.check_password(body.get("old") or "", u["pw_hash"]):
@@ -171,17 +171,38 @@ def change_password(con, h, user, body, q):
 def users_list(con, h, user, body, q):
     ucols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
     ph = "phone" if "phone" in ucols else "'' AS phone"
-    return [dict(r) for r in con.execute(f"SELECT id, login, name, role, active, sip_number, tg_username, {ph}, photo_at FROM users ORDER BY id")]
+    out = [dict(r) for r in con.execute(f"""SELECT id, login, name, role, is_senior, is_promoter, active, sip_number, tg_username, {ph}, photo_at
+                                            FROM users ORDER BY id""")]
+    return [u | {"title": perms.title(u)} for u in out]
+
+
+def set_post(con, uid: int, post: str | None, promoter=None):
+    """Должность из Настроек: owner | senior | operator | coach | lawyer (+ отметка промоутера)."""
+    roles = {"owner": ("admin", 0), "senior": ("operator", 1), "operator": ("operator", 0), "coach": ("coach", 0), "lawyer": ("lawyer", 0)}
+    if post:
+        if post not in roles:
+            raise ApiError("Неизвестная должность")
+        role, senior = roles[post]
+        con.execute("UPDATE users SET role=?, is_senior=? WHERE id=?", (role, senior, uid))
+        if role != "coach":
+            con.execute("UPDATE groups SET coach_id=NULL WHERE coach_id=?", (uid,))
+            con.execute("UPDATE groups SET assistant_id=NULL WHERE assistant_id=?", (uid,))
+        con.execute("DELETE FROM sessions WHERE user_id=?", (uid,))  # права меняются сразу: войдёт заново
+    if promoter is not None:
+        con.execute("UPDATE users SET is_promoter=? WHERE id=?", (1 if promoter else 0, uid))
 
 
 # ---------------- фото и анкета сотрудника ----------------
 
-@route("GET", "/api/team")
+@route("GET", "/api/team", role="team")
 def team_view(con, h, user, body, q):
     from . import team
     v = team.view(con)
-    if user["role"] == "coach":
-        v["pay"] = {}
+    if not perms.can(user, "pay", "full"):  # модель оплаты: каждый видит только свою
+        rs = perms.roles_of(user)
+        v["pay"] = {k: t for k, t in v["pay"].items() if (k == "admins" and rs & {"senior", "operator"}) or (k == "promoters" and "promoter" in rs)}
+        if "coach" not in rs:
+            v.pop("coach_pay", None)
     return v
 
 
@@ -192,7 +213,7 @@ def team_save(con, h, user, body, q):
     return {"ok": True}
 
 
-@route("GET", "/api/users/{uid}/photo")
+@route("GET", "/api/users/{uid}/photo", role="all")
 def user_photo(con, h, user, body, q, uid):
     from . import profiles
     p = profiles.read_photo(int(uid))
@@ -219,16 +240,16 @@ def user_photo_set(con, h, user, body, q, uid):
     return {"ok": True}
 
 
-@route("GET", "/api/users/{uid}/profile")
+@route("GET", "/api/users/{uid}/profile", role="all")
 def user_profile(con, h, user, body, q, uid):
     from . import profiles
     p = profiles.profile(con, int(uid))
-    if user["role"] == "coach" and user["id"] != int(uid):
+    if not perms.allowed(user, "operator") and user["id"] != int(uid):
         p["phone"] = ""
     return p
 
 
-@route("PUT", "/api/users/{uid}/profile")
+@route("PUT", "/api/users/{uid}/profile", role="all")
 def user_profile_save(con, h, user, body, q, uid):
     from . import profiles
     if user["role"] != "admin" and user["id"] != int(uid):
@@ -239,6 +260,11 @@ def user_profile_save(con, h, user, body, q, uid):
 
 @route("PATCH", "/api/users/{uid}", role="admin")
 def users_patch(con, h, user, body, q, uid):
+    if body.get("post") or "is_promoter" in body:
+        if int(uid) == user["id"] and body.get("post") not in (None, "owner"):
+            raise ApiError("Нельзя снять с себя должность руководителя")
+        set_post(con, int(uid), body.get("post"), body.get("is_promoter"))
+        sv.audit(con, user, "user.post", f"{uid}:{body.get('post')}:{body.get('is_promoter')}")
     if "active" in body:
         if int(uid) == user["id"] and not body["active"]:
             raise ApiError("Нельзя отправить в архив самого себя")
@@ -305,8 +331,9 @@ def users_bulk(con, h, user, body, q):
     import secrets
     from . import schedule
     alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    roles = {"оператор": "operator", "админ": "admin", "администратор": "admin", "тренер": "coach", "контролёр": "operator",
-             "контролер": "operator", "руководитель": "admin"}
+    roles = {"оператор": "operator", "админ": "operator", "администратор": "operator", "тренер": "coach", "контролёр": "operator",
+             "контролер": "operator", "руководитель": "admin", "юрист": "lawyer", "старший администратор": "operator",
+             "старший админ": "operator", "промоутер": "coach"}
     ucols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
     if "phone" not in ucols:
         con.execute("ALTER TABLE users ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
@@ -338,6 +365,10 @@ def users_bulk(con, h, user, body, q):
             uid = con.execute("INSERT INTO users(login, name, role, pw_hash, phone) VALUES (?,?,?,?,?)",
                               (login_, name, role, db.hash_password(pw), phone)).lastrowid
             status = "заведён"
+        if not ex and (role_word.startswith("контрол") or role_word.startswith("старш")):
+            con.execute("UPDATE users SET is_senior=1 WHERE id=?", (uid,))
+        if not ex and "промоутер" in role_word:
+            con.execute("UPDATE users SET is_promoter=1 WHERE id=?", (uid,))
         if role_word.startswith("контрол"):
             for k in ("planner_controller", "checkin_reviewer"):
                 con.execute("INSERT INTO settings(key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, str(uid)))
@@ -352,17 +383,24 @@ def users_create(con, h, user, body, q):
     pw = body.get("password") or ""
     if not login_ or len(pw) < 8:
         raise ApiError("Нужен логин и пароль от 8 символов")
-    role = body.get("role") if body.get("role") in ("admin", "operator", "coach") else "operator"
     try:
-        con.execute("INSERT INTO users(login, name, role, pw_hash) VALUES (?,?,?,?)",
-                    (login_, body.get("name") or login_, role, db.hash_password(pw)))
+        uid = con.execute("INSERT INTO users(login, name, role, pw_hash) VALUES (?,?,'operator',?)",
+                          (login_, body.get("name") or login_, db.hash_password(pw))).lastrowid
     except Exception:
         raise ApiError("Такой логин уже есть")
+    set_post(con, uid, body.get("post") or {"admin": "owner"}.get(body.get("role"), body.get("role")) or "operator",
+             body.get("is_promoter") in (True, "1", "on"))
     sv.audit(con, user, "user.create", login_)
     return {"ok": True}
 
 
 # ---------------- данные ----------------
+
+def journal_write(user):
+    """Отмечать в журнале: руководитель, старший администратор, тренер (свои группы). Администратор только смотрит."""
+    if perms.level(user, "journal") == perms.LEVEL["view"]:
+        raise ApiError("Журнал у вас только для просмотра", 403)
+
 
 def coach_guard(con, user, group_id: int):
     if user["role"] != "coach":
@@ -371,13 +409,16 @@ def coach_guard(con, user, group_id: int):
         raise ApiError("Это не ваша группа", 403)
 
 
-@route("GET", "/api/meta")
+@route("GET", "/api/meta", role="all")
 def meta(con, h, user, body, q):
-    m = sv.meta(con) | {"user": user, "demo": os.environ.get("CRM_DEMO", "1") == "1", "comms": comms.status(con)}
     user["sip_number"] = con.execute("SELECT sip_number FROM users WHERE id=?", (user["id"],)).fetchone()[0]
+    user |= {"perms": perms.view_of(user), "title": perms.title(user)}
+    m = sv.meta(con) | {"user": user, "demo": os.environ.get("CRM_DEMO", "1") == "1", "comms": comms.status(con)}
     if user["role"] == "coach":
         m["groups"] = [g for g in m["groups"] if schedule.coach_may(con, user["id"], g["id"])]
         m["settings"] = {}
+    elif not perms.allowed(user, "any"):  # юрист: группы и цены ему не нужны
+        m["groups"], m["settings"] = [], {}
     from . import staffdocs
     m["staff_docs_pending"] = staffdocs.pending(con, user)
     import json as _json
@@ -389,13 +430,13 @@ def meta(con, h, user, body, q):
     return m
 
 
-@route("GET", "/api/staff-docs")
+@route("GET", "/api/staff-docs", role="all")
 def staff_docs(con, h, user, body, q):
     from . import staffdocs, legal
     return {"docs": [d | {"html": legal._md(d["text"])} for d in staffdocs.docs_for(con, user, base_url(h))], "name": user["name"]}
 
 
-@route("POST", "/api/staff-docs/accept")
+@route("POST", "/api/staff-docs/accept", role="all")
 def staff_docs_accept(con, h, user, body, q):
     from . import staffdocs
     ip = (h.headers.get("X-Forwarded-For") or h.client_address[0] or "").split(",")[0].strip()
@@ -404,20 +445,20 @@ def staff_docs_accept(con, h, user, body, q):
     return {"ok": True, "accepted": n}
 
 
-@route("GET", "/api/staff-docs/overview", role="admin")
+@route("GET", "/api/staff-docs/overview", role="staffdocs:view")
 def staff_docs_overview(con, h, user, body, q):
     from . import staffdocs
     return {"items": staffdocs.overview(con)}
 
 
-@route("GET", "/api/staff-docs/log/{uid}", role="admin")
+@route("GET", "/api/staff-docs/log/{uid}", role="staffdocs:view")
 def staff_docs_log(con, h, user, body, q, uid):
     from . import staffdocs
     u = con.execute("SELECT name FROM users WHERE id=?", (int(uid),)).fetchone()
     return {"name": u[0] if u else "", "items": staffdocs.log(con, int(uid))}
 
 
-@route("PATCH", "/api/groups/{gid}", role="admin")
+@route("PATCH", "/api/groups/{gid}", role="schedule:full")
 def group_patch(con, h, user, body, q, gid):
     if "capacity" in body:
         cap = int(body["capacity"])
@@ -662,7 +703,7 @@ def payment_confirm(con, h, user, body, q, pid):
     return {"ok": True}
 
 
-@route("GET", "/api/payments", role="admin")
+@route("GET", "/api/payments", role="payments:view")
 def payments_list(con, h, user, body, q):
     from datetime import date as _d
     start = q.get("from") or _d.today().replace(day=1).isoformat()
@@ -670,6 +711,8 @@ def payments_list(con, h, user, body, q):
     r = money.registry(con, start, end, q.get("method", ""), q.get("unconfirmed") == "1")
     r["debtors"] = money.debtors(con)
     if q.get("csv") == "1":
+        if not perms.can(user, "export"):
+            raise ApiError("Выгружать данные может только руководитель", 403)
         rows = [["Дата", "Ученик", "Семья", "Группа", "Сумма", "Способ", "Комментарий", "Принял", "Подтверждён", "Отменён"]]
         rows += [[x["paid_at"].replace("T", " "), x["student"], x["family"], x["group_name"] or "", x["amount"], x["method_label"],
                   x["comment"], x["user_name"], "да" if x["confirmed"] else "нет", "да" if x["cancelled"] else ""] for x in r["rows"]]
@@ -689,82 +732,82 @@ def structure(con, h, user, body, q):
     return schedule.structure(con)
 
 
-@route("POST", "/api/branches", role="admin")
+@route("POST", "/api/branches", role="schedule:full")
 def branch_add(con, h, user, body, q):
     return {"id": sx(schedule.save_branch, con, body)}
 
 
-@route("PUT", "/api/branches/{bid}", role="admin")
+@route("PUT", "/api/branches/{bid}", role="schedule:full")
 def branch_edit(con, h, user, body, q, bid):
     return {"id": sx(schedule.save_branch, con, body, int(bid))}
 
 
-@route("POST", "/api/branches/{bid}/archive", role="admin")
+@route("POST", "/api/branches/{bid}/archive", role="schedule:full")
 def branch_archive(con, h, user, body, q, bid):
     sx(schedule.set_branch_active, con, int(bid), bool(body.get("active")))
     return {"ok": True}
 
 
-@route("POST", "/api/groups", role="admin")
+@route("POST", "/api/groups", role="schedule:full")
 def group_add(con, h, user, body, q):
     gid = sx(schedule.save_group, con, body)
     sv.audit(con, user, "group.create", str(gid))
     return {"id": gid}
 
 
-@route("PUT", "/api/groups/{gid}", role="admin")
+@route("PUT", "/api/groups/{gid}", role="schedule:full")
 def group_edit(con, h, user, body, q, gid):
     sx(schedule.save_group, con, body, int(gid))
     sv.audit(con, user, "group.edit", str(gid))
     return {"ok": True}
 
 
-@route("POST", "/api/groups/{gid}/archive", role="admin")
+@route("POST", "/api/groups/{gid}/archive", role="schedule:full")
 def group_archive(con, h, user, body, q, gid):
     sx(schedule.set_group_active, con, int(gid), bool(body.get("active")))
     return {"ok": True}
 
 
-@route("GET", "/api/groups/{gid}/export", role="operator")
+@route("GET", "/api/groups/{gid}/export", role="export")
 def group_export(con, h, user, body, q, gid):
     name, rows = sx(schedule.group_export, con, int(gid))
     return csv_raw(rows, name)
 
 
-@route("POST", "/api/shifts", role="admin")
+@route("POST", "/api/shifts", role="schedule:full")
 def shift_add(con, h, user, body, q):
     return {"id": sx(schedule.save_shift, con, body)}
 
 
-@route("PUT", "/api/shifts/{shid}", role="admin")
+@route("PUT", "/api/shifts/{shid}", role="schedule:full")
 def shift_edit(con, h, user, body, q, shid):
     return {"id": sx(schedule.save_shift, con, body, int(shid))}
 
 
-@route("DELETE", "/api/shifts/{shid}", role="admin")
+@route("DELETE", "/api/shifts/{shid}", role="schedule:full")
 def shift_del(con, h, user, body, q, shid):
     schedule.remove_shift(con, int(shid))
     return {"ok": True}
 
 
-@route("GET", "/api/schedule/day")
+@route("GET", "/api/schedule/day", role="schedule")
 def schedule_day(con, h, user, body, q):
     from datetime import date as _d
     return schedule.day(con, _d.fromisoformat(q["date"]) if q.get("date") else _d.today())
 
 
-@route("POST", "/api/substitutions", role="operator")
+@route("POST", "/api/substitutions", role="schedule:full")
 def sub_save(con, h, user, body, q):
     return {"id": sx(schedule.save_sub, con, body, user)}
 
 
-@route("DELETE", "/api/substitutions/{sid}", role="operator")
+@route("DELETE", "/api/substitutions/{sid}", role="schedule:full")
 def sub_delete(con, h, user, body, q, sid):
     schedule.remove_sub(con, int(sid))
     return {"ok": True}
 
 
-@route("POST", "/api/schedule/import", role="admin")
+@route("POST", "/api/schedule/import", role="schedule:full")
 def schedule_import(con, h, user, body, q):
     r = sx(schedule.import_schedule, con, body)
     sv.audit(con, user, "schedule.import", f"{r['groups_new']} новых, {r['groups_updated']} обновлено")
@@ -776,12 +819,12 @@ def absences_list(con, h, user, body, q):
     return {"items": schedule.absences(con), "needs": schedule.needs_subs(con)}
 
 
-@route("POST", "/api/absences", role="operator")
+@route("POST", "/api/absences", role="schedule:full")
 def absence_add(con, h, user, body, q):
     return {"id": sx(schedule.save_absence, con, body, user)}
 
 
-@route("DELETE", "/api/absences/{aid}", role="operator")
+@route("DELETE", "/api/absences/{aid}", role="schedule:full")
 def absence_delete(con, h, user, body, q, aid):
     schedule.remove_absence(con, int(aid))
     return {"ok": True}
@@ -835,7 +878,7 @@ def staff_settings_put(con, h, user, body, q):
     return {k: staff.setting(con, k) for k in staff.DEFAULTS}
 
 
-@route("GET", "/api/lessons/staff")
+@route("GET", "/api/lessons/staff", role="journal")
 def lesson_staff_get(con, h, user, body, q):
     gid = int(q.get("group_id") or 0)
     coach_guard(con, user, gid)
@@ -843,8 +886,9 @@ def lesson_staff_get(con, h, user, body, q):
     return staff.lesson_staff(con, gid, q.get("date") or "") | {"coaches": coaches_}
 
 
-@route("POST", "/api/lessons/staff")
+@route("POST", "/api/lessons/staff", role="journal")
 def lesson_staff_set(con, h, user, body, q):
+    journal_write(user)
     gid = int(body.get("group_id") or 0)
     coach_guard(con, user, gid)
     stx(staff.set_lesson_staff, con, gid, body.get("date") or "", int(body.get("main_id") or 0),
@@ -911,59 +955,59 @@ def px(fn, *a, **kw):
         raise ApiError(str(e))
 
 
-@route("GET", "/api/planner")
+@route("GET", "/api/planner", role="planner")
 def planner_view(con, h, user, body, q):
     return planner.view(con, user)
 
 
-@route("POST", "/api/planner/tasks")
+@route("POST", "/api/planner/tasks", role="planner")
 def planner_add(con, h, user, body, q):
     return {"id": px(planner.add, con, user, body)}
 
 
-@route("GET", "/api/planner/week")
+@route("GET", "/api/planner/week", role="planner")
 def planner_week(con, h, user, body, q):
     from datetime import date as _d
     return px(planner.week, con, user, q.get("start") or _d.today().isoformat(), int(q["user"]) if q.get("user") else None)
 
 
-@route("POST", "/api/planner/tasks/{tid}/move")
+@route("POST", "/api/planner/tasks/{tid}/move", role="planner")
 def planner_move(con, h, user, body, q, tid):
     px(planner.move, con, int(tid), user, body.get("date") or "")
     return {"ok": True}
 
 
-@route("POST", "/api/planner/tasks/{tid}/reopen")
+@route("POST", "/api/planner/tasks/{tid}/reopen", role="planner")
 def planner_reopen(con, h, user, body, q, tid):
     px(planner.reopen, con, int(tid), user)
     return {"ok": True}
 
 
-@route("POST", "/api/planner/tasks/{tid}/cancel")
+@route("POST", "/api/planner/tasks/{tid}/cancel", role="planner")
 def planner_cancel(con, h, user, body, q, tid):
     px(planner.cancel, con, int(tid), user)
     return {"ok": True}
 
 
-@route("POST", "/api/planner/tasks/{tid}/return")
+@route("POST", "/api/planner/tasks/{tid}/return", role="planner")
 def planner_return(con, h, user, body, q, tid):
     px(planner.return_task, con, int(tid), user, body.get("note") or "")
     return {"ok": True}
 
 
-@route("POST", "/api/planner/recurring/{rid}/stop")
+@route("POST", "/api/planner/recurring/{rid}/stop", role="planner")
 def planner_stop(con, h, user, body, q, rid):
     px(planner.stop_recurring, con, int(rid), user)
     return {"ok": True}
 
 
-@route("PUT", "/api/planner/settings", role="admin")
+@route("PUT", "/api/planner/settings", role="planner:full")
 def planner_settings(con, h, user, body, q):
     px(planner.save_settings, con, body)
     return {"ok": True}
 
 
-@route("PUT", "/api/users/{uid}/birth")
+@route("PUT", "/api/users/{uid}/birth", role="all")
 def user_birth(con, h, user, body, q, uid):
     if not planner.can_manage(con, user) and int(uid) != user["id"]:
         raise ApiError("Нет доступа", 403)
@@ -980,7 +1024,7 @@ def fx(fn, *a, **kw):
         raise ApiError(str(e))
 
 
-@route("GET", "/api/fiscal", role="operator")
+@route("GET", "/api/fiscal", role="fiscal")
 def fiscal_get(con, h, user, body, q):
     v = fiscal.view(con, int(q.get("days") or 30))
     if user["role"] != "admin":
@@ -1000,12 +1044,12 @@ def fiscal_test(con, h, user, body, q):
     return fiscal.test_sources(con)
 
 
-@route("POST", "/api/fiscal/run", role="admin")
+@route("POST", "/api/fiscal/run", role="fiscal")
 def fiscal_run(con, h, user, body, q):
     return fiscal.run(con)
 
 
-@route("POST", "/api/fiscal/{pid}/resolve", role="operator")
+@route("POST", "/api/fiscal/{pid}/resolve", role="fiscal")
 def fiscal_resolve(con, h, user, body, q, pid):
     fx(fiscal.resolve, con, int(pid), body.get("action") or "", user, (body.get("note") or "").strip())
     sv.audit(con, user, "fiscal.resolve", f"{pid}:{body.get('action')}")
@@ -1071,12 +1115,12 @@ def ads_post_mark(con, h, user, body, q, pid):
     return {"ok": True}
 
 
-@route("GET", "/api/offers", role="operator")
+@route("GET", "/api/offers", role="operator|docs")
 def offers_list(con, h, user, body, q):
     return {"programs": offers.listing(con, base_url(h))}
 
 
-@route("POST", "/api/offers", role="admin")
+@route("POST", "/api/offers", role="docs:full")
 def offers_upload(con, h, user, body, q):
     try:
         oid = offers.upload(con, body, user)
@@ -1086,7 +1130,7 @@ def offers_upload(con, h, user, body, q):
     return {"id": oid}
 
 
-@route("POST", "/api/offers/{oid}/archive", role="admin")
+@route("POST", "/api/offers/{oid}/archive", role="docs:full")
 def offers_archive(con, h, user, body, q, oid):
     offers.archive(con, int(oid), bool(body.get("archived", True)))
     return {"ok": True}
@@ -1133,7 +1177,7 @@ def fake_remove(con, h, user, body, q):
     return {"removed": n}
 
 
-@route("GET", "/api/schedule/week")
+@route("GET", "/api/schedule/week", role="schedule")
 def schedule_week(con, h, user, body, q):
     if q.get("start"):
         from datetime import date as _d
@@ -1216,8 +1260,9 @@ def makeup_book(con, h, user, body, q, sid):
                           body.get("absence_id"), user)
 
 
-@route("POST", "/api/makeups/{mid}/status")
+@route("POST", "/api/makeups/{mid}/status", role="journal")
 def makeup_status(con, h, user, body, q, mid):
+    journal_write(user)
     m = con.execute("SELECT group_id FROM makeups WHERE id=?", (int(mid),)).fetchone()
     if m:
         coach_guard(con, user, m["group_id"])
@@ -1225,7 +1270,7 @@ def makeup_status(con, h, user, body, q, mid):
     return {"ok": True}
 
 
-@route("GET", "/api/journal")
+@route("GET", "/api/journal", role="journal")
 def journal(con, h, user, body, q):
     coach_guard(con, user, int(q.get("group_id") or 0))
     j = sv.journal(con, int(q.get("group_id") or 0), q.get("date") or sv.today().isoformat())
@@ -1240,17 +1285,18 @@ def journal(con, h, user, body, q):
     return j
 
 
-@route("POST", "/api/attendance")
+@route("POST", "/api/attendance", role="journal")
 def attendance(con, h, user, body, q):
+    journal_write(user)
     coach_guard(con, user, int(body.get("group_id") or 0))
     sv.mark_attendance(con, int(body.get("student_id") or 0), int(body.get("group_id") or 0),
                        body.get("date") or "", body.get("status") or "", user)
     return {"ok": True}
 
 
-@route("GET", "/api/coach/today")
+@route("GET", "/api/coach/today", role="today")
 def coach_today(con, h, user, body, q):
-    cid = user["id"] if user["role"] == "coach" else int(q.get("coach_id") or 0)
+    cid = int(q.get("coach_id") or 0) if perms.can(user, "today", "full") else user["id"]
     out = coaches.coach_today(con, cid)
     out["checkins"] = staff.my_day(con, cid)
     for les in out["today"]:
@@ -1264,7 +1310,7 @@ def coach_today(con, h, user, body, q):
     return out
 
 
-@route("GET", "/api/coaches/board")
+@route("GET", "/api/coaches/board", role="coaches")
 def coaches_board(con, h, user, body, q):
     me = user["id"] if user["role"] == "coach" else (int(q["as_coach"]) if q.get("as_coach") else None)
     return coaches.leaderboard(con, q.get("month"), me)
@@ -1276,14 +1322,12 @@ def analytics_report(con, h, user, body, q):
     return analytics.report(con, q.get("month"), int(q["branch_id"]) if q.get("branch_id") else None, q.get("part") or "groups")
 
 
-@route("GET", "/api/salary")
+@route("GET", "/api/salary", role="pay")
 def salary_report(con, h, user, body, q):
     """Зарплата тренеров за месяц. Тренер видит только свою."""
     from . import salary
-    if user["role"] == "coach":
+    if not perms.can(user, "pay", "full"):
         return salary.payroll(con, q.get("month"), None, user["id"])
-    if user["role"] != "admin":
-        raise ApiError("Нет доступа", 403)
     return salary.payroll(con, q.get("month"), int(q["branch_id"]) if q.get("branch_id") else None)
 
 
@@ -1504,7 +1548,7 @@ def closures_list(con, h, user, body, q):
     return {"items": closures.listing(con)}
 
 
-@route("POST", "/api/closures", role="admin")
+@route("POST", "/api/closures", role="schedule:full")
 def closures_add(con, h, user, body, q):
     from . import closures
     try:
@@ -1513,7 +1557,7 @@ def closures_add(con, h, user, body, q):
         raise ApiError(str(e))
 
 
-@route("DELETE", "/api/closures/{cid}", role="admin")
+@route("DELETE", "/api/closures/{cid}", role="schedule:full")
 def closures_del(con, h, user, body, q, cid):
     from . import closures
     closures.remove(con, int(cid))
@@ -1648,13 +1692,13 @@ def integrations_get(con, h, user, body, q):
     return comms.admin_view(con, base_url(h))
 
 
-@route("GET", "/api/legal", role="admin")
+@route("GET", "/api/legal", role="docs:full")
 def legal_get(con, h, user, body, q):
     comms.put(con, "public_url", base_url(h))
     return legal.admin_view(con, base_url(h))
 
 
-@route("PUT", "/api/legal", role="admin")
+@route("PUT", "/api/legal", role="docs:full")
 def legal_put(con, h, user, body, q):
     legal.save(con, body)
     sv.audit(con, user, "legal.update", ",".join(sorted(body)))
@@ -1753,10 +1797,6 @@ def handle_hook(h, method: str, source: str, token: str, url) -> None:
             return h._send(400, {"ok": False, "success": False, "error": str(e)})
         # остальным сервисам отвечаем «принято»: ошибку видно в журнале событий, а Sipuni не отключит отправку
     return h._send(200, result)
-
-
-ROLE_RANK = {"coach": 1, "operator": 2, "admin": 3}
-ROLE_NEED = {"any": 1, "operator": 2, "admin": 3}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1880,7 +1920,7 @@ class Handler(BaseHTTPRequestHandler):
                     user = current_user(con, self)
                     if not user:
                         raise ApiError("Нужно войти", 401)
-                    if ROLE_RANK.get(user["role"], 0) < ROLE_NEED.get(role, 1):
+                    if not any(perms.allowed(user, x) for x in role.split("|")):
                         raise ApiError("Недостаточно прав", 403)
                 con.execute("BEGIN" if method in ("GET", "HEAD") else "BEGIN IMMEDIATE")
                 try:

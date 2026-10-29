@@ -986,3 +986,10 @@ html.theme-soft .col-body { overflow-y: auto; overscroll-behavior: contain; scro
 .tm-check { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 8px 0; }
 .center { text-align: center; }
 @media (max-width: 760px) { .tm-paygrid { grid-template-columns: 1fr; } .tm-sec { padding: 14px; } }
+
+/* права: журнал только для просмотра, копирование списков только у руководителя */
+.readonly .mark button[data-att], .readonly .mark button[data-mk] { pointer-events: none; opacity: .55; }
+.no-copy .page, .no-copy .drawer-panel { -webkit-user-select: none; user-select: none; }
+.no-copy .page input, .no-copy .page textarea, .no-copy .drawer input, .no-copy .drawer textarea { -webkit-user-select: text; user-select: text; }
+.staff-row { flex-wrap: wrap; row-gap: 8px; }
+.staff-row > .grow { flex: 1 1 100%; }

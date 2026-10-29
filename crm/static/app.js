@@ -146,7 +146,7 @@ async function renderLogin(force = false) {
 /* ---------- каркас ---------- */
 const VIEWS = [
   ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Ученики"], ["skips", "Пропуски"],
-  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["settings", "Настройки"],
+  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["docs", "Документы"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
   team: '<circle cx="12" cy="6" r="2.5"/><circle cx="5.5" cy="17.5" r="2.5"/><circle cx="18.5" cy="17.5" r="2.5"/><path d="M12 8.5v3.5M5.5 15v-3h13v3"/>',
@@ -165,28 +165,33 @@ const NAV_ICONS = {
   merch: '<path d="M8 4l-4 3 2 3 2-1v11h8V9l2 1 2-3-4-3c-.5 1.5-2 2.5-4 2.5S8.5 5.5 8 4z"/>',
   payments: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h3"/>',
   search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
+  docs: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 11h5M10 14.5h5M10 18h3"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>',
   more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
 };
 const navIcon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NAV_ICONS[k] || ""}</svg>`;
 
 const isCoach = () => S.user && S.user.role === "coach";
-const COACH_VIEWS = ["today", "journal", "planner", "coaches", "settings", "meet"];
-const visibleViews = () => isCoach() ? VIEWS.filter(([k]) => COACH_VIEWS.includes(k)).map(([k, t]) => [k, k === "coaches" ? "Мои результаты" : t])
-  : VIEWS.filter(([k]) => k !== "today" && (S.user.role === "admin" || !["dashboard", "payments", "spend"].includes(k)));
+/* права по разделам приходят с сервера (perms.py): own - своё, view - смотреть, full - всё */
+const LEVELS = { own: 1, view: 2, full: 3 };
+const can = (sec, lvl = "own") => (LEVELS[((S.user && S.user.perms) || {})[sec]] || 0) >= LEVELS[lvl];
+const isOwner = () => can("settings", "full");
+const visibleViews = () => VIEWS.filter(([k]) => can(k) && (k !== "today" || !isOwner()))  // руководитель смотрит стол тренера через «Как видит»
+  .map(([k, t]) => [k, k === "coaches" && !can("coaches", "view") ? "Мои результаты" : t]);
 const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
 function isCoachShort() { return "Результаты"; }
 const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></span>` : "";
 
 function shell() {
-  if (isCoach() && !COACH_VIEWS.includes(S.view)) S.view = "today";
   const views = visibleViews();
+  if (S.view !== "meet" && !views.some(([k]) => k === S.view)) S.view = views[0][0];
+  document.body.classList.toggle("no-copy", !can("export"));
   const tabs = views.length <= 5 ? views : [...views.slice(0, 4), ["more", "Ещё"]];
   app.innerHTML = `
   <header class="topbar">
     <div class="brand"><i aria-hidden="true">⚽</i><div>Абонемент <span>Плюс</span></div></div>
     <nav class="nav">${views.map(([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}<span>${t}</span>${badge(k)}</button>`).join("")}</nav>
-    ${isCoach() ? "" : `<button class="btn" id="new-client">+ Клиент</button>`}
+    ${can("members", "full") ? `<button class="btn" id="new-client">+ Клиент</button>` : ""}
   </header>
   <main class="page" id="page"></main>
   <nav class="tabbar">${tabs.map(([k, t]) => `<button data-${k === "more" ? "more" : "view"}="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}<span>${SHORT[k] || t}</span>${badge(k)}</button>`).join("")}</nav>
@@ -240,6 +245,7 @@ function go(view, fromHistory = false) {
 async function render() {
   const page = $("#page");
   if (!page) return;
+  page.classList.remove("readonly");
   if (S.meta && S.meta.staff_docs_pending) return renderStaffDocs(page);
   await renderView(page);
   if (navDepth() > 0 && !page.querySelector(".back-btn")) {
@@ -267,6 +273,7 @@ async function renderView(page) {
     if (S.view === "team") return await renderTeam(page);
     if (S.view === "search") return await renderSearch(page);
     if (S.view === "settings") return await renderSettings(page);
+    if (S.view === "docs") return await renderDocs(page);
   } catch (e) { if (e.message !== "Нужно войти") page.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
 }
 
@@ -987,6 +994,7 @@ async function renderJournal(page) {
   if ($("#j-meet")) $("#j-meet").onclick = () => openMeet(g.id, S.journal.date);
   $("#j-group").onchange = (e) => { step(() => { S.journal.group = +e.target.value; }); };
   $("#j-date").onchange = (e) => { step(() => { S.journal.date = e.target.value; }); };
+  page.classList.toggle("readonly", !can("journal", "full") && !isCoach());
   if (!isCoach()) page.querySelectorAll("[data-who]").forEach((el) => (el.onclick = () => openStudent(+el.dataset.who)));
   page.querySelectorAll("[data-att]").forEach((b) => (b.onclick = async () => {
     try { await api("POST", "/api/attendance", { student_id: +b.dataset.sid, group_id: S.journal.group, date: S.journal.date, status: b.dataset.att }); render(); } catch (e) { fail(e); }
@@ -1047,7 +1055,7 @@ async function renderSearch(page) {
 
 /* ---------- настройки ---------- */
 async function renderSettings(page) {
-  const st = S.meta.settings || {}, admin = S.user.role === "admin";
+  const st = S.meta.settings || {}, admin = isOwner();
   const users = admin ? (await api("GET", "/api/users")).filter((u) => u.active) : [];
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Настройки</h2><button class="btn sm" id="logout">Выйти</button></div>
@@ -1075,27 +1083,28 @@ async function renderSettings(page) {
       <button class="btn primary">Сохранить</button>
     </form>
     <div class="section" id="backup-settings"></div>
-    <div class="section" id="staffdocs-settings"></div>
     <div class="section" id="resp-settings"></div>
     <div id="program-settings"></div>
     <div class="section">
       <h3>Сотрудники</h3>
-      <div class="list" style="box-shadow:none;margin-bottom:10px">${users.map((u) => `<div class="list-row"><div class="grow"><span class="who" data-prof="${u.id}">${avatar(u.id, u.name, 34)}<span>${esc(u.name)} <span class="muted small">${esc(u.login)}</span></span></span></div>
+      <div class="list" style="box-shadow:none;margin-bottom:10px">${users.map((u) => `<div class="list-row staff-row"><div class="grow"><span class="who" data-prof="${u.id}">${avatar(u.id, u.name, 34)}<span>${esc(u.name)} <span class="muted small">${esc(u.login)}</span></span></span></div>
         <input data-uph="${u.id}" value="${esc(u.phone || "")}" placeholder="телефон" title="Телефон сотрудника" inputmode="tel" style="flex:0 0 130px;padding:5px 8px">
         <input data-tgu="${u.id}" value="${esc(u.tg_username ? "@" + u.tg_username : "")}" placeholder="@telegram" title="Ник в Telegram: CRM отметит сотрудника в рабочих чатах" style="flex:0 0 120px;padding:5px 8px">
         ${u.role === "coach" ? "" : `<input data-sip="${u.id}" value="${esc(u.sip_number || "")}" placeholder="вн. номер" title="Внутренний номер Sipuni: на него придёт звонок из карточки" inputmode="numeric" style="flex:0 0 96px;padding:5px 8px">`}
-        <span class="pill">${{ admin: "Руководитель", operator: "Администратор", coach: "Тренер" }[u.role]}</span>
+        <select data-upost="${u.id}" title="Должность: от неё зависят разделы и права" style="flex:0 0 auto;width:auto;padding:5px 8px" ${u.id === S.user.id ? "disabled" : ""}>${POSTS.map(([k, t]) => `<option value="${k}" ${postOf(u) === k ? "selected" : ""}>${t}</option>`).join("")}</select>
+        <label class="check small" title="Промоутер: права промоутера добавляются к должности" style="flex:0 0 auto"><input type="checkbox" data-uprom="${u.id}" ${u.is_promoter ? "checked" : ""}> промоутер</label>
         ${u.id !== S.user.id ? `<button class="icon-btn" data-upw="${u.id}" title="Задать новый пароль">🔑</button><button class="icon-btn" data-uarch="${u.id}" title="В архив">🗄</button>` : ""}</div>`).join("")}</div>
       <div class="small muted" style="margin:-4px 0 10px">Внутренний номер Sipuni нужен, чтобы звонить клиенту прямо из карточки</div>
       <form id="nu">
         <div class="row"><div class="field"><label>Имя</label><input name="name" required></div><div class="field"><label>Логин</label><input name="login" required></div></div>
         <div class="row"><div class="field"><label>Пароль (от 8 символов)</label><div class="pw-wrap"><input name="password" type="password" minlength="8" required><button type="button" class="pw-eye" aria-label="Показать пароль">👁</button></div></div>
-          <div class="field"><label>Роль</label><select name="role"><option value="operator">Оператор</option><option value="coach">Тренер</option><option value="admin">Админ</option></select></div></div>
+          <div class="field"><label>Должность</label><select name="post">${POSTS.map(([k, t]) => `<option value="${k}" ${k === "operator" ? "selected" : ""}>${t}</option>`).join("")}</select></div></div>
+        <label class="check small" style="margin-bottom:8px"><input type="checkbox" name="is_promoter" value="1"> Ещё и промоутер</label>
         <button class="btn sm">Добавить сотрудника</button>
       </form>
       <details style="margin-top:12px"><summary class="linkish small">Завести команду списком (пароли создаст CRM)</summary>
-        <div class="small muted" style="margin:6px 0">По строке на человека: Имя Фамилия; роль; телефон. Роль: оператор, тренер, админ или контролёр. Если человек уже есть, ему просто выдастся новый пароль</div>
-        <textarea id="bulk-users" rows="6" placeholder="Ольга Авлахова; оператор; +7 911 831-27-83"></textarea>
+        <div class="small muted" style="margin:6px 0">По строке на человека: Имя Фамилия; должность; телефон. Должность: администратор, старший администратор, тренер, промоутер, юрист или руководитель. Если человек уже есть, ему просто выдастся новый пароль</div>
+        <textarea id="bulk-users" rows="6" placeholder="Ольга Авлахова; администратор; +7 911 831-27-83"></textarea>
         <button class="btn sm primary" id="bulk-go" style="margin-top:6px">Завести и выдать пароли</button>
         <div id="bulk-res"></div></details>
     </div>
@@ -1103,7 +1112,6 @@ async function renderSettings(page) {
     <div class="section" id="archive-settings"><h3>Архив</h3><div class="muted small">Загружаю…</div></div>
     </div>` : ""}
     <div class="section" id="offers-settings"><h3>Оферты</h3><div class="muted small">Загружаю…</div></div>
-    ${admin ? `<div class="section" id="legal-settings"><h3>Юридические документы</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="source-settings"><h3>Рекламные каналы и источники</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="staff-settings"><h3>Тренеры: приход и оплата</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="task-settings"><h3>Задачи и автосообщения по пробным</h3><div class="muted small">Загружаю…</div></div>` : ""}
@@ -1151,11 +1159,10 @@ async function renderSettings(page) {
   if ($("#staff-settings")) renderStaffSettings($("#staff-settings"), users).catch(fail);
   if ($("#source-settings")) renderSourceSettings($("#source-settings")).catch(fail);
   if ($("#legal-settings")) renderLegalSettings($("#legal-settings")).catch(fail);
-  if ($("#offers-settings") && !isCoach()) renderOffers($("#offers-settings")).catch(fail);
+  if ($("#offers-settings") && can("sales") && !can("docs")) renderOffers($("#offers-settings")).catch(fail);  // администраторам: ссылки на оферты для родителей
   if ($("#program-settings")) renderProgramSettings($("#program-settings")).catch(fail);
   if ($("#resp-settings")) renderResponsibles($("#resp-settings")).catch(fail);
   if ($("#backup-settings")) renderBackup($("#backup-settings")).catch(() => { $("#backup-settings").remove(); });
-  if ($("#staffdocs-settings")) renderStaffDocsAdmin($("#staffdocs-settings")).catch(() => { $("#staffdocs-settings").remove(); });
   else if ($("#offers-settings")) $("#offers-settings").remove();
   if ($("#structure-settings")) renderStructure($("#structure-settings"), users).catch(fail);
   if ($("#archive-settings")) renderArchive($("#archive-settings")).catch(fail);
@@ -1181,6 +1188,14 @@ async function renderSettings(page) {
   page.querySelectorAll("[data-prof]").forEach((el) => (el.onclick = () => openStaffProfile(+el.dataset.prof)));
   page.querySelectorAll("[data-uph]").forEach((inp) => (inp.onchange = async () => {
     try { await api("PATCH", `/api/users/${inp.dataset.uph}`, { phone: inp.value }); toast("Телефон сохранён"); } catch (err) { fail(err); }
+  }));
+  page.querySelectorAll("[data-upost]").forEach((sel) => (sel.onchange = async () => {
+    const t = POSTS.find(([k]) => k === sel.value)[1];
+    if (!confirm(`Сделать должность «${t}»? Разделы и права поменяются сразу, сотруднику нужно будет войти заново`)) { render(); return; }
+    try { await api("PATCH", `/api/users/${sel.dataset.upost}`, { post: sel.value }); toast("Должность изменена"); } catch (err) { fail(err); render(); }
+  }));
+  page.querySelectorAll("[data-uprom]").forEach((c) => (c.onchange = async () => {
+    try { await api("PATCH", `/api/users/${c.dataset.uprom}`, { is_promoter: c.checked }); toast(c.checked ? "Отмечен промоутером" : "Больше не промоутер"); } catch (err) { fail(err); }
   }));
   page.querySelectorAll("[data-tgu]").forEach((inp) => (inp.onchange = async () => {
     try { await api("PATCH", `/api/users/${inp.dataset.tgu}`, { tg_username: inp.value }); toast("Ник в Telegram сохранён"); } catch (err) { fail(err); }
@@ -1228,22 +1243,46 @@ async function renderSettings(page) {
   };
 }
 
+/* должности для Настроек → Сотрудники (perms.py) */
+const POSTS = [["owner", "Руководитель"], ["senior", "Старший администратор"], ["operator", "Администратор"], ["coach", "Тренер"], ["lawyer", "Юрист"]];
+const postOf = (u) => u.role === "admin" ? "owner" : u.role === "operator" ? (u.is_senior ? "senior" : "operator") : u.role;
+
 /* ---------- старт ---------- */
 async function boot() {
   try {
     S.meta = await api("GET", "/api/meta");
     S.user = S.meta.user;
   } catch (e) { if (e.message !== "Нужно войти") renderLogin(); return; }
-  S.view = isCoach() ? "today" : "sales";
+  S.view = visibleViews()[0][0];
   try { const v = localStorage.getItem("crm.view"); if (v && visibleViews().some(([k]) => k === v)) S.view = v; } catch (_) {}
   shell();
   try { history.replaceState({ view: S.view, sub: navSnap(), depth: 0 }, "", "#" + S.view); } catch (_) {}
   render();
   setInterval(() => { if ($("#drawer").hidden && ["members", "skips"].includes(S.view)) render(); }, 60000);
   setInterval(() => { if ($("#drawer").hidden && S.view === "sales" && !document.hidden && !document.querySelector(".task-done:not([hidden])")) render(); }, 20000);
-  if (!isCoach()) { pollCounts(); setInterval(pollCounts, 20000); }
+  if (can("inbox")) { pollCounts(); setInterval(pollCounts, 20000); }
 }
 boot();
+
+/* Выгружать и копировать списки может только руководитель: остальным копирование из CRM не даём (кроме полей ввода) */
+document.addEventListener("copy", (e) => {
+  if (!S.user || can("export")) return;
+  const t = document.activeElement;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+  e.preventDefault();
+  toast("Копировать данные из CRM может только руководитель", true);
+});
+
+/* Документы: юридические документы, оферты, подписи сотрудников (руководитель и юрист) */
+async function renderDocs(page) {
+  page.innerHTML = `<div class="page-head"><h2 class="grow">Документы</h2></div><div style="max-width:780px">
+    ${can("docs", "full") ? `<div class="section" id="legal-settings"><h3>Юридические документы</h3><div class="muted small">Загружаю…</div></div>
+    <div class="section" id="offers-settings"><h3>Оферты</h3><div class="muted small">Загружаю…</div></div>` : ""}
+    ${can("staffdocs", "view") ? `<div class="section" id="staffdocs-settings"></div>` : ""}</div>`;
+  if ($("#legal-settings")) renderLegalSettings($("#legal-settings")).catch(fail);
+  if ($("#offers-settings")) renderOffers($("#offers-settings")).catch(fail);
+  if ($("#staffdocs-settings")) renderStaffDocsAdmin($("#staffdocs-settings")).catch(fail);
+}
 
 
 /* Перевод в другую группу вместе с абонементом: сначала показываем, что станет с оплатой, потом переводим */

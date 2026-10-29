@@ -75,9 +75,9 @@ async function renderOffers(box) {
         <div class="grow"><b>Редакция от ${dFull(v.edition_date)}</b> <span class="pill ${OFFER_STATE[v.state][0]}">${OFFER_STATE[v.state][1]}${v.state !== "past" && v.state !== "archived" ? ` с ${dFull(v.effective_from)}` : ""}</span>
           <div class="small muted">${v.groups.length ? esc(v.groups.join(", ")) : "все группы"} · загрузил(а) ${esc(v.uploaded_by)} ${dShort(v.uploaded_at)} · ${Math.round(v.size / 1024)} КБ${v.note ? ` · ${esc(v.note)}` : ""}</div></div>
         <a class="btn sm" href="${esc(v.link)}" target="_blank">Открыть</a>
-        ${S.user.role === "admin" ? `<button class="btn sm" data-oarch="${v.id}" data-v="${v.archived ? 0 : 1}" title="${v.archived ? "Вернуть" : "В архив, если загрузили по ошибке"}">${v.archived ? "↩" : "🗄"}</button>` : ""}</div>`).join("")}</div>
+        ${can("docs", "full") ? `<button class="btn sm" data-oarch="${v.id}" data-v="${v.archived ? 0 : 1}" title="${v.archived ? "Вернуть" : "В архив, если загрузили по ошибке"}">${v.archived ? "↩" : "🗄"}</button>` : ""}</div>`).join("")}</div>
     </section>`).join("") : `<div class="muted small" style="margin-bottom:10px">Оферт пока нет</div>`}
-    ${S.user.role === "admin" ? `<button class="btn primary" id="of-new">+ Загрузить оферту</button><div id="of-form"></div>` : ""}`;
+    ${can("docs", "full") ? `<button class="btn primary" id="of-new">+ Загрузить оферту</button><div id="of-form"></div>` : ""}`;
   box.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast("Ссылка скопирована"); } catch (_) {} }));
   box.querySelectorAll("[data-oarch]").forEach((b) => (b.onclick = async () => {
     try { await api("POST", `/api/offers/${b.dataset.oarch}/archive`, { archived: b.dataset.v === "1" }); renderOffers(box); } catch (e) { fail(e); }

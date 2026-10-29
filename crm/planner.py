@@ -60,8 +60,8 @@ def controller(con) -> int | None:
 
 
 def can_manage(con, user: dict) -> bool:
-    """Ставить задачи другим и видеть всю команду: админ и контролёр."""
-    return user["role"] == "admin" or user["id"] == controller(con)
+    """Ставить задачи другим и видеть всю команду: руководитель и старший администратор."""
+    return user["role"] == "admin" or bool(user.get("is_senior")) or user["id"] == controller(con)
 
 
 def _due(d: str, t: str) -> str:

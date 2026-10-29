@@ -12,7 +12,7 @@ async function renderPayments(page) {
   const disc = await api("GET", "/api/discounts?all=1");
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Оплаты</h2>
-      <a class="btn sm" href="/api/payments?${qs}&csv=1">Выгрузить в Excel</a></div>
+      ${can("export") ? `<a class="btn sm" href="/api/payments?${qs}&csv=1">Выгрузить в Excel</a>` : ""}</div>
     <div class="row" style="max-width:820px;margin-bottom:12px">
       <div class="field"><label>С</label><input type="date" id="p-from" value="${P.from}"></div>
       <div class="field"><label>По</label><input type="date" id="p-to" value="${P.to}"></div>

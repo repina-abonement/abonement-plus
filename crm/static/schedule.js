@@ -65,7 +65,7 @@ function dayHtml(d, compact = false) {
         <span class="grow"><b>${esc(l.name)}</b>${l.is_makeup ? ` <span class="pill">отработки</span>` : ""}<span class="small muted"> ${esc(l.age ? (/\d$/.test(l.age) ? l.age + " лет" : l.age) : "")}${l.coach ? ` · ${esc(l.coach)}` : " · тренер не назначен"}${l.assistant ? ` / ${esc(l.assistant)}` : ""}</span>
           ${Object.entries(l.subs || {}).map(([r, x]) => x.missing ? `<span class="pill red">⚠️ нужна замена: ${r === "main" ? "тренер" : "помощник"} ${esc(x.instead)} отсутствует</span>` : x.solo ? `<span class="pill">👤 без ${r === "main" ? "тренера" : "помощника"}: тренер один</span>` : `<span class="pill yellow">🔁 ${esc(x.name)} вместо ${esc(x.instead || "штатного")}</span>`).join(" ")}</span>
         <span class="small">${l.is_makeup ? `${l.kids} записано` : `${l.kids} из ${l.capacity}`}${l.trials ? ` · 🎯 ${l.trials}` : ""}</span>
-      </button>${!compact && !isCoach() ? `<button class="btn sm sub-btn" data-sub="${l.id}" title="Поставить другого тренера на этот день">🔁</button>` : ""}</div>`).join("") || `<div class="small muted">Тренировок нет</div>`}
+      </button>${!compact && can("schedule", "full") ? `<button class="btn sm sub-btn" data-sub="${l.id}" title="Поставить другого тренера на этот день">🔁</button>` : ""}</div>`).join("") || `<div class="small muted">Тренировок нет</div>`}
     </section>`).join("")}</div>`;
 }
 
@@ -264,7 +264,7 @@ async function renderStructure(box, users) {
       <div class="list" style="box-shadow:none">${b.groups.filter((g) => g.active).map((g) => `<div class="list-row">
         <div class="grow"><b>${g.time && !g.name.includes(g.time) ? esc(g.time) + " " : ""}${esc(g.name)}</b>${g.is_makeup ? ` <span class="pill">отработки</span>` : ""}
           <div class="small muted">${g.weekdays.split(",").map((x) => WD[+x]).join(", ")}${g.age ? ` · ${esc(g.age)} лет` : ""} · ${esc(g.coach_name || "без тренера")}${g.assistant_name ? ` / ${esc(g.assistant_name)}` : ""} · ${g.is_makeup ? "" : `${g.kids} из ${g.capacity} мест`}</div></div>
-        <a class="btn sm" href="/api/groups/${g.id}/export" title="Список учеников в Excel">Excel</a>
+        ${can("export") ? `<a class="btn sm" href="/api/groups/${g.id}/export" title="Список учеников в Excel">Excel</a>` : ""}
         <button class="btn sm" data-gedit="${g.id}" data-b="${b.id}">Изменить</button></div>`).join("") || `<div class="list-row muted small">Групп пока нет</div>`}</div>
       <button class="btn sm" data-gadd="${b.id}" style="margin-top:8px">+ Группа</button>
       <div class="small" style="margin-top:12px"><b>Смены</b></div>
@@ -311,7 +311,7 @@ function groupForm(gid, branchId, d, coaches, done) {
       <label class="check"><input type="checkbox" name="is_makeup" ${g.is_makeup ? "checked" : ""}> Это группа отработок</label>
       <label class="check"><input type="checkbox" name="trial_ok" ${g.trial_ok === 0 ? "" : "checked"}> Можно записывать на пробное</label>
       <div class="row" style="margin-top:14px"><button class="btn primary">Сохранить</button>
-        ${gid ? `<a class="btn" href="/api/groups/${gid}/export">Список в Excel</a><button type="button" class="btn danger" id="g-arch">В архив</button>` : ""}</div>
+        ${gid ? `${can("export") ? `<a class="btn" href="/api/groups/${gid}/export">Список в Excel</a>` : ""}<button type="button" class="btn danger" id="g-arch">В архив</button>` : ""}</div>
     </form>`);
   const f = $("#gf");
   const dt = Object.fromEntries((g.day_times || "").split(",").filter((x) => x.includes("=")).map((x) => x.split("=")));
