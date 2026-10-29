@@ -91,6 +91,27 @@ def title(user: dict) -> str:
     return main
 
 
+def real_staff(con) -> bool:
+    """В CRM уже работает настоящая команда (кто-то, кроме руководителя, без «тест» в имени)."""
+    return bool(con.execute("""SELECT 1 FROM users WHERE active=1 AND role!='admin'
+                               AND lower(name) NOT LIKE '%тест%' AND name NOT LIKE '%Тест%'""").fetchone())
+
+
+def archive_test_staff(con) -> int:
+    """Тестовые сотрудники («Тренер Алексей (тест)», «Ольга (тест)») уходят в архив, когда есть настоящая команда.
+    Вызывается при каждом запуске: тестовый режим заново заводит их, а в работе они только путают."""
+    if not real_staff(con):
+        return 0
+    ids = [r[0] for r in con.execute("""SELECT id FROM users WHERE active=1 AND role!='admin'
+                                        AND (lower(name) LIKE '%тест%' OR name LIKE '%Тест%')""")]
+    for uid in ids:
+        con.execute("UPDATE users SET active=0 WHERE id=?", (uid,))
+        con.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
+        con.execute("UPDATE groups SET coach_id=NULL WHERE coach_id=?", (uid,))
+        con.execute("UPDATE groups SET assistant_id=NULL WHERE assistant_id=?", (uid,))
+    return len(ids)
+
+
 def init(con) -> None:
     """Отметки старшего администратора и промоутера. При первом запуске переносим тех, кто уже работает."""
     cols = {r[1] for r in con.execute("PRAGMA table_info(users)")}

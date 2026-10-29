@@ -2022,6 +2022,10 @@ def main():
             comms.seed_demo(con)
         ai.seed_demo(con)
         tasks.seed_demo(con)
+    n = perms.archive_test_staff(con)
+    if n:
+        print(f"Тестовые сотрудники отправлены в архив: {n}", flush=True)
+    con.commit()
     con.close()
     ai.start_worker(db.connect)
     tasks.start_worker(db.connect)

@@ -156,6 +156,9 @@ def leaderboard(con, ym: str | None = None, me: int | None = None) -> dict:
 def seed_demo_coaches(con):
     """Тестовый режим: ещё два выдуманных тренера, чтобы было с кем соревноваться."""
     from .db import hash_password
+    from . import perms
+    if perms.real_staff(con) or con.execute("SELECT 1 FROM users WHERE login IN ('trener2','trener3')").fetchone():
+        return  # уже есть настоящая команда или выдуманные тренеры заведены раньше: группы не трогаем
     free = [r[0] for r in con.execute("SELECT id FROM groups WHERE coach_id IS NULL AND is_makeup=0 ORDER BY id")]
     if not free:
         return
