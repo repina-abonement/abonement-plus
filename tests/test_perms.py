@@ -78,7 +78,8 @@ def main():
         ("varya", "GET /api/payments", 200), ("varya", "GET /api/payments?csv=1", 403), ("varya", "GET /api/fiscal", 200),
         ("varya", "GET /api/dashboard", 403), ("varya", "GET /api/coaches/board", 200),
         ("lesha", "GET /api/board/sales", 403), ("lesha", "GET /api/payments", 403), ("lesha", "GET /api/coach/today", 200),
-        ("lesha", "GET /api/staff-docs/overview", 403),
+        ("lesha", "GET /api/staff-docs/overview", 403), ("lesha", "GET /api/students", 403), ("lesha", "GET /api/coach/kids", 200),
+        ("varya", "GET /api/users", 200), ("olga", "GET /api/users", 403), ("babanov", "GET /api/coach/kids", 403),
         ("babanov", "GET /api/legal", 200), ("babanov", "GET /api/offers", 200), ("babanov", "GET /api/staff-docs/overview", 200),
         ("babanov", "GET /api/board/sales", 403), ("babanov", "GET /api/schedule/week", 403), ("babanov", "GET /api/students", 403),
         ("babanov", "GET /api/team", 200), ("babanov", "GET /api/planner", 200),
@@ -92,6 +93,15 @@ def main():
     mark = {"student_id": sid, "group_id": gid, "date": "2026-01-01", "status": "present"}
     check(S["olga"]("POST", "/api/attendance", mark)[0] == 403, "Администратор журнал только смотрит")
     check(S["varya"]("POST", "/api/attendance", mark)[0] != 403, "Старший администратор отмечает в журнале")
+
+    print("Тренер видит своих детей")
+    import sqlite3
+    c2 = sqlite3.connect(os.environ["CRM_DB"])
+    c2.execute("UPDATE groups SET coach_id=? WHERE id=?", (users["lesha"]["id"], gid)); c2.commit()
+    kids = json.loads(S["lesha"]("GET", "/api/coach/kids")[1])["groups"]
+    check(len(kids) == 1 and kids[0]["id"] == gid and all("parents" in k for k in kids[0]["kids"]),
+          "Только его группа, у детей телефоны родителей")
+    check("members" in menu("lesha"), "В меню тренера «Мои ученики»")
 
     print("Модели оплаты: только своя")
     t = lambda who: json.loads(S[who]("GET", "/api/team")[1])

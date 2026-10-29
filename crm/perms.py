@@ -16,7 +16,8 @@ TITLES = {"owner": "Руководитель", "senior": "Старший адм�
 
 DESK = {"owner": "full", "senior": "full", "operator": "full"}
 SECTIONS: dict[str, dict[str, str]] = {
-    "sales": DESK, "inbox": DESK, "skips": DESK, "merch": DESK, "members": DESK, "search": DESK,
+    "sales": DESK, "inbox": DESK, "skips": DESK, "merch": DESK, "search": DESK,
+    "members": DESK | {"coach": "own"},  # тренер: дети своих групп и телефоны родителей, без правок
     "today": {"owner": "full", "coach": "own"},
     "planner": {"owner": "full", "senior": "full", "operator": "own", "coach": "own", "promoter": "own", "lawyer": "own"},
     "journal": {"owner": "full", "senior": "full", "operator": "view", "coach": "own"},

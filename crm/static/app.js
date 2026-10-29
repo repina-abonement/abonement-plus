@@ -177,7 +177,7 @@ const LEVELS = { own: 1, view: 2, full: 3 };
 const can = (sec, lvl = "own") => (LEVELS[((S.user && S.user.perms) || {})[sec]] || 0) >= LEVELS[lvl];
 const isOwner = () => can("settings", "full");
 const visibleViews = () => VIEWS.filter(([k]) => can(k) && (k !== "today" || !isOwner()))  // руководитель смотрит стол тренера через «Как видит»
-  .map(([k, t]) => [k, k === "coaches" && !can("coaches", "view") ? "Мои результаты" : t]);
+  .map(([k, t]) => [k, k === "coaches" && !can("coaches", "view") ? "Мои результаты" : k === "members" && !can("members", "full") ? "Мои ученики" : t]);
 const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
 function isCoachShort() { return "Результаты"; }
 const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></span>` : "";
@@ -264,6 +264,7 @@ async function renderView(page) {
     if (S.view === "spend") return await renderSpend(page);
     if (S.view === "fiscal") return await renderFiscal(page);
     if (S.view === "schedule") return await renderSchedule(page);
+    if (S.view === "members" && !can("members", "full")) return await renderCoachKids(page);
     if (["members", "skips"].includes(S.view)) return await renderBoard(page, S.view);
     if (S.view === "dashboard") return await renderDashboard(page);
     if (S.view === "inbox") return await renderInbox(page);
@@ -908,6 +909,18 @@ async function openStudent(id) {
   };
 }
 
+/* «Мои ученики» тренера: только просмотр, телефон родителя - позвонить одним нажатием */
+async function renderCoachKids(page) {
+  const d = await api("GET", "/api/coach/kids");
+  const n = d.groups.reduce((a, g) => a + g.kids.length, 0);
+  page.innerHTML = `<div class="page-head"><h2 class="grow">Мои ученики</h2><span class="muted small">${n} ${n % 10 === 1 && n % 100 !== 11 ? "ребёнок" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "ребёнка" : "детей"}</span></div>
+    ${d.groups.length ? d.groups.map((g) => `<div class="section"><h3>${esc(g.name)} <span class="muted small">${esc(g.branch)} · ${esc(g.age || "")}${/\d$/.test(g.age || "") ? " лет" : ""} · ${g.main ? "ты главный тренер" : "ты помощник"}</span></h3>
+      <div class="list" style="box-shadow:none">${g.kids.map((k) => `<div class="list-row"><div class="grow"><b>${esc(k.name)}</b>${k.birth ? ` <span class="muted small">${ageText(k.birth)}</span>` : ""}</div>
+        <div class="small" style="text-align:right">${k.parents.map((p) => `${esc(p.name || "Родитель")}${p.phone ? ` <a href="tel:${esc(p.phone)}">${esc(fmtPhone(p.phone))}</a>` : ""}`).join("<br>") || `<span class="muted">телефона нет</span>`}</div></div>`).join("")
+        || `<div class="list-row muted small">В группе пока нет детей</div>`}</div></div>`).join("")
+      : `<div class="panel center" style="padding:40px">За тобой пока не закреплено ни одной группы. Спроси у старшего администратора</div>`}`;
+}
+
 function ageText(birth) {
   const b = new Date(birth + "T00:00:00"), n = new Date();
   let y = n.getFullYear() - b.getFullYear();
@@ -1056,7 +1069,7 @@ async function renderSearch(page) {
 /* ---------- настройки ---------- */
 async function renderSettings(page) {
   const st = S.meta.settings || {}, admin = isOwner();
-  const users = admin ? (await api("GET", "/api/users")).filter((u) => u.active) : [];
+  const users = admin || can("schedule", "full") ? (await api("GET", "/api/users")).filter((u) => u.active) : [];
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Настройки</h2><button class="btn sm" id="logout">Выйти</button></div>
     <div style="max-width:780px">
@@ -1110,7 +1123,7 @@ async function renderSettings(page) {
     </div>
     <div class="section" id="structure-settings"><h3>Филиалы, группы и смены</h3><div class="muted small">Загружаю…</div></div>
     <div class="section" id="archive-settings"><h3>Архив</h3><div class="muted small">Загружаю…</div></div>
-    </div>` : ""}
+    </div>` : can("schedule", "full") ? `<div class="section" id="structure-settings"><h3>Филиалы, группы и смены</h3><div class="muted small">Загружаю…</div></div>` : ""}
     <div class="section" id="offers-settings"><h3>Оферты</h3><div class="muted small">Загружаю…</div></div>
     ${admin ? `<div class="section" id="source-settings"><h3>Рекламные каналы и источники</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="staff-settings"><h3>Тренеры: приход и оплата</h3><div class="muted small">Загружаю…</div></div>` : ""}

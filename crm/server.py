@@ -167,7 +167,7 @@ def change_password(con, h, user, body, q):
     return {"ok": True}
 
 
-@route("GET", "/api/users", role="admin")
+@route("GET", "/api/users", role="admin|schedule:full")  # старшему администратору: для смен и тренеров групп
 def users_list(con, h, user, body, q):
     ucols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
     ph = "phone" if "phone" in ucols else "'' AS phone"
@@ -1308,6 +1308,25 @@ def coach_today(con, h, user, body, q):
     from . import pu
     out["missing_marks"] = [m for m in pu.missing_marks(con) if m["coach_id"] == cid]
     return out
+
+
+@route("GET", "/api/coach/kids", role="members")
+def coach_kids(con, h, user, body, q):
+    """«Мои ученики» тренера: его группы (главным или помощником), дети и телефоны родителей. Только просмотр."""
+    from datetime import date as _d
+    today = _d.today().isoformat()
+    cid = int(q.get("coach_id") or 0) if perms.can(user, "members", "full") else user["id"]
+    out = []
+    for g in con.execute("""SELECT g.id, g.name, g.age, g.coach_id, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id
+                            WHERE g.active=1 AND g.is_makeup=0 AND (g.coach_id=? OR g.assistant_id=?) ORDER BY b.id, g.name""", (cid, cid)):
+        kids = []
+        for s in con.execute("""SELECT DISTINCT s.id, s.name, s.birth, s.family_id FROM enrollments e JOIN students s ON s.id=e.student_id
+                                WHERE e.group_id=? AND (e.active=1 OR e.end_date > ?) AND (e.start_date='' OR e.start_date <= ?)
+                                  AND s.funnel='members' AND s.stage != 'left' AND s.archived=0 ORDER BY s.name""", (g["id"], today, today)):
+            parents = [dict(p) for p in con.execute("SELECT name, phone FROM parents WHERE family_id=? ORDER BY id", (s["family_id"],))]
+            kids.append({"id": s["id"], "name": s["name"], "birth": s["birth"] or "", "parents": parents})
+        out.append({"id": g["id"], "name": g["name"], "age": g["age"], "branch": g["branch"], "main": g["coach_id"] == cid, "kids": kids})
+    return {"groups": out}
 
 
 @route("GET", "/api/coaches/board", role="coaches")
