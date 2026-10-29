@@ -743,9 +743,11 @@ def journal(con, group_id: int, day: str) -> dict:
                 (group_id, day)):
             rows.append(dict(m))
     else:
+        # переведённые (transfer.py): в старой группе до даты перевода, в новой с неё
         for s in con.execute("""SELECT s.id, s.name, e.weekdays FROM enrollments e JOIN students s ON s.id = e.student_id
-                                WHERE e.group_id=? AND e.active=1 AND s.funnel='members' AND s.stage != 'left' AND s.archived=0
-                                ORDER BY s.name""", (group_id,)).fetchall():
+                                WHERE e.group_id=? AND (e.active=1 OR e.end_date > ?) AND (e.start_date = '' OR e.start_date <= ?)
+                                  AND s.funnel='members' AND s.stage != 'left' AND s.archived=0
+                                ORDER BY s.name""", (group_id, day, day)).fetchall():
             if s["weekdays"] and d.weekday() not in logic.parse_weekdays(s["weekdays"]):
                 continue
             a = con.execute("SELECT status, resolved, warned, note FROM attendance WHERE student_id=? AND date=? AND group_id=?",

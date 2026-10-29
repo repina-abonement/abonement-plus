@@ -612,6 +612,18 @@ def enrollment_patch(con, h, user, body, q, eid):
     return {"ok": True}
 
 
+@route("GET", "/api/enrollments/{eid}/transfer", role="operator")
+def enrollment_transfer_plan(con, h, user, body, q, eid):
+    from . import transfer
+    return transfer.plan(con, int(eid), int(q.get("group_id") or 0), q.get("date") or "", [int(x) for x in (q.get("weekdays") or "").split(",") if x])
+
+
+@route("POST", "/api/enrollments/{eid}/transfer", role="operator")
+def enrollment_transfer(con, h, user, body, q, eid):
+    from . import transfer
+    return transfer.apply(con, int(eid), int(body.get("group_id") or 0), body.get("date") or "", user, body.get("weekdays"))
+
+
 @route("POST", "/api/subscriptions/{sub}/pay", role="operator")
 def pay(con, h, user, body, q, sub):
     sv.pay_subscription(con, int(sub), user, body.get("method") or "cash", body.get("amount"))

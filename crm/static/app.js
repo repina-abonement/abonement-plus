@@ -733,7 +733,10 @@ async function openStudent(id) {
         </div>` : `
         <div class="enr">
           <div class="enr-head"><b>${esc(e.group_name)}</b><span class="muted small">${esc(e.group_age)} лет</span>
+            ${e.start_date && e.start_date > S.meta.today ? `<span class="pill yellow">ходит с ${dShort(e.start_date)}</span>` : ""}
+            <button class="btn sm" data-entr="${e.id}" title="Перевести в другую группу вместе с абонементом">Перевести</button>
             <button class="icon-btn" data-enoff="${e.id}" title="Больше не ходит в эту группу">✕</button></div>
+          <div class="enr-tr" data-trbox="${e.id}" hidden></div>
           <div class="chips" style="margin:6px 0 8px">${e.group_weekdays.split(",").map((wd) => { const on = !e.weekdays || e.weekdays.split(",").includes(wd); return `<button class="chip day ${on ? "on" : ""}" data-enday="${e.id}" data-wd="${wd}">${WD[+wd]}</button>`; }).join("")}
             <select data-entar="${e.id}" style="width:auto;padding:4px 8px"><option value="fixed" ${e.tariff === "fixed" ? "selected" : ""}>Негибкий</option><option value="flex" ${e.tariff === "flex" ? "selected" : ""}>Гибкий</option></select></div>
           <div class="quote muted" data-quote="${e.id}">Считаю…</div>
@@ -803,6 +806,7 @@ async function openStudent(id) {
     enPatch(eid, { weekdays: days });
   }));
   body.querySelectorAll("[data-entar]").forEach((sel) => (sel.onchange = () => enPatch(+sel.dataset.entar, { tariff: sel.value })));
+  body.querySelectorAll("[data-entr]").forEach((b) => (b.onclick = () => openTransfer(+b.dataset.entr, body.querySelector(`[data-trbox="${b.dataset.entr}"]`), d, groups, reload)));
   body.querySelectorAll("[data-enoff]").forEach((b) => (b.onclick = () => { if (confirm("Ученик больше не ходит в эту группу?")) enPatch(+b.dataset.enoff, { active: false }); }));
   if ($("#en-add")) $("#en-add").onclick = async () => {
     if (!$("#en-group").value) return toast("Выберите группу", true);
@@ -1241,6 +1245,38 @@ async function boot() {
 }
 boot();
 
+
+/* Перевод в другую группу вместе с абонементом: сначала показываем, что станет с оплатой, потом переводим */
+function openTransfer(eid, box, d, groups, reload) {
+  if (!box.hidden) { box.hidden = true; return; }
+  const e = d.enrollments.find((x) => x.id === eid);
+  const t = new Date(), first = new Date(t.getFullYear(), t.getMonth() + 1, 1);
+  const iso = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+  const opts = groups.filter((g) => !g.program_id && !g.is_makeup && g.id !== e.group_id && !d.enrollments.some((x) => x.group_id === g.id));
+  box.hidden = false;
+  box.innerHTML = `<div class="row" style="margin-top:8px">
+      <div class="field"><label>В группу</label><select data-trg><option value="">Выберите группу</option>${opts.map((g) => `<option value="${g.id}">${esc(g.name)} · ${esc(g.age)} лет</option>`).join("")}</select></div>
+      <div class="field" style="flex:0 0 150px"><label>С какого дня</label><input type="date" data-trd value="${iso(first)}" min="${iso(new Date(t.getFullYear(), t.getMonth(), 1))}"></div></div>
+    <div data-trplan class="small muted">Выберите группу: покажу, что станет с абонементом и оплатой</div>`;
+  const sel = box.querySelector("[data-trg]"), dt = box.querySelector("[data-trd]"), out = box.querySelector("[data-trplan]");
+  const calc = async () => {
+    if (!sel.value) return;
+    out.textContent = "Считаю…";
+    try {
+      const p = await api("GET", `/api/enrollments/${eid}/transfer?group_id=${sel.value}&date=${dt.value}`);
+      const rows = p.months.map((m) => `<li><b>${esc(m.label)}</b>: было ${m.old_lessons} зан. за ${rub(m.old_price)} →
+        ${m.keep_lessons ? `${m.keep_lessons} зан. в старой группе (${rub(m.keep_price)}) и ` : ""}${m.new_lessons} зан. в новой (${rub(m.new_price)})</li>`).join("");
+      out.innerHTML = `<div style="margin:6px 0">С ${dShort(p.start)} в группу <b>${esc(p.to_group)}</b>. До этой даты ребёнок остаётся в журнале старой группы</div>
+        ${rows ? `<ul style="margin:4px 0 6px 18px">${rows}</ul><div>${p.diff > 0 ? `Доплата ${rub(p.diff)}: появится как долг` : p.diff < 0 ? `Разница ${rub(-p.diff)} уйдёт на депозит` : "По деньгам без изменений"}</div>`
+          : `<div>Абонементов с этой даты нет, переносить нечего</div>`}
+        <button class="btn primary sm" data-trgo style="margin-top:8px">Перевести</button>`;
+      out.querySelector("[data-trgo]").onclick = async () => {
+        try { await api("POST", `/api/enrollments/${eid}/transfer`, { group_id: +sel.value, date: dt.value }); toast("Ученик переведён"); reload(); } catch (err) { fail(err); }
+      };
+    } catch (err) { out.innerHTML = `<span style="color:#b42318">${esc(err.message)}</span>`; }
+  };
+  sel.onchange = calc; dt.onchange = calc;
+}
 
 /* Первый вход сотрудника: принять документы (NDA, правила работы с данными, согласие, журнал, ПЭП) */
 async function renderStaffDocs(page) {

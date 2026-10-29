@@ -57,6 +57,7 @@ python3 -m tests.test_tasks    # проверка задач и автосооб
 python3 -m tests.test_money    # проверка оплат, долга, депозита и скидок
 python3 -m tests.test_schedule # проверка расписания, архива и дней рождения
 python3 -m tests.test_fiscal   # проверка сверки чеков 54-ФЗ
+python3 -m tests.test_transfer # проверка перевода в другую группу с абонементом
 ```
 
 Пароль администратора задаётся переменной `CRM_ADMIN_PASSWORD`, иначе генерируется

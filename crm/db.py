@@ -278,7 +278,8 @@ def init_db(con: sqlite3.Connection):
     offers.init(con)
     fakegen.init(con)
     pu.init(con)
-    from . import pin, profiles
+    from . import pin, profiles, transfer
+    transfer.init(con)
     pin.init(con)
     profiles.init(con)
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sub_enr_month ON subscriptions(enrollment_id, month)")
