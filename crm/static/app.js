@@ -759,7 +759,9 @@ async function openStudent(id) {
     : `<div class="muted small">Абонемент выставляется, когда клиент переходит в этап «Купил абонемент».</div>`}
     ${d.subscriptions.length ? `<ul class="history" style="margin-top:10px">${d.subscriptions.map((x) => { const cov = (d.balance.covered || {})[x.id] || 0; return `<li><b>${x.kind === "single" ? "Разовое занятие" : monthLabel(x.month)}</b>${x.group_name ? " · " + esc(x.group_name) : ""} · ${rub(x.price)}${x.kind === "single" ? "" : ` · ${x.lessons} зан.`}${x.credit_lessons ? ` · перерасчёт ${x.credit_lessons}` : ""}${x.late_fee ? ` · наценка ${rub(x.late_fee)}` : ""}${x.discount_amount ? ` · скидка ${rub(x.discount_amount)}` : ""}
       <span class="pill ${x.status === "paid" ? "green" : x.status === "cancelled" ? "" : "yellow"}">${x.status === "invoiced" && cov ? `оплачено ${rub(cov)} из ${rub(x.price)}` : { paid: "оплачен", invoiced: "ждёт оплаты", cancelled: "отменён" }[x.status]}</span>
-      ${x.status === "invoiced" ? `<button class="btn sm primary" data-pay="${x.id}" data-left="${x.price - cov}">Принять оплату</button> <button class="btn sm danger" data-cancel="${x.id}">Отменить</button>` : ""}</li>`; }).join("")}</ul>` : ""}
+      ${x.corrected ? `<span class="pill">корректировка</span>` : ""}
+      ${x.status === "invoiced" ? `<button class="btn sm primary" data-pay="${x.id}" data-left="${x.price - cov}">Принять оплату</button> <button class="btn sm danger" data-cancel="${x.id}">Отменить</button>` : ""}
+      ${x.status !== "cancelled" && x.kind === "month" && can("members", "full") ? `<button class="btn sm" data-corr="${x.id}" data-price="${x.price}" title="Исключение из правил с обязательной причиной: попадёт в отчёт">Корректировка</button>` : ""}</li>`; }).join("")}</ul>` : ""}
   </div>
 
   <div class="section">
@@ -857,7 +859,9 @@ async function openStudent(id) {
       box.innerHTML = `<div class="total">${rub(q.total)}</div>
         <div class="small">${q.lessons_paid} занятий × ${rub(q.per_lesson)} = ${rub(q.base)}${q.days_label ? ` · только ${esc(q.days_label)}` : ""}${q.vacation_lessons ? ` · отпуск: −${q.vacation_lessons} зан.` : ""}</div>
         ${q.credit_lessons ? `<div class="small">Перерасчёт пропусков (${q.credit_absence_dates.map(dShort).join(", ")}): −${rub(q.credit)}</div>` : ""}
-        ${q.late_fee ? `<div class="small">Наценка за оплату после ${S.meta.settings.renewal_deadline_day} числа: +${rub(q.late_fee)}</div>` : ""}
+        ${q.late_fee ? `<div class="small">Оплата после ${dShort(q.pricing.deadline)}: +${String(q.pricing.late_pct).replace(".", ",")}% (+${rub(q.late_fee)}), скидки не действуют</div>` : ""}
+        ${q.pricing && q.pricing.newcomer ? `<div class="small">Новичок: только оставшиеся занятия этого месяца, без надбавки</div>` : ""}
+        ${q.pricing && !q.pricing.late && q.pricing.late_pct && q.pricing.late_total > q.total ? `<div class="small muted">При оплате после ${dShort(q.pricing.deadline)}: ${rub(q.pricing.late_total)} без скидок</div>` : ""}
         ${q.discount ? `<div class="small">Скидка «${esc(q.discount.name)}» ${q.discount.percent}%: −${rub(q.discount.amount)}${q.discount.auto ? ". Действует при оплате сегодня" : ""}</div>` : ""}
         <div class="small muted">Даты: ${q.dates.map(dShort).join(", ")}</div>
         ${q.waitlist ? `<div class="alert" style="margin-top:6px">Оплата после срока: место не гарантировано, в листе ожидания ${q.waitlist}</div>` : ""}`;
@@ -867,6 +871,13 @@ async function openStudent(id) {
   wireWaitlistCard(body, id, reload);
   wirePuCard(body, id, reload);
   if ($("#q-month")) { $("#q-month").onchange = loadQuotes; $("#q-disc").onchange = loadQuotes; loadQuotes(); }
+  body.querySelectorAll("[data-corr]").forEach((b) => (b.onclick = async () => {
+    const price = prompt(`Корректировка цены (сейчас ${rub(+b.dataset.price)}). Новая сумма, ₽:`, b.dataset.price);
+    if (price === null) return;
+    const comment = prompt("Почему? Причина попадёт в отчёт руководителю");
+    if (comment === null) return;
+    try { await api("POST", `/api/subscriptions/${b.dataset.corr}/correct`, { price: +price, comment }); toast("Цена скорректирована"); reload(); } catch (e) { fail(e); }
+  }));
   body.querySelectorAll("[data-inv]").forEach((b) => (b.onclick = async () => {
     try { const r = await api("POST", `/api/students/${id}/invoice`, { month: $("#q-month").value, enrollment_id: +b.dataset.inv, discount_id: $("#q-disc").value || null }); toast(`Счёт выставлен: ${rub(r.quote.total)}`); reload(); } catch (e) { fail(e); }
   }));
@@ -1080,18 +1091,11 @@ async function renderSettings(page) {
     ${admin ? `
     <form class="section" id="set">
       <h3>Цены и правила</h3>
-      <div class="row">
-        <div class="field"><label>Негибкий, ₽ за занятие</label><input name="price_fixed" type="number" value="${esc(st.price_fixed)}"></div>
-        <div class="field"><label>Гибкий, ₽ за занятие</label><input name="price_flex" type="number" value="${esc(st.price_flex)}"></div>
-      </div>
+      <div id="price-list" class="small muted" style="margin-bottom:10px">Загружаю прайс…</div>
       <div class="row"><div class="field"><label>Разовое занятие, ₽</label><input name="price_single" type="number" value="${esc(st.price_single || "")}" placeholder="Уточнить цену"></div><div></div></div>
       <div class="row">
         <div class="field"><label>Продлить до числа</label><input name="renewal_deadline_day" type="number" min="1" max="28" value="${esc(st.renewal_deadline_day)}"></div>
         <div class="field"><label>Длительность пробного, мин</label><input name="trial_minutes" type="number" value="${esc(st.trial_minutes)}"></div>
-      </div>
-      <div class="row">
-        <div class="field"><label>Наценка за позднюю оплату</label><select name="late_fee_enabled"><option value="0" ${st.late_fee_enabled === "0" ? "selected" : ""}>Выключена</option><option value="1" ${st.late_fee_enabled === "1" ? "selected" : ""}>Включена</option></select></div>
-        <div class="field"><label>Наценка, %</label><input name="late_fee_percent" type="number" value="${esc(st.late_fee_percent)}"></div>
       </div>
       <button class="btn primary">Сохранить</button>
     </form>
@@ -1167,6 +1171,7 @@ async function renderSettings(page) {
     try { localStorage.setItem("crm.theme", t); } catch (_) {}
     applyTheme(t); toast(t ? "Новый дизайн включён" : "Вернули прежний вид");
   };
+  if ($("#price-list")) renderPriceList($("#price-list")).catch(fail);
   if ($("#comms-settings")) renderCommsSettings($("#comms-settings"), users).catch(fail);
   if ($("#task-settings")) renderTaskSettings($("#task-settings"), users).catch(fail);
   if ($("#staff-settings")) renderStaffSettings($("#staff-settings"), users).catch(fail);
@@ -1253,6 +1258,26 @@ async function renderSettings(page) {
   $("#pw").onsubmit = async (e) => {
     e.preventDefault();
     try { await api("POST", "/api/me/password", Object.fromEntries(new FormData(e.target))); toast("Пароль изменён"); e.target.reset(); } catch (err) { fail(err); }
+  };
+}
+
+/* Прайс обычных групп с датой начала (pricing.py): старая и новая цена живут параллельно */
+async function renderPriceList(box) {
+  const d = await api("GET", "/api/prices");
+  const GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+  const ml = (ym) => ym <= "2000-01" ? "с самого начала" : `с 1 ${GEN[+ym.slice(5, 7) - 1]} ${ym.slice(0, 4)}`;
+  box.classList.remove("muted");
+  box.innerHTML = `<table class="tbl"><thead><tr><th>Для абонементов</th><th>Негибкий</th><th>Гибкий</th><th>После ${esc(String(S.meta.settings.renewal_deadline_day || 25))} числа</th></tr></thead>
+    <tbody>${d.items.map((p) => `<tr><td>${ml(p.valid_from)}</td><td>${rub(p.fixed)}</td><td>${rub(p.flex)}</td><td>${p.late_pct ? `+${String(p.late_pct).replace(".", ",")}%, без скидок` : "без надбавки"}</td></tr>`).join("")}</tbody></table>
+    <div class="row" style="margin-top:8px;align-items:flex-end">
+      <div class="field"><label>С месяца</label><input type="month" id="pl-m"></div>
+      <div class="field"><label>Негибкий, ₽</label><input type="number" id="pl-fx"></div>
+      <div class="field"><label>Гибкий, ₽</label><input type="number" id="pl-fl"></div>
+      <div class="field"><label>Надбавка, %</label><input type="number" id="pl-pct" value="5"></div>
+      <button type="button" class="btn sm" id="pl-add" style="flex:0 0 auto">Добавить цены</button></div>
+    <div class="small muted">Цена берётся по месяцу абонемента. При оплате после срока надбавка со всей суммы, скидки не действуют. Исключение только кнопкой «Корректировка» в карточке</div>`;
+  $("#pl-add").onclick = async () => {
+    try { await api("POST", "/api/prices", { valid_from: $("#pl-m").value, fixed: $("#pl-fx").value, flex: $("#pl-fl").value, late_pct: $("#pl-pct").value }); toast("Прайс сохранён"); renderPriceList(box); } catch (e) { fail(e); }
   };
 }
 

@@ -136,8 +136,9 @@ def add_payment(con, sid: int, amount: int, method: str, user: dict, *, subscrip
 
 
 def pay_subscription(con, sub_id: int, method: str, user: dict, amount: int | None = None) -> int:
-    from . import program
+    from . import pricing, program
     program.reprice(con, sub_id)  # сборная: цена зависит от даты оплаты
+    pricing.reprice(con, sub_id)  # обычные группы: тоже (+5% и без скидки после 25 числа)
     sub = con.execute("SELECT * FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
     if not sub or sub["status"] == "cancelled":
         raise ValueError("Счёт не найден или отменён")

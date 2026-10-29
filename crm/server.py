@@ -710,6 +710,8 @@ def payments_list(con, h, user, body, q):
     end = q.get("to") or _d.today().isoformat()
     r = money.registry(con, start, end, q.get("method", ""), q.get("unconfirmed") == "1")
     r["debtors"] = money.debtors(con)
+    from . import pricing
+    r["corrections"] = pricing.corrections(con, start, end)
     if q.get("csv") == "1":
         if not perms.can(user, "export"):
             raise ApiError("Выгружать данные может только руководитель", 403)
@@ -1245,6 +1247,35 @@ def discounts_save(con, h, user, body, q):
 @route("POST", "/api/discounts/{did}/archive", role="admin")
 def discounts_archive(con, h, user, body, q, did):
     money.archive_discount(con, int(did), bool(body.get("active")))
+    return {"ok": True}
+
+
+def prx(fn, *a, **kw):
+    from . import pricing
+    try:
+        return fn(*a, **kw)
+    except pricing.PriceError as e:
+        raise ApiError(str(e))
+
+
+@route("GET", "/api/prices", role="admin")
+def prices_get(con, h, user, body, q):
+    from . import pricing
+    return {"items": pricing.listing(con)}
+
+
+@route("POST", "/api/prices", role="admin")
+def prices_save(con, h, user, body, q):
+    from . import pricing
+    prx(pricing.save_price, con, body)
+    sv.audit(con, user, "prices.save", json.dumps(body, ensure_ascii=False))
+    return {"items": pricing.listing(con)}
+
+
+@route("POST", "/api/subscriptions/{sub}/correct", role="operator")
+def subscription_correct(con, h, user, body, q, sub):
+    from . import pricing
+    prx(pricing.correct, con, int(sub), body.get("price"), body.get("comment") or "", user)
     return {"ok": True}
 
 

@@ -26,6 +26,11 @@ async function renderPayments(page) {
     </div>
     ${d.debtors.length ? `<section class="panel" style="margin-top:14px"><h3>Должники</h3>
       <div class="chips" style="margin-top:8px">${d.debtors.slice(0, 40).map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)} · ${rub(x.debt)}</button>`).join("")}</div></section>` : ""}
+    ${d.corrections.length ? `<section class="panel" style="margin-top:14px"><h3>Корректировки цен · ${d.corrections.length}</h3>
+      <div class="small muted" style="margin:4px 0 8px">Исключения из правил: обычная цена или скидка после 25 числа. Кто, когда, на сколько и почему</div>
+      <div class="table-wrap"><table class="optable"><thead><tr><th>Когда</th><th>Ученик</th><th>Месяц</th><th>Было</th><th>Стало</th><th>Причина</th><th>Кто</th></tr></thead>
+      <tbody>${d.corrections.map((c) => `<tr><td>${esc(c.created_at.replace("T", " "))}</td><td><a href="#" data-open="${c.student_id}">${esc(c.student)}</a></td><td>${esc(monthLabel(c.month))}</td>
+        <td>${rub(c.old_price)}</td><td><b>${rub(c.new_price)}</b> <span class="small muted">${c.new_price < c.old_price ? "−" : "+"}${rub(Math.abs(c.new_price - c.old_price))}</span></td><td>${esc(c.comment)}</td><td>${esc(c.user_name)}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
     <section class="panel" style="margin-top:14px"><h3>Реестр платежей</h3>
       <div class="table-wrap"><table class="optable"><thead><tr><th>Дата</th><th>Ученик</th><th>Сумма</th><th>Способ</th><th>Комментарий</th><th>Принял</th><th></th></tr></thead>
       <tbody>${d.rows.length ? d.rows.map((r) => `<tr class="${r.cancelled ? "struck" : ""}">

@@ -254,28 +254,37 @@ def _pick_enrollment(con, sid: int, enrollment_id) -> dict:
 def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None) -> dict:
     get_student_row(con, sid)
     e = _pick_enrollment(con, sid, enrollment_id)
-    st = settings(con)
-    prices = {"fixed": st["price_fixed"], "flex": st["price_flex"]}
     prev_abs = unresolved_absences_in_month(con, sid, logic.shift_month(ym, -1), e["group_id"])
-    from . import closures, program
+    from . import closures, pricing, program
     if program.program_of_group(con, e["group_id"]):
         return program.quote(con, sid, ym, e, discount_id=discount_id)
+    on = today()
+    pr = pricing.prices_for(con, ym)  # прайс оплачиваемого месяца (pricing.py)
     ms, me = logic.month_bounds(ym)
-    q = logic.quote(weekdays=enrollment_days(e), ym=ym, tariff=e["tariff"], prices=prices,
-                    vacations=vacations_of(con, sid), prev_unresolved_absences=len(prev_abs),
-                    closed=closures.closed_dates(con, e["group_id"], ms, me))
+    newcomer = pricing.is_newcomer(con, sid, ym, on)
+    closed = closures.closed_dates(con, e["group_id"], ms, me)
+    if newcomer:  # новичок в текущем месяце: только оставшиеся занятия
+        start = pricing.newcomer_start(con, sid, on)
+        closed = closed | {d.isoformat() for d in logic.lesson_dates(enrollment_days(e), ym) if d < start}
+    q = logic.quote(weekdays=enrollment_days(e), ym=ym, tariff=e["tariff"], prices={"fixed": pr["fixed"], "flex": pr["flex"]},
+                    vacations=vacations_of(con, sid), prev_unresolved_absences=len(prev_abs), closed=closed)
     q["credit_absence_ids"] = [a["id"] for a in prev_abs[:q["credit_lessons"]]]
     q["credit_absence_dates"] = [a["date"] for a in prev_abs[:q["credit_lessons"]]]
-    total, fee = logic.apply_late_fee(q["total"], enabled=st["late_fee_enabled"] == "1",
-                                      percent=float(st["late_fee_percent"]), today=today(), target_month=ym,
-                                      deadline_day=int(st["renewal_deadline_day"]))
+    dl = pricing.deadline(con, ym)
+    late = on > dl and not newcomer and pr["late_pct"] > 0
+    total, fee = q["total"], 0
+    if late:  # после срока: надбавка со всей суммы, скидок нет
+        fee = pricing.late_fee(q["total"], pr["late_pct"])
+        total += fee
     q["late_fee"] = fee
+    q["pricing"] = {"late": late, "late_pct": pr["late_pct"], "deadline": dl.isoformat(), "newcomer": newcomer,
+                    "late_total": q["total"] + pricing.late_fee(q["total"], pr["late_pct"])}
     from . import money
     manual = None
-    if discount_id:
+    if discount_id and not late:
         r = con.execute("SELECT * FROM discounts WHERE id=? AND active=1", (int(discount_id),)).fetchone()
         manual = dict(r) if r else None
-    disc = money.best_discount([manual, *money.auto_discounts(con, sid)])  # скидки не суммируются, берём большую
+    disc = None if late else money.best_discount([manual, *money.auto_discounts(con, sid, on)])  # скидки не суммируются, берём большую
     total, off = money.apply_discount(total, disc)
     q["discount"] = {"id": disc["id"], "name": disc["name"], "percent": disc["percent"], "amount": off,
                      "auto": disc["rule"] != "manual"} if disc else None

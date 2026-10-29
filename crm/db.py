@@ -282,8 +282,9 @@ def init_db(con: sqlite3.Connection):
     transfer.init(con)
     pin.init(con)
     profiles.init(con)
-    from . import perms
+    from . import perms, pricing
     perms.init(con)
+    pricing.init(con)
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sub_enr_month ON subscriptions(enrollment_id, month)")
     for k, v in DEFAULT_SETTINGS.items():
         con.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
