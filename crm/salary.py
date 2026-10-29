@@ -20,11 +20,11 @@ def _dates(con, g, ym: str) -> list[str]:
     from . import closures
     a, b = logic.month_bounds(ym)
     a, b = (date.fromisoformat(a) if isinstance(a, str) else a), (date.fromisoformat(b) if isinstance(b, str) else b)
-    wd = logic.parse_weekdays(g["weekdays"])
+    from . import schedule
     closed = closures.closed_dates(con, g["id"], a, b)
     out, d = [], a
     while d <= b:
-        if d.weekday() in wd and d.isoformat() not in closed:
+        if d.weekday() in logic.parse_weekdays(schedule.on(con, g, d)["weekdays"]) and d.isoformat() not in closed:
             out.append(d.isoformat())
         d += timedelta(days=1)
     return out

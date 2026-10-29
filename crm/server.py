@@ -759,6 +759,14 @@ def group_add(con, h, user, body, q):
     return {"id": gid}
 
 
+@route("POST", "/api/groups/{gid}/version", role="schedule:full")
+def group_version(con, h, user, body, q, gid):
+    """Новые дни и время группы с даты (до неё действует прежнее расписание)."""
+    if body.get("cancel"):
+        return sx(schedule.cancel_change, con, int(gid), str(body["cancel"]), user) or {"ok": True}
+    return sx(schedule.plan_change, con, int(gid), str(body.get("valid_from") or ""), body, user)
+
+
 @route("PUT", "/api/groups/{gid}", role="schedule:full")
 def group_edit(con, h, user, body, q, gid):
     sx(schedule.save_group, con, body, int(gid))

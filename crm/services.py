@@ -263,10 +263,17 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None) -> d
     ms, me = logic.month_bounds(ym)
     newcomer = pricing.is_newcomer(con, sid, ym, on)
     closed = closures.closed_dates(con, e["group_id"], ms, me)
+    weekdays = enrollment_days(e)
+    from . import schedule
+    if con.execute("SELECT 1 FROM group_versions WHERE group_id=?", (e["group_id"],)).fetchone():  # расписание меняется с даты
+        g = con.execute("SELECT * FROM groups WHERE id=?", (e["group_id"],)).fetchone()
+        real = {d.isoformat() for d in schedule.month_dates(con, g, e["weekdays"], ym)}
+        weekdays = sorted({date.fromisoformat(x).weekday() for x in real} | set(weekdays))
+        closed = closed | {d.isoformat() for d in logic.lesson_dates(weekdays, ym) if d.isoformat() not in real}
     if newcomer:  # новичок в текущем месяце: только оставшиеся занятия
         start = pricing.newcomer_start(con, sid, on)
-        closed = closed | {d.isoformat() for d in logic.lesson_dates(enrollment_days(e), ym) if d < start}
-    q = logic.quote(weekdays=enrollment_days(e), ym=ym, tariff=e["tariff"], prices={"fixed": pr["fixed"], "flex": pr["flex"]},
+        closed = closed | {d.isoformat() for d in logic.lesson_dates(weekdays, ym) if d < start}
+    q = logic.quote(weekdays=weekdays, ym=ym, tariff=e["tariff"], prices={"fixed": pr["fixed"], "flex": pr["flex"]},
                     vacations=vacations_of(con, sid), prev_unresolved_absences=len(prev_abs), closed=closed)
     q["credit_absence_ids"] = [a["id"] for a in prev_abs[:q["credit_lessons"]]]
     q["credit_absence_dates"] = [a["date"] for a in prev_abs[:q["credit_lessons"]]]
@@ -754,9 +761,9 @@ def journal(con, group_id: int, day: str) -> dict:
     if not g:
         raise ApiError("Группа не найдена", 404)
     d = date.fromisoformat(day)
-    from . import closures
+    from . import closures, schedule
     closed = closures.is_closed(con, group_id, d)
-    has_lesson = d.weekday() in logic.parse_weekdays(g["weekdays"]) and not closed
+    has_lesson = d.weekday() in logic.parse_weekdays(schedule.on(con, g, d)["weekdays"]) and not closed  # с учётом версий расписания
     rows = []
     if g["is_makeup"]:
         for m in con.execute(

@@ -47,6 +47,11 @@ class SchedError(ValueError):
 
 
 def init(con):
+    # версии расписания группы: дни и время «с такой-то даты» (до неё действует прежнее)
+    con.execute("""CREATE TABLE IF NOT EXISTS group_versions (
+        id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL, valid_from TEXT NOT NULL,
+        weekdays TEXT NOT NULL, time TEXT NOT NULL DEFAULT '', day_times TEXT NOT NULL DEFAULT '',
+        created_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, UNIQUE(group_id, valid_from))""")
     old = {r[1] for r in con.execute("PRAGMA table_info(substitutions)")}
     if old and "role" not in old:  # первая версия замен была без помощников
         con.execute("ALTER TABLE substitutions RENAME TO substitutions_old")
@@ -182,7 +187,7 @@ def structure(con) -> dict:
                                  WHERE e.group_id=g.id AND e.active=1 AND s.funnel='members' AND s.stage != 'left' AND s.archived=0) AS kids
                                 FROM groups g LEFT JOIN users u ON u.id=g.coach_id WHERE g.branch_id=?
                                 ORDER BY g.active DESC, g.is_makeup, g.time, g.name""", (b["id"],)):
-            b["groups"].append(dict(g))
+            b["groups"].append(dict(g) | {"versions": [v for v in versions(con, g["id"]) if v["valid_from"] > date.today().isoformat()]})
         b["shifts"] = [dict(r) for r in con.execute(
             """SELECT sh.*, u.name AS user_name FROM shifts sh JOIN users u ON u.id=sh.user_id
                WHERE sh.branch_id=? AND sh.active=1 ORDER BY sh.time_from""", (b["id"],))]
@@ -210,6 +215,112 @@ def remove_shift(con, shid: int):
 
 # ---------------- расписание ----------------
 
+# ---------------- версии расписания ----------------
+
+BASE = "0000-01-01"  # исходное расписание группы до первого изменения
+
+
+def on(con, g, d: date | str) -> dict:
+    """Группа с днями и временем, которые действуют в дату d. Без запланированных изменений - как в карточке группы."""
+    g = dict(g)
+    v = con.execute("""SELECT weekdays, time, day_times FROM group_versions WHERE group_id=? AND valid_from<=?
+                       ORDER BY valid_from DESC LIMIT 1""", (g["id"], str(d)[:10])).fetchone()
+    return g | dict(v) if v else g
+
+
+def versions(con, gid: int) -> list[dict]:
+    return [dict(r) for r in con.execute("SELECT * FROM group_versions WHERE group_id=? AND valid_from>? ORDER BY valid_from", (gid, BASE))]
+
+
+def plan_change(con, gid: int, valid_from: str, data: dict, user: dict) -> dict:
+    """Новые дни и время группы с даты. Проданные абонементы с этого месяца переезжают на новые даты сами:
+    та же цена занятия, число занятий по новому расписанию, разница на баланс или в долг."""
+    from . import services as sv
+    g = con.execute("SELECT * FROM groups WHERE id=?", (gid,)).fetchone()
+    if not g:
+        raise SchedError("Группа не найдена")
+    try:
+        f = date.fromisoformat(valid_from)
+    except ValueError:
+        raise SchedError("Укажите дату, с которой меняется расписание")
+    days = _days(data.get("weekdays"))
+    dts = data.get("day_times") or {}
+    if isinstance(dts, str):
+        dts = logic.parse_day_times(dts)
+    dts = ",".join(f"{k}={_time(v)}" for k, v in sorted({int(k): v for k, v in dts.items() if v and str(k) in days.split(",")}.items()))
+    now = datetime.now().isoformat(timespec="minutes")
+    if not con.execute("SELECT 1 FROM group_versions WHERE group_id=?", (gid,)).fetchone():
+        con.execute("INSERT INTO group_versions(group_id, valid_from, weekdays, time, day_times, created_at) VALUES (?,?,?,?,?,?)",
+                    (gid, BASE, g["weekdays"], g["time"] or "", g["day_times"] or "", now))
+    con.execute("""INSERT INTO group_versions(group_id, valid_from, weekdays, time, day_times, created_by, created_at) VALUES (?,?,?,?,?,?,?)
+                   ON CONFLICT(group_id, valid_from) DO UPDATE SET weekdays=excluded.weekdays, time=excluded.time,
+                   day_times=excluded.day_times, created_by=excluded.created_by""",
+                (gid, f.isoformat(), days, _time(data.get("time")), dts, user.get("name", ""), now))
+    apply_versions(con, date.today())
+    moved = reprice_from(con, gid, f, user)
+    return {"ok": True, "repriced": moved}
+
+
+def cancel_change(con, gid: int, valid_from: str, user: dict) -> None:
+    if valid_from <= date.today().isoformat():
+        raise SchedError("Это изменение уже действует")
+    con.execute("DELETE FROM group_versions WHERE group_id=? AND valid_from=?", (gid, valid_from))
+    reprice_from(con, gid, date.fromisoformat(valid_from), user)
+
+
+def apply_versions(con, today: date) -> int:
+    """Раз в день и после изменения: карточка группы показывает расписание, которое действует сегодня."""
+    n = 0
+    for (gid,) in con.execute("SELECT DISTINCT group_id FROM group_versions").fetchall():
+        g = con.execute("SELECT * FROM groups WHERE id=?", (gid,)).fetchone()
+        if not g:
+            continue
+        v = on(con, g, today)
+        if (v["weekdays"], v["time"], v["day_times"]) != (g["weekdays"], g["time"], g["day_times"]):
+            con.execute("UPDATE groups SET weekdays=?, time=?, day_times=? WHERE id=?", (v["weekdays"], v["time"], v["day_times"], gid))
+            n += 1
+    return n
+
+
+def month_dates(con, g, own_days: str, ym: str) -> list[date]:
+    """Даты занятий месяца по версиям расписания (дни ученика, если он ходит не во все дни группы)."""
+    allv = [dict(r) for r in con.execute("SELECT weekdays FROM group_versions WHERE group_id=?", (g["id"],))] or [dict(g)]
+    union = sorted({d for v in allv for d in logic.parse_weekdays(v["weekdays"])})
+    own = logic.parse_weekdays(own_days or "")
+    out = []
+    for d in logic.lesson_dates(union, ym):
+        wd = logic.parse_weekdays(on(con, g, d)["weekdays"])
+        if d.weekday() in wd and (not own or d.weekday() in own or not any(x in wd for x in own)):
+            out.append(d)
+    return out
+
+
+def reprice_from(con, gid: int, f: date, user: dict) -> int:
+    """Абонементы группы с месяца изменения: число занятий по новому расписанию, цена занятия прежняя."""
+    import math
+    from . import money, services as sv
+    n = 0
+    g = con.execute("SELECT * FROM groups WHERE id=?", (gid,)).fetchone()
+    for x in con.execute("""SELECT x.*, e.weekdays AS own FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id
+                            WHERE e.group_id=? AND x.month>=? AND x.status!='cancelled' AND x.kind='month'""",
+                         (gid, f.isoformat()[:7])).fetchall():
+        vac = sv.vacations_of(con, x["student_id"])
+        from . import closures
+        a, b = logic.month_bounds(x["month"])
+        closed = closures.closed_dates(con, gid, a, b)
+        new = [d for d in month_dates(con, g, x["own"], x["month"]) if d.isoformat() not in closed and not logic.in_vacation(d, vac)]
+        if len(new) == x["lessons"] or not x["lessons"]:
+            continue
+        unit = x["price"] / x["lessons"]
+        price = math.ceil(unit * len(new) - 1e-9)
+        con.execute("UPDATE subscriptions SET lessons=?, price=? WHERE id=?", (len(new), price, x["id"]))
+        sv.log(con, x["student_id"], f"Расписание группы {g['name']} изменилось: абонемент на {logic.month_label(x['month'])} "
+               f"{x['lessons']} → {len(new)} зан., {x['price']} → {price} ₽", user, "payment")
+        money.reconcile(con, x["student_id"])
+        n += 1
+    return n
+
+
 def day(con, d: date) -> dict:
     """Что происходит в этот день: по филиалам — тренировки, тренеры, кто на смене."""
     from . import services as sv
@@ -220,6 +331,7 @@ def day(con, d: date) -> dict:
         for g in con.execute("""SELECT g.*, u.name AS coach_name, a.name AS assistant_name FROM groups g
                                 LEFT JOIN users u ON u.id=g.coach_id LEFT JOIN users a ON a.id=g.assistant_id
                                 WHERE g.branch_id=? AND g.active=1 ORDER BY g.time, g.name""", (b["id"],)):
+            g = on(con, g, d)  # расписание, которое действует в этот день
             if d.weekday() not in logic.parse_weekdays(g["weekdays"]):
                 continue
             from . import closures

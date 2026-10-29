@@ -364,7 +364,8 @@ def guard_due(con, tid: int, new_due: str):
 # ---------------- контроль отметок в журнале ----------------
 
 def _lesson_end(con, g, d: date) -> datetime | None:
-    t = logic.group_time(g, d.weekday())
+    from . import schedule
+    t = logic.group_time(schedule.on(con, g, d), d.weekday())
     if not t:
         return None
     mins = int((con.execute("SELECT value FROM settings WHERE key='trial_minutes'").fetchone() or ["60"])[0])

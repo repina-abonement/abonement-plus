@@ -189,8 +189,9 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     program.apply_pending(con, now.date())
     from . import pu, waitlist
     pu.tick(con, now)
-    from . import coachreport
-    coachreport.tick(con, now)  # несданные отчёты о смене: 30 минут и 2 часа
+    from . import coachreport, schedule
+    coachreport.tick(con, now)
+    schedule.apply_versions(con, now.date())  # с даты изменения в карточке группы новое расписание  # несданные отчёты о смене: 30 минут и 2 часа
     waitlist._sync_done(con)
     program.price_notice(con, now.date())
     st = {k: setting(con, k) for k in AUTO_SETTINGS}

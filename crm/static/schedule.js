@@ -305,6 +305,10 @@ function groupForm(gid, branchId, d, coaches, done) {
         <div class="field"><label>Возраст</label><input name="age" value="${esc(g.age || "")}" placeholder="4–5"></div>
         <div class="field"><label>Мест</label><input name="capacity" type="number" min="0" max="200" value="${g.capacity ?? 12}"></div></div>
       <div id="g-dt"></div>
+      ${gid ? `<div class="field"><label>Новые дни и время действуют с</label><input type="date" name="valid_from" min="${S.meta.today}">
+        <div class="small muted">Пусто: меняем сразу. С датой (например, с 1 декабря): до неё всё по-старому, проданные абонементы сами переедут на новые даты</div></div>
+        ${(g.versions || []).map((v) => `<div class="alert" style="margin-bottom:8px">С ${dShort(v.valid_from)}: ${v.weekdays.split(",").map((x) => WD[+x]).join(", ")}${v.time ? " " + esc(v.time) : ""}
+          <button type="button" class="btn sm" data-vcancel="${v.valid_from}" style="margin-left:6px">Отменить</button></div>`).join("")}` : ""}
       <div class="row"><div class="field"><label>Тренер</label><select name="coach_id"><option value="">— без тренера —</option>${coaches.map((u) => `<option value="${u.id}" ${u.id === g.coach_id ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select></div>
         <div class="field"><label>Помощник</label><select name="assistant_id"><option value="">— без помощника —</option>${coaches.map((u) => `<option value="${u.id}" ${u.id === g.assistant_id ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select></div></div>
       <div class="field"><label>Заметка</label><input name="note" value="${esc(g.note || "")}" placeholder="Например: ОФП в недели без турнира"></div>
@@ -330,8 +334,22 @@ function groupForm(gid, branchId, d, coaches, done) {
     data.trial_ok = f.elements.trial_ok.checked;
     data.weekdays = [...f.querySelectorAll("[data-gd].on")].map((x) => +x.dataset.gd);
     data.day_times = Object.fromEntries([...f.querySelectorAll("[data-dt]")].filter((x) => x.value).map((x) => [x.dataset.dt, x.value]));
-    try { await api(gid ? "PUT" : "POST", gid ? `/api/groups/${gid}` : "/api/groups", data); toast("Группа сохранена"); closeDrawer(); done(); } catch (err) { fail(err); }
+    const from = data.valid_from; delete data.valid_from;
+    try {
+      if (gid && from) {  // дни и время с даты: карточку сохраняем со старым расписанием, новое планируем
+        await api("PUT", `/api/groups/${gid}`, { ...data, weekdays: g.weekdays.split(",").map(Number), time: g.time, day_times: g.day_times || "" });
+        const r = await api("POST", `/api/groups/${gid}/version`, { valid_from: from, weekdays: data.weekdays, time: data.time, day_times: data.day_times });
+        toast(`Новое расписание с ${dShort(from)}${r.repriced ? `, абонементов пересчитано: ${r.repriced}` : ""}`);
+      } else {
+        await api(gid ? "PUT" : "POST", gid ? `/api/groups/${gid}` : "/api/groups", data); toast("Группа сохранена");
+      }
+      closeDrawer(); done();
+    } catch (err) { fail(err); }
   };
+  document.querySelectorAll("[data-vcancel]").forEach((b) => (b.onclick = async () => {
+    if (!confirm("Отменить запланированное изменение расписания?")) return;
+    try { await api("POST", `/api/groups/${gid}/version`, { cancel: b.dataset.vcancel }); toast("Изменение отменено"); closeDrawer(); done(); } catch (err) { fail(err); }
+  }));
   if ($("#g-arch")) $("#g-arch").onclick = async () => {
     if (!confirm("Перенести группу в архив? Вернуть можно в Настройках → Архив")) return;
     try { await api("POST", `/api/groups/${gid}/archive`, { active: false }); toast("Группа в архиве"); closeDrawer(); done(); } catch (err) { fail(err); }

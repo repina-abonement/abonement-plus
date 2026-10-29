@@ -66,6 +66,7 @@ python3 -m tests.test_mypay    # проверка «Моей зарплаты»:
 python3 -m tests.test_coachreport # проверка отчёта тренера о смене
 python3 -m tests.test_balance   # проверка баланса: оплата за семью, перенос, возврат, лента
 python3 -m tests.test_trials    # проверка пробных: возраст, конверсия, задачи по итогам тренера
+python3 -m tests.test_schedversions # проверка версий расписания с даты
 ```
 
 Пароль администратора задаётся переменной `CRM_ADMIN_PASSWORD`, иначе генерируется

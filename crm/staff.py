@@ -72,9 +72,10 @@ def planned(con, d: date) -> list[dict]:
     ds = d.isoformat()
     for g in con.execute("""SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id
                             WHERE g.active=1 AND b.active=1"""):
+        from . import closures, schedule
+        g = schedule.on(con, g, d)  # расписание, которое действует в этот день
         if d.weekday() not in logic.parse_weekdays(g["weekdays"]):
             continue
-        from . import closures
         if closures.is_closed(con, g["id"], d):
             continue
         people = {}
