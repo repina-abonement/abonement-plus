@@ -1892,6 +1892,14 @@ def occupancy(con, h, user, body, q):
     return capacity.occupancy(con, int(q.get("group_id") or 0), q.get("date") or "")
 
 
+@route("PATCH", "/api/families/{fid}", role="members:full")
+def family_patch(con, h, user, body, q, fid):
+    if "note" in body:
+        con.execute("UPDATE families SET note=? WHERE id=?", ((body.get("note") or "").strip()[:500], int(fid)))
+        sv.audit(con, user, "family.note", str(fid))
+    return {"ok": True}
+
+
 @route("GET", "/api/families/{fid}/comms", role="operator")
 def family_comms(con, h, user, body, q, fid):
     return comms.family_comms(con, int(fid))
