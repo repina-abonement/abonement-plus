@@ -140,7 +140,7 @@ async function dial(phone) {
 }
 
 /* ---------- блок в карточке ученика ---------- */
-async function loadFamilyComms(familyId, parents, studentId) {
+async function loadFamilyComms(familyId, parents, studentId, kid) {
   const box = $("#comms-box");
   if (!box) return;
   let d;
@@ -156,6 +156,7 @@ async function loadFamilyComms(familyId, parents, studentId) {
     <h3>Связь с семьёй</h3>
     <div class="chips" style="margin-bottom:10px">${parents.filter((p) => p.phone).map((p) => `<button class="btn sm" data-dial="${esc(p.phone)}">📞 ${esc(p.name.split(" ")[0])} · ${esc(p.phone)}</button>`).join("")}</div>
     <div class="feed" id="feed">${d.items.length ? d.items.map((i) => i.type === "call" ? callHtml(i) : msgHtml(i)).join("") : `<div class="muted small">Пока ни переписки, ни звонков</div>`}</div>
+    ${kid && kid.funnel === "sales" ? `<div class="to-bar" style="margin-top:10px"><button class="btn sm" id="to-open">📅 Предложить дни для пробного</button><button class="btn sm" id="to-book">✅ Записать на пробное</button></div><div id="to-panel" hidden></div>` : ""}
     ${targets.length ? `
       <div class="composer">
         ${targets.length > 1 ? `<select id="cm-to">${targets.map((x) => `<option value="${x.v}">${esc(x.t)}</option>`).join("")}</select>` : `<div class="small muted">Ответ уйдёт: ${esc(targets[0].t)}</div><input type="hidden" id="cm-to" value="${targets[0].v}">`}
@@ -163,6 +164,7 @@ async function loadFamilyComms(familyId, parents, studentId) {
       </div>` : `<div class="small muted">Написать отсюда можно, когда родитель напишет школе в Telegram или MAX${st.whatsapp || st.wazzup_telegram ? "" : ". Первыми написать можно после подключения Wazzup"}</div>`}`;
   const feed = $("#feed"); if (feed) feed.scrollTop = feed.scrollHeight;
   box.querySelectorAll("[data-dial]").forEach((b) => (b.onclick = () => dial(b.dataset.dial)));
+  if (kid && kid.funnel === "sales") wireTrialOffer({ students: [kid], family_id: familyId, onBooked: kid.onBooked }, "#cm-text");
   const send = $("#cm-send");
   if (send) send.onclick = async () => {
     const text = $("#cm-text").value.trim(), to = $("#cm-to").value;
@@ -519,9 +521,10 @@ function aiSettingsHtml(v, inf, st) {
 
 
 /* «Предложить ближайшие ПУ»: подбор групп по возрасту и ближайших дат со свободными местами, текст сразу в поле ответа */
-function wireTrialOffer(c) {
+function wireTrialOffer(c, textSel = "#chat-text") {
   const btn = $("#to-open"), panel = $("#to-panel");
   if (!btn) return;
+  if ($("#to-book")) $("#to-book").onclick = () => { if (panel.hidden) btn.onclick(); };
   const leads = (c.students || []).filter((x) => x.funnel === "sales");
   const ageOf = (b) => (b ? parseInt(ageText(b)) : NaN);
   btn.onclick = () => {
@@ -542,15 +545,17 @@ function wireTrialOffer(c) {
       try {
         const r = await api("GET", `/api/trial-offer?age=${age}${$("#to-br").value ? "&branch_id=" + $("#to-br").value : ""}`);
         if (!r.slots.length) { $("#to-res").innerHTML = `<div class="small muted" style="margin-top:8px">${esc(r.error)}</div>`; return; }
-        $("#chat-text").value = r.text;
-        $("#to-res").innerHTML = `<div class="small muted" style="margin:8px 0 4px">Текст уже в поле ответа: проверьте и нажмите «Отправить». Когда родитель выберет, запишите одним нажатием:</div>
+        const ta = $(textSel);
+        if (ta) ta.value = r.text;
+        $("#to-res").innerHTML = `<div class="small muted" style="margin:8px 0 4px">${ta ? "Текст с вариантами уже в поле сообщения: проверьте и нажмите «Отправить». " : ""}Когда родитель выберет, запишите одним нажатием:</div>
           ${r.slots.map((x, i) => `<div class="to-slot"><span class="grow">${esc(x.label)} · ${esc(x.group)} · ${esc(x.branch)} <span class="small muted">мест ${x.free}</span></span>
             ${kidId ? `<button class="btn sm" data-to-book="${i}">Записать</button>` : ""}</div>`).join("")}`;
         $("#to-res").querySelectorAll("[data-to-book]").forEach((b) => (b.onclick = async () => {
           const x = r.slots[+b.dataset.toBook];
           try {
             await api("PATCH", `/api/students/${kidId}`, { group_id: x.group_id, trial_at: `${x.date}T${x.time}` });
-            toast(`Записан на пробное: ${x.label}`); panel.hidden = true; loadWarnBox(c.family_id, $("#warn-box"));
+            toast(`Записан на пробное: ${x.label}`); panel.hidden = true;
+            if (c.onBooked) c.onBooked(); else loadWarnBox(c.family_id, $("#warn-box"));
           } catch (e) { fail(e); }
         }));
       } catch (e) { fail(e); }

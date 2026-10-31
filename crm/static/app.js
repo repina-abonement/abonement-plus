@@ -737,8 +737,9 @@ function askRefusal(sid, done) {
   };
 }
 
-function openDrawer(html) {
+function openDrawer(html, size) {
   $("#drawer-body").innerHTML = html; $("#drawer").hidden = false; document.body.style.overflow = "hidden";
+  const panel = $("#drawer .drawer-panel"); if (panel) panel.classList.toggle("wide", size === "wide");
   if (!drawerInHistory) { try { history.pushState({ ...(history.state || {}), drawer: true }, ""); drawerInHistory = true; } catch (_) {} }
 }
 function hideDrawer() { const d = $("#drawer"); if (d) d.hidden = true; document.body.style.overflow = ""; }
@@ -760,6 +761,106 @@ document.addEventListener("click", (e) => {
   i.focus();
 });
 
+/* Карточка клиента: слева общение, справа абонементы и оплаты, ниже свёрнутые блоки. На телефоне две вкладки */
+function layoutStudentCard(body, isMember) {
+  const grid = body.querySelector(".sc-grid"), left = grid.querySelector(".sc-left"), right = grid.querySelector(".sc-right");
+  const take = (k) => body.querySelector(`[data-sc="${k}"]`);
+  left.appendChild($("#comms-box"));
+  const order = isMember ? ["subs", "balance"] : ["stage", "pu", "abon"];
+  order.forEach((k) => take(k) && right.appendChild(take(k)));
+  const folds = isMember ? ["abon", "skips", "family", "stage", "vac", "hist"] : ["subs", "family", "balance", "hist"];
+  folds.forEach((k) => {
+    const sec = take(k); if (!sec) return;
+    const det = document.createElement("details"); det.className = "sc-fold"; det.dataset.fold = k;
+    det.innerHTML = `<summary>${sec.dataset.title || (k === "stage" ? "⚙️ Этап и источник" : k === "balance" ? "💳 Баланс и оплаты" : "")}</summary>`;
+    det.appendChild(sec); right.appendChild(det);
+  });
+  if (take("arch")) right.appendChild(take("arch"));
+  body.querySelectorAll("[data-sctab]").forEach((b) => (b.onclick = () => {
+    grid.dataset.tab = b.dataset.sctab;
+    body.querySelectorAll("[data-sctab]").forEach((x) => x.classList.toggle("on", x === b));
+  }));
+}
+const scTab = (tab) => { const b = document.querySelector(`#drawer-body [data-sctab="${tab}"]`); if (b) b.click(); };
+const openFold = (body, k) => { scTab("abon"); const f = body.querySelector(`[data-fold="${k}"]`); if (f) { f.open = true; f.scrollIntoView({ block: "start", behavior: "smooth" }); } };
+
+function quoteHtml(q) {
+  return `<div class="total">${rub(q.total)}</div>
+    <div class="small">${q.lessons_paid} занятий × ${rub(q.per_lesson)} = ${rub(q.base)}${q.days_label ? ` · только ${esc(q.days_label)}` : ""}${q.vacation_lessons ? ` · отпуск: −${q.vacation_lessons} зан.` : ""}</div>
+    ${q.credit_lessons ? `<div class="small">Перерасчёт пропусков (${q.credit_absence_dates.map(dShort).join(", ")}): −${rub(q.credit)}</div>` : ""}
+    ${q.late_fee ? `<div class="small">Оплата после ${dShort(q.pricing.deadline)}: +${String(q.pricing.late_pct).replace(".", ",")}% (+${rub(q.late_fee)}), скидки не действуют</div>` : ""}
+    ${q.pricing && q.pricing.newcomer ? `<div class="small">Новичок: только оставшиеся занятия этого месяца, без надбавки</div>` : ""}
+    ${q.pricing && !q.pricing.late && q.pricing.late_pct && q.pricing.late_total > q.total ? `<div class="small muted">При оплате после ${dShort(q.pricing.deadline)}: ${rub(q.pricing.late_total)} без скидок</div>` : ""}
+    ${q.discount ? `<div class="small">Скидка «${esc(q.discount.name)}» ${q.discount.percent}%: −${rub(q.discount.amount)}${q.discount.auto ? ". Действует при оплате сегодня" : ""}</div>` : ""}
+    <div class="small muted">Даты: ${q.dates.map(dShort).join(", ")}</div>
+    ${q.waitlist ? `<div class="alert" style="margin-top:6px">Оплата после срока: место не гарантировано, в листе ожидания ${q.waitlist}</div>` : ""}`;
+}
+
+/* «Продать абонемент»: месяц, группа, тариф, скидка → цена по всем правилам → ссылка на оплату, оплата сейчас или только счёт */
+function openSell(d, reload) {
+  const id = d.student.id, box = $("#sell-box");
+  scTab("abon");
+  const ens = d.enrollments.filter((e) => e.lesson_kind !== "ofp");
+  const methods = Object.entries(PAY_METHODS).filter(([k]) => !PAY_INTERNAL.includes(k) && k !== "online");
+  box.innerHTML = `<div class="section sell">
+    <div class="row" style="align-items:center"><h3 class="grow" style="margin:0">🛒 Продать абонемент</h3><button class="icon-btn" id="sl-x" title="Закрыть">✕</button></div>
+    <div class="row" style="margin-top:8px">
+      <div class="field"><label>Месяц</label><select id="sl-month">${[d.cur_month, d.next_month].map((m) => `<option value="${m}" ${m === d.next_month ? "selected" : ""}>${monthLabel(m)}</option>`).join("")}</select></div>
+      <div class="field"><label>Группа</label><select id="sl-en">${ens.map((e) => `<option value="${e.id}">${esc(e.group_name)}</option>`).join("")}</select></div></div>
+    <div class="row">
+      <div class="field"><label>Тариф</label><select id="sl-tar"><option value="fixed">Негибкий</option><option value="flex">Гибкий</option></select></div>
+      <div class="field"><label>Скидка</label><select id="sl-disc"><option value="">По правилам (или без скидки)</option>${(d.discounts || []).map((x) => `<option value="${x.id}">${esc(x.name)}, ${x.percent}%</option>`).join("")}</select></div></div>
+    <div class="quote" id="sl-q">Считаю…</div>
+    <div class="sc-actions" style="margin-top:10px">
+      <button class="btn primary" id="sl-link">💳 Ссылка на оплату</button>
+      <button class="btn" id="sl-now">✅ Оплачено сейчас</button>
+      <button class="btn" id="sl-inv">🧾 Только выставить счёт</button></div>
+    <div id="sl-res"></div></div>`;
+  const en = () => ens.find((e) => e.id === +$("#sl-en").value);
+  let total = 0;
+  const quote = async () => {
+    $("#sl-tar").value = en().tariff || "fixed";
+    $("#sl-q").innerHTML = "Считаю…";
+    try {
+      const q = await api("GET", `/api/students/${id}/quote?month=${$("#sl-month").value}&enrollment_id=${en().id}${$("#sl-disc").value ? "&discount_id=" + $("#sl-disc").value : ""}`);
+      total = q.total; $("#sl-q").innerHTML = q.program ? programQuoteHtml(q) : quoteHtml(q);
+    } catch (e) { $("#sl-q").textContent = e.message; }
+  };
+  $("#sl-month").onchange = quote; $("#sl-en").onchange = quote; $("#sl-disc").onchange = quote;
+  $("#sl-tar").onchange = async (e) => { try { await api("PATCH", `/api/enrollments/${en().id}`, { tariff: e.target.value }); en().tariff = e.target.value; quote(); } catch (err) { fail(err); } };
+  $("#sl-x").onclick = () => { box.innerHTML = ""; };
+  const invoice = () => api("POST", `/api/students/${id}/invoice`, { month: $("#sl-month").value, enrollment_id: en().id, discount_id: $("#sl-disc").value || null });
+  const busy = (on) => box.querySelectorAll(".sc-actions button").forEach((b) => (b.disabled = on));
+  $("#sl-inv").onclick = async () => { busy(true); try { const r = await invoice(); toast(`Счёт выставлен: ${rub(r.quote.total)}`); reload(); } catch (e) { fail(e); busy(false); } };
+  $("#sl-now").onclick = () => {
+    $("#sl-res").innerHTML = `<div class="row" style="margin-top:10px;align-items:flex-end"><div class="field"><label>Как оплатили</label><select id="sl-m">${methods.map(([k, t]) => `<option value="${k}">${t}</option>`).join("")}</select></div>
+      <button class="btn primary" id="sl-ok" style="flex:0">Принять ${rub(total)}</button></div>`;
+    $("#sl-ok").onclick = async () => {
+      busy(true); $("#sl-ok").disabled = true;
+      try { const r = await invoice(); await api("POST", `/api/subscriptions/${r.id}/pay`, { amount: r.quote.total, method: $("#sl-m").value }); toast("Абонемент продан и оплачен"); reload(); }
+      catch (e) { fail(e); busy(false); $("#sl-ok").disabled = false; }
+    };
+  };
+  $("#sl-link").onclick = async () => {
+    busy(true);
+    try {
+      const st = await api("GET", `/api/students/${id}/paylinks`);
+      if (!st.ready) throw new Error("PayKeeper не подключён: Чеки → Подключение");
+      const r = await invoice();
+      const what = `Абонемент на ${monthLabel($("#sl-month").value)}: ${d.student.name}`;
+      const l = await api("POST", `/api/students/${id}/paylinks`, { amount: r.quote.total, purpose: what, subscription_id: r.id });
+      const msg = `Здравствуйте! Ссылка для оплаты: ${l.purpose}, ${l.amount} ₽\n${l.url}`;
+      $("#sl-res").innerHTML = `<div class="field" style="margin-top:10px"><label>Счёт выставлен. Отправьте родителю, после оплаты абонемент отметится сам</label><textarea id="sl-msg" rows="3">${esc(msg)}</textarea></div>
+        <div class="sc-actions"><button class="btn primary" id="sl-send">Вставить в чат с семьёй</button><button class="btn" id="sl-copy">Скопировать</button><button class="btn" id="sl-done">Готово</button></div>`;
+      $("#sl-copy").onclick = () => navigator.clipboard.writeText($("#sl-msg").value).then(() => toast("Скопировано"));
+      $("#sl-send").onclick = () => { scTab("feed"); const t = $("#cm-text"); if (!t) return toast("Нет открытого чата с семьёй: скопируйте и отправьте вручную", true); t.value = $("#sl-msg").value; t.focus(); t.scrollIntoView({ block: "center", behavior: "smooth" }); toast("Текст в поле сообщения: проверьте и нажмите «Отправить»"); };
+      $("#sl-done").onclick = reload;
+    } catch (e) { fail(e); busy(false); }
+  };
+  quote();
+  box.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
 async function openStudent(id) {
   let d;
   try { d = await api("GET", `/api/students/${id}`); } catch (e) { return fail(e); }
@@ -772,12 +873,43 @@ async function openStudent(id) {
     ? [["active", "Занимается"], ["left", "Ушёл"]]
     : S.meta.sales_stages.filter((x) => !x.auto).map((x) => [x.key, x.title]);
 
+  const regular = d.enrollments.filter((e) => e.lesson_kind !== "ofp");
+  const full = can("members", "full");
+  const alerts = [
+    s.priority ? `<span class="pill red">🔥 Заявка с сайта: обработать первой</span>` : "",
+    d.family.note ? `<span class="pill yellow" title="Заметка для персонала">📝 ${esc(d.family.note)}</span>` : "",
+    isMember && d.balance.debt ? `<span class="pill red">Долг ${rub(d.balance.debt)}</span>` : "",
+    isMember && d.balance.upcoming ? `<span class="pill yellow">К оплате ${rub(d.balance.upcoming)}</span>` : "",
+    isMember && d.balance.deposit ? `<span class="pill green">На балансе ${rub(d.balance.deposit)}</span>` : "",
+    isMember && !d.balance.debt && !d.balance.upcoming ? `<span class="pill green">Долга нет</span>` : "",
+    isMember && c.available ? `<span class="pill">Можно отработать: ${c.available}</span>` : "",
+    !s.birth ? `<span class="pill yellow">Нет даты рождения</span>` : "",
+    ...d.enrollments.filter((e) => e.age_warn).map((e) => `<span class="pill red">⚠️ ${esc(e.group_name)}: ${esc(e.age_warn)}</span>`),
+    d.trial_age_warn ? `<span class="pill red">⚠️ Пробное ${esc(d.trial_age_warn)}</span>` : "",
+  ].filter(Boolean).join("");
   const html = `
-  <h2>${esc(s.name)}</h2>
-  <div class="muted small" style="margin-top:4px">${esc(d.stage_label)}${s.birth ? " · " + esc(ageText(s.birth)) : ` · <span style="color:#b42318">нет даты рождения: без неё CRM не проверит возраст</span>`}</div>
-  ${s.priority ? `<div class="alert">Заявка с сайта, обработать в первую очередь. Карточка перестанет быть красной, когда вы смените этап или добавите комментарий с итогом звонка</div>` : ""}
+  <div class="sc-head">
+    <div class="sc-title"><h2>${esc(s.name)}</h2>
+      <span class="muted">${esc(d.stage_label)}${s.birth ? " · " + esc(ageText(s.birth)) : ""}${s.archived ? " · в архиве" : ""}</span></div>
+    ${d.siblings.length ? `<div class="chips sc-kids"><span class="chip on">${esc(s.name.split(" ")[0])}</span>${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}</div>` : ""}
+    <div class="sc-meta">${isMember ? (regular.length ? regular.map((e) => `<span class="pill">${esc(e.group_name)}</span>`).join(" ") : `<span class="muted small">Группа не выбрана</span>`)
+      : `${s.trial_at ? `<span class="pill">Пробное ${dtShort(s.trial_at)}</span>` : ""}`}</div>
+    <div class="sc-parents">${d.parents.map((p) => `<span class="sc-parent"><b>${esc(p.name)}</b>${p.phone ? ` <a href="tel:${esc(p.phone)}">${esc(p.phone)}</a> <button class="icon-btn" data-dial="${esc(p.phone)}" title="Позвонить через Sipuni">📞</button>` : ""}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}</span>`).join("")}</div>
+    ${alerts ? `<div class="chips sc-alerts">${alerts}</div>` : ""}
+    <div class="sc-actions">
+      ${isMember && full && regular.length ? `<button class="btn primary" id="act-sell">🛒 Продать абонемент</button>` : ""}
+      ${isMember && full ? `<button class="btn" id="act-link">💳 Ссылка на оплату</button>` : ""}
+      ${isMember ? `<button class="btn" id="act-pay">+ Принять оплату</button>` : ""}
+      ${!isMember ? `<button class="btn primary" id="act-trial">📅 Записать на пробное</button>` : ""}
+      ${d.parents.some((p) => p.phone) ? `<button class="btn" id="act-call">📞 Позвонить</button>` : ""}
+      ${isMember ? `<button class="btn" id="act-vac">🌴 Отпуск</button>` : ""}
+      ${isMember && regular.length === 1 ? `<button class="btn" id="act-move">↔ Перевести</button>` : ""}
+    </div>
+  </div>
+  <div class="sc-tabs"><button class="on" data-sctab="feed">💬 Общение</button><button data-sctab="abon">💳 Абонементы и инфо</button></div>
+  <div class="sc-grid" data-tab="feed"><div class="sc-left"></div><div class="sc-right"><div id="sell-box"></div></div></div>
 
-  <div class="section">
+  <div class="section" data-sc="stage">
     <div class="row">
       <div class="field"><label>Этап</label><select id="f-stage">${stageOpts.map(([k, t]) => `<option value="${k}" ${k === s.stage ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
       ${!isMember ? `<div class="field"><label>Тариф</label><select id="f-tariff"><option value="fixed" ${s.tariff === "fixed" ? "selected" : ""}>Негибкий</option><option value="flex" ${s.tariff === "flex" ? "selected" : ""}>Гибкий</option></select></div>` : ""}
@@ -790,19 +922,20 @@ async function openStudent(id) {
     <div class="field"><label>Откуда узнали</label>${sourceSelect("f-source", s.source_id, s.source)}</div>
   </div>
 
-  <div class="section">
+  <div class="section" data-sc="family" data-title="👪 Семья и заметка">
     <h3>Семья ${esc(d.family.name)}</h3>
+    <div class="field"><label>Заметка для персонала (видна в шапке карточки)</label><textarea id="fam-note" rows="2" placeholder="Например: аллергия, звонить только маме">${esc(d.family.note || "")}</textarea></div>
     ${consentHtml(d.family)}
     <dl class="kv">${d.parents.map((p) => `<dt>${esc(p.name)}</dt><dd><a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}</dd>`).join("")}</dl>
     ${d.siblings.length ? `<div style="margin-top:10px" class="chips">${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}</div>` : ""}
     <button class="btn sm" style="margin-top:10px" id="add-sibling">+ Брат или сестра</button>
   </div>
 
-  ${puCardBlock(d)}
+  <div data-sc="pu">${puCardBlock(d)}</div>
   <div class="section" id="comms-box"><h3>Связь с семьёй</h3><div class="muted small">Загружаю переписку…</div></div>
 
   ${isMember ? `
-  <div class="section">
+  <div class="section" data-sc="skips" data-title="🩹 Пропуски и отработки">
     <h3>Пропуски и отработки</h3>
     <div class="counters">
       <div class="counter"><b>${c.absent_cur}</b><span>пропущено в этом месяце</span></div>
@@ -827,7 +960,7 @@ async function openStudent(id) {
       ${m.status === "booked" ? `<button class="btn sm" data-mk="${m.id}" data-st="cancelled">Отменить</button>` : ""}</li>`).join("")}</ul>` : ""}
   </div>` : ""}
 
-  <div class="section">
+  <div class="section" data-sc="abon" data-title="🏟 Группы, сборная, лист ожидания">
     <h3>${isMember ? "Группы и абонементы" : "Абонемент"}</h3>
     ${waitlistCard(d)}
     ${isMember ? `
@@ -860,15 +993,20 @@ async function openStudent(id) {
       <button class="btn sm" id="en-add">+ Добавить группу</button>
       <div class="small muted" style="margin-top:6px">Дни можно снять, если ребёнок ходит в группу не во все её дни: цена посчитается только за выбранные.</div>`
     : `<div class="muted small">Абонемент выставляется, когда клиент переходит в этап «Купил абонемент».</div>`}
-    ${d.subscriptions.length ? `<ul class="history" style="margin-top:10px">${d.subscriptions.map((x) => { const cov = (d.balance.covered || {})[x.id] || 0; return `<li><b>${x.kind === "single" ? "Разовое занятие" : monthLabel(x.month)}</b>${x.group_name ? " · " + esc(x.group_name) : ""} · ${rub(x.price)}${x.kind === "single" ? "" : ` · ${x.lessons} зан.`}${x.credit_lessons ? ` · перерасчёт ${x.credit_lessons}` : ""}${x.late_fee ? ` · наценка ${rub(x.late_fee)}` : ""}${x.discount_amount ? ` · скидка ${rub(x.discount_amount)}` : ""}
+  </div>
+  <div class="section" data-sc="subs">
+    <h3>Абонементы</h3>
+    ${d.subscriptions.length ? "" : `<div class="muted small">Абонементов пока нет${isMember && regular.length ? ": кнопка «🛒 Продать абонемент» вверху" : ""}</div>`}
+    ${d.subscriptions.length ? `<ul class="history sub-list ${d.subscriptions.length > 3 ? "folded" : ""}" style="margin-top:10px">${d.subscriptions.map((x) => { const cov = (d.balance.covered || {})[x.id] || 0; return `<li><b>${x.kind === "single" ? "Разовое занятие" : monthLabel(x.month)}</b>${x.group_name ? " · " + esc(x.group_name) : ""} · ${rub(x.price)}${x.kind === "single" ? "" : ` · ${x.lessons} зан.`}${x.credit_lessons ? ` · перерасчёт ${x.credit_lessons}` : ""}${x.late_fee ? ` · наценка ${rub(x.late_fee)}` : ""}${x.discount_amount ? ` · скидка ${rub(x.discount_amount)}` : ""}
       <span class="pill ${x.status === "paid" ? "green" : x.status === "cancelled" ? "" : "yellow"}">${x.status === "invoiced" && cov ? `оплачено ${rub(cov)} из ${rub(x.price)}` : { paid: "оплачен", invoiced: "ждёт оплаты", cancelled: "отменён" }[x.status]}</span>
       ${x.corrected ? `<span class="pill">корректировка</span>` : ""}
       ${x.status === "invoiced" ? `<button class="btn sm primary" data-pay="${x.id}" data-left="${x.price - cov}">Принять оплату</button>${can("members", "full") ? ` <button class="btn sm" data-plsub="${x.id}" data-left="${x.price - cov}" data-what="${esc("Абонемент на " + (x.month ? monthLabel(x.month) : ""))}" title="Ссылка PayKeeper: после оплаты абонемент отметится оплаченным сам">💳 Ссылкой</button>` : ""} <button class="btn sm danger" data-cancel="${x.id}">Отменить</button>` : ""}
       ${x.status === "paid" ? `<button class="btn sm danger" data-pcanc="${x.id}" data-paid="${cov}">Отменить</button>` : ""}
       ${x.status !== "cancelled" && x.kind === "month" && can("members", "full") ? `<button class="btn sm" data-corr="${x.id}" data-price="${x.price}" title="Исключение из правил с обязательной причиной: попадёт в отчёт">Корректировка</button>` : ""}</li>`; }).join("")}</ul>` : ""}
+    ${d.subscriptions.length > 3 ? `<button class="linkish small" id="sub-more">Показать все абонементы (${d.subscriptions.length})</button>` : ""}
   </div>
 
-  <div class="section">
+  <div class="section" data-sc="balance">
     <h3>Баланс и оплаты</h3>
     <div class="chips">
       <span class="pill ${d.balance.debt ? "red" : "green"}">${d.balance.debt ? `Долг ${rub(d.balance.debt)}` : "Долга нет"}</span>
@@ -894,7 +1032,7 @@ async function openStudent(id) {
       <div class="small muted">Остаток плюс: переплата на балансе, минус: долг. Переплата сама закрывает следующий счёт</div></details>` : ""}
   </div>
 
-  <div class="section">
+  <div class="section" data-sc="vac" data-title="🌴 Отпуск">
     <h3>Отпуск</h3>
     <div class="row">
       <div class="field"><label>С</label><input id="v-start" type="date"></div>
@@ -905,14 +1043,15 @@ async function openStudent(id) {
     <div class="small muted" style="margin-top:6px">Дни отпуска не входят в цену абонемента. Предупредить нужно до оплаты месяца.</div>
   </div>
 
-  <div class="section">
+  <div class="section" data-sc="hist" data-title="🕘 История и комментарии">
     <h3>История</h3>
     <div class="row" style="margin-bottom:10px"><input id="note" placeholder="Комментарий, итог звонка…"><button class="btn sm" id="note-add" style="flex:0">Добавить</button></div>
     <ul class="history">${d.history.map((h) => `<li><div class="when">${dtShort(h.ts)} · ${esc(h.user_name)}</div>${esc(h.text)}</li>`).join("")}</ul>
   </div>
-  <div style="margin-top:14px"><button class="btn sm ${s.archived ? "" : "danger"}" id="s-arch">${s.archived ? "Вернуть из архива" : "Перенести в архив"}</button></div>`;
-  openDrawer(html);
+  <div style="margin-top:14px" data-sc="arch"><button class="btn sm ${s.archived ? "" : "danger"}" id="s-arch">${s.archived ? "Вернуть из архива" : "Перенести в архив"}</button></div>`;
+  openDrawer(html, "wide");
   const body = $("#drawer-body");
+  layoutStudentCard(body, isMember);
   const reload = () => { openStudent(id); render(); };
   const patch = async (data) => { try { await api("PATCH", `/api/students/${id}`, data); reload(); } catch (e) { fail(e); } };
 
@@ -941,8 +1080,18 @@ async function openStudent(id) {
   $("#f-source").onchange = (e) => patch({ source_id: e.target.value ? +e.target.value : "" });
   body.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.open)));
   $("#add-sibling").onclick = () => openNewClient({ family_id: s.family_id, family_name: d.family.name });
-  loadFamilyComms(s.family_id, d.parents, id);
+  loadFamilyComms(s.family_id, d.parents, id, { id, name: s.name, funnel: s.funnel, birth: s.birth, onBooked: reload });
   wireConsent(d.family, reload);
+  body.querySelectorAll(".sc-head [data-dial]").forEach((b) => (b.onclick = () => dial(b.dataset.dial)));
+  const firstPhone = (d.parents.find((p) => p.phone) || {}).phone;
+  if ($("#act-call")) $("#act-call").onclick = () => dial(firstPhone);
+  if ($("#act-sell")) $("#act-sell").onclick = () => openSell(d, reload);
+  if ($("#act-link")) $("#act-link").onclick = () => { scTab("abon"); const b = $("#pay-link"); if (b) b.click(); };
+  if ($("#act-pay")) $("#act-pay").onclick = () => { scTab("abon"); $("#pay-free").click(); };
+  if ($("#act-vac")) $("#act-vac").onclick = () => openFold(body, "vac");
+  if ($("#act-move")) $("#act-move").onclick = () => { const b = body.querySelector("[data-entr]"); if (b) { b.click(); b.scrollIntoView({ block: "center", behavior: "smooth" }); } };
+  if ($("#act-trial")) $("#act-trial").onclick = () => { scTab("feed"); const b = $("#to-book"); if (b) { b.click(); b.scrollIntoView({ block: "center", behavior: "smooth" }); } else { const f = $("#f-trial"); if (f) f.scrollIntoView({ block: "center", behavior: "smooth" }); } };
+  if ($("#fam-note")) $("#fam-note").onchange = async (e) => { try { await api("PATCH", `/api/families/${s.family_id}`, { note: e.target.value }); toast("Заметка сохранена"); reload(); } catch (err) { fail(err); } };
 
   if (isMember) loadWarnBox(s.family_id, $("#warn-box"), id);
   if ($("#mk-slots")) loadSlots($("#mk-slots"), async (x) => {
@@ -970,16 +1119,7 @@ async function openStudent(id) {
     try {
       const q = await api("GET", `/api/students/${id}/quote?month=${$("#q-month").value}&enrollment_id=${eid}${$("#q-disc").value ? "&discount_id=" + $("#q-disc").value : ""}`);
       box.classList.remove("muted");
-      if (q.program) { box.innerHTML = programQuoteHtml(q); return; }
-      box.innerHTML = `<div class="total">${rub(q.total)}</div>
-        <div class="small">${q.lessons_paid} занятий × ${rub(q.per_lesson)} = ${rub(q.base)}${q.days_label ? ` · только ${esc(q.days_label)}` : ""}${q.vacation_lessons ? ` · отпуск: −${q.vacation_lessons} зан.` : ""}</div>
-        ${q.credit_lessons ? `<div class="small">Перерасчёт пропусков (${q.credit_absence_dates.map(dShort).join(", ")}): −${rub(q.credit)}</div>` : ""}
-        ${q.late_fee ? `<div class="small">Оплата после ${dShort(q.pricing.deadline)}: +${String(q.pricing.late_pct).replace(".", ",")}% (+${rub(q.late_fee)}), скидки не действуют</div>` : ""}
-        ${q.pricing && q.pricing.newcomer ? `<div class="small">Новичок: только оставшиеся занятия этого месяца, без надбавки</div>` : ""}
-        ${q.pricing && !q.pricing.late && q.pricing.late_pct && q.pricing.late_total > q.total ? `<div class="small muted">При оплате после ${dShort(q.pricing.deadline)}: ${rub(q.pricing.late_total)} без скидок</div>` : ""}
-        ${q.discount ? `<div class="small">Скидка «${esc(q.discount.name)}» ${q.discount.percent}%: −${rub(q.discount.amount)}${q.discount.auto ? ". Действует при оплате сегодня" : ""}</div>` : ""}
-        <div class="small muted">Даты: ${q.dates.map(dShort).join(", ")}</div>
-        ${q.waitlist ? `<div class="alert" style="margin-top:6px">Оплата после срока: место не гарантировано, в листе ожидания ${q.waitlist}</div>` : ""}`;
+      box.innerHTML = q.program ? programQuoteHtml(q) : quoteHtml(q);
     } catch (e) { box.textContent = e.message; }
   });
   wireProgramBlock(body, id, reload);
@@ -1008,6 +1148,7 @@ async function openStudent(id) {
   };
   body.querySelectorAll("[data-pay]").forEach((b) => (b.onclick = () => payForm("Оплата счёта", +b.dataset.left,
     (amount, method) => api("POST", `/api/subscriptions/${b.dataset.pay}/pay`, { amount, method }))));
+  if ($("#sub-more")) $("#sub-more").onclick = (e) => { body.querySelector(".sub-list").classList.remove("folded"); e.target.remove(); };
   if ($("#pay-more")) $("#pay-more").onclick = (e) => { body.querySelector(".pay-list").classList.remove("folded"); e.target.remove(); };
   $("#pay-free").onclick = () => payForm("Оплата на депозит", d.balance.debt || 0,
     (amount, method, comment) => api("POST", `/api/students/${id}/payments`, { amount, method, comment }));
