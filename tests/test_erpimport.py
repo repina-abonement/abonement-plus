@@ -137,6 +137,12 @@ def rules():
             "5,Только Пробное,Небо НУП вт/пт,Вводное,12.10.2026,0,0\n").encode()
     u = ei.upload(con, "абонементы.csv", subs, "subs")
     ei.set_upload(con, u["id"], None, {"erp_id": 0, "child_name": 1, "group": 2, "tariff": 3, "month": 4, "price": 5, "status": 6})
+    cl2 = ("ID,ФИО посетителя,Телефон,Статус,Филиал,Группа\n"
+           "11,Тёзка Один,79000000011,Ушедший,ТЦ Небо,Чоботовская сб/вс\n"
+           "12,Тёзка Один,79000000012,Ушедший,ТЦ Небо,Небо НУП вт/пт\n").encode()
+    ei.upload(con, "тёзки.csv", cl2, "clients")
+    vis = ("Номер клиента в ERP,Ребёнок,Дата занятия,Группа,Отметка\n,Тёзка Один,04.10.2025,Небо НУП вт/пт,был\n,Тёзка Один,05.10.2025,Чоботовская сб/вс,пропуск\n").encode()
+    ei.upload(con, "журнал.csv", vis, "visits")
     pays = ("ID посетителя,Посетитель,Дата продажи,Дата оплаты,Сумма,Вид оплаты\n"
             "1,Два Группы,01.10.2026,02.10.2026,8000,Наличные\n"
             "2,Не Оплатил,05.10.2026,,4000,PayKeeper\n").encode()
@@ -146,8 +152,8 @@ def rules():
                          "ТЦ Небо · Небо НУП вт/пт": neb})
     p = ei.plan(con, NOW.date())
     s = p["stats"]
-    check(s["children"] == 6 and s["no_name"] == 1, f"Лид без имени ребёнка не потерян, пустая строка пропущена ({s})")
-    check(s["members_active"] == 3 and s["members_unpaid"] == 1 and s["members_left"] == 1 and s["leads"] == 2,
+    check(s["children"] == 8 and s["no_name"] == 1, f"Лид без имени ребёнка не потерян, пустая строка пропущена ({s})")
+    check(s["members_active"] == 3 and s["members_unpaid"] == 1 and s["members_left"] == 3 and s["leads"] == 2,
           f"Статусы по абонементам: 3 занимаются (1 не оплатил ноябрь), 1 ушёл, 2 лида ({s})")
     check(s["subs"] == 6 and s["subs_trials"] == 1 and s["subs_makeups"] == 1, "Вводные и отработки не считаются абонементами")
     check(s["pay_date_from_sale"] == 1 and not any("не понял дату" in x for x in p["problems"]), "Пустая дата оплаты заменена датой продажи")
@@ -162,6 +168,9 @@ def rules():
     check([tuple(x) for x in two_subs] == [(9500, "invoiced")], f"Продажи одного месяца сложены, частично оплаченный - не оплачен ({[tuple(x) for x in two_subs]})")
     v = {x["label"]: x for x in ei.verify(con)["rows"]}
     check(v["Абонементы"]["ok"], f"Сверка абонементов учитывает сложенные продажи ({v['Абонементы']})")
+    t1, t2 = g("11")["id"], g("12")["id"]
+    vv = {r[0]: r[1] for r in con.execute("SELECT student_id, status FROM attendance WHERE student_id IN (?,?)", (t1, t2))}
+    check(vv == {t2: "present", t1: "absent"}, f"Посещения тёзок без номера разведены по группе ({vv})")
     check(g("5")["funnel"] == "sales" and g("5")["trial_at"].startswith("2026-10-12"), "Только вводное: остаётся лидом, дата пробного из вводного")
     nn = con.execute("SELECT s.*, f.name AS fam FROM students s JOIN families f ON f.id=s.family_id WHERE s.name=?", (ei.NO_NAME,)).fetchone()
     check(nn and nn["fam"] == "Папа Без Имени" and nn["funnel"] == "sales", "Лид без имени перенесён в воронку продаж с семьёй родителя")

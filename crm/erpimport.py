@@ -636,11 +636,20 @@ def _children(con, problems: list[str] | None = None) -> tuple[list[dict], dict]
     return children, by_key
 
 
-def _child_finder(children: list[dict], by_key: dict):
+def _child_finder(children: list[dict], by_key: dict, subs: list[dict] | None = None):
+    """Поиск ребёнка для абонемента, оплаты, посещения, задачи: по номеру ERP, иначе по имени и телефону, иначе по имени.
+    Тёзок (в журнале ERP только ФИО) различаем по группе: чей ребёнок ходил в эту группу по абонементам или по карточке."""
     names: dict[str, list] = {}
     for c in children:
         if not c.get("_no_name"):
             names.setdefault(_norm(_split_name(c)), []).append(c)
+    groups_of: dict[tuple, set] = {}
+    for c in children:
+        groups_of[_key(c)] = {_norm(g) for g in (c.get("group") or "").split(";") if g.strip()}
+    for rec in subs or []:
+        k = _key(rec)
+        if k in by_key and (rec.get("group") or "").strip():
+            groups_of.setdefault(k, set()).add(_norm(rec["group"]))
 
     def find(rec):
         k = _key(rec)
@@ -649,6 +658,9 @@ def _child_finder(children: list[dict], by_key: dict):
         if k[0] == "id":
             return None
         cands = names.get(_norm(_split_name(rec)), [])
+        if len(cands) > 1 and (rec.get("group") or "").strip():
+            g = _norm(rec["group"])
+            cands = [c for c in cands if g in groups_of.get(_key(c), set())]
         return cands[0] if len(cands) == 1 else None
     return find
 
@@ -663,8 +675,8 @@ def plan(con, today: date | None = None) -> dict:
     for rec in children:
         p = normalize_phone(rec.get("phone", ""))[-10:] or ("solo", _key(rec))
         fams.setdefault(p, []).append(rec)
-    find = _child_finder(children, by_key)
     subs = _records(con, "subs")
+    find = _child_finder(children, by_key, subs)
     pays = _records(con, "payments")
     visits = _records(con, "visits")
     tasks = _records(con, "tasks")
@@ -759,8 +771,8 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
     nowi = now.isoformat(timespec="minutes")
     # кто есть кто считаем до удаления выдуманных: группы берутся из сопоставления
     children, by_key = _children(con)
-    find_child = _child_finder(children, by_key)
     sub_recs = _records(con, "subs")
+    find_child = _child_finder(children, by_key, sub_recs)
     cls = _classify(con, children, sub_recs, lambda r: (lambda c: _key(c) if c else None)(find_child(r)), now.date())
     removed = wipe_clients(con)
     batch = con.execute("INSERT INTO erp_batches(started_at, user_name, backup) VALUES (?,?,?)",
@@ -843,13 +855,8 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
             st["comments"] += 1
 
     def find_sid(rec):
-        k = _key(rec)
-        if k in sid_by_key:
-            return sid_by_key[k]
-        if k[0] == "id":
-            return None
-        lst = name_index.get(_norm(_split_name(rec)), [])
-        return lst[0] if len(lst) == 1 else None
+        c = find_child(rec)
+        return sid_by_key.get(_key(c)) if c else None
 
     def enrollment(sid, group_name):
         gid = _group_id(con, "", group_name) if group_name else None
