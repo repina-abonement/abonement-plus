@@ -138,6 +138,8 @@ def init(con):
         con.execute("ALTER TABLE students ADD COLUMN priority INTEGER NOT NULL DEFAULT 0")
     if not get(con, "hook_token"):
         put(con, "hook_token", secrets.token_urlsafe(18))
+    if con.execute("SELECT name FROM sqlite_master WHERE name='conversations'").fetchone():
+        merge_wazzup_duplicates(con)
     for k in ("tg_secret", "max_secret"):
         if not get(con, k):
             put(con, k, secrets.token_hex(16))
@@ -638,13 +640,58 @@ def _utc_to_local(s: str) -> str | None:
         return s[:19]
 
 
-def _wz_tg_rekey(con, chat_id: str, phone: str) -> None:
+def merge_conversations(con, src: int, dst: int) -> None:
+    """Две переписки с одним человеком в одном канале → одна. Сообщения переносим, повторы (эхо Wazzup) отбрасываем."""
+    if src == dst:
+        return
+    for m in con.execute("SELECT * FROM messages WHERE conversation_id=? ORDER BY id", (src,)).fetchall():
+        dup = m["external_id"] and con.execute("SELECT 1 FROM messages WHERE conversation_id=? AND external_id=?", (dst, m["external_id"])).fetchone()
+        if not dup:
+            con.execute("UPDATE messages SET conversation_id=? WHERE id=?", (dst, m["id"]))
+    con.execute("DELETE FROM messages WHERE conversation_id=?", (src,))
+    s, d = con.execute("SELECT * FROM conversations WHERE id=?", (src,)).fetchone(), con.execute("SELECT * FROM conversations WHERE id=?", (dst,)).fetchone()
+    con.execute("""UPDATE conversations SET family_id=COALESCE(family_id, ?), phone=CASE WHEN phone='' THEN ? ELSE phone END,
+                   phone_norm=CASE WHEN phone_norm='' THEN ? ELSE phone_norm END WHERE id=?""", (s["family_id"], s["phone"], s["phone_norm"], dst))
+    last = con.execute("SELECT ts, text, direction FROM messages WHERE conversation_id=? ORDER BY ts DESC, id DESC LIMIT 1", (dst,)).fetchone()
+    if last:
+        con.execute("UPDATE conversations SET last_at=?, last_text=? WHERE id=?", (last[0], ("Вы: " if last[2] == "out" else "") + (last[1] or "")[:120], dst))
+    con.execute("DELETE FROM conversations WHERE id=?", (src,))
+    _ = d
+
+
+def merge_wazzup_duplicates(con) -> int:
+    """Переписка «по номеру» и настоящий чат Telegram одной семьи склеиваются в одну."""
+    n = 0
+    for p in con.execute("""SELECT id, family_id, phone_norm FROM conversations WHERE channel='wazzup_telegram'
+                            AND external_id LIKE 'phone:%'""").fetchall():
+        other = con.execute("""SELECT id FROM conversations WHERE channel='wazzup_telegram' AND external_id NOT LIKE 'phone:%' AND id!=?
+                               AND ((family_id IS NOT NULL AND family_id=?) OR (phone_norm!='' AND phone_norm=?)) ORDER BY id LIMIT 1""",
+                            (p["id"], p["family_id"], p["phone_norm"])).fetchone()
+        if other:
+            merge_conversations(con, p["id"], other[0])
+            n += 1
+    # эхо Wazzup собственных сообщений CRM («Из Wazzup» с тем же текстом в ту же минуту) — повтор
+    con.execute("""DELETE FROM messages WHERE user_name='Из Wazzup' AND direction='out' AND EXISTS (
+                     SELECT 1 FROM messages o WHERE o.conversation_id=messages.conversation_id AND o.id!=messages.id AND o.direction='out'
+                     AND o.user_name!='Из Wazzup' AND o.text=messages.text AND substr(o.ts,1,16)=substr(messages.ts,1,16))""")
+    return n
+
+
+def _wz_tg_rekey(con, chat_id: str, phone: str, echo_id: str = "") -> None:
     """Первое сообщение в Telegram мы отправили «по номеру» (phone:…), а ответ приходит с настоящим номером чата.
     Связываем: по телефону, если Telegram его показал; иначе единственный недавний чат «по номеру» без ответа."""
-    if con.execute("SELECT 1 FROM conversations WHERE channel='wazzup_telegram' AND external_id=?", (chat_id,)).fetchone():
-        return
     pn = normalize_phone(phone) if phone else ""
-    row = con.execute("SELECT id FROM conversations WHERE channel='wazzup_telegram' AND external_id=?", ("phone:" + pn,)).fetchone() if pn else None
+    row = None
+    if echo_id:  # эхо нашего же сообщения: по его номеру точно знаем, какая переписка «по номеру» это была
+        row = con.execute("""SELECT c.id FROM conversations c JOIN messages m ON m.conversation_id=c.id
+                             WHERE c.channel='wazzup_telegram' AND c.external_id LIKE 'phone:%' AND m.external_id=?""", (echo_id,)).fetchone()
+    if not row and pn:
+        row = con.execute("SELECT id FROM conversations WHERE channel='wazzup_telegram' AND external_id=?", ("phone:" + pn,)).fetchone()
+    existing = con.execute("SELECT id FROM conversations WHERE channel='wazzup_telegram' AND external_id=?", (chat_id,)).fetchone()
+    if existing:
+        if row:
+            merge_conversations(con, row[0], existing[0])
+        return
     if not row:
         since = (datetime.now() - timedelta(hours=48)).isoformat(timespec="seconds")
         cands = con.execute("""SELECT c.id FROM conversations c WHERE c.channel='wazzup_telegram' AND c.external_id LIKE 'phone:%'
@@ -664,12 +711,14 @@ def wz_hook(con, payload: dict) -> None:
         contact = m.get("contact") or {}
         phone = m.get("chatId") if ct == "whatsapp" else (contact.get("phone") or "")
         if ct == "telegram":
-            _wz_tg_rekey(con, str(m.get("chatId") or ""), phone)
+            _wz_tg_rekey(con, str(m.get("chatId") or ""), phone, str(m.get("messageId") or "") if m.get("isEcho") else "")
         cid = upsert_conversation(con, channel, m.get("chatId"), title=contact.get("name") or "",
                                   username=contact.get("username") or "", phone=phone or "",
                                   meta={"channelId": m.get("channelId"), "chatType": ct})
         kind = WZ_KINDS.get(m.get("type") or "text", "other")
         echo = bool(m.get("isEcho"))
+        if echo and m.get("messageId") and con.execute("SELECT 1 FROM messages WHERE external_id=?", (str(m["messageId"]),)).fetchone():
+            continue  # эхо сообщения, которое CRM сама отправила: оно уже в переписке
         dt = _utc_to_local(m.get("dateTime") or "")
         add_message(con, cid, "out" if echo else "in", m.get("text") or "", kind=kind, media=m.get("contentUri") or "",
                     external_id=m.get("messageId"), user_name="Из Wazzup" if echo else "", ts=dt)
