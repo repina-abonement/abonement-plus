@@ -1582,8 +1582,11 @@ async function renderBackup(box) {
       <div class="small" style="color:#b42318">Сохраните этот пароль отдельно от CRM, например в заметках телефона. Без него копию с Диска не открыть</div></div>
     <button class="btn sm primary" id="bk-run">Сделать копию сейчас</button>
     ${can("export") ? `<div class="field" style="margin-top:14px"><label>Копия, которую можно прочитать</label>
-      <a class="btn sm" href="/api/export/all?t=${Date.now()}">📥 Скачать базу в Excel</a>
-      <div class="small muted" style="margin-top:6px">Один файл: дети и родители с телефонами, абонементы, оплаты, посещения, группы, сотрудники. Открывается в Excel. Храните его в надёжном месте: в нём персональные данные клиентов</div></div>` : ""}`;
+      <div class="row" style="gap:8px;flex-wrap:wrap"><a class="btn sm" style="flex:0 0 auto" href="/api/export/all?t=${Date.now()}">📥 Вся база в Excel</a>
+        <a class="btn sm" style="flex:0 0 auto" href="/api/export/all?part=contacts&t=${Date.now()}">📞 Только контакты</a></div>
+      <div class="small muted" style="margin-top:6px"><b>Вся база:</b> дети и родители с телефонами, абонементы, оплаты, посещения, группы, сотрудники.<br>
+        <b>Только контакты:</b> один лист для обзвона: ребёнок, родитель, телефон, группа, ученик или лид, пометка «не звонить». Без оплат.<br>
+        Храните файлы в надёжном месте: в них персональные данные клиентов</div></div>` : ""}`;
   $("#bk-copy").onclick = () => navigator.clipboard.writeText(d.key).then(() => toast("Пароль скопирован"));
   $("#bk-save").onclick = async () => { try { await api("POST", "/api/backup", { yadisk_token: $("#bk-token").value }); toast("Сохранено"); renderBackup(box); } catch (e) { fail(e); } };
   $("#bk-run").onclick = async (e) => {

@@ -32,6 +32,11 @@ def main():
     s1, s3 = z.read("xl/worksheets/sheet1.xml").decode(), z.read("xl/worksheets/sheet3.xml").decode()
     check("Аня" in s1 and "+7 900 000-11-22" in s1 and "Небо · Сб &lt;10:00&gt; &amp; Вс" in s1, "Ребёнок с телефоном родителя и группой")
     check("5400" in s3 and "СБП" in s3 and "за ноябрь" in s3, "Оплата с суммой, способом и комментарием")
+    data, name = fullexport.build(con, "contacts")
+    z = zipfile.ZipFile(io.BytesIO(data))
+    s = z.read("xl/worksheets/sheet1.xml").decode()
+    check(name.startswith("kontakty-") and "xl/worksheets/sheet2.xml" not in z.namelist(), "Контакты: один лист")
+    check("Аня" in s and "+7 900 000-11-22" in s and "Мама Ани" in s and "5400" not in s, "Ребёнок, родитель, телефон, без денег")
     print("ok")
 
 

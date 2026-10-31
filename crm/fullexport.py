@@ -25,21 +25,29 @@ def _rows(con, sql, args=()):
     return [list(r) for r in con.execute(sql, args)]
 
 
-def build(con) -> tuple[bytes, str]:
+def build(con, part: str = "all") -> tuple[bytes, str]:
+    """part="contacts": один лист для обзвона (ребёнок, родитель, телефон, группа), без денег."""
     real = "AND s.fake=0" if con.execute("SELECT COUNT(*) FROM students WHERE fake=0").fetchone()[0] else ""
     kids = [["Ребёнок", "Дата рождения", "Семья", "Родитель", "Телефон", "Мессенджер", "Ещё родители", "Группы", "Тариф",
-             "Статус", "Этап", "Источник", "Пришёл в CRM", "Стал учеником", "Код"]]
+             "Статус", "Этап", "Источник", "Пришёл в CRM", "Стал учеником", "Не звонить", "Код"]]
     for r in con.execute(f"""
         SELECT s.id, s.name, s.birth, f.name, s.tariff, s.funnel, s.stage, s.archived, s.source, s.created_at, s.converted_at,
           (SELECT GROUP_CONCAT(b.name || ' · ' || g.name, ', ') FROM enrollments e JOIN groups g ON g.id=e.group_id
              JOIN branches b ON b.id=g.branch_id WHERE e.student_id=s.id AND e.active=1),
-          s.family_id
+          s.family_id, s.dnd
         FROM students s JOIN families f ON f.id=s.family_id WHERE 1=1 {real} ORDER BY s.archived, s.funnel DESC, s.name"""):
         ps = con.execute("SELECT name, phone, messenger FROM parents WHERE family_id=? ORDER BY id", (r[12],)).fetchall()
         p0 = ps[0] if ps else ("", "", "")
         status = "в архиве" if r[7] else ("ученик" if r[5] == "members" else "лид")
         kids.append([r[1], r[2], r[3], p0[0], p0[1], p0[2], "; ".join(f"{p[0]} {p[1]}".strip() for p in ps[1:]),
-                     r[11] or "", r[4], status, r[6], r[8], (r[9] or "")[:10], (r[10] or "")[:10], r[0]])
+                     r[11] or "", r[4], status, r[6], r[8], (r[9] or "")[:10], (r[10] or "")[:10],
+                     "не звонить" if r[13] else "", r[0]])
+    now = datetime.now()
+    if part == "contacts":
+        cols = ["Ребёнок", "Дата рождения", "Родитель", "Телефон", "Мессенджер", "Ещё родители", "Группы", "Статус", "Не звонить"]
+        idx = [kids[0].index(c) for c in cols]
+        rows = [cols] + [[_ru(r[i]) for i in idx] for r in kids[1:]]
+        return xlsx.build([("Контакты", rows)]), f"kontakty-{now:%Y-%m-%d_%H%M}.xlsx"
     subs = [["Ребёнок", "Месяц", "Группа", "Тариф", "Занятий", "Цена занятия", "Скидка", "Сумма скидки", "Надбавка",
              "К оплате", "Статус", "Оплачен", "Вид"]]
     subs += _rows(con, f"""SELECT s.name, x.month, COALESCE(b.name || ' · ' || g.name, ''), x.tariff, x.lessons, x.per_lesson,
@@ -76,7 +84,6 @@ def build(con) -> tuple[bytes, str]:
     for r in con.execute("SELECT name, role, is_senior, is_promoter, phone, tg_username, login, active FROM users ORDER BY active DESC, name"):
         staff.append([r[0], "Старший администратор" if r[2] else POST.get(r[1], r[1]), "да" if r[3] else "", r[4], r[5], r[6],
                       "да" if r[7] else "архив"])
-    now = datetime.now()
     sheets = [("Дети и родители", kids), ("Абонементы", subs), ("Оплаты", pays), ("Посещения", att),
               ("Группы", grp), ("Сотрудники", staff)]
     sheets = [(n, [rows[0]] + [[_ru(v) for v in r] for r in rows[1:]]) for n, rows in sheets]

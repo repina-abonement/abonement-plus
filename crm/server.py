@@ -316,7 +316,7 @@ def backup_status(con, h, user, body, q):
 def export_all(con, h, user, body, q):
     """Вся база понятными таблицами Excel: дети и родители, абонементы, оплаты, посещения, группы, сотрудники."""
     from . import fullexport
-    data, name = fullexport.build(con)
+    data, name = fullexport.build(con, "contacts" if q.get("part") == "contacts" else "all")
     sv.audit(con, user, "export.all", name)
     return Raw(data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", name)
 
