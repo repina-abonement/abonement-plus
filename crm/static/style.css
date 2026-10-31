@@ -1210,3 +1210,15 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 .pay-tbl td { vertical-align: top; padding-top: 9px; padding-bottom: 9px; }
 .pay-more-hide { display: none; }
 .req-fold { background: var(--surface-2); border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; }
+.tm-zmore summary, .tm-example-fold summary { cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 600; margin: 4px 0 0 18px; }
+.tm-example-fold summary { margin: 8px 0; text-align: center; }
+.an-tabs { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: thin; }
+.an-tabs button { white-space: nowrap; }
+.tm-zmore > summary { display: block; list-style: none; margin: 4px 0 0 18px; padding: 0; background: none; width: auto; height: auto; }
+.tm-zmore > summary::-webkit-details-marker { display: none; }
+.tm-zmore > summary::before { content: "▸ "; }
+.tm-zmore[open] > summary::before { content: "▾ "; }
+.tm-example-fold > summary { list-style: none; }
+.tm-example-fold > summary::-webkit-details-marker { display: none; }
+.tm-example-fold > summary::before { content: "▸ "; }
+.tm-example-fold[open] > summary::before { content: "▾ "; }

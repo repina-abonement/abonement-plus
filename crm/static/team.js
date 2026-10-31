@@ -44,7 +44,8 @@ async function renderTeam(page) {
     <section class="tm-sec"><div class="tm-h"><div><b>Зоны ответственности</b><small>к кому идти с вопросом</small></div></div>
       <div class="tm-zones">${t.zones.map((z) => `<div class="tm-zone" style="--zc:${z.color}">
         <div class="tm-zone-h"><i></i><b>${esc(z.title)}</b>${stack(z.key)}</div>
-        <ul>${z.items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`).join("")}</div>
+        <ul>${z.items.slice(0, 3).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+        ${z.items.length > 3 ? `<details class="tm-zmore"><summary>ещё ${z.items.length - 3}</summary><ul>${z.items.slice(3).map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details>` : ""}</div>`).join("")}</div>
     </section>
 
     ${cp || t.pay.admins || t.pay.promoters ? `<section class="tm-sec"><div class="tm-h"><div><b>${admin ? "Модели оплаты" : "Моя модель оплаты"}</b><small>как считается вознаграждение</small></div></div>
@@ -56,11 +57,11 @@ async function renderTeam(page) {
             <div class="tm-tile alt"><b>${pc(cp.pct.solo)} %</b><small>если тренер один</small></div>
           </div>
           <div class="small muted center">от выручки группы за месяц, поделённой на тренировки</div>
-          ${admin ? `<div class="tm-example"><b>Пример: 10 детей, 1100 ₽ за занятие</b>
+          ${admin ? `<details class="tm-example-fold"><summary>Пример расчёта</summary><div class="tm-example"><b>Пример: 10 детей, 1100 ₽ за занятие</b>
             <div><span>выручка за тренировку</span><b>${rub(ex)}</b></div>
             <div><span>главному · ${pc(cp.pct.main)} %</span><b>${rub(Math.round(ex * cp.pct.main / 100))}</b></div>
             <div><span>помощнику · ${pc(cp.pct.assistant)} %</span><b>${rub(Math.round(ex * cp.pct.assistant / 100))}</b></div>
-            <div><span>если один · ${pc(cp.pct.solo)} %</span><b>${rub(Math.round(ex * cp.pct.solo / 100))}</b></div></div>` : ""}
+            <div><span>если один · ${pc(cp.pct.solo)} %</span><b>${rub(Math.round(ex * cp.pct.solo / 100))}</b></div></div></details>` : ""}
           <div class="tm-tiles">
             <div class="tm-tile"><b>${rub(cp.makeup)}</b><small>группа отработок, если кто-то пришёл</small></div>
             ${cp.program ? `<div class="tm-tile alt"><b>${pc(cp.program.pct)} %</b><small>${esc(cp.program.name)}: от выручки направления</small></div>` : ""}
