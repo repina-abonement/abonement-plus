@@ -501,7 +501,7 @@ def board(con, funnel: str) -> dict:
                                                WHERE g.id=?""", (s["group_id"] or 0,))]
             by[key]["cards"].append(card)
         return {"funnel": "members", "columns": cols, "draggable": False,
-                "note": f"Этапы ставятся сами по оплатам. Продление — до {deadline_day} числа."}
+                "note": f"Этапы ставятся сами по оплатам. Продлить нужно до {deadline_day} числа."}
 
     if funnel == "skips":
         cols = [
@@ -512,6 +512,9 @@ def board(con, funnel: str) -> dict:
         ]
         by = {c["key"]: c for c in cols}
         for s in _rows(con.execute("SELECT * FROM students WHERE funnel='members' AND stage != 'left' AND archived=0 ORDER BY name")):
+            # отработки только на гибком абонементе: у кого без переносов, в воронку не берём
+            if not con.execute("SELECT 1 FROM enrollments WHERE student_id=? AND active=1 AND tariff='flex'", (s["id"],)).fetchone():
+                continue
             c = absence_counters(con, s["id"])
             if not c["available"] and not c["booked"]:
                 continue
@@ -520,7 +523,7 @@ def board(con, funnel: str) -> dict:
             key = "booked" if c["booked"] else s["skip_stage"]
             by.get(key, by["none"])["cards"].append(card)
         return {"funnel": "skips", "columns": cols, "draggable": True,
-                "note": "Сюда попадают ученики с неотработанными пропусками за этот и прошлый месяц."}
+                "note": "Сюда попадают ученики на гибком абонементе с неотработанными пропусками за этот и прошлый месяц."}
 
     raise ApiError("Неизвестная воронка", 404)
 
