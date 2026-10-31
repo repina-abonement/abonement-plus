@@ -67,6 +67,18 @@ h3 { font-size: 15.5px; font-weight: 800; }
 .nav button.active { background: #fff; color: var(--pitch); font-weight: 600; }
 .nav button.active svg { opacity: 1; color: var(--accent); }
 .nav .nbadge { margin-left: auto; }
+.nav-q { margin: 0 0 8px; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.07);
+  color: #fff; font: inherit; font-size: 14px; width: 100%; box-sizing: border-box; }
+.nav-q::placeholder { color: rgba(255,255,255,.55); }
+.nav-q:focus { outline: none; border-color: rgba(255,255,255,.4); background: rgba(255,255,255,.12); }
+.nav .nav-fold-h { margin-top: 6px; font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: rgba(255,255,255,.5); gap: 8px; padding: 7px 10px; }
+.nav .nav-arrow { display: inline-block; width: 19px; text-align: center; transition: transform .15s; font-size: 12px; }
+.nav-fold.open .nav-arrow { transform: rotate(90deg); }
+.nav-fold-b { display: none; flex-direction: column; gap: 2px; }
+.nav-fold.open .nav-fold-b { display: flex; }
+html.theme-soft .nav-q { background: var(--surface-2); border-color: var(--line); color: var(--ink); }
+html.theme-soft .nav-q::placeholder { color: var(--ink-2); }
+html.theme-soft .nav .nav-fold-h { color: var(--ink-2); }
 .topbar #new-client { margin-top: 12px; background: var(--accent); color: #fff; border: 0; padding: 10px 12px; border-radius: 10px; font-weight: 600; }
 .topbar #new-client:hover { filter: brightness(1.08); }
 .page { margin-left: var(--side); padding: 26px 28px 40px; max-width: 1640px; }

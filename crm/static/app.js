@@ -184,6 +184,31 @@ const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", c
 function isCoachShort() { return "Результаты"; }
 const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></span>` : "";
 
+/* Боковое меню: главное сверху, остальное по папкам. Открыта папка с текущим разделом и те, что сотрудник раскрыл сам */
+const NAV_TOP = ["today", "sales", "inbox", "planner"];
+const NAV_FOLDERS = [["Клиенты", ["members", "skips"]], ["Занятия", ["journal", "schedule", "coaches"]],
+  ["Деньги", ["payments", "fiscal", "merch", "spend", "dashboard"]], ["Школа", ["team", "docs", "settings"]]];
+const navOpen = () => { try { return JSON.parse(localStorage.getItem("crm.nav_open") || "{}"); } catch (_) { return {}; } };
+function sideNav(views) {
+  const item = ([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}<span>${t}</span>${badge(k)}</button>`;
+  if (views.length <= 8) return views.map(item).join("");
+  const has = (k) => views.find(([v]) => v === k);
+  const search = has("search") ? `<input class="nav-q" id="nav-q" type="search" placeholder="🔍 Найти клиента" title="Имя, фамилия или телефон, потом Enter">` : "";
+  const placed = new Set(["search"]);
+  const top = NAV_TOP.filter(has).map((k) => { placed.add(k); return item(has(k)); }).join("");
+  const o = navOpen();
+  const folders = NAV_FOLDERS.map(([title, keys]) => {
+    const list = keys.filter(has); list.forEach((k) => placed.add(k));
+    if (!list.length) return "";
+    if (list.length === 1) return item(has(list[0]));
+    const open = o[title] || list.includes(S.view);
+    return `<div class="nav-fold ${open ? "open" : ""}"><button class="nav-fold-h" data-fold="${title}"><span class="nav-arrow">▸</span><span>${title}</span></button>
+      <div class="nav-fold-b">${list.map((k) => item(has(k))).join("")}</div></div>`;
+  }).join("");
+  const rest = views.filter(([k]) => !placed.has(k)).map(item).join("");
+  return search + top + folders + rest;
+}
+
 function shell() {
   const views = visibleViews();
   if (S.view !== "meet" && !views.some(([k]) => k === S.view)) S.view = views[0][0];
@@ -192,13 +217,19 @@ function shell() {
   app.innerHTML = `
   <header class="topbar">
     <div class="brand"><i aria-hidden="true">⚽</i><div>Абонемент <span>Плюс</span></div></div>
-    <nav class="nav">${views.map(([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}<span>${t}</span>${badge(k)}</button>`).join("")}</nav>
+    <nav class="nav">${sideNav(views)}</nav>
     ${can("members", "full") ? `<button class="btn" id="new-client">+ Клиент</button>` : ""}
   </header>
   <main class="page" id="page"></main>
   <nav class="tabbar">${tabs.map(([k, t]) => `<button data-${k === "more" ? "more" : "view"}="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}<span>${SHORT[k] || t}</span>${badge(k)}</button>`).join("")}</nav>
   <div class="more-sheet" hidden><div class="sheet">${views.slice(4).map(([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}${t}</button>`).join("")}</div></div>`;
   app.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => { $(".more-sheet").hidden = true; go(b.dataset.view); }));
+  app.querySelectorAll("[data-fold]").forEach((b) => (b.onclick = () => {
+    const f = b.closest(".nav-fold"), open = f.classList.toggle("open");
+    try { const o = navOpen(); o[b.dataset.fold] = open; localStorage.setItem("crm.nav_open", JSON.stringify(o)); } catch (_) {}
+  }));
+  const nq = $("#nav-q");
+  if (nq) nq.onkeydown = (e) => { if (e.key === "Enter") { S.search = nq.value.trim(); nq.value = ""; go("search"); setTimeout(() => { const q = $("#q"); if (q) { q.focus(); q.dispatchEvent(new Event("input")); } }, 50); } };
   const more = $("[data-more]");
   if (more) more.onclick = () => { $(".more-sheet").hidden = !$(".more-sheet").hidden; };
   $(".more-sheet").onclick = (e) => { if (e.target.classList.contains("more-sheet")) e.currentTarget.hidden = true; };
@@ -239,6 +270,7 @@ function go(view, fromHistory = false) {
   if (!fromHistory) pushNav();
   try { localStorage.setItem("crm.view", view); } catch (_) {}
   app.querySelectorAll("[data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
+  app.querySelectorAll(".nav-fold").forEach((f) => { if (f.querySelector(`[data-view="${view}"]`)) f.classList.add("open"); });
   const more = $("[data-more]");
   if (more) more.classList.toggle("active", !visibleViews().slice(0, 4).some(([k]) => k === view));
   window.scrollTo(0, 0);
