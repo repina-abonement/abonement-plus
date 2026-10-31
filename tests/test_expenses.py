@@ -15,6 +15,7 @@ ADM = {"id": 1, "name": "Юлия", "role": "admin"}
 def main():
     con = db.connect(os.path.join(tempfile.mkdtemp(), "e.sqlite3"))
     db.init_db(con)
+    con.execute("DELETE FROM bills")  # разовое напоминание об ОФД здесь не нужно
     t = date(2026, 10, 27)
     print("Мои платежи")
     rent = expenses.save_bill(con, {"title": "Аренда Небо", "category": "rent", "amount": 60000, "next_due": "2026-10-29", "remind_days": 3})
@@ -55,7 +56,7 @@ def _upcoming():
     import tempfile as _t
     from datetime import date as _d
     from crm import db as _db, expenses as _e
-    con = _db.connect(os.path.join(_t.mkdtemp(), "u.sqlite3")); _db.init_db(con)
+    con = _db.connect(os.path.join(_t.mkdtemp(), "u.sqlite3")); _db.init_db(con); con.execute("DELETE FROM bills")
     _e.save_bill(con, {"title": "Сервер CRM", "category": "crm", "amount": 990, "next_due": "2026-11-20", "remind_days": 5})
     _e.save_bill(con, {"title": "Домен", "category": "crm", "amount": 300, "period": "yearly", "next_due": "2027-10-01"})
     up = _e.bills_upcoming(con, _d(2026, 10, 28))
