@@ -1212,7 +1212,7 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 .req-fold { background: var(--surface-2); border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; }
 .tm-zmore summary, .tm-example-fold summary { cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 600; margin: 4px 0 0 18px; }
 .tm-example-fold summary { margin: 8px 0; text-align: center; }
-.an-tabs { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: thin; }
+.an-tabs { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; box-sizing: border-box; display: flex; scrollbar-width: thin; }
 .an-tabs button { white-space: nowrap; }
 .tm-zmore > summary { display: block; list-style: none; margin: 4px 0 0 18px; padding: 0; background: none; width: auto; height: auto; }
 .tm-zmore > summary::-webkit-details-marker { display: none; }
@@ -1231,3 +1231,20 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 .dwf > summary::after { content: "▸"; margin-left: auto; color: var(--ink-2); transition: transform .15s; }
 .dwf[open] > summary::after { transform: rotate(90deg); }
 .dwf > .dw { padding: 0 4px 4px; }
+
+/* телефон: ничего не вылезает вбок, кнопки удобно нажимать пальцем */
+@media (max-width: 640px) {
+  .seg { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+  .seg::-webkit-scrollbar { display: none; }
+  .seg button { white-space: nowrap; }
+  .chip { min-height: 32px; }
+  .pay-dates input { width: 140px; }
+  .pay-tbl, .pay-tbl tbody { display: block; min-width: 0 !important; width: 100%; }
+  .pay-tbl tr { display: grid; grid-template-columns: 40px 1fr auto; column-gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .pay-tbl td { padding: 0 !important; border: 0 !important; }
+  .pay-tbl td:nth-child(4), .pay-tbl td:nth-child(5) { grid-column: 2 / 4; font-size: 12.5px; }
+  .pay-tbl td:nth-child(6) { grid-column: 2 / 4; text-align: left !important; }
+  .pay-tbl td:nth-child(6):empty { display: none; }
+  .cfacts { flex-wrap: wrap; }
+}
+@media (max-width: 640px) { .kpi { min-width: 0; padding: 14px; } .kpi-body { flex-wrap: wrap; gap: 10px; } .kpi-value { font-size: 26px; } .kpis { grid-template-columns: minmax(0, 1fr); } }
