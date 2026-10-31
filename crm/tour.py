@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-VERSION = 1
+VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS staff_tour (
