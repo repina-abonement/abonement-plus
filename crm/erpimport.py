@@ -190,6 +190,7 @@ FIELDS = {
         ("task", "Задача (вид или статус)", ["задача", "тип задачи", "статус задачи", "вид", "статус"]),
         ("due", "Срок", ["срок", "дата", "когда"]),
         ("comment", "Комментарий", ["комментарий", "описание", "текст"]),
+        ("assignee", "Исполнитель в ERP", ["исполнитель", "ответственный"]),
     ],
 }
 KIND_LABELS = {"clients": "Клиенты (дети и родители)", "subs": "Абонементы", "payments": "Оплаты", "visits": "Посещения", "tasks": "Задачи"}
@@ -926,7 +927,9 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
         due = parse_date(rec.get("due", "")) or nowi
         if len(due) == 10:
             due += "T10:00"
-        tid = _tasks.import_erp_task(con, rec["task"], sid, due, (rec.get("comment") or "").strip())
+        note = "; ".join(x for x in ((rec.get("comment") or "").strip(),
+                                     f"исполнитель в ERP: {rec['assignee'].strip()}" if (rec.get("assignee") or "").strip() else "") if x)
+        tid = _tasks.import_erp_task(con, rec["task"], sid, due, note)
         if tid:
             if olga:  # задачи по пробным на Ольгу (решение Юлии)
                 con.execute("UPDATE tasks SET assignee_id=? WHERE id=?", (olga[0], tid))

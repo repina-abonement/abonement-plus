@@ -47,7 +47,7 @@ def main():
     check(ei.upload(con, "оплаты.csv", pays_csv)["kind"] == "payments", "Оплаты угаданы")
     vis_csv = ("ID клиента;ФИО;Дата занятия;Группа;Отметка\n101;Иванов Петя;03.09.2026;Пн/Чт 17:00;был\n101;Иванов Петя;07.09.2026;Пн/Чт 17:00;н\n").encode()
     check(ei.upload(con, "посещения.csv", vis_csv)["kind"] == "visits", "Посещения угаданы")
-    tasks_csv = ("ID клиента;ФИО;Задача;Срок;Комментарий\n103;Смирнов Гоша;Не пришли на ПУ;20.10.2026;перезвонить\n").encode()
+    tasks_csv = ("ID клиента;ФИО;Задача;Срок;Комментарий;Исполнитель в ERP\n103;Смирнов Гоша;Не пришли на ПУ;20.10.2026;перезвонить;Оператор Ольга\n").encode()
     check(ei.upload(con, "задачи.csv", tasks_csv)["kind"] == "tasks", "Задачи угаданы")
     # группы
     gr = {g["erp"]: g["group_id"] for g in ei.erp_groups(con)}
@@ -87,6 +87,8 @@ def main():
     att = con.execute("SELECT status FROM attendance WHERE student_id=? ORDER BY date", (petya["id"],)).fetchall()
     check([x[0] for x in att] == ["present", "absent"], "Посещения и пропуски перенесены")
     check(con.execute("SELECT kind FROM tasks WHERE student_id=?", (gosha["id"],)).fetchone()[0] == "no_show", "Задача ERP «Не пришли на ПУ» стала нашей задачей")
+    check("исполнитель в ERP: Оператор Ольга" in (con.execute("SELECT note FROM tasks WHERE student_id=?", (gosha["id"],)).fetchone()[0] or ""),
+          "Исполнитель из ERP виден в задаче")
     check(con.execute("SELECT 1 FROM history WHERE student_id=? AND text='Аллергия на орехи'", (petya["id"],)).fetchone(), "Комментарий из ERP в истории")
     v = ei.verify(con)
     rows = {x["label"]: x for x in v["rows"]}
