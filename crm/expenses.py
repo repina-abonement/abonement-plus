@@ -75,6 +75,15 @@ def init(con):
     con.executescript(SCHEMA)
     if "anchor_day" not in {r[1] for r in con.execute("PRAGMA table_info(bills)")}:
         con.execute("ALTER TABLE bills ADD COLUMN anchor_day INTEGER NOT NULL DEFAULT 0")
+    # разово по просьбе Юлии 31.10: напоминание об оплате Платформы ОФД (пробный период до 10.11.2026).
+    # Флаг в настройках: если платёж удалят, сам он больше не появится.
+    if not con.execute("SELECT 1 FROM settings WHERE key='seed_bill_ofd'").fetchone():
+        if not con.execute("SELECT 1 FROM bills WHERE title LIKE '%ОФД%'").fetchone():
+            con.execute("""INSERT INTO bills(title, category, amount, period, next_due, remind_days, pay_where, note, created_at)
+                           VALUES ('Платформа ОФД: Интеграция 1С', 'crm', 0, 'yearly', '2026-11-10', 7,
+                                   'platformaofd.ru → Сервис и услуги → Интеграция 1С',
+                                   'Ключ для сверки чеков в CRM. Пробный период до 10.11.2026. Сумму впишите после выбора тарифа', ?)""", (_now(),))
+        con.execute("INSERT INTO settings(key, value) VALUES ('seed_bill_ofd', '1')")
 
 
 def _now() -> str:
