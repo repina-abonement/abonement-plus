@@ -15,10 +15,19 @@ ofp = schedule.save_group(con, {"name": "ОФП 3–5", "branch_id": b, "weekday
 r = trialoffer.offer(con, 4)
 ids = {s["group_id"] for s in r["slots"]}
 assert ids == {g34, g45}, r["slots"]
-assert r["slots"][0]["group_id"] == g34, "сначала самая ранняя дата"
+assert r["slots"][0]["group_id"] == g34, "группы пустые одинаково: сначала самая ранняя дата"
 assert "📅" in r["text"] and "3 этаж" in r["text"]
 print("✓ 4 года → группы 3–4 и 4–5, ближайшие даты первыми, без ОФП")
 print(r["text"])
+# группа 3–4 заполнена сильнее: первой предлагаем 4–5, где детей меньше (Юлия, 01.11)
+fam = con.execute("INSERT INTO families(name) VALUES ('Ф')").lastrowid
+for i in range(5):
+    st = con.execute("INSERT INTO students(family_id, name, funnel, stage, stage_changed_at, created_at) VALUES (?, ?, 'members', 'active', '2026-01-01', '2026-01-01')", (fam, f"Ребёнок {i}")).lastrowid
+    con.execute("INSERT INTO enrollments(student_id, group_id, created_at) VALUES (?, ?, '2026-01-01')", (st, g34))
+r = trialoffer.offer(con, 4)
+assert r["slots"][0]["group_id"] == g45, [(x["group"], x["fill"]) for x in r["slots"]]
+assert r["text"].index("4–5") < r["text"].index("3–4")
+print("✓ первой строкой группа, где детей меньше")
 # группа, куда пробные не пишем (например, Небо Пн/Чт 17:45), не предлагается и не даёт записать
 con.execute("UPDATE groups SET trial_ok=0 WHERE id=?", (g45,))
 r = trialoffer.offer(con, 4)

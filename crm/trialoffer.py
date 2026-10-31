@@ -37,7 +37,7 @@ def years(birth: str, on: date | None = None) -> int | None:
 def slots(con, age: int, branch_id: int | None = None, limit: int = 4, days: int = 14) -> list[dict]:
     from . import capacity, closures
     now = datetime.now()
-    out = []
+    out, fill = [], {}
     for g in con.execute("""SELECT g.*, b.name AS branch, b.address, b.lesson_limit FROM groups g JOIN branches b ON b.id=g.branch_id
                             WHERE g.active=1 AND b.active=1 AND g.is_makeup=0 AND g.program_id IS NULL AND g.trial_ok=1"""
                          + (" AND g.branch_id=?" if branch_id else ""), (branch_id,) if branch_id else ()).fetchall():
@@ -60,18 +60,27 @@ def slots(con, age: int, branch_id: int | None = None, limit: int = 4, days: int
                 continue
             out.append({"group_id": g["id"], "group": g["name"], "age": g["age"], "branch_id": g["branch_id"], "branch": g["branch"],
                         "address": g["address"] or "", "date": d.isoformat(), "time": t, "free": free,
+                        "fill": fill.setdefault(g["id"], _fill(con, g)),
                         "label": f"{WD[d.weekday()]} {d.strftime('%d.%m')} в {t}"})
-    out.sort(key=lambda x: (x["date"], x["time"]))
-    # не больше двух вариантов в один день, чтобы предложить разные дни
-    res, per_day = [], {}
+    # сначала группы, где детей меньше (Юлия, 01.11: чтобы дети распределялись по группам равномерно), потом ближайшие даты
+    out.sort(key=lambda x: (x["fill"], x["date"], x["time"]))
+    # не больше двух вариантов в один день и в одну группу, чтобы предложить разные дни
+    res, per_day, per_group = [], {}, {}
     for s in out:
-        if per_day.get(s["date"], 0) >= 2:
+        if per_day.get(s["date"], 0) >= 2 or per_group.get(s["group_id"], 0) >= 2:
             continue
         per_day[s["date"]] = per_day.get(s["date"], 0) + 1
+        per_group[s["group_id"]] = per_group.get(s["group_id"], 0) + 1
         res.append(s)
         if len(res) >= limit:
             break
     return res
+
+
+def _fill(con, g) -> float:
+    """Насколько заполнена группа постоянными учениками: доля занятых мест."""
+    kids = con.execute("SELECT COUNT(DISTINCT student_id) FROM enrollments WHERE group_id=? AND active=1", (g["id"],)).fetchone()[0]
+    return round(kids / max(1, g["capacity"] or 12), 3)
 
 
 def offer(con, age: int | None, child: str = "", branch_id: int | None = None, n: int = 4) -> dict:
