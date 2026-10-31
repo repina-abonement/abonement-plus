@@ -268,6 +268,8 @@ def init_db(con: sqlite3.Connection):
     program.init(con)
     waitlist.init(con)
     staffdocs.init(con)
+    from . import tour
+    tour.init(con)
     staff.init(con)
     merch.init(con)
     sources.init(con)

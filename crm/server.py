@@ -459,6 +459,8 @@ def meta(con, h, user, body, q):
         m["groups"], m["settings"] = [], {}
     from . import staffdocs
     m["staff_docs_pending"] = staffdocs.pending(con, user)
+    from . import tour
+    m["tour_pending"] = tour.pending(con, user)
     import json as _json
     m["staff"] = []
     for r in con.execute("SELECT id, name, role, photo_at, photo_sq, bio FROM users WHERE active=1 ORDER BY name"):
@@ -481,6 +483,13 @@ def staff_docs_accept(con, h, user, body, q):
     n = staffdocs.accept(con, user, body.get("docs") or [], body.get("signed_name") or "", ip, h.headers.get("User-Agent") or "", base_url(h))
     sv.audit(con, user, "staff_docs.accept", str(n))
     return {"ok": True, "accepted": n}
+
+
+@route("POST", "/api/tour/done", role="all")
+def tour_done(con, h, user, body, q):
+    from . import tour
+    sv.audit(con, user, "tour.done", "")
+    return {"ok": True, "done_at": tour.finish(con, user)}
 
 
 @route("GET", "/api/staff-docs/overview", role="staffdocs:view")

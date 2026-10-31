@@ -283,6 +283,7 @@ async function render() {
   page.classList.remove("readonly");
   if (S.meta && S.meta.staff_docs_pending) return renderStaffDocs(page);
   await renderView(page);
+  if (S.meta && S.meta.tour_pending && !S.tourOn) startTour();
   if (navDepth() > 0 && !page.querySelector(".back-btn")) {
     page.insertAdjacentHTML("afterbegin", `<button class="back-btn" type="button">← Назад</button>`);
     page.querySelector(".back-btn").onclick = () => history.back();
@@ -1469,6 +1470,8 @@ async function renderSettings(page) {
       <div class="row" style="gap:8px;margin-top:6px"><button class="btn sm" id="sound-test" style="flex:0 0 auto">Проверить звук</button>
         ${"Notification" in window && Notification.permission !== "granted" ? `<button class="btn sm" id="notif-on" style="flex:0 0 auto">Показывать уведомления, когда CRM свёрнута</button>` : ""}</div>` : ""}</div>
     <div class="section" data-tab="profile"><h3>Быстрый вход по коду</h3><div id="pin-set" class="small muted">…</div></div>
+    <div class="section" data-tab="profile"><h3>Обучение</h3><div class="small muted" style="margin-bottom:8px">Короткая экскурсия по твоим разделам CRM</div>
+      <button class="btn sm" id="tour-again">🎓 Пройти обучение ещё раз</button></div>
     ${admin ? `
     <form class="section" id="set" data-tab="prices">
       <h3>Цены и правила</h3>
@@ -1539,6 +1542,7 @@ async function renderSettings(page) {
     e.preventDefault();
     try { await api("POST", "/api/users", Object.fromEntries(new FormData(e.target))); toast("Сотрудник добавлен"); render(); } catch (err) { fail(err); }
   };
+  if ($("#tour-again")) $("#tour-again").onclick = () => startTour(true);
   (async () => {
     const box = $("#pin-set"); if (!box) return;
     const dev = deviceToken(true);
@@ -1684,7 +1688,7 @@ async function boot() {
   setInterval(() => { if ($("#drawer").hidden && ["members", "skips"].includes(S.view)) render(); }, 60000);
   setInterval(() => { if ($("#drawer").hidden && S.view === "sales" && !document.hidden && !document.querySelector(".task-done:not([hidden])")) render(); }, 20000);
   if (can("inbox")) { pollCounts(); setInterval(pollCounts, 10000); }
-  offerAlerts();
+  if (!S.meta.tour_pending) offerAlerts();
 }
 boot();
 
@@ -1803,6 +1807,7 @@ async function renderStaffDocsAdmin(box) {
   box.innerHTML = `<h3>Документы сотрудников</h3><div class="small muted">NDA, правила работы с данными, согласие, журнал действий, электронная подпись. Каждый подписывает при первом входе</div>
     ${d.items.map((u) => `<div class="list-row"><div class="grow">${esc(u.name)}</div>
       ${u.pending ? `<span class="pill red">не подписал${u.last ? " новую редакцию" : ""}</span>` : `<span class="pill green">подписал ${dtWhen(u.last)}</span>`}
+      ${u.tour ? `<span class="pill green" title="Обучение в CRM">обучение ${dtWhen(u.tour)}</span>` : `<span class="pill">обучение не пройдено</span>`}
       ${u.last ? `<button class="btn sm" data-sdlog="${u.id}">Лист подписания</button>` : ""}</div>`).join("") || `<div class="small muted">Сотрудников пока нет</div>`}`;
   box.querySelectorAll("[data-sdlog]").forEach((b) => (b.onclick = async () => {
     const l = await api("GET", `/api/staff-docs/log/${b.dataset.sdlog}`);

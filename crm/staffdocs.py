@@ -156,5 +156,6 @@ def overview(con) -> list[dict]:
             continue
         p = pending(con, dict(u))
         last = con.execute("SELECT MAX(accepted_at) FROM staff_acceptances WHERE user_id=?", (u["id"],)).fetchone()[0]
-        out.append({"id": u["id"], "name": u["name"], "pending": p, "last": last})
+        from . import tour
+        out.append({"id": u["id"], "name": u["name"], "pending": p, "last": last, "tour": tour.done_at(con, u["id"])})
     return out
