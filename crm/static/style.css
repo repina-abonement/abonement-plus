@@ -1052,3 +1052,11 @@ h1, h2, h3, h4, b, strong, th { font-weight: 800; }
 .rep-slot b { font-size: 14px; }
 .rep-nav { position: sticky; bottom: 0; display: flex; gap: 10px; padding: 12px 0 16px; background: var(--bg); }
 .rep-nav .btn { flex: 1; min-height: 52px; font-size: 16px; }
+
+/* настройки плитками */
+.set-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.set-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; background: var(--surface); border: 0; border-radius: 14px; padding: 16px; box-shadow: var(--shadow); cursor: pointer; font: inherit; color: inherit; }
+.set-tile:hover { outline: 2px solid var(--accent); }
+.set-tile-emoji { font-size: 24px; }
+@media (max-width: 700px) { .set-tiles { grid-template-columns: 1fr 1fr; } }
+[data-tab][hidden] { display: none !important; }

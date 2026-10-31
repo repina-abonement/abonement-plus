@@ -234,6 +234,7 @@ window.addEventListener("popstate", (e) => {
 });
 
 function go(view, fromHistory = false) {
+  if (view === "settings" && !fromHistory) S.setTab = null;  // из меню: сначала плитки
   S.view = view;
   if (!fromHistory) pushNav();
   try { localStorage.setItem("crm.view", view); } catch (_) {}
@@ -1131,18 +1132,43 @@ async function renderSearch(page) {
 }
 
 /* ---------- настройки ---------- */
+const SET_TABS = [
+  ["users", "👥", "Сотрудники", "Должности, телефоны, пароли"], ["prices", "💰", "Цены и правила", "Прайс, срок продления, пробное"],
+  ["structure", "🏟", "Филиалы, группы и смены", "Расписание и лимиты"], ["resp", "🎯", "Ответственные по филиалам", "Кому задачи по пробным"],
+  ["comms", "💬", "Связь с клиентами", "Telegram, MAX, WhatsApp, Sipuni, заявки"], ["trials", "📋", "Задачи по пробным", "Автосообщения и сроки"],
+  ["coachpay", "⏱", "Тренеры: приход и оплата", "Отметка прихода, ставки"], ["program", "🏆", "Сборная ПРО", "Цены и правила сборной"],
+  ["sources", "📣", "Рекламные каналы", "Источники лидов"], ["offers", "📄", "Оферты", "Редакции и ссылки"],
+  ["backup", "💾", "Резервные копии", "Яндекс Диск, копия сейчас"], ["archive", "🗄", "Архив", "Вернуть из архива"],
+  ["test", "🧪", "Тестовые клиенты", "Выдуманные клиенты для проверки"], ["profile", "👤", "Мой профиль", "Вид, код входа, пароль"],
+];
+
+function settingsTiles(page) {
+  const parts = (k) => page.querySelectorAll(`[data-tab="${k}"]`);
+  const tabs = SET_TABS.filter(([k]) => parts(k).length);
+  if (S.setTab && !tabs.some(([k]) => k === S.setTab)) S.setTab = null;
+  page.querySelectorAll("[data-tab]").forEach((el) => { el.hidden = el.dataset.tab !== S.setTab; });
+  const box = $("#set-tiles");
+  const cur = tabs.find(([k]) => k === S.setTab);
+  box.innerHTML = cur
+    ? `<div class="row" style="align-items:center;gap:10px;margin-bottom:12px"><button class="btn sm" id="set-back" style="flex:0 0 auto;width:auto">← Все настройки</button><b>${cur[1]} ${esc(cur[2])}</b></div>`
+    : `<div class="set-tiles">${tabs.map(([k, e, t, d]) => `<button class="set-tile" data-tile="${k}"><span class="set-tile-emoji">${e}</span><b>${esc(t)}</b><span class="small muted">${esc(d)}</span></button>`).join("")}</div>`;
+  box.querySelectorAll("[data-tile]").forEach((b) => (b.onclick = () => { S.setTab = b.dataset.tile; settingsTiles(page); window.scrollTo(0, 0); }));
+  if ($("#set-back")) $("#set-back").onclick = () => { S.setTab = null; settingsTiles(page); window.scrollTo(0, 0); };
+}
+
 async function renderSettings(page) {
   const st = S.meta.settings || {}, admin = isOwner();
   const users = admin || can("schedule", "full") ? (await api("GET", "/api/users")).filter((u) => u.active) : [];
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Настройки</h2><button class="btn sm" id="logout">Выйти</button></div>
     <div style="max-width:780px">
-    <div class="section"><h3>Внешний вид</h3>
+    <div id="set-tiles"></div>
+    <div class="section" data-tab="profile"><h3>Внешний вид</h3>
       <label class="check"><input type="checkbox" id="theme-soft" ${document.documentElement.classList.contains("theme-soft") ? "checked" : ""}> Новый дизайн (проба)</label>
       <div class="small muted" style="margin-top:6px">Светлый спокойный вид. Включается только на этом устройстве, выключить можно здесь же в любой момент</div></div>
-    <div class="section"><h3>Быстрый вход по коду</h3><div id="pin-set" class="small muted">…</div></div>
+    <div class="section" data-tab="profile"><h3>Быстрый вход по коду</h3><div id="pin-set" class="small muted">…</div></div>
     ${admin ? `
-    <form class="section" id="set">
+    <form class="section" id="set" data-tab="prices">
       <h3>Цены и правила</h3>
       <div id="price-list" class="small muted" style="margin-bottom:10px">Загружаю прайс…</div>
       <div class="row"><div class="field"><label>Разовое занятие, ₽</label><input name="price_single" type="number" value="${esc(st.price_single || "")}" placeholder="Уточнить цену"></div><div></div></div>
@@ -1152,10 +1178,10 @@ async function renderSettings(page) {
       </div>
       <button class="btn primary">Сохранить</button>
     </form>
-    <div class="section" id="backup-settings"></div>
-    <div class="section" id="resp-settings"></div>
-    <div id="program-settings"></div>
-    <div class="section">
+    <div class="section" id="backup-settings" data-tab="backup"></div>
+    <div class="section" id="resp-settings" data-tab="resp"></div>
+    <div id="program-settings" data-tab="program"></div>
+    <div class="section" data-tab="users">
       <h3>Сотрудники</h3>
       <div class="list" style="box-shadow:none;margin-bottom:10px">${users.map((u) => `<div class="list-row staff-row"><div class="grow"><span class="who" data-prof="${u.id}">${avatar(u.id, u.name, 34)}<span>${esc(u.name)} <span class="muted small">${esc(u.login)}</span></span></span></div>
         <input data-uph="${u.id}" value="${esc(u.phone || "")}" placeholder="телефон" title="Телефон сотрудника" inputmode="tel" style="flex:0 0 130px;padding:5px 8px">
@@ -1178,30 +1204,31 @@ async function renderSettings(page) {
         <button class="btn sm primary" id="bulk-go" style="margin-top:6px">Завести и выдать пароли</button>
         <div id="bulk-res"></div></details>
     </div>
-    <div class="section" id="structure-settings"><h3>Филиалы, группы и смены</h3><div class="muted small">Загружаю…</div></div>
-    <div class="section" id="archive-settings"><h3>Архив</h3><div class="muted small">Загружаю…</div></div>
-    </div>` : can("schedule", "full") ? `<div class="section" id="structure-settings"><h3>Филиалы, группы и смены</h3><div class="muted small">Загружаю…</div></div>` : ""}
-    <div class="section" id="offers-settings"><h3>Оферты</h3><div class="muted small">Загружаю…</div></div>
-    ${admin ? `<div class="section" id="source-settings"><h3>Рекламные каналы и источники</h3><div class="muted small">Загружаю…</div></div>` : ""}
-    ${admin ? `<div class="section" id="staff-settings"><h3>Тренеры: приход и оплата</h3><div class="muted small">Загружаю…</div></div>` : ""}
-    ${admin ? `<div class="section" id="task-settings"><h3>Задачи и автосообщения по пробным</h3><div class="muted small">Загружаю…</div></div>` : ""}
-    ${admin ? `<div class="section" id="comms-settings"><h3>Связь с клиентами</h3><div class="muted small">Загружаю…</div></div>` : ""}
-    ${admin ? `<div class="section"><h3>Выдуманные клиенты для проверки</h3>
+    <div class="section" id="structure-settings" data-tab="structure"><h3>Филиалы, группы и смены</h3><div class="muted small">Загружаю…</div></div>
+    <div class="section" id="archive-settings" data-tab="archive"><h3>Архив</h3><div class="muted small">Загружаю…</div></div>
+    </div>` : can("schedule", "full") ? `<div class="section" id="structure-settings" data-tab="structure"><h3>Филиалы, группы и смены</h3><div class="muted small">Загружаю…</div></div>` : ""}
+    <div class="section" id="offers-settings" data-tab="offers"><h3>Оферты</h3><div class="muted small">Загружаю…</div></div>
+    ${admin ? `<div class="section" id="source-settings" data-tab="sources"><h3>Рекламные каналы и источники</h3><div class="muted small">Загружаю…</div></div>` : ""}
+    ${admin ? `<div class="section" id="staff-settings" data-tab="coachpay"><h3>Тренеры: приход и оплата</h3><div class="muted small">Загружаю…</div></div>` : ""}
+    ${admin ? `<div class="section" id="task-settings" data-tab="trials"><h3>Задачи и автосообщения по пробным</h3><div class="muted small">Загружаю…</div></div>` : ""}
+    ${admin ? `<div class="section" id="comms-settings" data-tab="comms"><h3>Связь с клиентами</h3><div class="muted small">Загружаю…</div></div>` : ""}
+    ${admin ? `<div class="section" data-tab="test"><h3>Выдуманные клиенты для проверки</h3>
       <div class="small muted" style="margin-bottom:8px">Добавляют клиентов в настоящие группы: с абонементами, оплатами, посещениями, пропусками и лидами на разных этапах. Все помечены как выдуманные и удаляются одной кнопкой, настоящие клиенты не пострадают</div>
       <div class="row" style="align-items:center;flex-wrap:wrap"><input type="number" id="fake-n" value="150" min="1" max="500" style="flex:0 0 100px">
         <button class="btn sm primary" id="fake-add" style="flex:0">Добавить</button><button class="btn sm" id="fake-real" style="flex:0">Школа с историей за 1,5 года</button><button class="btn sm" id="fake-calls" style="flex:0">+ Звонки с разборами</button><button class="btn sm danger" id="fake-del" style="flex:0">Удалить всех выдуманных</button></div></div>` : ""}
-    ${admin && S.meta.demo ? `<div class="section"><h3>Тестовые данные</h3>
+    ${admin && S.meta.demo ? `<div class="section" data-tab="test"><h3>Тестовые данные</h3>
       <div class="small muted" style="margin-bottom:8px">Сейчас включён тестовый режим. Кнопка сотрёт всех клиентов и создаст выдуманных заново. Сотрудники и настройки сохранятся.</div>
       <button class="btn sm danger" id="demo-reset">Пересоздать тестовые данные</button></div>` : ""}
-    <form class="section" id="pw">
+    <form class="section" id="pw" data-tab="profile">
       <h3>Мой пароль</h3>
       <div class="field"><label>Текущий пароль</label><input name="old" type="password" required></div>
       <div class="field"><label>Новый пароль</label><input name="new" type="password" minlength="8" required></div>
       <button class="btn sm">Сменить пароль</button>
     </form>
-    <div class="small muted" style="margin-top:12px">Вы вошли как ${esc(S.user.name)}. Версия 0.2, тестовая.</div>
+    <div class="small muted" data-tab="profile" style="margin-top:12px">Вы вошли как ${esc(S.user.name)}. Версия 0.2, тестовая.</div>
     </div>`;
   $("#logout").onclick = async () => { await api("POST", "/api/logout", {}).catch(() => {}); renderLogin(); };
+  settingsTiles(page);
   if ($("#set")) $("#set").onsubmit = async (e) => {
     e.preventDefault();
     try { S.meta.settings = await api("PUT", "/api/settings", Object.fromEntries(new FormData(e.target))); toast("Сохранено"); } catch (err) { fail(err); }
@@ -1233,7 +1260,7 @@ async function renderSettings(page) {
   if ($("#offers-settings") && can("sales") && !can("docs")) renderOffers($("#offers-settings")).catch(fail);  // администраторам: ссылки на оферты для родителей
   if ($("#program-settings")) renderProgramSettings($("#program-settings")).catch(fail);
   if ($("#resp-settings")) renderResponsibles($("#resp-settings")).catch(fail);
-  if ($("#backup-settings")) renderBackup($("#backup-settings")).catch(() => { $("#backup-settings").remove(); });
+  if ($("#backup-settings")) renderBackup($("#backup-settings")).catch(() => { $("#backup-settings").remove(); $('[data-tile="backup"]')?.remove(); });
   else if ($("#offers-settings")) $("#offers-settings").remove();
   if ($("#structure-settings")) renderStructure($("#structure-settings"), users).catch(fail);
   if ($("#archive-settings")) renderArchive($("#archive-settings")).catch(fail);
