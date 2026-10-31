@@ -1248,3 +1248,11 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
   .cfacts { flex-wrap: wrap; }
 }
 @media (max-width: 640px) { .kpi { min-width: 0; padding: 14px; } .kpi-body { flex-wrap: wrap; gap: 10px; } .kpi-value { font-size: 26px; } .kpis { grid-template-columns: minmax(0, 1fr); } }
+
+/* поиск в меню: выпадающие результаты */
+.nav-res { position: absolute; left: 14px; right: 14px; z-index: 50; background: var(--surface); color: var(--ink); border-radius: 12px;
+  box-shadow: 0 12px 30px -8px rgba(0,0,0,.45); padding: 4px; max-height: 70vh; overflow: auto; }
+.nav-res button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--ink); font: inherit; }
+.nav-res button b { display: block; font-size: 14px; } .nav-res button small { color: var(--ink-2); font-size: 12px; }
+.nav-res button.on, .nav-res button:hover { background: var(--surface-2); }
+.nav-res button small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

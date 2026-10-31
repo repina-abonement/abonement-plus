@@ -193,7 +193,7 @@ function sideNav(views) {
   const item = ([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}<span>${t}</span>${badge(k)}</button>`;
   if (views.length <= 8) return views.map(item).join("");
   const has = (k) => views.find(([v]) => v === k);
-  const search = has("search") ? `<input class="nav-q" id="nav-q" type="search" placeholder="🔍 Найти клиента" title="Имя, фамилия или телефон, потом Enter">` : "";
+  const search = has("search") ? `<input class="nav-q" id="nav-q" type="search" placeholder="🔍 Найти клиента   /" title="Имя, фамилия или телефон. Быстро открыть поиск: клавиша /">` : "";
   const placed = new Set(["search"]);
   const top = NAV_TOP.filter(has).map((k) => { placed.add(k); return item(has(k)); }).join("");
   const o = navOpen();
@@ -208,6 +208,52 @@ function sideNav(views) {
   const rest = views.filter(([k]) => !placed.has(k)).map(item).join("");
   return search + top + folders + rest;
 }
+
+/* Поиск в меню: клиенты появляются прямо под полем, пока печатаешь. ↑↓ выбрать, Enter открыть, Esc закрыть */
+function wireNavSearch(nq) {
+  const box = document.createElement("div");
+  box.className = "nav-res"; box.hidden = true;
+  nq.after(box);
+  let t, rows = [], cur = -1;
+  const close = () => { box.hidden = true; cur = -1; };
+  const paint = () => {
+    box.innerHTML = rows.length ? rows.slice(0, 8).map((r, i) => `<button class="${i === cur ? "on" : ""}" data-nr="${r.id}"><b>${esc(r.name)}</b>
+      <small>${esc([r.parent, r.phone].filter(Boolean).join(" · "))}${r.funnel === "members" ? "" : " · лид"}</small></button>`).join("")
+      + (rows.length > 8 ? `<button data-nall><small>Все результаты: ${rows.length} →</small></button>` : "")
+      : `<div class="small" style="padding:8px 10px;opacity:.7">Никого не нашли</div>`;
+    box.style.top = nq.offsetTop + nq.offsetHeight + 4 + "px";
+    box.hidden = false;
+    box.querySelectorAll("[data-nr]").forEach((b) => (b.onmousedown = (e) => { e.preventDefault(); nq.value = ""; close(); openStudent(+b.dataset.nr); }));
+    const all = box.querySelector("[data-nall]"); if (all) all.onmousedown = (e) => { e.preventDefault(); goAll(); };
+  };
+  const goAll = () => { S.search = nq.value.trim(); nq.value = ""; close(); go("search"); setTimeout(() => { const q = $("#q"); if (q) { q.focus(); q.dispatchEvent(new Event("input")); } }, 50); };
+  nq.oninput = () => {
+    clearTimeout(t);
+    const v = nq.value.trim();
+    if (v.length < 2) return close();
+    t = setTimeout(async () => { try { rows = await api("GET", "/api/students?q=" + encodeURIComponent(v)); cur = rows.length ? 0 : -1; if (nq.value.trim() === v) paint(); } catch (_) {} }, 200);
+  };
+  nq.onkeydown = (e) => {
+    if (e.key === "Escape") { nq.value = ""; close(); nq.blur(); }
+    else if (e.key === "ArrowDown" && !box.hidden) { e.preventDefault(); cur = Math.min(cur + 1, Math.min(rows.length, 8) - 1); paint(); }
+    else if (e.key === "ArrowUp" && !box.hidden) { e.preventDefault(); cur = Math.max(cur - 1, 0); paint(); }
+    else if (e.key === "Enter") { e.preventDefault(); if (!box.hidden && rows[cur]) { const id = rows[cur].id; nq.value = ""; close(); openStudent(id); } else goAll(); }
+  };
+  nq.onblur = () => setTimeout(close, 150);
+}
+
+/* Горячие клавиши на компьютере: «/» поиск клиента, «N» новый клиент (работают и в русской раскладке) */
+document.addEventListener("keydown", (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey || !S.user) return;
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+  if (document.querySelector(".tour") || !$("#drawer") || !$("#drawer").hidden) return;
+  if (e.code === "Slash" || e.key === "/") {
+    const nq = $("#nav-q");
+    if (nq && nq.offsetParent) { e.preventDefault(); nq.focus(); }
+    else if (can("search")) { e.preventDefault(); go("search"); setTimeout(() => $("#q") && $("#q").focus(), 80); }
+  } else if (e.code === "KeyN" && $("#new-client")) { e.preventDefault(); openNewClient(); }
+});
 
 function shell() {
   const views = visibleViews();
@@ -229,7 +275,7 @@ function shell() {
     try { const o = navOpen(); o[b.dataset.fold] = open; localStorage.setItem("crm.nav_open", JSON.stringify(o)); } catch (_) {}
   }));
   const nq = $("#nav-q");
-  if (nq) nq.onkeydown = (e) => { if (e.key === "Enter") { S.search = nq.value.trim(); nq.value = ""; go("search"); setTimeout(() => { const q = $("#q"); if (q) { q.focus(); q.dispatchEvent(new Event("input")); } }, 50); } };
+  if (nq) wireNavSearch(nq);
   const more = $("[data-more]");
   if (more) more.onclick = () => { $(".more-sheet").hidden = !$(".more-sheet").hidden; };
   $(".more-sheet").onclick = (e) => { if (e.target.classList.contains("more-sheet")) e.currentTarget.hidden = true; };
