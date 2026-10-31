@@ -80,10 +80,14 @@ def init(con):
     if not con.execute("SELECT 1 FROM settings WHERE key='seed_bill_ofd'").fetchone():
         if not con.execute("SELECT 1 FROM bills WHERE title LIKE '%ОФД%'").fetchone():
             con.execute("""INSERT INTO bills(title, category, amount, period, next_due, remind_days, pay_where, note, created_at)
-                           VALUES ('Платформа ОФД: Интеграция 1С', 'crm', 0, 'yearly', '2026-11-10', 7,
+                           VALUES ('Платформа ОФД: Интеграция 1С', 'crm', 3000, 'yearly', '2026-11-10', 7,
                                    'platformaofd.ru → Сервис и услуги → Интеграция 1С',
-                                   'Ключ для сверки чеков в CRM. Пробный период до 10.11.2026. Сумму впишите после выбора тарифа', ?)""", (_now(),))
+                                   'Ключ для сверки чеков в CRM. Пробный период до 10.11.2026, тариф на год 3000 ₽', ?)""", (_now(),))
         con.execute("INSERT INTO settings(key, value) VALUES ('seed_bill_ofd', '1')")
+    if not con.execute("SELECT 1 FROM settings WHERE key='seed_bill_ofd2'").fetchone():  # сумма тарифа, уточнила Юлия
+        con.execute("""UPDATE bills SET amount=3000, note='Ключ для сверки чеков в CRM. Пробный период до 10.11.2026, тариф на год 3000 ₽'
+                       WHERE title='Платформа ОФД: Интеграция 1С' AND amount=0""")
+        con.execute("INSERT INTO settings(key, value) VALUES ('seed_bill_ofd2', '1')")
 
 
 def _now() -> str:
