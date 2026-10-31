@@ -181,6 +181,9 @@ def send_auto(con, s: dict, kind: str, tpl: str) -> dict:
     return {"ok": ok, "error": err}
 
 
+_PAYLINK_SYNC = datetime.min
+
+
 def run(con, now: datetime | None = None, send: bool = True) -> dict:
     """Один проход: создать задачи по пробным, отправить автосообщения, закрыть неактуальные задачи."""
     now = now or _now()
@@ -194,6 +197,14 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     schedule.apply_versions(con, now.date())  # с даты изменения в карточке группы новое расписание  # несданные отчёты о смене: 30 минут и 2 часа
     waitlist._sync_done(con)
     program.price_notice(con, now.date())
+    global _PAYLINK_SYNC
+    if (now - _PAYLINK_SYNC).total_seconds() >= 600:  # оплаты по ссылкам PayKeeper: раз в 10 минут
+        _PAYLINK_SYNC = now
+        from . import paylinks
+        try:
+            paylinks.sync(con, now.date())
+        except Exception:  # noqa: BLE001 — PayKeeper недоступен: попробуем в следующий раз
+            pass
     st = {k: setting(con, k) for k in AUTO_SETTINGS}
     trial_min = int((con.execute("SELECT value FROM settings WHERE key='trial_minutes'").fetchone() or ["60"])[0])
     made = sent = 0

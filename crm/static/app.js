@@ -863,7 +863,7 @@ async function openStudent(id) {
     ${d.subscriptions.length ? `<ul class="history" style="margin-top:10px">${d.subscriptions.map((x) => { const cov = (d.balance.covered || {})[x.id] || 0; return `<li><b>${x.kind === "single" ? "Разовое занятие" : monthLabel(x.month)}</b>${x.group_name ? " · " + esc(x.group_name) : ""} · ${rub(x.price)}${x.kind === "single" ? "" : ` · ${x.lessons} зан.`}${x.credit_lessons ? ` · перерасчёт ${x.credit_lessons}` : ""}${x.late_fee ? ` · наценка ${rub(x.late_fee)}` : ""}${x.discount_amount ? ` · скидка ${rub(x.discount_amount)}` : ""}
       <span class="pill ${x.status === "paid" ? "green" : x.status === "cancelled" ? "" : "yellow"}">${x.status === "invoiced" && cov ? `оплачено ${rub(cov)} из ${rub(x.price)}` : { paid: "оплачен", invoiced: "ждёт оплаты", cancelled: "отменён" }[x.status]}</span>
       ${x.corrected ? `<span class="pill">корректировка</span>` : ""}
-      ${x.status === "invoiced" ? `<button class="btn sm primary" data-pay="${x.id}" data-left="${x.price - cov}">Принять оплату</button> <button class="btn sm danger" data-cancel="${x.id}">Отменить</button>` : ""}
+      ${x.status === "invoiced" ? `<button class="btn sm primary" data-pay="${x.id}" data-left="${x.price - cov}">Принять оплату</button>${can("members", "full") ? ` <button class="btn sm" data-plsub="${x.id}" data-left="${x.price - cov}" data-what="${esc("Абонемент на " + (x.month ? monthLabel(x.month) : ""))}" title="Ссылка PayKeeper: после оплаты абонемент отметится оплаченным сам">💳 Ссылкой</button>` : ""} <button class="btn sm danger" data-cancel="${x.id}">Отменить</button>` : ""}
       ${x.status === "paid" ? `<button class="btn sm danger" data-pcanc="${x.id}" data-paid="${cov}">Отменить</button>` : ""}
       ${x.status !== "cancelled" && x.kind === "month" && can("members", "full") ? `<button class="btn sm" data-corr="${x.id}" data-price="${x.price}" title="Исключение из правил с обязательной причиной: попадёт в отчёт">Корректировка</button>` : ""}</li>`; }).join("")}</ul>` : ""}
   </div>
@@ -879,8 +879,9 @@ async function openStudent(id) {
       ${d.family_kids.length ? `<button class="btn sm" id="pay-fam" style="flex:0" title="Один платёж закроет счета всех детей семьи, остаток на баланс">Оплата за семью</button>` : ""}
       ${d.balance.deposit && d.family_kids.length ? `<button class="btn sm" id="bal-move" style="flex:0">Перенести с баланса</button>` : ""}
       ${d.balance.deposit && can("payments", "view") ? `<button class="btn sm" id="bal-refund" style="flex:0">Вернуть деньги</button>` : ""}
-      <button class="btn sm" id="sell-single" style="flex:0">Разовое занятие</button></div>
-    <div id="pay-form"></div>
+      <button class="btn sm" id="sell-single" style="flex:0">Разовое занятие</button>
+      ${can("members", "full") ? `<button class="btn sm" id="pay-link" style="flex:0" title="Счёт PayKeeper: родитель платит картой или СБП, оплата сама попадёт в CRM">💳 Ссылка на оплату</button>` : ""}</div>
+    <div id="pay-form"></div><div id="pay-links"></div>
     ${d.payments.length ? `<ul class="history pay-list ${d.payments.length > 4 ? "folded" : ""}" style="margin-top:10px">${d.payments.map((p) => `<li class="${p.cancelled ? "struck" : ""}"><b>${rub(p.amount)}</b> · ${esc(PAY_METHODS[p.method] || p.method)} · ${dtShort(p.paid_at)}${p.comment ? " · " + esc(p.comment) : ""}
       <div class="when">${esc(p.user_name)}${p.cancelled ? ` · отменён (${esc(p.cancelled_by)})` : p.confirmed ? "" : " · ждёт подтверждения"}</div>
       ${S.user.role === "admin" && !p.cancelled && p.method !== "unknown" ? `${p.confirmed ? "" : `<button class="btn sm" data-pconf="${p.id}">Подтвердить</button> `}<button class="btn sm danger" data-pcancel="${p.id}">Отменить платёж</button>` : ""}</li>`).join("")}</ul>
@@ -1010,6 +1011,39 @@ async function openStudent(id) {
   if ($("#pay-more")) $("#pay-more").onclick = (e) => { body.querySelector(".pay-list").classList.remove("folded"); e.target.remove(); };
   $("#pay-free").onclick = () => payForm("Оплата на депозит", d.balance.debt || 0,
     (amount, method, comment) => api("POST", `/api/students/${id}/payments`, { amount, method, comment }));
+  if ($("#pay-link")) {
+    const drawLinks = async () => {
+      const r = await api("GET", `/api/students/${id}/paylinks`).catch(() => ({ links: [] }));
+      const open = r.links.filter((l) => l.status === "open"), paid = r.links.filter((l) => l.status === "paid").slice(0, 3);
+      $("#pay-links").innerHTML = open.length || paid.length ? `<ul class="history" style="margin-top:8px">${[...open, ...paid].map((l) => `<li>
+        ${l.status === "paid" ? "✅" : "⏳"} <b>${rub(l.amount)}</b> · ${esc(l.purpose)} · ${l.status === "paid" ? "оплачено " + dtShort(l.paid_at) : "ждём оплату, ссылка от " + dtShort(l.created_at)}
+        ${l.status === "open" ? `<button class="linkish small" data-plcopy="${esc(l.url)}">скопировать ссылку</button> <button class="linkish small" data-plx="${l.id}">отменить</button>` : ""}</li>`).join("")}</ul>` : "";
+      $("#pay-links").querySelectorAll("[data-plcopy]").forEach((b) => (b.onclick = () => navigator.clipboard.writeText(b.dataset.plcopy).then(() => toast("Ссылка скопирована"))));
+      $("#pay-links").querySelectorAll("[data-plx]").forEach((b) => (b.onclick = async () => { await api("POST", `/api/paylinks/${b.dataset.plx}/cancel`, {}); drawLinks(); }));
+    };
+    drawLinks();
+    const linkForm = (amount, what, subId) => {
+      $("#pay-form").innerHTML = `<div class="quote" style="margin-top:10px"><b>Ссылка на оплату</b>
+        <div class="small muted">Родитель откроет ссылку и заплатит картой или по СБП. Оплата сама появится в CRM в течение 10 минут, чек пробьёт PayKeeper</div>
+        <div class="row" style="margin-top:8px"><div class="field"><label>Сумма, ₽</label><input id="pl-sum" type="number" min="1" value="${amount}"></div>
+          <div class="field"><label>За что (увидит родитель)</label><input id="pl-p" value="${esc((what || "Занятия футболом") + ": " + d.student.name)}"></div></div>
+        <button class="btn primary sm" id="pl-ok">Создать ссылку</button><div id="pl-res"></div></div>`;
+      $("#pl-ok").onclick = async (e) => {
+        e.target.disabled = true;
+        try {
+          const r = await api("POST", `/api/students/${id}/paylinks`, { amount: +$("#pl-sum").value, purpose: $("#pl-p").value, subscription_id: subId || null });
+          const msg = `Здравствуйте! Ссылка для оплаты: ${r.purpose}, ${r.amount} ₽\n${r.url}`;
+          $("#pl-res").innerHTML = `<div class="field" style="margin-top:10px"><label>Отправьте родителю</label><textarea id="pl-msg" rows="3">${esc(msg)}</textarea></div>
+            <button class="btn sm primary" id="pl-copy">Скопировать сообщение</button>`;
+          $("#pl-copy").onclick = () => navigator.clipboard.writeText($("#pl-msg").value).then(() => toast("Скопировано: вставьте в чат с родителем"));
+          drawLinks();
+        } catch (err) { fail(err); e.target.disabled = false; }
+      };
+      $("#pay-form").scrollIntoView({ block: "center", behavior: "smooth" });
+    };
+    $("#pay-link").onclick = () => linkForm(d.balance.debt || d.balance.upcoming || "", "", null);
+    body.querySelectorAll("[data-plsub]").forEach((b) => (b.onclick = () => linkForm(+b.dataset.left, b.dataset.what, +b.dataset.plsub)));
+  }
   $("#sell-single").onclick = async () => { try { await api("POST", `/api/students/${id}/single`, {}); toast("Разовое занятие выставлено"); reload(); } catch (e) { fail(e); } };
   body.querySelectorAll("[data-pconf]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/payments/${b.dataset.pconf}/confirm`, {}); reload(); } catch (e) { fail(e); } }));
   body.querySelectorAll("[data-pcancel]").forEach((b) => (b.onclick = async () => { if (!confirm("Отменить платёж? Он останется в реестре как отменённый.")) return; try { await api("POST", `/api/payments/${b.dataset.pcancel}/cancel`, {}); reload(); } catch (e) { fail(e); } }));

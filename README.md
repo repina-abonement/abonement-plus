@@ -69,6 +69,7 @@ python3 -m tests.test_trials    # проверка пробных: возрас�
 python3 -m tests.test_schedversions # проверка версий расписания с даты
 python3 -m tests.test_cert      # проверка медсправок: перерасчёт на «Гибком» только по справке
 python3 -m tests.test_fullexport # проверка выгрузки всей базы в Excel
+python3 -m tests.test_paylinks  # проверка оплаты по ссылке PayKeeper
 ```
 
 Пароль администратора задаётся переменной `CRM_ADMIN_PASSWORD`, иначе генерируется

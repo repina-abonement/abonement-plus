@@ -312,6 +312,31 @@ def backup_status(con, h, user, body, q):
     return backup.status(con)
 
 
+@route("GET", "/api/students/{sid}/paylinks", role="members:full")
+def paylinks_list(con, h, user, body, q, sid):
+    from . import paylinks
+    return {"ready": paylinks.ready(con), "links": paylinks.listing(con, int(sid))}
+
+
+@route("POST", "/api/students/{sid}/paylinks", role="members:full")
+def paylinks_create(con, h, user, body, q, sid):
+    from . import paylinks
+    try:
+        sub = int(body["subscription_id"]) if body.get("subscription_id") else None
+        if sub and not con.execute("SELECT 1 FROM subscriptions WHERE id=? AND student_id=?", (sub, int(sid))).fetchone():
+            raise ApiError("Абонемент не найден")
+        return paylinks.create(con, int(sid), body.get("amount"), user, body.get("purpose") or "", sub)
+    except paylinks.PayLinkError as e:
+        raise ApiError(str(e))
+
+
+@route("POST", "/api/paylinks/{lid}/cancel", role="members:full")
+def paylinks_cancel(con, h, user, body, q, lid):
+    from . import paylinks
+    paylinks.cancel(con, int(lid))
+    return {"ok": True}
+
+
 @route("GET", "/api/export/all", role="export")
 def export_all(con, h, user, body, q):
     """Вся база понятными таблицами Excel: дети и родители, абонементы, оплаты, посещения, группы, сотрудники."""
