@@ -1256,3 +1256,7 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 .nav-res button b { display: block; font-size: 14px; } .nav-res button small { color: var(--ink-2); font-size: 12px; }
 .nav-res button.on, .nav-res button:hover { background: var(--surface-2); }
 .nav-res button small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-row[data-open], .pay-row { cursor: pointer; transition: background .12s; }
+.m-row[data-open]:hover, .pay-row:hover { background: var(--surface-2); }
+.m-row[data-open] { border-radius: 10px; padding-left: 8px; padding-right: 8px; }
+.m-name b { color: inherit; } .pay-name { color: var(--accent); font-weight: 600; }

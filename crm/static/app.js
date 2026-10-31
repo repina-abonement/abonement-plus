@@ -567,8 +567,8 @@ function renderMembersList(page, data) {
   const cnt = (s) => base.filter((k) => (s ? k.status === s : k.status !== "left")).length;
   const rows = base.filter((k) => (f.status ? k.status === f.status : k.status !== "left"));
   const pill = { unpaid_cur: "red", renew: "", invoiced: "", paid_next: "green", left: "" };
-  const row = (k, g) => `<div class="m-row ${k.color === "red" ? "m-red" : k.color === "yellow" ? "m-yellow" : ""}">
-    <button class="linkish m-name" data-open="${k.id}"><b>${esc(k.name)}</b></button>
+  const row = (k, g) => `<div class="m-row ${k.color === "red" ? "m-red" : k.color === "yellow" ? "m-yellow" : ""}" data-open="${k.id}" role="button" tabindex="0">
+    <span class="m-name"><b>${esc(k.name)}</b></span>
     <span class="small muted m-parent">${esc(k.parent)}${k.phone ? ", " + esc(k.phone) : ""}</span>
     ${g ? "" : `<span class="small m-group">${esc(k.groups.map((x) => x.branch + " · " + x.name).join(", ") || k.group)}</span>`}
     <span class="m-st"><span class="pill ${pill[k.status]}">${esc(k.badge || cols[k.status] || "")}</span></span></div>`;
@@ -610,7 +610,7 @@ function renderMembersList(page, data) {
   $("#mf-group").onchange = (e) => { f.group = e.target.value; rerender(); };
   $("#mf-grouped").onchange = (e) => { f.grouped = e.target.checked; rerender(); };
   page.querySelectorAll("[data-mst]").forEach((b) => (b.onclick = () => { f.status = b.dataset.mst; rerender(); }));
-  page.querySelectorAll(".m-list [data-open]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.open)));
+  page.querySelectorAll(".m-list [data-open]").forEach((b) => { b.onclick = () => openStudent(+b.dataset.open); b.onkeydown = (e) => { if (e.key === "Enter") openStudent(+b.dataset.open); }; });
   if ($("#arch-btn")) membersArchive(page);
 }
 

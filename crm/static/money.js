@@ -58,9 +58,9 @@ async function renderPayments(page) {
     ${dayKeys.length ? dayKeys.map((k, i) => { const rows = days[k], sum = rows.filter((r) => !r.cancelled).reduce((a, r) => a + r.amount, 0);
       return `<details class="panel fold pay-day" data-day="${k}" ${isOpen(k, i) ? "open" : ""}><summary><h3>${dayTitle(k, today)}</h3>
         <span class="muted small">${rows.length} ${plural(rows.length, "платёж", "платежа", "платежей")}</span><b class="pay-day-sum">${rub(sum)}</b></summary>
-        <div class="table-wrap"><table class="optable pay-tbl"><tbody>${rows.map((r, j) => `<tr class="${r.cancelled ? "struck" : ""}${j >= 15 && !P.allDays[k] ? " pay-more-hide" : ""}">
+        <div class="table-wrap"><table class="optable pay-tbl"><tbody>${rows.map((r, j) => `<tr class="pay-row ${r.cancelled ? "struck" : ""}${j >= 15 && !P.allDays[k] ? " pay-more-hide" : ""}" data-prow="${r.student_id}">
           <td class="muted small" style="width:48px">${esc((r.paid_at || "").slice(11, 16))}</td>
-          <td><button class="linkish" data-open="${r.student_id}">${esc(r.student)}</button><div class="small muted">${esc(r.group_name || "")}</div></td>
+          <td><b class="pay-name">${esc(r.student)}</b><div class="small muted">${esc(r.group_name || "")}</div></td>
           <td style="white-space:nowrap"><b>${rub(r.amount)}</b></td><td class="small">${esc(r.method_label)}</td>
           <td class="small muted">${esc(r.comment)}${r.user_name ? `<div>${esc(r.user_name)}</div>` : ""}</td>
           <td style="text-align:right">${r.cancelled ? `<span class="pill">отменён</span>` : r.confirmed ? "" : `<button class="btn sm" data-pconf="${r.id}">Подтвердить</button>`}</td></tr>`).join("")}</tbody></table></div>
@@ -75,6 +75,7 @@ async function renderPayments(page) {
   $("#p-unc").onclick = () => { P.unconfirmed = !P.unconfirmed; render(); };
   page.querySelectorAll(".pay-day").forEach((x) => x.addEventListener("toggle", () => { P.openDays[x.dataset.day] = x.open; }));
   page.querySelectorAll("[data-open]").forEach((b) => (b.onclick = (e) => { e.preventDefault(); openStudent(+b.dataset.open); }));
+  page.querySelectorAll("[data-prow]").forEach((tr) => (tr.onclick = (e) => { if (!e.target.closest("button")) openStudent(+tr.dataset.prow); }));
   page.querySelectorAll("[data-pconf]").forEach((b) => (b.onclick = async () => { await api("POST", `/api/payments/${b.dataset.pconf}/confirm`, {}).catch(fail); render(); }));
 }
 
