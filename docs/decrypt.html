@@ -65,7 +65,7 @@ $("#go").onclick = async () => {
   $("#go").disabled = true; say("Расшифровываю…");
   try {
     let out = await decrypt(await file.arrayBuffer(), pw);
-    let name = file.name.replace(/\.enc$/, "");
+    let name = file.name.replace(/\.enc$/, "").replace(/(\.[a-z]+)_\d+$/i, "$1");  // фото: 12.jpg_1730000000 → 12.jpg
     if (name.endsWith(".gz")) { out = await gunzip(out); name = name.replace(/\.gz$/, ""); }
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([out]));
