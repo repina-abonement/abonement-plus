@@ -628,6 +628,33 @@ WZ_KINDS = {"text": "text", "image": "image", "audio": "audio", "video": "video"
             "vcard": "contact", "sticker": "sticker"}
 
 
+def _utc_to_local(s: str) -> str | None:
+    """Время Wazzup приходит в UTC (…Z): переводим в местное, как всё остальное в CRM."""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone().replace(tzinfo=None).isoformat(timespec="seconds")
+    except ValueError:
+        return s[:19]
+
+
+def _wz_tg_rekey(con, chat_id: str, phone: str) -> None:
+    """Первое сообщение в Telegram мы отправили «по номеру» (phone:…), а ответ приходит с настоящим номером чата.
+    Связываем: по телефону, если Telegram его показал; иначе единственный недавний чат «по номеру» без ответа."""
+    if con.execute("SELECT 1 FROM conversations WHERE channel='wazzup_telegram' AND external_id=?", (chat_id,)).fetchone():
+        return
+    pn = normalize_phone(phone) if phone else ""
+    row = con.execute("SELECT id FROM conversations WHERE channel='wazzup_telegram' AND external_id=?", ("phone:" + pn,)).fetchone() if pn else None
+    if not row:
+        since = (datetime.now() - timedelta(hours=48)).isoformat(timespec="seconds")
+        cands = con.execute("""SELECT c.id FROM conversations c WHERE c.channel='wazzup_telegram' AND c.external_id LIKE 'phone:%'
+                               AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND m.direction='out' AND m.ts>=?)
+                               AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND m.direction='in')""", (since,)).fetchall()
+        row = cands[0] if len(cands) == 1 else None
+    if row:
+        con.execute("UPDATE conversations SET external_id=? WHERE id=?", (chat_id, row[0]))
+
+
 def wz_hook(con, payload: dict) -> None:
     for m in payload.get("messages") or []:
         ct = m.get("chatType") or ""
@@ -636,12 +663,14 @@ def wz_hook(con, payload: dict) -> None:
         channel = "whatsapp" if ct == "whatsapp" else f"wazzup_{ct}"
         contact = m.get("contact") or {}
         phone = m.get("chatId") if ct == "whatsapp" else (contact.get("phone") or "")
+        if ct == "telegram":
+            _wz_tg_rekey(con, str(m.get("chatId") or ""), phone)
         cid = upsert_conversation(con, channel, m.get("chatId"), title=contact.get("name") or "",
                                   username=contact.get("username") or "", phone=phone or "",
                                   meta={"channelId": m.get("channelId"), "chatType": ct})
         kind = WZ_KINDS.get(m.get("type") or "text", "other")
         echo = bool(m.get("isEcho"))
-        dt = (m.get("dateTime") or "")[:19] or None
+        dt = _utc_to_local(m.get("dateTime") or "")
         add_message(con, cid, "out" if echo else "in", m.get("text") or "", kind=kind, media=m.get("contentUri") or "",
                     external_id=m.get("messageId"), user_name="Из Wazzup" if echo else "", ts=dt)
 
