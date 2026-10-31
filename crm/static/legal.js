@@ -38,12 +38,13 @@ async function renderLegalSettings(box) {
   box.innerHTML = `<h3>Юридические документы</h3>
     <div class="small muted" style="margin-bottom:10px">Документы открываются по ссылкам для всех, без входа в CRM. Ссылку на согласие бот сам добавляет в приветствие, а кнопка «Поделиться номером» фиксирует согласие в карточке семьи</div>
     ${d.missing.length ? `<div class="alert" style="margin-bottom:12px">Чтобы документы были действительными, заполните: ${d.missing.map(esc).join(", ")}. Пока пустые места выделены жёлтым на страницах</div>` : ""}
-    <div class="row">${["legal_ip_name", "legal_inn", "legal_ogrnip"].map((k) => `<div class="field"><label>${esc(d.labels[k])}</label><input data-l="${k}" value="${esc(r[k])}"></div>`).join("")}</div>
+    <details class="fold req-fold" ${d.missing.length ? "open" : ""}><summary><b>Реквизиты ИП</b><span class="small muted">${d.missing.length ? `не заполнено: ${d.missing.length}` : `${esc(r.legal_ip_name || "")}, ИНН ${esc(r.legal_inn || "")}`}</span></summary>
+    <div class="row" style="margin-top:10px">${["legal_ip_name", "legal_inn", "legal_ogrnip"].map((k) => `<div class="field"><label>${esc(d.labels[k])}</label><input data-l="${k}" value="${esc(r[k])}"></div>`).join("")}</div>
     <div class="row">${["legal_address", "legal_email", "legal_phone"].map((k) => `<div class="field"><label>${esc(d.labels[k])}</label><input data-l="${k}" value="${esc(r[k])}"></div>`).join("")}</div>
     <div class="row">${["legal_account", "legal_bank"].map((k) => `<div class="field"><label>${esc(d.labels[k])}</label><input data-l="${k}" value="${esc(r[k])}"></div>`).join("")}</div>
     <div class="row">${["legal_bik", "legal_corr"].map((k) => `<div class="field"><label>${esc(d.labels[k])}</label><input data-l="${k}" value="${esc(r[k])}"></div>`).join("")}</div>
     <div class="small muted" style="margin:-4px 0 10px">В поле ФИО пишите без «ИП»: Фамилия Имя Отчество. Слова «Индивидуальный предприниматель» документ добавит сам</div>
-    <div class="row">${["legal_school", "legal_site", "legal_date"].map((k) => `<div class="field"><label>${esc(d.labels[k])}</label><input data-l="${k}" value="${esc(r[k])}"></div>`).join("")}</div>
+    <div class="row">${["legal_school", "legal_site", "legal_date"].map((k) => `<div class="field"><label>${esc(d.labels[k])}</label><input data-l="${k}" value="${esc(r[k])}"></div>`).join("")}</div></details>
     <div class="list" style="box-shadow:none;margin:6px 0 10px">${d.docs.map((x) => `<div class="list-row"><div class="grow"><b>${esc(x.title)}</b>${x.custom ? ` <span class="pill">изменён</span>` : ""}
       <div class="small"><a href="${esc(x.url)}" target="_blank">${esc(x.url)}</a></div></div>
       <button class="btn sm" data-copy="${esc(x.url)}">Копировать</button><button class="btn sm" data-ledit="${x.slug}">Текст</button></div>

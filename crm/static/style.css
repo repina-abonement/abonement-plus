@@ -1209,3 +1209,4 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 .pay-day-sum { margin-left: auto; font-size: 16px; }
 .pay-tbl td { vertical-align: top; padding-top: 9px; padding-bottom: 9px; }
 .pay-more-hide { display: none; }
+.req-fold { background: var(--surface-2); border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; }

@@ -1752,13 +1752,15 @@ document.addEventListener("copy", (e) => {
 
 /* Документы: юридические документы, оферты, подписи сотрудников (руководитель и юрист) */
 async function renderDocs(page) {
-  page.innerHTML = `<div class="page-head"><h2 class="grow">Документы</h2></div><div style="max-width:780px">
-    ${can("docs", "full") ? `<div class="section" id="legal-settings"><h3>Юридические документы</h3><div class="muted small">Загружаю…</div></div>
-    <div class="section" id="offers-settings"><h3>Оферты</h3><div class="muted small">Загружаю…</div></div>` : ""}
-    ${can("staffdocs", "view") ? `<div class="section" id="staffdocs-settings"></div>` : ""}</div>`;
-  if ($("#legal-settings")) renderLegalSettings($("#legal-settings")).catch(fail);
-  if ($("#offers-settings")) renderOffers($("#offers-settings")).catch(fail);
-  if ($("#staffdocs-settings")) renderStaffDocsAdmin($("#staffdocs-settings")).catch(fail);
+  const tabs = [...(can("docs", "full") ? [["legal", "Юридические документы"], ["offers", "Оферты"]] : []), ...(can("staffdocs", "view") ? [["staff", "Документы сотрудников"]] : [])];
+  if (!tabs.some(([k]) => k === S.docTab)) S.docTab = tabs[0] && tabs[0][0];
+  page.innerHTML = `<div class="page-head"><h2 class="grow">Документы</h2></div><div style="max-width:880px">
+    ${tabs.length > 1 ? `<div class="seg" style="margin-bottom:14px">${tabs.map(([k, t]) => `<button data-dtab="${k}" class="${S.docTab === k ? "active" : ""}">${t}</button>`).join("")}</div>` : ""}
+    <div class="section" id="doc-box"><div class="muted small">Загружаю…</div></div></div>`;
+  page.querySelectorAll("[data-dtab]").forEach((b) => (b.onclick = () => { S.docTab = b.dataset.dtab; render(); }));
+  const box = $("#doc-box");
+  const fn = { legal: renderLegalSettings, offers: renderOffers, staff: renderStaffDocsAdmin }[S.docTab];
+  if (fn) fn(box).catch(fail);
 }
 
 
