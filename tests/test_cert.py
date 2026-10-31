@@ -1,4 +1,4 @@
-"""Перерасчёт на «Гибком» только по медсправке. Запуск: python -m tests.test_cert"""
+"""Перерасчёт на «Гибком» без справки, до 3 занятий. Запуск: python -m tests.test_cert"""
 import os
 import sys
 import tempfile
@@ -24,11 +24,10 @@ def main():
     sv.today = lambda: date(2026, 10, 20)
     check(sv.quote_for(con, sid, "2026-11")["credit_lessons"] == 2, "Ноябрь (до новых правил): оба пропуска октября в перерасчёте")
     sv.today = lambda: date(2026, 11, 20)
-    check(sv.quote_for(con, sid, "2026-12")["credit_lessons"] == 0, "Декабрь: пропуски без справки не пересчитываем")
-    a = con.execute("SELECT id FROM attendance WHERE date='2026-11-07'").fetchone()[0]
-    con.execute("UPDATE attendance SET cert=1 WHERE id=?", (a,))
-    q = sv.quote_for(con, sid, "2026-12")
-    check(q["credit_lessons"] == 1 and q["credit_absence_dates"] == ["2026-11-07"], "Со справкой: в перерасчёт идёт только этот пропуск")
+    check(sv.quote_for(con, sid, "2026-12")["credit_lessons"] == 2, "Декабрь: пропуски переносим и без справки")
+    for d in ("2026-11-21", "2026-11-28"):
+        con.execute("INSERT INTO attendance(student_id, group_id, date, status) VALUES (?,?,?, 'absent')", (sid, g, d))
+    check(sv.quote_for(con, sid, "2026-12")["credit_lessons"] == 3, "Не больше 3 занятий в перерасчёт")
     print("ok")
 
 

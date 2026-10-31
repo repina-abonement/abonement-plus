@@ -1317,9 +1317,8 @@ async function openStudent(id) {
       <div class="counter"><b>${c.made_up}</b><span>отработано</span></div>
       <div class="counter hl"><b>${c.available}</b><span>можно отработать</span></div>
     </div>
-    ${c.available_ids.length ? `<div class="small" style="margin-top:8px"><b>Неотработанные пропуски:</b> ${c.available_ids.map((a) => `<label class="check small" style="display:inline-flex;margin-right:10px">
-      <input type="checkbox" data-cert="${a.id}" ${a.cert ? "checked" : ""}> ${dShort(a.date)} справка</label>`).join("")}
-      <div class="muted">На «Гибком» в перерасчёт идут только пропуски со справкой, не больше 3 и только при оплате следующего месяца</div></div>` : ""}
+    ${c.available_ids.length ? `<div class="small" style="margin-top:8px"><b>Неотработанные пропуски:</b> ${c.available_ids.map((a) => dShort(a.date)).join(", ")}
+      <div class="muted">На «Гибком» пропуски переносим и без справки: не больше 3 и только при оплате следующего месяца</div></div>` : ""}
     <div id="warn-box" style="margin-top:10px"></div>
     ${c.booked ? `<div class="small muted" style="margin-top:8px">Записан на отработку: ${c.booked}</div>` : ""}
     ${c.credited ? `<div class="small muted" style="margin-top:4px">Ушло в перерасчёт: ${c.credited}</div>` : ""}
@@ -1847,6 +1846,7 @@ async function renderSettings(page) {
     </form>
     ${can("payments", "full") ? `<div class="section" id="discount-settings" data-tab="prices"></div>` : ""}
     <div id="program-settings" data-tab="prices"></div>
+    ${can("members", "full") ? `<div class="section" id="memo-settings" data-tab="prices"></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" id="tips-settings" data-tab="tips"></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" id="chains-settings" data-tab="chains"></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" id="erp-settings" data-tab="erp"></div>` : ""}
@@ -1936,6 +1936,7 @@ async function renderSettings(page) {
   if ($("#source-settings")) renderSourceSettings($("#source-settings")).catch(fail);
   if ($("#legal-settings")) renderLegalSettings($("#legal-settings")).catch(fail);
   if ($("#offers-settings") && can("sales") && !can("docs")) renderOffers($("#offers-settings")).catch(fail);  // администраторам: ссылки на оферты для родителей
+  if ($("#memo-settings")) renderMemosSettings($("#memo-settings")).catch(fail);
   if ($("#program-settings")) renderProgramSettings($("#program-settings")).catch(fail);
   if ($("#resp-settings")) renderResponsibles($("#resp-settings")).catch(fail);
   if ($("#backup-settings")) renderBackup($("#backup-settings")).catch(() => { $("#backup-settings").remove(); $('[data-tile="backup"]')?.remove(); });
@@ -2076,6 +2077,7 @@ async function boot() {
   setInterval(() => { if ($("#drawer").hidden && S.view === "sales" && !document.hidden && !document.querySelector(".task-done:not([hidden])")) render(); }, 20000);
   if (can("inbox")) { pollCounts(); setInterval(pollCounts, 10000); }
   if (!S.meta.tour_pending) offerAlerts();
+  setTimeout(() => { if (typeof memoSync === "function") memoSync(); }, 4000);  // памятки для родителей: перерисовать, если поменялись цены
 }
 boot();
 

@@ -258,7 +258,7 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None) -> d
     get_student_row(con, sid)
     e = _pick_enrollment(con, sid, enrollment_id)
     cert_from = (con.execute("SELECT value FROM settings WHERE key='cert_required_from'").fetchone() or ["9999"])[0]
-    # перерасчёт на «Гибком»: с декабря 2026 только пропуски со справкой, не больше 3 и только при оплате следующего месяца
+    # перерасчёт на «Гибком»: без справки (с 01.11.2026), не больше 3 и только при оплате следующего месяца
     prev_abs = unresolved_absences_in_month(con, sid, logic.shift_month(ym, -1), e["group_id"], cert_only=ym >= cert_from)
     from . import closures, pricing, program
     if program.program_of_group(con, e["group_id"]):

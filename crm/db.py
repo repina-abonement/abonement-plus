@@ -235,7 +235,10 @@ def init_db(con: sqlite3.Connection):
     acols = {r[1] for r in con.execute("PRAGMA table_info(attendance)")}
     if "cert" not in acols:  # у пропуска есть медсправка: только такие идут в перерасчёт на «Гибком» (с декабря 2026)
         con.execute("ALTER TABLE attendance ADD COLUMN cert INTEGER NOT NULL DEFAULT 0")
-    con.execute("INSERT OR IGNORE INTO settings(key, value) VALUES ('cert_required_from', '2026-12')")
+    # 01.11.2026 Юлия: на «Гибком» перенос без справки, до 3 занятий. Справку больше не требуем
+    if not con.execute("SELECT 1 FROM settings WHERE key='cert_off_2611'").fetchone():
+        con.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('cert_required_from', '9999')")
+        con.execute("INSERT INTO settings(key, value) VALUES ('cert_off_2611', '1')")
     scols = {r[1] for r in con.execute("PRAGMA table_info(students)")}
     for col in ("converted_at TEXT", "trial_booked_at TEXT", "trial_came INTEGER"):
         if col.split()[0] not in scols:
@@ -271,10 +274,11 @@ def init_db(con: sqlite3.Connection):
     staffdocs.init(con)
     from . import tour
     tour.init(con)
-    from . import smart, chains, erpimport
+    from . import smart, chains, erpimport, memos
     smart.init(con)
     chains.init(con)
     erpimport.init(con)
+    memos.init(con)
     staff.init(con)
     merch.init(con)
     sources.init(con)

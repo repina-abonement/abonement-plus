@@ -561,6 +561,27 @@ def required_post(con, h, user, body, q, sid):
     return {"ok": True}
 
 
+@route("GET", "/api/memos", role="operator")
+def memos_get(con, h, user, body, q):
+    from . import memos
+    return {"items": memos.status(con)}
+
+
+@route("POST", "/api/memos/save", role="operator")
+def memos_post(con, h, user, body, q):
+    from . import memos
+    return {"ok": memos.save(con, str(body.get("key") or ""), body.get("hash") or "", body.get("png") or "")}
+
+
+@route("GET", "/api/memos/png", role="operator")
+def memos_png(con, h, user, body, q):
+    from . import memos
+    png = memos.image(con, q.get("key", ""), fresh_only=False)
+    if not png:
+        raise ApiError("Памятка ещё не нарисована", 404)
+    return Raw(png, "image/png")
+
+
 @route("GET", "/api/erp", role="admin")
 def erp_get(con, h, user, body, q):
     from . import erpimport
@@ -2418,7 +2439,7 @@ class Handler(BaseHTTPRequestHandler):
                     if method != "DELETE" and "application/json" not in (self.headers.get("Content-Type") or ""):
                         raise ApiError("Ожидается JSON", 415)
                     n = int(self.headers.get("Content-Length") or 0)
-                    if n > (21_000_000 if url.path.startswith("/api/offers") else 40_000_000 if url.path.startswith("/api/erp") else 1_000_000):
+                    if n > (21_000_000 if url.path.startswith("/api/offers") else 40_000_000 if url.path.startswith("/api/erp") else 8_000_000 if url.path.startswith("/api/memos") else 1_000_000):
                         raise ApiError("Слишком большой запрос", 413)
                     if n:
                         body = json.loads(self.rfile.read(n) or b"{}")
