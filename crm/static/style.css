@@ -501,7 +501,26 @@ h2.sub { font-size: 17px; }
   padding: 7px 9px; margin-bottom: 6px; font-size: 13px; cursor: pointer; box-shadow: var(--shadow); }
 .week-l span { display: block; color: var(--ink-2); font-size: 12px; }
 .br-block { border-top: 1px solid var(--line); padding: 12px 0; }
-.br-head { display: flex; gap: 10px; align-items: baseline; margin-bottom: 8px; flex-wrap: wrap; }
+.br-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; cursor: pointer; padding: 4px 0; }
+.br-head b { font-size: 16px; }
+.br-arrow { display: inline-block; width: 16px; color: var(--ink-2); transition: transform .15s; }
+.br-block.open .br-arrow { transform: rotate(90deg); }
+.br-body { display: none; padding-top: 6px; }
+.br-block.open .br-body { display: block; }
+.gt-day { margin: 12px 0 4px 26px; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+.gt-row { display: grid; grid-template-columns: 56px 48px 1fr 110px 48px; gap: 10px; align-items: center; margin-left: 18px; padding: 8px 8px;
+  border-radius: 10px; cursor: pointer; font-size: 14px; }
+.gt-row:hover { background: var(--surface-2); }
+.gt-time { font-variant-numeric: tabular-nums; }
+.gt-age { color: var(--ink-2); }
+.gt-coach { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gt-fill { height: 7px; border-radius: 4px; background: var(--line); overflow: hidden; }
+.gt-fill i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.gt-fill.over i { background: #d92d20; }
+.gt-num { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: 13px; }
+.br-shifts { margin: 14px 0 0 18px; }
+.br-shifts summary { cursor: pointer; padding: 4px 0; }
+@media (max-width: 640px) { .gt-row { grid-template-columns: 48px 40px 1fr 44px; margin-left: 0; } .gt-fill { display: none; } .gt-day { margin-left: 0; } }
 .br-head .btn { margin-left: auto; }
 .shift-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
 .shift-form select { width: auto; } .shift-form input[type=time] { width: 110px; }

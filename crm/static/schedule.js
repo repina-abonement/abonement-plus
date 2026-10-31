@@ -252,36 +252,69 @@ function wireSchedule(root, date) {
 }
 
 /* ---------- конструктор: филиалы, группы, смены ---------- */
+/* Филиалы и группы: филиал сворачивается, группы разложены по дням компактной таблицей */
+const strOpen = () => { try { return JSON.parse(localStorage.getItem("crm.br_open") || "{}"); } catch (_) { return {}; } };
+function strDays(gs) {
+  const by = {};
+  gs.forEach((g) => { const k = g.weekdays || ""; (by[k] = by[k] || []).push(g); });
+  return Object.entries(by).sort(([a], [b]) => (+(a.split(",")[0] || 9)) - (+(b.split(",")[0] || 9)) || a.localeCompare(b))
+    .map(([k, list]) => [k ? k.split(",").map((x) => WD[+x]).join(" / ") : "Дни не указаны", list.sort((x, y) => (x.time || "").localeCompare(y.time || ""))]);
+}
+/* что в названии группы сверх филиала, дней, времени и возраста: например «ОФП» или «ПУП» */
+function strExtra(g, b) {
+  const first = (b.name || "").replace(/[«»"]/g, " ").split(/\s+/).filter((w) => w && !/^(тц|ск)$/i.test(w))[0] || "";
+  return (g.name || "").split(/\s+/).filter((w) => w
+    && w.toLowerCase() !== first.toLowerCase()
+    && !/^((пн|вт|ср|чт|пт|сб|вс)\/?)+$/i.test(w)
+    && !/^\d{1,2}:\d{2}$/.test(w)
+    && !/^\d+([–-]\d+)?$/.test(w)).join(" ");
+}
+const plural = window.plural || ((n, a, b, c) => { const m = n % 10, h = n % 100; return m === 1 && h !== 11 ? a : m >= 2 && m <= 4 && (h < 12 || h > 14) ? b : c; });
+
 async function renderStructure(box, users) {
   const d = await api("GET", "/api/structure");
   const coaches = users.filter((u) => u.role === "coach" && u.active);
   const staff = users.filter((u) => u.active);
   box.innerHTML = `<h3>Филиалы, группы и смены</h3>
     <div class="small muted" style="margin-bottom:10px">Здесь создаются филиалы и группы, назначаются тренеры, места и смены администраторов. Ничего не удаляется: группа или филиал уходят в архив и возвращаются оттуда</div>
-    ${d.branches.filter((b) => b.active).map((b) => `<div class="br-block">
-      <div class="br-head"><b>${esc(b.name)}</b><span class="small muted">${esc(b.address || "адрес не указан")}</span>
+    ${d.branches.filter((b) => b.active).map((b) => {
+      const gs = b.groups.filter((g) => g.active), main = gs.filter((g) => !g.is_makeup);
+      const kids = main.reduce((a, g) => a + (g.kids || 0), 0), cap = main.reduce((a, g) => a + (g.capacity || 0), 0);
+      const open = strOpen()[b.id];
+      return `<div class="br-block ${open ? "open" : ""}" data-brb="${b.id}">
+      <div class="br-head" data-brt="${b.id}"><span class="br-arrow">▸</span><b>${esc(b.name)}</b>
+        <span class="small muted">${gs.length} ${plural(gs.length, "группа", "группы", "групп")}${cap ? ` · ${kids} из ${cap} мест` : ""}</span>
         <button class="btn sm" data-bedit="${b.id}">Изменить</button></div>
-      <div class="list" style="box-shadow:none">${b.groups.filter((g) => g.active).map((g) => `<div class="list-row">
-        <div class="grow"><b>${g.time && !g.name.includes(g.time) ? esc(g.time) + " " : ""}${esc(g.name)}</b>${g.is_makeup ? ` <span class="pill">отработки</span>` : ""}
-          <div class="small muted">${g.weekdays.split(",").map((x) => WD[+x]).join(", ")}${g.age ? ` · ${esc(g.age)} лет` : ""} · ${esc(g.coach_name || "без тренера")}${g.assistant_name ? ` / ${esc(g.assistant_name)}` : ""} · ${g.is_makeup ? "" : `${g.kids} из ${g.capacity} мест`}</div></div>
-        ${can("export") ? `<a class="btn sm" href="/api/groups/${g.id}/export" title="Список учеников в Excel">Excel</a>` : ""}
-        <button class="btn sm" data-gedit="${g.id}" data-b="${b.id}">Изменить</button></div>`).join("") || `<div class="list-row muted small">Групп пока нет</div>`}</div>
-      <button class="btn sm" data-gadd="${b.id}" style="margin-top:8px">+ Группа</button>
-      <div class="small" style="margin-top:12px"><b>Смены</b></div>
-      ${b.shifts.map((sh) => `<div class="row" style="align-items:center;margin-top:6px"><div class="small">${esc(sh.user_name)} · ${sh.weekdays.split(",").map((x) => WD[+x]).join(", ")}${sh.time_from ? ` · ${esc(sh.time_from)}–${esc(sh.time_to)}` : ""}</div>
-        <button class="btn sm danger" data-shdel="${sh.id}" style="flex:0">Убрать</button></div>`).join("") || `<div class="small muted">Смен пока нет</div>`}
-      <div class="shift-form" data-sb="${b.id}">
-        <select data-su>${staff.filter((u) => u.role !== "coach").map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join("")}</select>
-        <div class="chips">${WD.map((w, i) => `<button type="button" class="chip day" data-sd="${i}">${w}</button>`).join("")}</div>
-        <input data-sf type="time" value="10:00"><input data-st type="time" value="21:00">
-        <button class="btn sm" data-shadd>+ Смена</button>
+      <div class="br-body">
+        <div class="small muted" style="margin:-2px 0 8px 26px">${esc(b.address || "адрес не указан")}</div>
+        ${strDays(gs).map(([lbl, list]) => `<div class="gt-day">${lbl}</div>
+          ${list.map((g) => { const pc = g.capacity ? Math.min(100, Math.round(100 * g.kids / g.capacity)) : 0, extra = g.is_makeup ? "" : strExtra(g, b);
+            return `<div class="gt-row" data-gedit="${g.id}" data-b="${b.id}" title="${esc(g.name)}: нажмите, чтобы изменить">
+            <b class="gt-time">${esc(g.time || "—")}</b><span class="gt-age">${g.age ? esc(g.age) : ""}</span>
+            <span class="gt-coach">${esc(g.coach_name || "без тренера")}${g.assistant_name ? ` / ${esc(g.assistant_name)}` : ""}${extra ? ` <span class="pill">${esc(extra)}</span>` : ""}${g.is_makeup ? ` <span class="pill">отработки</span>` : ""}</span>
+            ${g.is_makeup ? `<span></span>` : `<span class="gt-fill ${g.kids > g.capacity ? "over" : ""}"><i style="width:${pc}%"></i></span><span class="gt-num">${g.kids}/${g.capacity}</span>`}</div>`; }).join("")}`).join("") || `<div class="small muted">Групп пока нет</div>`}
+        <button class="btn sm" data-gadd="${b.id}" style="margin-top:10px">+ Группа</button>
+        <details class="br-shifts"><summary><b>Смены администраторов</b> <span class="muted">(${b.shifts.length})</span></summary>
+        ${b.shifts.map((sh) => `<div class="row" style="align-items:center;margin-top:6px"><div class="small">${esc(sh.user_name)} · ${sh.weekdays.split(",").map((x) => WD[+x]).join(", ")}${sh.time_from ? ` · ${esc(sh.time_from)}–${esc(sh.time_to)}` : ""}</div>
+          <button class="btn sm danger" data-shdel="${sh.id}" style="flex:0">Убрать</button></div>`).join("") || `<div class="small muted">Смен пока нет</div>`}
+        <div class="shift-form" data-sb="${b.id}">
+          <select data-su>${staff.filter((u) => u.role !== "coach").map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join("")}</select>
+          <div class="chips">${WD.map((w, i) => `<button type="button" class="chip day" data-sd="${i}">${w}</button>`).join("")}</div>
+          <input data-sf type="time" value="10:00"><input data-st type="time" value="21:00">
+          <button class="btn sm" data-shadd>+ Смена</button>
+        </div></details>
       </div>
-    </div>`).join("")}
+    </div>`; }).join("")}
     <button class="btn" id="b-add" style="margin-top:12px">+ Филиал</button>`;
   const reload = () => renderStructure(box, users);
   const refreshMeta = async () => { S.meta = await api("GET", "/api/meta"); reload(); };
   box.querySelectorAll("[data-gadd]").forEach((b) => (b.onclick = () => groupForm(null, +b.dataset.gadd, d, coaches, refreshMeta)));
   box.querySelectorAll("[data-gedit]").forEach((b) => (b.onclick = () => groupForm(+b.dataset.gedit, +b.dataset.b, d, coaches, refreshMeta)));
+  box.querySelectorAll("[data-brt]").forEach((h) => (h.onclick = (e) => {
+    if (e.target.closest("[data-bedit]")) return;
+    const blk = h.closest(".br-block"), on = blk.classList.toggle("open");
+    try { const o = strOpen(); o[h.dataset.brt] = on; localStorage.setItem("crm.br_open", JSON.stringify(o)); } catch (_) {}
+  }));
   box.querySelectorAll("[data-bedit]").forEach((b) => (b.onclick = () => branchForm(d.branches.find((x) => x.id === +b.dataset.bedit), refreshMeta)));
   $("#b-add").onclick = () => branchForm(null, refreshMeta);
   box.querySelectorAll("[data-sd]").forEach((b) => (b.onclick = () => b.classList.toggle("on")));
