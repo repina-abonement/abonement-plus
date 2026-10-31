@@ -1511,8 +1511,43 @@ async function boot() {
   setInterval(() => { if ($("#drawer").hidden && ["members", "skips"].includes(S.view)) render(); }, 60000);
   setInterval(() => { if ($("#drawer").hidden && S.view === "sales" && !document.hidden && !document.querySelector(".task-done:not([hidden])")) render(); }, 20000);
   if (can("inbox")) { pollCounts(); setInterval(pollCounts, 10000); }
+  offerAlerts();
 }
 boot();
+
+/* Руководителю и администраторам при каждом входе, пока не настроено: включить звук и уведомления.
+   «Пропустить» откладывает до следующего входа. Настройка живёт в браузере, поэтому на каждом устройстве своя */
+const notifReady = () => !("Notification" in window) || Notification.permission === "granted";
+function offerAlerts() {
+  if (!S.user || !["admin", "operator"].includes(S.user.role) || !can("inbox")) return;
+  if (soundOn() && notifReady()) return;
+  const draw = () => {
+    const denied = "Notification" in window && Notification.permission === "denied";
+    openDrawer(`<h2>🔔 Чтобы не пропустить клиента</h2>
+      <p class="muted">Включите звук и уведомления: тогда CRM даст знать о новом сообщении, пропущенном звонке или заявке, даже если она свёрнута. Это займёт полминуты.</p>
+      <div class="section"><h3>1. Звук</h3>
+        <label class="check"><input type="checkbox" id="oa-sound" ${soundOn() ? "checked" : ""}> Звук, когда приходит сообщение, пропущенный звонок или заявка</label>
+        <button class="btn" id="oa-test" style="margin-top:10px">🔊 Проверить звук</button>
+        <div class="small muted" style="margin-top:6px">Не слышно? Проверьте громкость на компьютере или телефоне.</div></div>
+      ${"Notification" in window ? `<div class="section"><h3>2. Уведомления</h3>
+        ${notifReady() ? `<div>✅ Уведомления включены</div>`
+          : denied ? `<div class="small">Браузер сейчас запрещает уведомления. Нажмите на значок слева от адреса сайта (замочек или настройки), найдите «Уведомления» и выберите «Разрешить». Потом обновите страницу.</div>`
+          : `<button class="btn primary" id="oa-notif">Разрешить уведомления</button>
+             <div class="small muted" style="margin-top:6px">Браузер спросит разрешение: нажмите «Разрешить».</div>`}</div>` : ""}
+      <div class="row" style="gap:10px;margin-top:18px">
+        <button class="btn primary" id="oa-done" style="flex:1">Готово</button>
+        <button class="btn" id="oa-skip" style="flex:1">Пропустить, напомнить в следующий раз</button></div>`);
+    $("#oa-sound").onchange = (e) => { try { localStorage.setItem("crm.sound", e.target.checked ? "1" : "0"); } catch (_) {} };
+    $("#oa-test").onclick = () => ding();
+    if ($("#oa-notif")) $("#oa-notif").onclick = async () => { await Notification.requestPermission(); draw(); };
+    $("#oa-skip").onclick = () => closeDrawer();
+    $("#oa-done").onclick = () => {
+      closeDrawer();
+      toast(soundOn() && notifReady() ? "Готово! Теперь CRM даст знать о новых сообщениях" : "Не всё включено: напомню при следующем входе");
+    };
+  };
+  draw();
+}
 
 /* Выгружать и копировать списки может только руководитель: остальным копирование из CRM не даём (кроме полей ввода) */
 document.addEventListener("copy", (e) => {
