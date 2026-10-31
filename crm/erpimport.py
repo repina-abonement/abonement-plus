@@ -413,7 +413,7 @@ def _classify(con, children: list[dict], subs: list[dict], child_of, today: date
     out = {}
     for c in children:
         ck = _key(c)
-        sold = sorted(by_child.get(ck, []), reverse=True)
+        sold = sorted(by_child.get(ck, []), key=lambda x: x[0], reverse=True)  # группа бывает без пары (None)
         file_gid = _group_id(con, c.get("branch", ""), c.get("group", ""))
 
         def gids(pred):
@@ -884,6 +884,14 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
         lessons = sub_lessons(rec)
         status = sub_status(rec.get("status", ""), price)
         tariff = "flex" if "гибк" in _norm(rec.get("tariff", "")) else (con.execute("SELECT tariff FROM students WHERE id=?", (sid,)).fetchone()[0])
+        old = con.execute("SELECT id, price, lessons, status FROM subscriptions WHERE enrollment_id=? AND month=?", (eid, ym)).fetchone()
+        if old:  # в ERP за месяц в одной группе бывает несколько продаж (абонемент и разовые): в CRM это один абонемент месяца
+            p2, l2 = old["price"] + price, old["lessons"] + lessons
+            s2 = "paid" if old["status"] == "paid" and status == "paid" else "invoiced"
+            con.execute("UPDATE subscriptions SET price=?, lessons=?, per_lesson=?, status=?, paid_at=? WHERE id=?",
+                        (p2, l2, (p2 // l2) if l2 else p2, s2, f"{ym}-01T10:00" if s2 == "paid" else None, old["id"]))
+            st["subs_merged"] = st.get("subs_merged", 0) + 1
+            continue
         sub = con.execute("""INSERT INTO subscriptions(student_id, enrollment_id, month, tariff, lessons, per_lesson, price, status, created_at, paid_at)
                              VALUES (?,?,?,?,?,?,?,?,?,?)""",
                           (sid, eid, ym, tariff, lessons, (price // lessons) if lessons else price, price, status,
@@ -983,7 +991,7 @@ def verify(con) -> dict:
     line("Дети и лиды", p["stats"]["children"], cnt("students"))
     line("Занимаются сейчас", p["stats"]["members_active"],
          con.execute("SELECT COUNT(*) FROM students WHERE funnel='members' AND stage='active'").fetchone()[0])
-    line("Абонементы", p["stats"]["subs"], cnt("subscriptions"))
+    line("Абонементы", p["stats"]["subs"], cnt("subscriptions") + st.get("subs_merged", 0))  # продажи одного месяца в одной группе сложены в один
     line("Оплаты, штук", p["stats"]["payments"], cnt("payments"))
     crm_sum = con.execute("""SELECT COALESCE(SUM(t.amount),0) FROM erp_rows r JOIN payments t ON t.id=r.row_id
                              WHERE r.batch_id=? AND r.tbl='payments'""", (bid,)).fetchone()[0]

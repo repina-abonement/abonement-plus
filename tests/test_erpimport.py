@@ -131,6 +131,7 @@ def rules():
             "1,Два Группы,Чоботовская сб/вс,Абонемент (стандарт /8),07.11.2026,8000,8000\n"
             "1,Два Группы,Небо НУП вт/пт,Отработка,10.11.2026,0,0\n"
             "2,Не Оплатил,Небо НУП вт/пт,Абонемент (стандарт /8),03.10.2026,8000,4000\n"
+            "2,Не Оплатил,Старая группа без пары,Разовое,03.10.2026,1500,1500\n"
             "3,Давно Ушёл,Небо НУП вт/пт,Абонемент (стандарт /8),03.03.2025,8000,8000\n"
             "4,Вернулся Сам,Небо НУП вт/пт,Разовое,01.12.2026,1500,1500\n"
             "5,Только Пробное,Небо НУП вт/пт,Вводное,12.10.2026,0,0\n").encode()
@@ -148,7 +149,7 @@ def rules():
     check(s["children"] == 6 and s["no_name"] == 1, f"Лид без имени ребёнка не потерян, пустая строка пропущена ({s})")
     check(s["members_active"] == 3 and s["members_unpaid"] == 1 and s["members_left"] == 1 and s["leads"] == 2,
           f"Статусы по абонементам: 3 занимаются (1 не оплатил ноябрь), 1 ушёл, 2 лида ({s})")
-    check(s["subs"] == 5 and s["subs_trials"] == 1 and s["subs_makeups"] == 1, "Вводные и отработки не считаются абонементами")
+    check(s["subs"] == 6 and s["subs_trials"] == 1 and s["subs_makeups"] == 1, "Вводные и отработки не считаются абонементами")
     check(s["pay_date_from_sale"] == 1 and not any("не понял дату" in x for x in p["problems"]), "Пустая дата оплаты заменена датой продажи")
     check(p["problem_types"].get("Лиды и клиенты без имени ребёнка (сохраняются с пометкой)") == 1, f"Итог нестыковок по видам ({p['problem_types']})")
     ei.run(con, OWNER, True, now=NOW)
@@ -157,7 +158,10 @@ def rules():
     act = [r[0] for r in con.execute("SELECT group_id FROM enrollments WHERE student_id=? AND active=1", (two["id"],))]
     check(act == [chob] and two["group_id"] == chob, f"Действующая группа - та, куда продан абонемент на ноябрь ({act})")
     check(g("2")["stage"] == "active" and g("3")["stage"] == "left" and g("4")["stage"] == "active", "Не оплатил ноябрь - занимается, давно ушёл - ушёл, купил на декабрь - занимается")
-    check(con.execute("SELECT status FROM subscriptions WHERE student_id=?", (g("2")["id"],)).fetchone()[0] == "invoiced", "Частично оплаченный абонемент - не оплачен")
+    two_subs = con.execute("SELECT price, status FROM subscriptions WHERE student_id=?", (g("2")["id"],)).fetchall()
+    check([tuple(x) for x in two_subs] == [(9500, "invoiced")], f"Продажи одного месяца сложены, частично оплаченный - не оплачен ({[tuple(x) for x in two_subs]})")
+    v = {x["label"]: x for x in ei.verify(con)["rows"]}
+    check(v["Абонементы"]["ok"], f"Сверка абонементов учитывает сложенные продажи ({v['Абонементы']})")
     check(g("5")["funnel"] == "sales" and g("5")["trial_at"].startswith("2026-10-12"), "Только вводное: остаётся лидом, дата пробного из вводного")
     nn = con.execute("SELECT s.*, f.name AS fam FROM students s JOIN families f ON f.id=s.family_id WHERE s.name=?", (ei.NO_NAME,)).fetchone()
     check(nn and nn["fam"] == "Папа Без Имени" and nn["funnel"] == "sales", "Лид без имени перенесён в воронку продаж с семьёй родителя")
