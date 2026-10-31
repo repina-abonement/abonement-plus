@@ -1188,3 +1188,24 @@ h1, h2, h3, h4, b, strong, th { font-weight: 800; }
   animation: tourPulse 1.4s ease-in-out infinite; }
 @keyframes tourPulse { 50% { box-shadow: 0 0 0 3px #7fe0ad, 0 0 0 11px rgba(127,224,173,.15) !important; } }
 @media (max-width: 760px) { .tour-card { right: 16px; left: 16px; bottom: 78px; width: auto; max-height: calc(100vh - 110px); } }
+
+/* оплаты: периоды кнопками, способы чипами, дни сворачиваются */
+.pay-filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.pay-dates { display: inline-flex; gap: 6px; align-items: center; }
+.pay-dates input { width: auto; padding: 6px 8px; font-size: 14px; }
+.pay-sum { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; background: var(--surface); border-radius: 14px; padding: 12px 16px; box-shadow: var(--shadow); }
+.pay-total { display: flex; flex-direction: column; min-width: 150px; }
+.pay-total span:first-child { font-size: 13px; color: var(--ink-2); }
+.pay-total b { font-family: var(--display); font-weight: 800; font-size: 24px; }
+.chip.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.chip.warn { border-color: var(--red); color: var(--red); }
+.chip.on.warn { background: var(--red); color: #fff; }
+details.fold > summary { list-style: none; cursor: pointer; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary h3 { margin: 0; }
+details.fold > summary::before { content: "▸"; color: var(--ink-2); transition: transform .15s; display: inline-block; }
+details.fold[open] > summary::before { transform: rotate(90deg); }
+.pay-days { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.pay-day-sum { margin-left: auto; font-size: 16px; }
+.pay-tbl td { vertical-align: top; padding-top: 9px; padding-bottom: 9px; }
+.pay-more-hide { display: none; }

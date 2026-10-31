@@ -1483,6 +1483,7 @@ async function renderSettings(page) {
       </div>
       <button class="btn primary">Сохранить</button>
     </form>
+    ${can("payments", "full") ? `<div class="section" id="discount-settings" data-tab="prices"></div>` : ""}
     <div class="section" id="backup-settings" data-tab="backup"></div>
     <div class="section" id="resp-settings" data-tab="resp"></div>
     <div id="program-settings" data-tab="program"></div>
@@ -1571,6 +1572,7 @@ async function renderSettings(page) {
   if ($("#resp-settings")) renderResponsibles($("#resp-settings")).catch(fail);
   if ($("#backup-settings")) renderBackup($("#backup-settings")).catch(() => { $("#backup-settings").remove(); $('[data-tile="backup"]')?.remove(); });
   else if ($("#offers-settings")) $("#offers-settings").remove();
+  if ($("#discount-settings")) renderDiscounts($("#discount-settings")).catch(() => $("#discount-settings").remove());
   if ($("#structure-settings")) renderStructure($("#structure-settings"), users).catch(fail);
   if ($("#archive-settings")) renderArchive($("#archive-settings")).catch(fail);
   page.querySelectorAll("[data-upw]").forEach((b) => (b.onclick = async () => {
