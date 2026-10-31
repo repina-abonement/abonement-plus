@@ -592,9 +592,10 @@ function renderMembersList(page, data) {
   } else body = rows.map((k) => row(k, false)).join("");
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">${BOARD_TITLES.members}</h2>
-      ${can("members", "full") ? `<button class="btn sm" id="arch-btn">🗄 Архив ▾</button>` : ""}
+      ${can("members", "full") ? `<button class="btn sm" id="dup-btn" hidden>👯 Дубли</button><button class="btn sm" id="arch-btn">🗄 Архив ▾</button>` : ""}
 </div>
     <div class="section arch-box" id="arch-box" hidden></div>
+    <div class="m-views" id="m-views"></div>
     <div class="m-filters">
       <input id="mf-q" placeholder="Поиск: ребёнок, родитель или телефон" value="${esc(f.q || "")}">
       <select id="mf-branch"><option value="">Все филиалы</option>${branches.map((b) => `<option ${f.branch === b ? "selected" : ""}>${esc(b)}</option>`).join("")}</select>
@@ -612,6 +613,83 @@ function renderMembersList(page, data) {
   page.querySelectorAll("[data-mst]").forEach((b) => (b.onclick = () => { f.status = b.dataset.mst; rerender(); }));
   page.querySelectorAll(".m-list [data-open]").forEach((b) => { b.onclick = () => openStudent(+b.dataset.open); b.onkeydown = (e) => { if (e.key === "Enter") openStudent(+b.dataset.open); }; });
   if ($("#arch-btn")) membersArchive(page);
+  membersViews(page, f, rerender);
+  if ($("#dup-btn")) membersDups($("#dup-btn"));
+}
+
+/* Настройки → Подсказки по этапам: что сказать и что сделать, чтобы перейти дальше */
+async function renderTipsSettings(box) {
+  const d = await api("GET", "/api/stage-tips");
+  box.innerHTML = `<h3>Подсказки по этапам</h3><div class="small muted" style="margin-bottom:10px">Видны в карточке лида на жёлтой плашке «💡 Подсказка». Пишите так, как хотите, чтобы говорил администратор</div>
+    ${Object.entries(d.tips).map(([k, t]) => `<div class="section" style="box-shadow:none;padding:10px 0;border-top:1px solid var(--line)"><b>${esc(d.labels[k])}</b>
+      <div class="field"><label>Что сказать</label><textarea rows="3" data-tsay="${k}">${esc(t.say)}</textarea></div>
+      <div class="field"><label>Чтобы перейти дальше</label><input data-tnext="${k}" value="${esc(t.next)}"></div></div>`).join("")}
+    <button class="btn primary" id="tips-save">Сохранить</button>`;
+  $("#tips-save").onclick = async () => {
+    const tips = Object.fromEntries(Object.keys(d.tips).map((k) => [k, { say: box.querySelector(`[data-tsay="${k}"]`).value, next: box.querySelector(`[data-tnext="${k}"]`).value }]));
+    try { await api("PUT", "/api/stage-tips", { tips }); toast("Подсказки сохранены"); } catch (e) { fail(e); }
+  };
+}
+
+/* Мои списки: сохранённые фильтры «Учеников», у каждого сотрудника свои */
+async function membersViews(page, f, rerender) {
+  const box = $("#m-views"); if (!box) return;
+  const items = (await api("GET", "/api/views?section=members").catch(() => ({ items: [] }))).items;
+  const keys = ["q", "branch", "group", "status", "grouped"];
+  const same = (v) => keys.every((k) => (v.data[k] || "") === (f[k] || ""));
+  const hasFilter = keys.some((k) => f[k]);
+  box.innerHTML = items.length || hasFilter ? `<span class="small muted">⭐ Мои списки:</span>
+    ${items.map((v) => `<span class="chip ${same(v) ? "on" : ""}" data-view-id="${v.id}">${esc(v.name)}<button class="chip-x" data-view-del="${v.id}" title="Удалить список">×</button></span>`).join("")}
+    ${hasFilter && !items.some(same) ? `<button class="chip" id="view-save">+ Сохранить этот список</button>` : ""}` : "";
+  box.querySelectorAll("[data-view-id]").forEach((c) => (c.onclick = (e) => {
+    if (e.target.closest("[data-view-del]")) return;
+    const v = items.find((x) => x.id === +c.dataset.viewId);
+    keys.forEach((k) => { f[k] = v.data[k] || ""; }); f.grouped = !!v.data.grouped;
+    rerender();
+  }));
+  box.querySelectorAll("[data-view-del]").forEach((b) => (b.onclick = async () => {
+    if (!confirm("Удалить этот список? Сами ученики никуда не денутся")) return;
+    await api("DELETE", `/api/views/${b.dataset.viewDel}`).catch(fail); membersViews(page, f, rerender);
+  }));
+  if ($("#view-save")) $("#view-save").onclick = async () => {
+    const name = prompt("Как назвать список? Например: «Небо, не оплатили»");
+    if (!name) return;
+    try { await api("POST", "/api/views", { section: "members", name, data: Object.fromEntries(keys.map((k) => [k, f[k] || ""])) }); toast("Список сохранён"); membersViews(page, f, rerender); }
+    catch (e) { fail(e); }
+  };
+}
+
+/* Дубли семей: одна семья заведена дважды. Склеить одной кнопкой */
+async function membersDups(btn) {
+  const d = await api("GET", "/api/duplicates").catch(() => ({ items: [] }));
+  if (!d.items.length) return;
+  btn.hidden = false; btn.textContent = `👯 Дубли (${d.items.length})`;
+  btn.onclick = () => openDups(d.items);
+}
+function openDups(items) {
+  const fam = (x) => `<div class="dup-fam"><b>${esc(x.name || "Семья")}</b>
+    <div class="small">${x.kids.map((k) => esc(k.name) + (k.birth ? ` (${dShort(k.birth)})` : "") + (k.funnel === "sales" ? " · лид" : "")).join(", ") || "детей нет"}</div>
+    <div class="small muted">${x.parents.map((p) => esc(p.name) + (p.phone ? " " + esc(p.phone) : "")).join(", ")}</div>
+    <div class="small muted">оплат: ${x.payments}</div></div>`;
+  openDrawer(`<h2>👯 Похоже на одну семью</h2>
+    <p class="muted">Одна и та же семья заведена дважды. Выберите, какую карточку оставить: всё из второй (дети, родители, переписка, звонки, оплаты) переедет в неё. Отменить склейку нельзя.</p>
+    ${items.map((x, i) => `<div class="section dup-pair"><div class="small muted" style="margin-bottom:8px">Почему: ${esc(x.why)}</div>
+      <div class="dup-grid">${fam(x.a)}${fam(x.b)}</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn sm primary" data-merge="${i}" data-keep="a">Оставить левую</button>
+        <button class="btn sm primary" data-merge="${i}" data-keep="b">Оставить правую</button>
+        <button class="btn sm" data-dskip="${i}">Это разные семьи</button></div></div>`).join("")}`);
+  const body = $("#drawer-body");
+  body.querySelectorAll("[data-merge]").forEach((b) => (b.onclick = async () => {
+    const x = items[+b.dataset.merge], keep = b.dataset.keep === "a" ? x.a : x.b, drop = b.dataset.keep === "a" ? x.b : x.a;
+    if (!confirm(`Склеить? Останется семья «${keep.name}», всё из «${drop.name}» переедет в неё`)) return;
+    try { await api("POST", "/api/families/merge", { keep: keep.id, drop: drop.id }); toast("Склеено"); closeDrawer(); render(); } catch (e) { fail(e); }
+  }));
+  body.querySelectorAll("[data-dskip]").forEach((b) => (b.onclick = async () => {
+    const x = items[+b.dataset.dskip];
+    await api("POST", "/api/duplicates/skip", { a: x.a.id, b: x.b.id }).catch(fail);
+    b.closest(".dup-pair").remove(); toast("Больше не предложу");
+  }));
 }
 
 /* Архив учеников и лидов: кнопка над доской «Ученики», список раскрывается под ней */
@@ -766,6 +844,7 @@ function cardHtml(k, draggable) {
     <div class="meta">${esc(sub)}</div>
     ${meta2 ? `<div class="meta">${esc(meta2)}</div>` : ""}
     ${k.badge ? `<span class="badge">${esc(k.badge)}</span>` : ""}
+    ${k.score ? `<span class="score ${k.score}">${{ hot: "🔥 горячий", warm: "🌤 тёплый", cold: "❄ холодный" }[k.score]}</span>` : ""}
     ${k.due ? `<div class="due ${k.due_color || ""}" title="${esc(k.due_title || "")}">⏰ ${dueText(k.due)}</div>` : ""}
   </article>`;
 }
@@ -947,6 +1026,7 @@ function openSell(d, reload) {
   box.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
+const NEXT_GO = { reply: "Ответить", call: "Позвонить", offer: "Предложить дни", trial: "Записать", sell: "Продать", link: "Ссылка на оплату", makeup: "Отработка", task: "К задаче" };
 async function openStudent(id) {
   let d;
   try { d = await api("GET", `/api/students/${id}`); } catch (e) { return fail(e); }
@@ -976,12 +1056,16 @@ async function openStudent(id) {
   const html = `
   <div class="sc-head">
     <div class="sc-title"><h2>${esc(s.name)}</h2>
-      <span class="muted">${esc(d.stage_label)}${s.birth ? " · " + esc(ageText(s.birth)) : ""}${s.archived ? " · в архиве" : ""}</span></div>
+      <span class="muted">${esc(d.stage_label)}${s.birth ? " · " + esc(ageText(s.birth)) : ""}${s.archived ? " · в архиве" : ""}</span>
+      ${d.lead_score ? `<span class="score ${d.lead_score.level}" title="${esc(d.lead_score.why.join(", ") || "")}">${d.lead_score.label}</span>` : ""}</div>
     ${d.siblings.length ? `<div class="chips sc-kids"><span class="chip on">${esc(s.name.split(" ")[0])}</span>${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}</div>` : ""}
     <div class="sc-meta">${isMember ? (regular.length ? regular.map((e) => `<span class="pill">${esc(e.group_name)}</span>`).join(" ") : `<span class="muted small">Группа не выбрана</span>`)
       : `${s.trial_at ? `<span class="pill">Пробное ${dtShort(s.trial_at)}</span>` : ""}`}</div>
     <div class="sc-parents">${d.parents.map((p) => `<span class="sc-parent"><b>${esc(p.name)}</b>${p.phone ? ` <a href="tel:${esc(p.phone)}">${esc(p.phone)}</a> <button class="icon-btn" data-dial="${esc(p.phone)}" title="Позвонить через Sipuni">📞</button>` : ""}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}</span>`).join("")}</div>
     ${alerts ? `<div class="chips sc-alerts">${alerts}</div>` : ""}
+    ${d.next_step ? `<div class="next-step"><span>👉 <b>Следующий шаг:</b> ${esc(d.next_step.text)}</span><button class="btn sm primary" id="ns-go">${NEXT_GO[d.next_step.action] || "Сделать"}</button></div>` : ""}
+    ${!isMember && d.stage_tip ? `<details class="stage-tip" ${S.tipsOpen === false ? "" : "open"}><summary>💡 Подсказка на этапе «${esc(d.stage_label)}»</summary>
+      <div><b>Что сказать.</b> ${esc(d.stage_tip.say)}</div><div style="margin-top:4px"><b>Чтобы перейти дальше:</b> ${esc(d.stage_tip.next)}</div></details>` : ""}
     <div class="sc-actions">
       ${isMember && full && regular.length ? `<button class="btn primary" id="act-sell">🛒 Продать абонемент</button>` : ""}
       ${isMember && full ? `<button class="btn" id="act-link">💳 Ссылка на оплату</button>` : ""}
@@ -1177,6 +1261,18 @@ async function openStudent(id) {
   if ($("#act-vac")) $("#act-vac").onclick = () => openFold(body, "vac");
   if ($("#act-move")) $("#act-move").onclick = () => { const b = body.querySelector("[data-entr]"); if (b) { b.click(); b.scrollIntoView({ block: "center", behavior: "smooth" }); } };
   if ($("#act-trial")) $("#act-trial").onclick = () => { scTab("feed"); const b = $("#to-book"); if (b) { b.click(); b.scrollIntoView({ block: "center", behavior: "smooth" }); } else { const f = $("#f-trial"); if (f) f.scrollIntoView({ block: "center", behavior: "smooth" }); } };
+  const tip = body.querySelector(".stage-tip"); if (tip) tip.addEventListener("toggle", () => { S.tipsOpen = tip.open; });
+  if ($("#ns-go")) $("#ns-go").onclick = () => {
+    const a = d.next_step.action, click = (sel) => { const b = $(sel); if (b) { b.click(); return true; } return false; };
+    if (a === "reply") { scTab("feed"); const t = $("#cm-text"); if (t) { t.scrollIntoView({ block: "center", behavior: "smooth" }); t.focus(); } }
+    else if (a === "call") dial(firstPhone);
+    else if (a === "offer") { scTab("feed"); click("#to-open"); }
+    else if (a === "trial") click("#act-trial");
+    else if (a === "sell") { if (!click("#act-sell")) { scTab("abon"); const f = $("#f-stage"); if (f) { f.scrollIntoView({ block: "center", behavior: "smooth" }); f.focus(); } } }
+    else if (a === "link") click("#act-link");
+    else if (a === "makeup") openFold(body, "skips");
+    else if (a === "task") { closeDrawer(); go("planner"); }
+  };
   if ($("#fam-note")) $("#fam-note").onchange = async (e) => { try { await api("PATCH", `/api/families/${s.family_id}`, { note: e.target.value }); toast("Заметка сохранена"); reload(); } catch (err) { fail(err); } };
 
   if (isMember) loadWarnBox(s.family_id, $("#warn-box"), id);
@@ -1489,6 +1585,7 @@ const SET_TABS = [
   ["users", "👥", "Сотрудники", "Должности, телефоны, пароли"], ["prices", "💰", "Цены и правила", "Прайс, срок продления, пробное"],
   ["structure", "🏟", "Филиалы, группы и смены", "Расписание и лимиты"], ["resp", "🎯", "Ответственные по филиалам", "Кому задачи по пробным"],
   ["comms", "💬", "Связь с клиентами", "Telegram, MAX, WhatsApp, Sipuni, заявки"], ["trials", "📋", "Задачи по пробным", "Автосообщения и сроки"],
+  ["tips", "💡", "Подсказки по этапам", "Что сказать на каждом этапе воронки"],
   ["coachpay", "⏱", "Тренеры: приход и оплата", "Отметка прихода, ставки"], ["program", "🏆", "Сборная ПРО", "Цены и правила сборной"],
   ["sources", "📣", "Рекламные каналы", "Источники лидов"], ["offers", "📄", "Оферты", "Редакции и ссылки"],
   ["backup", "💾", "Резервные копии", "Яндекс Диск, копия сейчас"], ["archive", "🗄", "Архив", "Вернуть из архива"],
@@ -1537,6 +1634,7 @@ async function renderSettings(page) {
       <button class="btn primary">Сохранить</button>
     </form>
     ${can("payments", "full") ? `<div class="section" id="discount-settings" data-tab="prices"></div>` : ""}
+    ${S.user.role === "admin" ? `<div class="section" id="tips-settings" data-tab="tips"></div>` : ""}
     <div class="section" id="backup-settings" data-tab="backup"></div>
     <div class="section" id="resp-settings" data-tab="resp"></div>
     <div id="program-settings" data-tab="program"></div>
@@ -1625,6 +1723,7 @@ async function renderSettings(page) {
   if ($("#resp-settings")) renderResponsibles($("#resp-settings")).catch(fail);
   if ($("#backup-settings")) renderBackup($("#backup-settings")).catch(() => { $("#backup-settings").remove(); $('[data-tile="backup"]')?.remove(); });
   else if ($("#offers-settings")) $("#offers-settings").remove();
+  if ($("#tips-settings")) renderTipsSettings($("#tips-settings")).catch(fail);
   if ($("#discount-settings")) renderDiscounts($("#discount-settings")).catch(() => $("#discount-settings").remove());
   if ($("#structure-settings")) renderStructure($("#structure-settings"), users).catch(fail);
   if ($("#archive-settings")) renderArchive($("#archive-settings")).catch(fail);

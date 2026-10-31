@@ -486,6 +486,67 @@ def staff_docs_accept(con, h, user, body, q):
     return {"ok": True, "accepted": n}
 
 
+@route("GET", "/api/stage-tips", role="operator")
+def stage_tips_get(con, h, user, body, q):
+    from . import smart
+    return {"tips": smart.tips(con), "labels": {k: sv.SALES_LABELS[k] for k in smart.TIP_STAGES}}
+
+
+@route("PUT", "/api/stage-tips", role="admin")
+def stage_tips_put(con, h, user, body, q):
+    from . import smart
+    smart.save_tips(con, body.get("tips") or {})
+    sv.audit(con, user, "tips.save", "")
+    return {"ok": True}
+
+
+@route("GET", "/api/views", role="all")
+def views_get(con, h, user, body, q):
+    from . import smart
+    return {"items": smart.views(con, user["id"], q.get("section", "members"))}
+
+
+@route("POST", "/api/views", role="all")
+def views_post(con, h, user, body, q):
+    from . import smart
+    try:
+        vid = smart.save_view(con, user["id"], body.get("section") or "members", body.get("name") or "", body.get("data") or {})
+    except ValueError as e:
+        raise ApiError(str(e))
+    return {"id": vid}
+
+
+@route("DELETE", "/api/views/{vid}", role="all")
+def views_delete(con, h, user, body, q, vid):
+    from . import smart
+    smart.delete_view(con, user["id"], int(vid))
+    return {"ok": True}
+
+
+@route("GET", "/api/duplicates", role="members:full")
+def dups_get(con, h, user, body, q):
+    from . import smart
+    return {"items": smart.duplicates(con)}
+
+
+@route("POST", "/api/duplicates/skip", role="members:full")
+def dups_skip(con, h, user, body, q):
+    from . import smart
+    smart.not_duplicate(con, body.get("a"), body.get("b"))
+    return {"ok": True}
+
+
+@route("POST", "/api/families/merge", role="members:full")
+def families_merge(con, h, user, body, q):
+    from . import smart
+    try:
+        r = smart.merge_families(con, body.get("keep"), body.get("drop"), user)
+    except ValueError as e:
+        raise ApiError(str(e))
+    sv.audit(con, user, "family.merge", f"{body.get('drop')}->{body.get('keep')}")
+    return r
+
+
 @route("POST", "/api/tour/done", role="all")
 def tour_done(con, h, user, body, q):
     from . import tour

@@ -391,6 +391,7 @@ def card_summary(con, s: dict, st: dict) -> dict:
         "stage": s["stage"], "stage_changed_at": s["stage_changed_at"], "trial_at": s["trial_at"],
         "priority": s.get("priority", 0),
         "branch": "" if grp else _branch_name(con, s.get("branch_id")),
+        "score": (__import__("crm.smart", fromlist=["lead_score"]).lead_score(con, s) or {}).get("level") if s["funnel"] == "sales" else None,
     }
 
 
@@ -620,7 +621,7 @@ def student_detail(con, sid: int) -> dict:
     else:
         stage_label = "Ушёл" if s["stage"] == "left" else "Занимается"
     cur = logic.month_of(today())
-    return {
+    out = {
         "student": s, "family": fam, "parents": parents, "siblings": siblings, "group": grp,
         "subscriptions": subs, "vacations": vacs,
         "enrollments": [e | {"age_warn": logic.age_warning(s["birth"], e["group_age"], e["branch_name"])} for e in enrollments_of(con, sid)],
@@ -637,6 +638,11 @@ def student_detail(con, sid: int) -> dict:
         "pu": __import__("crm.pu", fromlist=["card_info"]).card_info(con, sid),
         "waitlist": __import__("crm.waitlist", fromlist=["for_student"]).for_student(con, sid),
     }
+    from . import smart
+    out["lead_score"] = smart.lead_score(con, s)
+    out["next_step"] = smart.next_step(con, s, out)
+    out["stage_tip"] = smart.tips(con).get(s["stage"]) if s["funnel"] == "sales" else None
+    return out
 
 
 def _program_out(con, sid: int) -> dict:

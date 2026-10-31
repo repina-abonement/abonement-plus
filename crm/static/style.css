@@ -1260,3 +1260,22 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 .m-row[data-open]:hover, .pay-row:hover { background: var(--surface-2); }
 .m-row[data-open] { border-radius: 10px; padding-left: 8px; padding-right: 8px; }
 .m-name b { color: inherit; } .pay-name { color: var(--accent); font-weight: 600; }
+
+/* следующий шаг, подсказка этапа, оценка лида */
+.next-step { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 10px; padding: 10px 14px;
+  border-radius: 12px; background: var(--accent-soft, #e7f6ee); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); font-size: 14.5px; }
+.stage-tip { margin-top: 10px; padding: 8px 14px; border-radius: 12px; background: var(--yellow-soft, #fdf6e3); font-size: 14px; line-height: 1.5; }
+.stage-tip summary { cursor: pointer; font-weight: 600; list-style: none; padding: 2px 0; }
+.stage-tip summary::-webkit-details-marker { display: none; }
+.stage-tip[open] summary { margin-bottom: 6px; }
+.score { display: inline-block; font-size: 12.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; margin-left: 8px; vertical-align: middle; cursor: help; }
+.score.hot { background: #fde8e6; color: #b42318; } .score.warm { background: #fdf3dc; color: #93600c; } .score.cold { background: #e7f0fb; color: #285a9e; }
+.card .score { margin: 6px 0 0; font-size: 11.5px; padding: 2px 7px; }
+
+.m-views { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.m-views .chip { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.chip-x { border: 0; background: none; cursor: pointer; color: inherit; opacity: .55; font-size: 15px; padding: 0 0 0 2px; line-height: 1; }
+.chip-x:hover { opacity: 1; }
+.dup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.dup-fam { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
+@media (max-width: 640px) { .dup-grid { grid-template-columns: 1fr; } }
