@@ -18,8 +18,43 @@ async function pollCounts() {
     const c = await api("GET", "/api/inbox/counts");
     const n = c.unread + c.missed;
     document.querySelectorAll("[data-badge]").forEach((b) => { b.hidden = !n; b.textContent = n; });
+    const p = S.counts;
+    if (p && p.last_in !== undefined) {
+      const what = c.last_lead > p.last_lead ? "🔥 Заявка с сайта" : c.last_in > p.last_in ? "💬 Новое сообщение" : c.last_missed > p.last_missed ? "📞 Пропущенный звонок" : "";
+      if (what) newInboxAlert(what);
+    }
     S.counts = c;
   } catch (_) { /* тихо */ }
+}
+
+/* Звук и мигающий заголовок вкладки, когда приходит сообщение, пропущенный звонок или заявка. Выключается в «Мой профиль» */
+const soundOn = () => { try { return localStorage.getItem("crm.sound") !== "0"; } catch (_) { return true; } };
+let audioCtx = null, titleTimer = null;
+function ding() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    [[880, 0], [1320, 0.16]].forEach(([f, t]) => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = "sine"; o.frequency.value = f;
+      const at = audioCtx.currentTime + t;
+      g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(0.35, at + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.35);
+      o.connect(g).connect(audioCtx.destination); o.start(at); o.stop(at + 0.4);
+    });
+  } catch (_) { /* браузер без звука */ }
+}
+document.addEventListener("click", () => { try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === "suspended") audioCtx.resume(); } catch (_) {} }, { once: true });
+function newInboxAlert(what) {
+  if (soundOn()) ding();
+  if (document.hidden && !titleTimer) {
+    const base = document.title; let on = false;
+    titleTimer = setInterval(() => { document.title = (on = !on) ? what : base; }, 1000);
+    const stop = () => { if (!document.hidden) { clearInterval(titleTimer); titleTimer = null; document.title = base; document.removeEventListener("visibilitychange", stop); } };
+    document.addEventListener("visibilitychange", stop);
+  }
+  if (soundOn() && "Notification" in window && Notification.permission === "granted" && document.hidden) {
+    try { new Notification("Абонемент Плюс", { body: what }); } catch (_) {}
+  }
 }
 
 /* ---------- сообщение ---------- */

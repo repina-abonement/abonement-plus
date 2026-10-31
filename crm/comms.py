@@ -983,6 +983,10 @@ def counts(con) -> dict:
         "unread": con.execute("SELECT COUNT(*) FROM conversations WHERE unread > 0").fetchone()[0],
         "missed": con.execute("SELECT COUNT(*) FROM calls WHERE direction='in' AND status IN ('missed','busy') AND seen=0")
                      .fetchone()[0],
+        # для звука: номера последних входящих (сообщение, пропущенный звонок, заявка с сайта)
+        "last_in": con.execute("SELECT COALESCE(MAX(id), 0) FROM messages WHERE direction='in'").fetchone()[0],
+        "last_missed": con.execute("SELECT COALESCE(MAX(id), 0) FROM calls WHERE direction='in' AND status IN ('missed','busy')").fetchone()[0],
+        "last_lead": con.execute("SELECT COALESCE(MAX(id), 0) FROM students WHERE priority=1").fetchone()[0],
     }
 
 

@@ -1291,7 +1291,10 @@ async function renderSettings(page) {
     <div id="set-tiles"></div>
     <div class="section" data-tab="profile"><h3>Внешний вид</h3>
       <label class="check"><input type="checkbox" id="theme-soft" ${document.documentElement.classList.contains("theme-soft") ? "checked" : ""}> Новый дизайн (проба)</label>
-      <div class="small muted" style="margin-top:6px">Светлый спокойный вид. Включается только на этом устройстве, выключить можно здесь же в любой момент</div></div>
+      <div class="small muted" style="margin-top:6px">Светлый спокойный вид. Включается только на этом устройстве, выключить можно здесь же в любой момент</div>
+      ${can("inbox") ? `<label class="check" style="margin-top:12px"><input type="checkbox" id="sound-on" ${soundOn() ? "checked" : ""}> 🔔 Звук, когда приходит сообщение, пропущенный звонок или заявка</label>
+      <div class="row" style="gap:8px;margin-top:6px"><button class="btn sm" id="sound-test" style="flex:0 0 auto">Проверить звук</button>
+        ${"Notification" in window && Notification.permission !== "granted" ? `<button class="btn sm" id="notif-on" style="flex:0 0 auto">Показывать уведомления, когда CRM свёрнута</button>` : ""}</div>` : ""}</div>
     <div class="section" data-tab="profile"><h3>Быстрый вход по коду</h3><div id="pin-set" class="small muted">…</div></div>
     ${admin ? `
     <form class="section" id="set" data-tab="prices">
@@ -1372,6 +1375,9 @@ async function renderSettings(page) {
     $("#pin-new").onclick = async () => { try { localStorage.removeItem("crm.pin_skip"); } catch (_) {} if (has) await api("POST", "/api/pin", { device: dev, remove: true }); await offerPin(); shell(); render(); };
     if ($("#pin-off")) $("#pin-off").onclick = async () => { await api("POST", "/api/pin", { device: dev, remove: true }); try { localStorage.setItem("crm.pin_skip", "1"); } catch (_) {} toast("Вход по коду отключён"); render(); };
   })();
+  if ($("#sound-on")) $("#sound-on").onchange = (e) => { try { localStorage.setItem("crm.sound", e.target.checked ? "1" : "0"); } catch (_) {} toast(e.target.checked ? "Звук включён" : "Звук выключен"); };
+  if ($("#sound-test")) $("#sound-test").onclick = ding;
+  if ($("#notif-on")) $("#notif-on").onclick = async () => { const r = await Notification.requestPermission(); toast(r === "granted" ? "Уведомления включены" : "Браузер не разрешил уведомления"); render(); };
   if ($("#theme-soft")) $("#theme-soft").onchange = (e) => {
     const t = e.target.checked ? "soft" : "";
     try { localStorage.setItem("crm.theme", t); } catch (_) {}
@@ -1504,7 +1510,7 @@ async function boot() {
   render();
   setInterval(() => { if ($("#drawer").hidden && ["members", "skips"].includes(S.view)) render(); }, 60000);
   setInterval(() => { if ($("#drawer").hidden && S.view === "sales" && !document.hidden && !document.querySelector(".task-done:not([hidden])")) render(); }, 20000);
-  if (can("inbox")) { pollCounts(); setInterval(pollCounts, 20000); }
+  if (can("inbox")) { pollCounts(); setInterval(pollCounts, 10000); }
 }
 boot();
 
