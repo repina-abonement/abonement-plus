@@ -331,6 +331,7 @@ def backup_save(con, h, user, body, q):
         con.execute("COMMIT")  # копия должна включать всё, что уже сохранено
         try:
             r = backup.run(con)
+            r["excel"] = backup.excel_snapshot(con)
         finally:
             con.execute("BEGIN")  # обработчик запроса сам закроет транзакцию
         return backup.status(con) | {"result": r}
