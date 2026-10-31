@@ -667,6 +667,93 @@ async function renderTipsSettings(box) {
   };
 }
 
+/* Настройки → Перенос из ERP: файлы, колонки, группы, пробный прогон, перенос, сверка, отмена */
+async function renderErp(box) {
+  const d = await api("GET", "/api/erp");
+  const done = d.last && !d.last.undone_at;
+  box.innerHTML = `<h3>Перенос из ERP</h3>
+    <div class="small muted" style="margin-bottom:10px">Выгрузите из ERP клиентов, абонементы, оплаты, посещения и задачи в Excel (.xlsx) или CSV и загрузите сюда. Файлы разбираются на нашем сервере, никуда больше не уходят. Можно загружать по одному или все сразу</div>
+    ${done ? `<div class="alert" style="background:var(--accent-soft,#e7f6ee);color:inherit">✅ Перенос сделан ${esc(d.last.started_at.replace("T", " "))}. Ниже сверка с файлами</div><div id="erp-verify" class="small muted">Сверяю…</div>
+      <button class="btn danger" id="erp-undo" style="margin-top:12px">Отменить перенос</button>` : `
+    <div class="erp-step"><b>1. Файлы</b>
+      <div class="row" style="gap:8px;align-items:center;margin-top:8px"><input type="file" id="erp-file" multiple accept=".xlsx,.csv,.txt" style="flex:1"></div>
+      <div id="erp-ups">${d.uploads.map((u) => erpUploadHtml(u, d.kinds)).join("") || `<div class="small muted" style="margin-top:6px">Файлов пока нет</div>`}</div></div>
+    <div class="erp-step"><b>2. Группы</b><div id="erp-groups" class="small muted">${d.uploads.length ? "Загружаю…" : "Появятся после загрузки файлов"}</div></div>
+    <div class="erp-step"><b>3. Пробный прогон</b><div class="small muted">Ничего не записывает: показывает, что будет перенесено, и все нестыковки</div>
+      <button class="btn" id="erp-plan" style="margin-top:8px" ${d.uploads.length ? "" : "disabled"}>Проверить</button><div id="erp-plan-out"></div></div>
+    <div class="erp-step"><b>4. Перенос</b><div class="small muted">Перед переносом CRM сделает резервную копию и удалит всех выдуманных клиентов. Сотрудники, группы, настройки и переписки останутся. Перенос можно отменить целиком</div>
+      <label class="check" style="margin-top:8px"><input type="checkbox" id="erp-rkn"> Изменения в Роскомнадзор поданы, политика обработки данных опубликована</label>
+      <button class="btn primary" id="erp-run" style="margin-top:8px" disabled>Перенести</button></div>`}`;
+  if (done) {
+    const v = await api("GET", "/api/erp/verify");
+    $("#erp-verify").innerHTML = `<table class="tbl" style="margin-top:6px"><thead><tr><th></th><th>В файлах ERP</th><th>В CRM</th><th></th></tr></thead><tbody>
+      ${v.rows.map((r) => `<tr><td>${esc(r.label)}</td><td>${r.erp.toLocaleString("ru-RU")}</td><td>${r.crm.toLocaleString("ru-RU")}</td><td>${r.ok ? "✅" : "⚠️"}</td></tr>`).join("")}
+      ${v.by_month.map((r) => `<tr><td class="muted">Оплаты за ${esc(monthLabel(r.month))}</td><td>${rub(r.erp)}</td><td>${rub(r.crm)}</td><td>${r.ok ? "✅" : "⚠️"}</td></tr>`).join("")}</tbody></table>
+      <div style="margin-top:10px"><b>Занимаются по группам</b>${v.groups.map((g) => `<div>${esc(g.branch)} · ${esc(g.name)}: ${g.kids}</div>`).join("")}</div>`;
+    $("#erp-undo").onclick = async () => {
+      if (!confirm("Отменить перенос? Все перенесённые клиенты, абонементы и оплаты будут удалены. Выдуманные клиенты не вернутся")) return;
+      try { await api("POST", "/api/erp/undo", {}); toast("Перенос отменён"); renderErp(box); } catch (e) { fail(e); }
+    };
+    return;
+  }
+  $("#erp-file").onchange = async (e) => {
+    for (const f of e.target.files) {
+      const data = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(f); });
+      try { const r = await api("POST", "/api/erp/upload", { filename: f.name, data }); toast(`${f.name}: ${r.rows} строк`); } catch (err) { fail(err); }
+    }
+    renderErp(box);
+  };
+  box.querySelectorAll("[data-ukind]").forEach((sel) => (sel.onchange = async () => { await api("PUT", `/api/erp/uploads/${sel.dataset.ukind}`, { kind: sel.value }).catch(fail); renderErp(box); }));
+  box.querySelectorAll("[data-umap]").forEach((sel) => (sel.onchange = async () => {
+    const card = sel.closest("[data-up]"), mapping = {};
+    card.querySelectorAll("[data-umap]").forEach((x) => { if (x.value !== "") mapping[x.dataset.field] = +x.value; });
+    await api("PUT", `/api/erp/uploads/${card.dataset.up}`, { mapping }).catch(fail);
+    const u = d.uploads.find((x) => x.id === +card.dataset.up); u.mapping = mapping;
+    const ex = card.querySelector(`[data-ex="${sel.dataset.field}"]`); if (ex) ex.textContent = sel.value !== "" ? (u.preview[0] || [])[+sel.value] || "" : "";
+  }));
+  box.querySelectorAll("[data-udel]").forEach((b) => (b.onclick = async () => { if (!confirm("Убрать этот файл?")) return; await api("DELETE", `/api/erp/uploads/${b.dataset.udel}`).catch(fail); renderErp(box); }));
+  if (d.uploads.length) {
+    const g = await api("GET", "/api/erp/groups");
+    $("#erp-groups").innerHTML = g.erp.length ? `<div class="small muted" style="margin:4px 0 6px">Какой нашей группе соответствует группа из ERP. CRM подобрала сама, проверьте</div>
+      ${g.erp.map((x) => `<div class="row erp-grow" style="align-items:center;gap:8px"><span style="flex:1">${esc(x.erp)} <span class="muted">· ${x.count}</span></span>
+        <select data-gmap="${esc(x.erp)}" style="flex:1"><option value="">— не переносить в группу —</option>${g.ours.map((o) => `<option value="${o.id}" ${o.id === x.group_id ? "selected" : ""}>${esc(o.branch)} · ${esc(o.name)}</option>`).join("")}</select></div>`).join("")}
+      <button class="btn sm" id="erp-gsave" style="margin-top:8px">Сохранить группы</button>` : "В файлах нет колонки с группой";
+    if ($("#erp-gsave")) $("#erp-gsave").onclick = async () => {
+      const map = {}; box.querySelectorAll("[data-gmap]").forEach((x) => (map[x.dataset.gmap] = x.value));
+      try { await api("PUT", "/api/erp/groups", { map }); toast("Группы сохранены"); } catch (e) { fail(e); }
+    };
+  }
+  if ($("#erp-plan")) $("#erp-plan").onclick = async () => {
+    if ($("#erp-gsave")) $("#erp-gsave").click();
+    const p = await api("GET", "/api/erp/plan").catch(fail); if (!p) return;
+    const st = p.stats;
+    $("#erp-plan-out").innerHTML = `<div class="erp-stats">
+      <div><b>${st.families}</b> семей</div><div><b>${st.children}</b> детей и лидов</div><div><b>${st.members_active}</b> занимаются</div>
+      <div><b>${st.members_left}</b> ушли</div><div><b>${st.leads}</b> лидов</div><div><b>${st.subs}</b> абонементов</div>
+      <div><b>${st.payments}</b> оплат на ${rub(st.payments_sum)}</div><div><b>${st.visits}</b> посещений</div><div><b>${st.tasks}</b> задач</div></div>
+      <div class="small" style="margin-top:6px">Будет удалено клиентов, которые сейчас в CRM (выдуманные): <b>${p.will_remove}</b></div>
+      ${p.problems.length ? `<details class="fold" style="margin-top:8px" open><summary><b>Нестыковки: ${p.problems_total}</b></summary><ul class="small">${p.problems.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details>` : `<div class="small" style="margin-top:6px">✅ Нестыковок нет</div>`}`;
+    $("#erp-run").disabled = !$("#erp-rkn").checked;
+    S.erpPlanned = true;
+  };
+  if ($("#erp-rkn")) $("#erp-rkn").onchange = (e) => { $("#erp-run").disabled = !(e.target.checked && S.erpPlanned); };
+  if ($("#erp-run")) $("#erp-run").onclick = async () => {
+    if (!confirm("Перенести клиентов из ERP? Выдуманные клиенты будут удалены, перед этим CRM сделает резервную копию")) return;
+    $("#erp-run").disabled = true; $("#erp-run").textContent = "Переношу…";
+    try { const r = await api("POST", "/api/erp/run", { rkn: true }); toast(`Перенесено: ${r.stats.children} детей, ${r.stats.payments} оплат`); S.erpPlanned = false; renderErp(box); }
+    catch (e) { fail(e); $("#erp-run").disabled = false; $("#erp-run").textContent = "Перенести"; }
+  };
+}
+function erpUploadHtml(u, kinds) {
+  return `<div class="erp-up" data-up="${u.id}"><div class="row" style="align-items:center;gap:8px"><b style="flex:1">${esc(u.filename)} <span class="muted small">· ${u.count} строк</span></b>
+      <select data-ukind="${u.id}" style="flex:0 0 auto;width:auto">${Object.entries(kinds).map(([k, t]) => `<option value="${k}" ${k === u.kind ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>
+      <button class="icon-btn" data-udel="${u.id}" title="Убрать файл">✕</button></div>
+    <details class="fold"><summary class="small">Колонки: угадано ${Object.keys(u.mapping).length} из ${u.fields.length}. Проверить</summary>
+      <table class="tbl erp-map"><thead><tr><th>Что это</th><th>Колонка в файле</th><th>Пример из первой строки</th></tr></thead><tbody>
+      ${u.fields.map((f) => `<tr><td>${esc(f.label)}</td><td><select data-umap data-field="${f.key}"><option value="">— нет —</option>${u.headers.map((h, i) => `<option value="${i}" ${u.mapping[f.key] === i ? "selected" : ""}>${esc(h)}</option>`).join("")}</select></td>
+        <td class="small muted" data-ex="${f.key}">${u.mapping[f.key] !== undefined ? esc((u.preview[0] || [])[u.mapping[f.key]] || "") : ""}</td></tr>`).join("")}</tbody></table></details></div>`;
+}
+
 /* Настройки → Автоцепочки: серии сообщений родителям, по умолчанию выключены */
 async function renderChainsSettings(box) {
   const d = await api("GET", "/api/chains");
@@ -1657,6 +1744,7 @@ const SET_TABS = [
   ["structure", "🏟", "Филиалы, группы и смены", "Расписание и лимиты"], ["resp", "🎯", "Ответственные по филиалам", "Кому задачи по пробным"],
   ["comms", "💬", "Связь с клиентами", "Telegram, MAX, WhatsApp, Sipuni, заявки"], ["trials", "📋", "Задачи по пробным", "Автосообщения и сроки"],
   ["tips", "💡", "Подсказки по этапам", "Что сказать на каждом этапе воронки"], ["chains", "🔁", "Автоцепочки сообщений", "Серии сообщений родителям"],
+  ["erp", "📦", "Перенос из ERP", "Клиенты, абонементы, оплаты, история"],
   ["coachpay", "⏱", "Тренеры: приход и оплата", "Отметка прихода, ставки"], ["program", "🏆", "Сборная ПРО", "Цены и правила сборной"],
   ["sources", "📣", "Рекламные каналы", "Источники лидов"], ["offers", "📄", "Оферты", "Редакции и ссылки"],
   ["backup", "💾", "Резервные копии", "Яндекс Диск, копия сейчас"], ["archive", "🗄", "Архив", "Вернуть из архива"],
@@ -1707,6 +1795,7 @@ async function renderSettings(page) {
     ${can("payments", "full") ? `<div class="section" id="discount-settings" data-tab="prices"></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" id="tips-settings" data-tab="tips"></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" id="chains-settings" data-tab="chains"></div>` : ""}
+    ${S.user.role === "admin" ? `<div class="section" id="erp-settings" data-tab="erp"></div>` : ""}
     <div class="section" id="backup-settings" data-tab="backup"></div>
     <div class="section" id="resp-settings" data-tab="resp"></div>
     <div id="program-settings" data-tab="program"></div>
@@ -1795,6 +1884,7 @@ async function renderSettings(page) {
   if ($("#resp-settings")) renderResponsibles($("#resp-settings")).catch(fail);
   if ($("#backup-settings")) renderBackup($("#backup-settings")).catch(() => { $("#backup-settings").remove(); $('[data-tile="backup"]')?.remove(); });
   else if ($("#offers-settings")) $("#offers-settings").remove();
+  if ($("#erp-settings")) renderErp($("#erp-settings")).catch(fail);
   if ($("#chains-settings")) renderChainsSettings($("#chains-settings")).catch(fail);
   if ($("#tips-settings")) renderTipsSettings($("#tips-settings")).catch(fail);
   if ($("#discount-settings")) renderDiscounts($("#discount-settings")).catch(() => $("#discount-settings").remove());

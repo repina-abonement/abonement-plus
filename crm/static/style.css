@@ -1291,3 +1291,10 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 .need-miss label { color: #b42318; font-weight: 600; }
 .need-miss input { border-color: #f0a29b; background: #fff8f7; }
 .need-err { color: #b42318; min-height: 18px; margin-top: 4px; }
+
+.erp-step { border-top: 1px solid var(--line); padding: 12px 0; }
+.erp-up { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; margin-top: 8px; }
+.erp-map select { width: 100%; padding: 4px 6px; }
+.erp-stats { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 10px; }
+.erp-stats b { font-size: 18px; }
+.erp-grow { margin-top: 6px; }

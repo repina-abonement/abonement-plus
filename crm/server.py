@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 import mimetypes
 import os
 import re
@@ -557,6 +558,95 @@ def required_post(con, h, user, body, q, sid):
     from . import smart
     smart.fill_required(con, int(sid), body, user)
     return {"ok": True}
+
+
+@route("GET", "/api/erp", role="admin")
+def erp_get(con, h, user, body, q):
+    from . import erpimport
+    last = con.execute("SELECT * FROM erp_batches ORDER BY id DESC LIMIT 1").fetchone()
+    return {"uploads": erpimport.uploads(con), "kinds": erpimport.KIND_LABELS, "last": dict(last) if last else None}
+
+
+@route("POST", "/api/erp/upload", role="admin")
+def erp_upload(con, h, user, body, q):
+    import base64
+    from . import erpimport
+    try:
+        r = erpimport.upload(con, body.get("filename") or "file.xlsx", base64.b64decode(body.get("data") or ""), body.get("kind"))
+    except erpimport.ImportError_ as e:
+        raise ApiError(str(e))
+    except (ValueError, KeyError, zipfile.BadZipFile) as e:
+        raise ApiError("Не получилось прочитать файл: " + str(e)[:120])
+    sv.audit(con, user, "erp.upload", f"{body.get('filename')}:{r['rows']}")
+    return r
+
+
+@route("PUT", "/api/erp/uploads/{uid}", role="admin")
+def erp_upload_put(con, h, user, body, q, uid):
+    from . import erpimport
+    try:
+        erpimport.set_upload(con, int(uid), body.get("kind"), body.get("mapping"))
+    except erpimport.ImportError_ as e:
+        raise ApiError(str(e))
+    return {"ok": True}
+
+
+@route("DELETE", "/api/erp/uploads/{uid}", role="admin")
+def erp_upload_del(con, h, user, body, q, uid):
+    from . import erpimport
+    erpimport.delete_upload(con, int(uid))
+    return {"ok": True}
+
+
+@route("GET", "/api/erp/groups", role="admin")
+def erp_groups_get(con, h, user, body, q):
+    from . import erpimport
+    ours = [dict(r) for r in con.execute("""SELECT g.id, g.name, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id
+                                            WHERE g.active=1 ORDER BY b.name, g.name""")]
+    return {"erp": erpimport.erp_groups(con), "ours": ours}
+
+
+@route("PUT", "/api/erp/groups", role="admin")
+def erp_groups_put(con, h, user, body, q):
+    from . import erpimport
+    erpimport.save_groups(con, body.get("map") or {})
+    return {"ok": True}
+
+
+@route("GET", "/api/erp/plan", role="admin")
+def erp_plan(con, h, user, body, q):
+    from . import erpimport
+    return erpimport.plan(con)
+
+
+@route("POST", "/api/erp/run", role="admin")
+def erp_run(con, h, user, body, q):
+    from . import erpimport, backup
+    if not body.get("rkn"):
+        raise ApiError("Отметьте, что изменения в Роскомнадзор поданы и политика опубликована")
+    try:
+        path = backup.backup_once()  # копия всей базы до переноса
+    except Exception as e:  # noqa: BLE001
+        raise ApiError("Не получилось сделать резервную копию перед переносом: " + str(e)[:120])
+    try:
+        return erpimport.run(con, user, True, path)
+    except erpimport.ImportError_ as e:
+        raise ApiError(str(e))
+
+
+@route("POST", "/api/erp/undo", role="admin")
+def erp_undo(con, h, user, body, q):
+    from . import erpimport
+    try:
+        return erpimport.undo(con, user)
+    except erpimport.ImportError_ as e:
+        raise ApiError(str(e))
+
+
+@route("GET", "/api/erp/verify", role="admin")
+def erp_verify(con, h, user, body, q):
+    from . import erpimport
+    return erpimport.verify(con)
 
 
 @route("GET", "/api/duplicates", role="members:full")
@@ -2327,7 +2417,7 @@ class Handler(BaseHTTPRequestHandler):
                     if method != "DELETE" and "application/json" not in (self.headers.get("Content-Type") or ""):
                         raise ApiError("Ожидается JSON", 415)
                     n = int(self.headers.get("Content-Length") or 0)
-                    if n > (21_000_000 if url.path.startswith("/api/offers") else 1_000_000):
+                    if n > (21_000_000 if url.path.startswith("/api/offers") else 40_000_000 if url.path.startswith("/api/erp") else 1_000_000):
                         raise ApiError("Слишком большой запрос", 413)
                     if n:
                         body = json.loads(self.rfile.read(n) or b"{}")
