@@ -124,6 +124,11 @@ def main():
     print("Персональные данные")
     cols = {r[1] for r in con.execute("PRAGMA table_info(fx_payments)")} | {r[1] for r in con.execute("PRAGMA table_info(fx_receipts)")}
     check(not cols & {"payer", "name", "phone", "email", "contact", "description"}, "Ни имени, ни телефона, ни почты не храним")
+    print("Кассы в ответе Платформы ОФД")
+    for js, n in (({"kktList": {"orgBranches": [{"kkts": [{"kktRegId": "0001"}]}]}}, 1), ({"kkts": [{"regNumber": "0002"}]}, 1),
+                  ([{"kktRegId": "0003"}, {"kktRegId": "0004"}], 2), ({"kkts": []}, 0)):
+        check(len(fiscal.ofd_kkt_ids(js)) == n, f"Найдено касс: {n}")
+    check(fiscal.shape({"kkts": [], "total": 0}) == "{kkts: [0], total: int}", "Разбор ответа без номеров и сумм")
     print("Готово")
 
 

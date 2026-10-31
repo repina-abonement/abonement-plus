@@ -350,15 +350,42 @@ def ofd_get(con, path: str, params=None):
     return js or {}
 
 
-def fetch_ofd_kkts(con) -> list[str]:
-    js = ofd_get(con, "/kkts")
-    lst = js.get("kktList") or js
+KKT_KEYS = ("kktRegId", "kktRegNumber", "regNumber", "registrationNumber", "rnm", "kktRnm")
+
+
+def ofd_kkt_ids(js) -> list[str]:
+    """Регномера касс из ответа /kkts, где бы они ни лежали (список, ветки организации, вложенные объекты)."""
     out = []
-    for br in (lst.get("orgBranches") or []) if isinstance(lst, dict) else []:
-        for k in br.get("kkts") or []:
-            if k.get("kktRegId"):
-                out.append(k["kktRegId"])
+
+    def walk(v):
+        if isinstance(v, dict):
+            for k in KKT_KEYS:
+                rn = str(v.get(k) or "").strip()
+                if rn and rn not in out:
+                    out.append(rn)
+            for x in v.values():
+                if isinstance(x, (dict, list)):
+                    walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+    walk(js)
     return out
+
+
+def shape(v, depth=0) -> str:
+    """Устройство ответа без значений: ключи и длины списков, цифры не показываем."""
+    if depth > 3:
+        return "…"
+    if isinstance(v, dict):
+        return "{" + ", ".join(f"{k}: {shape(x, depth + 1)}" for k, x in list(v.items())[:12]) + "}"
+    if isinstance(v, list):
+        return f"[{len(v)}" + (f" × {shape(v[0], depth + 1)}" if v else "") + "]"
+    return type(v).__name__
+
+
+def fetch_ofd_kkts(con) -> list[str]:
+    return ofd_kkt_ids(ofd_get(con, "/kkts"))
 
 
 def fetch_ofd_receipts(con, d_from: date, d_to: date) -> list[dict]:
@@ -722,7 +749,11 @@ def test_sources(con) -> dict:
             out["paykeeper"] = f"ошибка: {e}"
     if on["ofd"]:
         try:
-            out["ofd"] = f"ок, касс: {len(fetch_ofd_kkts(con))}"
+            js = ofd_get(con, "/kkts")
+            n = len(ofd_kkt_ids(js))
+            out["ofd"] = f"ок, касс: {n}"
+            if n == 0:
+                out["ofd"] += " | разбор: " + shape(js)
         except Exception as e:  # noqa: BLE001
             out["ofd"] = f"ошибка: {e}"
     return out
