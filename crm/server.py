@@ -319,8 +319,11 @@ def backup_save(con, h, user, body, q):
         comms.put(con, "backup_yadisk_token", (body.get("yadisk_token") or "").strip())
         sv.audit(con, user, "backup.token", "")
     if body.get("run"):
-        con.commit()  # копия должна включать всё, что уже сохранено
-        r = backup.run(con)
+        con.execute("COMMIT")  # копия должна включать всё, что уже сохранено
+        try:
+            r = backup.run(con)
+        finally:
+            con.execute("BEGIN")  # обработчик запроса сам закроет транзакцию
         return backup.status(con) | {"result": r}
     return backup.status(con)
 
