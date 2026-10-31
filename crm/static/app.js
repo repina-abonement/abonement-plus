@@ -775,8 +775,14 @@ async function renderErp(box) {
       <div><b>${st.families}</b> семей</div><div><b>${st.children}</b> детей и лидов</div><div><b>${st.members_active}</b> занимаются</div>
       <div><b>${st.members_left}</b> ушли</div><div><b>${st.leads}</b> лидов</div><div><b>${st.subs}</b> абонементов</div>
       <div><b>${st.payments}</b> оплат на ${rub(st.payments_sum)}</div><div><b>${st.visits}</b> посещений</div><div><b>${st.tasks}</b> задач</div></div>
+      <div class="small" style="margin-top:6px">Статус и группа ребёнка - по проданным абонементам: занимается, если абонемент есть на текущий или будущий месяц
+        (из «занимаются» не оплатили текущий месяц, но платили в прошлом: <b>${st.members_unpaid || 0}</b>), ушёл - если абонементы были раньше.
+        Ходят в несколько групп по абонементам этого месяца: <b>${st.multi_group || 0}</b>.
+        Лидов без имени ребёнка (сохранятся с пометкой): <b>${st.no_name || 0}</b>. Вводные и отработки не считаются абонементами: <b>${(st.subs_trials || 0) + (st.subs_makeups || 0)}</b>.
+        Оплат с датой продажи вместо пустой даты оплаты: <b>${st.pay_date_from_sale || 0}</b></div>
       <div class="small" style="margin-top:6px">Будет удалено клиентов, которые сейчас в CRM (выдуманные): <b>${p.will_remove}</b></div>
-      ${p.problems.length ? `<details class="fold" style="margin-top:8px" open><summary><b>Нестыковки: ${p.problems_total}</b></summary><ul class="small">${p.problems.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details>` : `<div class="small" style="margin-top:6px">✅ Нестыковок нет</div>`}`;
+      ${p.problems.length ? `<div class="small" style="margin-top:8px"><b>Нестыковки по видам:</b> ${Object.entries(p.problem_types || {}).map(([k, v]) => `${esc(k)}: <b>${v}</b>`).join(" · ")}</div>
+        <details class="fold" style="margin-top:6px"><summary><b>Нестыковки: ${p.problems_total}</b>${p.problems_total > p.problems.length ? ` (показаны первые ${p.problems.length})` : ""}</summary><ul class="small">${p.problems.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details>` : `<div class="small" style="margin-top:6px">✅ Нестыковок нет</div>`}`;
     $("#erp-run").disabled = !$("#erp-rkn").checked;
     S.erpPlanned = true;
   };

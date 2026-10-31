@@ -6,9 +6,12 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tests.test_crm import check  # noqa: E402
+from datetime import date, datetime  # noqa: E402
+
 from crm import db, erpimport as ei, money, services as sv, xlsx  # noqa: E402
 
 OWNER = {"id": 1, "name": "Юлия", "role": "admin"}
+NOW = datetime(2026, 11, 1, 9, 0)  # «текущий месяц» в тесте - ноябрь 2026
 
 
 def main():
@@ -51,18 +54,18 @@ def main():
     check(gr.get("Небо · Пн/Чт 17:00") == g1 and gr.get("Небо · Сб 10:00") == g2, f"Группы ERP сами нашли пары в CRM: {gr}")
     ei.save_groups(con, {k: v for k, v in gr.items() if v} | {"Пн/Чт 17:00": g1, "Сб 10:00": g2})
     # пробный прогон ничего не пишет
-    p = ei.plan(con)
+    p = ei.plan(con, NOW.date())
     check(p["stats"]["children"] == 4 and p["stats"]["families"] == 3, f"Пробный прогон: 4 ребёнка, 3 семьи ({p['stats']})")
     check(any("повторяется" in x for x in p["problems"]) and any("Неизвестный" in x for x in p["problems"]),
           "Нестыковки найдены: повтор строки и оплата без ребёнка")
     check(con.execute("SELECT COUNT(*) FROM students").fetchone()[0] == 1, "Пробный прогон ничего не записал")
     try:
-        ei.run(con, OWNER, False)
+        ei.run(con, OWNER, False, now=NOW)
         ok = False
     except ei.ImportError_:
         ok = True
     check(ok, "Без отметки про Роскомнадзор перенос не начинается")
-    r = ei.run(con, OWNER, True)
+    r = ei.run(con, OWNER, True, now=NOW)
     st = r["stats"]
     check(st["children"] == 4 and st["removed_before"] == 1, f"Перенесено 4 ребёнка, выдуманный удалён ({st})")
     check(fake and not con.execute("SELECT 1 FROM students WHERE name='Выдуманный Тест'").fetchone(), "Выдуманного клиента больше нет")
@@ -90,7 +93,7 @@ def main():
     check(rows["Дети и лиды"]["ok"] and rows["Абонементы"]["ok"], f"Сверка: дети и абонементы сходятся ({v['rows']})")
     check(not rows["Оплаты, штук"]["ok"], "Сверка показывает, что оплата без найденного ребёнка не перенеслась")
     try:
-        ei.run(con, OWNER, True)
+        ei.run(con, OWNER, True, now=NOW)
         ok = False
     except ei.ImportError_:
         ok = True
@@ -98,7 +101,65 @@ def main():
     u = ei.undo(con, OWNER)
     check(con.execute("SELECT COUNT(*) FROM students").fetchone()[0] == 0 and con.execute("SELECT COUNT(*) FROM payments").fetchone()[0] == 0,
           f"Отмена убрала всё перенесённое ({u})")
+    rules()
     print("OK")
+
+
+
+def rules():
+    """Решения Юлии 01.11.2026: статус и группа по абонементам, лиды без имени сохраняются, дата продажи вместо пустой даты оплаты."""
+    con = db.connect(os.path.join(tempfile.mkdtemp(), "r.sqlite3"))
+    db.init_db(con)
+    money.init(con)
+    br = con.execute("INSERT INTO branches(name) VALUES ('ТЦ «Небо»')").lastrowid
+    neb = con.execute("INSERT INTO groups(branch_id,name,weekdays,time) VALUES (?, 'Небо Вт/Пт 16:45 3–4', '1,4', '16:45')", (br,)).lastrowid
+    chob = con.execute("INSERT INTO groups(branch_id,name,weekdays,time) VALUES (?, 'Чоботовская Сб/Вс 3–5', '5,6', '10:00')", (br,)).lastrowid
+    cl = ("ID,ФИО посетителя,Телефон,Имя родителя,Статус,Филиал,Группа\n"
+          "1,Два Группы,79000000001,Мама,Постоянный посетитель,ТЦ Небо;Чоботовская 4с2,Небо НУП вт/пт;Чоботовская сб/вс\n"
+          "2,Не Оплатил,79000000002,Мама,Постоянный посетитель,ТЦ Небо,Небо НУП вт/пт\n"
+          "3,Давно Ушёл,79000000003,Мама,Постоянный посетитель,ТЦ Небо,Небо НУП вт/пт\n"
+          "4,Вернулся Сам,79000000004,Мама,Ушедший,ТЦ Небо,Небо НУП вт/пт\n"
+          "5,Только Пробное,79000000005,Мама,Был на пробном не купил абонемент,,\n").encode()
+    ei.upload(con, "клиенты.csv", cl, "clients")
+    leads = ("ID,Имя родителя,Имя ребенка,Телефон,Комментарий\n77,Папа Без Имени,,79000000077,перезвонить\n78,,,,\n").encode()
+    u = ei.upload(con, "лиды.csv", leads, "clients")
+    ei.set_upload(con, u["id"], None, {"parent_name": 1, "child_name": 2, "phone": 3, "comment": 4})
+    subs = ("ID посетителя,ФИО посетителя,Группа,Тип,Дата начала,Стоимость со скидкой,Оплачено(руб.)\n"
+            "1,Два Группы,Небо НУП вт/пт,Абонемент (стандарт /8),03.10.2026,8000,8000\n"
+            "1,Два Группы,Чоботовская сб/вс,Абонемент (стандарт /8),07.11.2026,8000,8000\n"
+            "1,Два Группы,Небо НУП вт/пт,Отработка,10.11.2026,0,0\n"
+            "2,Не Оплатил,Небо НУП вт/пт,Абонемент (стандарт /8),03.10.2026,8000,4000\n"
+            "3,Давно Ушёл,Небо НУП вт/пт,Абонемент (стандарт /8),03.03.2025,8000,8000\n"
+            "4,Вернулся Сам,Небо НУП вт/пт,Разовое,01.12.2026,1500,1500\n"
+            "5,Только Пробное,Небо НУП вт/пт,Вводное,12.10.2026,0,0\n").encode()
+    u = ei.upload(con, "абонементы.csv", subs, "subs")
+    ei.set_upload(con, u["id"], None, {"erp_id": 0, "child_name": 1, "group": 2, "tariff": 3, "month": 4, "price": 5, "status": 6})
+    pays = ("ID посетителя,Посетитель,Дата продажи,Дата оплаты,Сумма,Вид оплаты\n"
+            "1,Два Группы,01.10.2026,02.10.2026,8000,Наличные\n"
+            "2,Не Оплатил,05.10.2026,,4000,PayKeeper\n").encode()
+    u = ei.upload(con, "оплаты.csv", pays, "payments")
+    ei.set_upload(con, u["id"], None, {"erp_id": 0, "child_name": 1, "date": 3, "amount": 4, "method": 5})  # как в старых загрузках: без date_alt
+    ei.save_groups(con, {"Небо НУП вт/пт": neb, "Чоботовская сб/вс": chob, "ТЦ Небо;Чоботовская 4с2 · Небо НУП вт/пт;Чоботовская сб/вс": "",
+                         "ТЦ Небо · Небо НУП вт/пт": neb})
+    p = ei.plan(con, NOW.date())
+    s = p["stats"]
+    check(s["children"] == 6 and s["no_name"] == 1, f"Лид без имени ребёнка не потерян, пустая строка пропущена ({s})")
+    check(s["members_active"] == 3 and s["members_unpaid"] == 1 and s["members_left"] == 1 and s["leads"] == 2,
+          f"Статусы по абонементам: 3 занимаются (1 не оплатил ноябрь), 1 ушёл, 2 лида ({s})")
+    check(s["subs"] == 5 and s["subs_trials"] == 1 and s["subs_makeups"] == 1, "Вводные и отработки не считаются абонементами")
+    check(s["pay_date_from_sale"] == 1 and not any("не понял дату" in x for x in p["problems"]), "Пустая дата оплаты заменена датой продажи")
+    check(p["problem_types"].get("Лиды и клиенты без имени ребёнка (сохраняются с пометкой)") == 1, f"Итог нестыковок по видам ({p['problem_types']})")
+    ei.run(con, OWNER, True, now=NOW)
+    g = lambda erp: con.execute("SELECT * FROM students WHERE erp_id=?", (erp,)).fetchone()
+    two = g("1")
+    act = [r[0] for r in con.execute("SELECT group_id FROM enrollments WHERE student_id=? AND active=1", (two["id"],))]
+    check(act == [chob] and two["group_id"] == chob, f"Действующая группа - та, куда продан абонемент на ноябрь ({act})")
+    check(g("2")["stage"] == "active" and g("3")["stage"] == "left" and g("4")["stage"] == "active", "Не оплатил ноябрь - занимается, давно ушёл - ушёл, купил на декабрь - занимается")
+    check(con.execute("SELECT status FROM subscriptions WHERE student_id=?", (g("2")["id"],)).fetchone()[0] == "invoiced", "Частично оплаченный абонемент - не оплачен")
+    check(g("5")["funnel"] == "sales" and g("5")["trial_at"].startswith("2026-10-12"), "Только вводное: остаётся лидом, дата пробного из вводного")
+    nn = con.execute("SELECT s.*, f.name AS fam FROM students s JOIN families f ON f.id=s.family_id WHERE s.name=?", (ei.NO_NAME,)).fetchone()
+    check(nn and nn["fam"] == "Папа Без Имени" and nn["funnel"] == "sales", "Лид без имени перенесён в воронку продаж с семьёй родителя")
+    check(con.execute("SELECT paid_at FROM payments WHERE student_id=?", (g("2")["id"],)).fetchone()[0].startswith("2026-10-05"), "Оплата получила дату продажи")
 
 
 if __name__ == "__main__":

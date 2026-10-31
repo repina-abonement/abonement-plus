@@ -169,6 +169,7 @@ FIELDS = {
         ("child_name", "Ребёнок", ["фио ребенка", "ребенок", "ученик", "клиент", "фио", "плательщик"]),
         ("phone", "Телефон", ["телефон"]),
         ("date", "Дата оплаты", ["дата оплаты", "дата платежа", "дата"]),
+        ("date_alt", "Дата, если нет даты оплаты", ["дата продажи", "дата события"]),
         ("amount", "Сумма", ["сумма", "оплачено", "размер"]),
         ("method", "Способ оплаты", ["способ", "тип оплаты", "форма оплаты", "касса"]),
         ("month", "За какой месяц", ["месяц", "период", "за месяц"]),
@@ -313,23 +314,146 @@ def pay_method(v: str) -> str:
 def client_stage(status: str) -> tuple[str, str]:
     """(funnel, stage) по статусу ERP."""
     s = _norm(status)
-    if any(w in s for w in ("ушел", "ушла", "отток", "выбыл", "архив", "бывш")):
+    if any(w in s for w in ("ушел", "ушла", "ушедш", "отток", "выбыл", "архив", "бывш", "нет абонемента")):
         return "members", "left"
-    if any(w in s for w in ("занима", "актив", "ученик", "постоян", "клиент", "абонемент", "купил")):
-        return "members", "active"
+    # воронка продаж раньше: в статусах ERP «Был на пробном, не купил абонемент», «Клиент отказался» есть слова «абонемент», «клиент»
     if "отказ" in s:
         return "sales", "refused"
-    if "недозвон" in s or "не дозвон" in s:
+    if "недозвон" in s or "не дозвон" in s or "не удалось связ" in s:
         return "sales", "no_answer"
     if "не дош" in s or "не приш" in s:
         return "sales", "missed_trial"
-    if "как прошл" in s or "был на пробн" in s:
+    if "как прошл" in s or "был на пробн" in s or "не купил" in s:
         return "sales", "how_was"
+    if any(w in s for w in ("занима", "актив", "ученик", "постоян", "клиент", "абонемент", "купил", "оплат", "вернувш", "разов")):
+        return "members", "active"
     if "пробн" in s or "пу" == s or "запис" in s:
         return "sales", "trial_booked"
     if "позже" in s or "думают" in s:
         return "sales", "later"
     return "sales", "lead"
+
+
+def sub_kind(tariff: str) -> str:
+    """Вид продажи ERP: sub - абонемент, single - разовое, trial - вводное (пробное), makeup - отработка."""
+    t = _norm(tariff)
+    if "вводн" in t or "пробн" in t:
+        return "trial"
+    if "отработ" in t:
+        return "makeup"
+    if "разов" in t:
+        return "single"
+    return "sub"
+
+
+def sub_status(raw: str, price: int) -> str:
+    """Статус абонемента: текстом («оплачен», «не оплачен») или суммой оплаченного (как в выгрузке ERP «Оплачено(руб.)»)."""
+    s = _norm(raw)
+    if "отмен" in s:
+        return "cancelled"
+    if re.fullmatch(r"-?[\d\s.,]+", s or "x"):
+        paid = parse_money(s) or 0
+        return "paid" if paid >= price else "invoiced"
+    return "paid" if ("оплач" in s and "не" not in s) or s in ("да", "1", "+") else "invoiced"
+
+
+def sub_lessons(rec: dict) -> int:
+    n = parse_money(rec.get("lessons", "")) or 0
+    if n:
+        return n
+    m = re.search(r"/\s*(\d{1,2})\b", rec.get("tariff", "") or "")
+    if m:
+        return int(m[1])
+    return 1 if sub_kind(rec.get("tariff", "")) == "single" else 0
+
+
+def pay_date(rec: dict) -> tuple[str | None, bool]:
+    """(дата, взята ли дата продажи вместо пустой даты оплаты) - решение Юлии 01.11.2026."""
+    d = parse_date(rec.get("date", ""))
+    if d:
+        return d, False
+    d = parse_date(rec.get("date_alt", ""))
+    return d, bool(d)
+
+
+NO_NAME = "Ребёнок (имя не указано)"
+
+
+def _classify(con, children: list[dict], subs: list[dict], child_of, today: date) -> dict:
+    """Статус и группы каждого ребёнка по проданным абонементам (правило Юлии, 01.11.2026):
+    - есть абонемент (или разовое) на текущий или будущий месяц - занимается, действующие группы - только те, куда он продан;
+    - в текущем месяце нет, а в прошлом был - занимается, «не оплачен текущий месяц» (CRM покажет сама по оплатам), группа прошлого месяца;
+    - были абонементы раньше - ушёл;
+    - абонементов не было - этап воронки по статусу ERP (а «постоянные» без единой продажи считаются ушедшими).
+    Вводные и отработки абонементом не считаются."""
+    cur = logic.month_of(today)
+    prev = logic.shift_month(cur, -1)
+    by_child: dict[tuple, list] = {}
+    trials: dict[tuple, str] = {}
+    gid_cache: dict[str, int | None] = {}
+    for rec in subs:
+        ck = child_of(rec)
+        if ck is None:
+            continue
+        kind = sub_kind(rec.get("tariff", ""))
+        if kind == "trial":
+            d = parse_date(rec.get("month", ""))
+            if d and (ck not in trials or d < trials[ck]):
+                trials[ck] = d
+        if kind in ("trial", "makeup"):
+            continue
+        ym = parse_month(rec.get("month", ""))
+        if not ym:
+            continue
+        g = (rec.get("group") or "").strip()
+        if g not in gid_cache:
+            gid_cache[g] = _group_id(con, "", g) if g else None
+        by_child.setdefault(ck, []).append((ym, gid_cache[g]))
+    out = {}
+    for c in children:
+        ck = _key(c)
+        sold = sorted(by_child.get(ck, []), reverse=True)
+        file_gid = _group_id(con, c.get("branch", ""), c.get("group", ""))
+
+        def gids(pred):
+            res = []
+            for ym, g in sold:
+                if pred(ym) and g and g not in res:
+                    res.append(g)
+            return res
+        if any(ym >= cur for ym, _ in sold):
+            info = {"funnel": "members", "stage": "active", "state": "paid_now", "groups": gids(lambda m: m >= cur) or ([file_gid] if file_gid else [])}
+        elif any(ym == prev for ym, _ in sold):
+            info = {"funnel": "members", "stage": "active", "state": "unpaid_now", "groups": gids(lambda m: m == prev) or ([file_gid] if file_gid else [])}
+        elif sold:
+            last = sold[0][0]
+            info = {"funnel": "members", "stage": "left", "state": "left", "groups": gids(lambda m: m == last) or ([file_gid] if file_gid else [])}
+        else:
+            funnel, stage = client_stage(c.get("status", ""))
+            if funnel == "members":
+                stage = "left"
+            info = {"funnel": funnel, "stage": stage, "state": "left" if funnel == "members" else "lead",
+                    "groups": [file_gid] if file_gid and funnel == "members" else []}
+        info["trial"] = trials.get(ck)
+        info["multi"] = len(info["groups"]) > 1
+        out[ck] = info
+    return out
+
+
+PROBLEM_TYPES = [("пустая строка", "Пустые строки (пропущены)"), ("нет имени ребёнка", "Лиды и клиенты без имени ребёнка (сохраняются с пометкой)"),
+                 ("нет телефона", "Нет телефона или он неполный"), ("повторяется", "Повтор строки"),
+                 ("дату рождения", "Непонятная дата рождения"), ("не нашёл ребёнка", "Строки без найденного ребёнка"),
+                 ("строк без найденного", "Строки без найденного ребёнка"), ("не понял месяц", "Непонятный месяц"),
+                 ("не понял дату", "Непонятная дата"), ("не понял сумму", "Непонятная сумма"), ("Группы без пары", "Группы без пары")]
+
+
+def _problem_types(problems: list[str]) -> dict:
+    out: dict[str, int] = {}
+    for p in problems:
+        label = next((lab for key, lab in PROBLEM_TYPES if key in p), "Другое")
+        m = re.match(r"(?:Абонементы|Оплаты|Посещения|Задачи): ещё (\d+) строк", p)
+        out[label] = out.get(label, 0) + (int(m[1]) if m else 1)
+    return out
 
 
 def visit_status(v: str) -> str | None:
@@ -384,6 +508,13 @@ def _records(con, kind: str) -> list[dict]:
     out = []
     for r in con.execute("SELECT * FROM erp_uploads WHERE kind=? ORDER BY id", (kind,)):
         mp = json.loads(r["mapping"])
+        if kind == "payments" and "date_alt" not in mp:
+            # файлы, загруженные до появления поля: дату продажи находим по названию колонки сами
+            hs = [_norm(h) for h in json.loads(r["headers"])]
+            for name in ("дата продажи", "дата события"):
+                if name in hs and hs.index(name) not in mp.values():
+                    mp["date_alt"] = hs.index(name)
+                    break
         for i, row in enumerate(json.loads(r["rows"])):
             rec = {k: (row[c] if c < len(row) else "") for k, c in mp.items()}
             rec["_where"] = f"{r['filename']}, строка {i + 2}"
@@ -475,17 +606,22 @@ def _key(rec: dict) -> tuple:
     return ("np", _norm(_split_name(rec)), normalize_phone(rec.get("phone", ""))[-10:])
 
 
-def plan(con) -> dict:
-    """Пробный прогон: что будет перенесено и какие нестыковки."""
-    problems: list[str] = []
-    clients = _records(con, "clients")
+def _children(con, problems: list[str] | None = None) -> tuple[list[dict], dict]:
+    """Клиенты из файлов без повторов. Строки без имени ребёнка не теряются (решение Юлии 01.11.2026):
+    ребёнок сохраняется как «Ребёнок (имя не указано)», если есть хоть что-то - телефон, родитель или комментарий."""
+    problems = problems if problems is not None else []
     by_key, children = {}, []
-    for rec in clients:
+    for rec in _records(con, "clients"):
         name = _split_name(rec)
         phone = normalize_phone(rec.get("phone", ""))
         if not name:
-            problems.append(f"{rec['_where']}: нет имени ребёнка, строка пропущена")
-            continue
+            if not (phone or (rec.get("parent_name") or "").strip() or (rec.get("comment") or "").strip()):
+                problems.append(f"{rec['_where']}: пустая строка (нет ни имени, ни телефона, ни родителя), пропущена")
+                continue
+            rec["child_name"], rec["child_last"] = NO_NAME, ""
+            rec["_no_name"] = True
+            problems.append(f"{rec['_where']}: нет имени ребёнка, сохраню как «{NO_NAME}»")
+            name = NO_NAME
         if len(phone) < 11:
             problems.append(f"{rec['_where']}: {name}: нет телефона родителя или он неполный")
         if rec.get("birth") and not parse_date(rec["birth"]):
@@ -496,15 +632,14 @@ def plan(con) -> dict:
             continue
         by_key[k] = rec
         children.append(rec)
-    # семьи: по телефону родителя
-    fams = {}
-    for rec in children:
-        p = normalize_phone(rec.get("phone", ""))[-10:] or ("solo", _key(rec))
-        fams.setdefault(p, []).append(rec)
-    stats = {"families": len(fams), "children": len(children),
-             "members_active": sum(1 for r in children if client_stage(r.get("status", ""))[1] == "active"),
-             "members_left": sum(1 for r in children if client_stage(r.get("status", ""))[1] == "left"),
-             "leads": sum(1 for r in children if client_stage(r.get("status", ""))[0] == "sales")}
+    return children, by_key
+
+
+def _child_finder(children: list[dict], by_key: dict):
+    names: dict[str, list] = {}
+    for c in children:
+        if not c.get("_no_name"):
+            names.setdefault(_norm(_split_name(c)), []).append(c)
 
     def find(rec):
         k = _key(rec)
@@ -512,14 +647,38 @@ def plan(con) -> dict:
             return by_key[k]
         if k[0] == "id":
             return None
-        nm = _norm(_split_name(rec))
-        cands = [c for c in children if _norm(_split_name(c)) == nm]
+        cands = names.get(_norm(_split_name(rec)), [])
         return cands[0] if len(cands) == 1 else None
+    return find
 
+
+def plan(con, today: date | None = None) -> dict:
+    """Пробный прогон: что будет перенесено и какие нестыковки."""
+    today = today or date.today()
+    problems: list[str] = []
+    children, by_key = _children(con, problems)
+    # семьи: по телефону родителя
+    fams = {}
+    for rec in children:
+        p = normalize_phone(rec.get("phone", ""))[-10:] or ("solo", _key(rec))
+        fams.setdefault(p, []).append(rec)
+    find = _child_finder(children, by_key)
     subs = _records(con, "subs")
     pays = _records(con, "payments")
     visits = _records(con, "visits")
     tasks = _records(con, "tasks")
+    cls = _classify(con, children, subs, lambda r: (lambda c: _key(c) if c else None)(find(r)), today)
+    kinds = [sub_kind(s.get("tariff", "")) for s in subs]
+    stats = {"families": len(fams), "children": len(children),
+             "members_active": sum(1 for v in cls.values() if v["state"] == "paid_now"),
+             "members_unpaid": sum(1 for v in cls.values() if v["state"] == "unpaid_now"),
+             "members_left": sum(1 for v in cls.values() if v["funnel"] == "members" and v["stage"] == "left"),
+             "leads": sum(1 for v in cls.values() if v["funnel"] == "sales"),
+             "no_name": sum(1 for c in children if c.get("_no_name")),
+             "multi_group": sum(1 for v in cls.values() if v["multi"] and v["stage"] == "active"),
+             "subs_trials": kinds.count("trial"), "subs_makeups": kinds.count("makeup"),
+             "pay_date_from_sale": sum(1 for p in pays if pay_date(p)[1])}
+    stats["members_active"] += stats["members_unpaid"]  # «занимаются» = все действующие, из них не оплатили текущий месяц - members_unpaid
     for label, rows, need in (("Абонементы", subs, ("month",)), ("Оплаты", pays, ("date", "amount")), ("Посещения", visits, ("date",)),
                               ("Задачи", tasks, ())):
         lost = 0
@@ -531,13 +690,14 @@ def plan(con) -> dict:
             for f in need:
                 if f == "month" and not parse_month(rec.get("month", "")):
                     problems.append(f"{rec['_where']}: не понял месяц «{rec.get('month', '')}»")
-                if f == "date" and not parse_date(rec.get("date", "")):
+                if f == "date" and not (pay_date(rec)[0] if label == "Оплаты" else parse_date(rec.get("date", ""))):
                     problems.append(f"{rec['_where']}: не понял дату «{rec.get('date', '')}»")
                 if f == "amount" and parse_money(rec.get("amount", "")) is None:
                     problems.append(f"{rec['_where']}: не понял сумму «{rec.get('amount', '')}»")
         if lost > 15:
             problems.append(f"{label}: ещё {lost - 15} строк без найденного ребёнка")
-    stats.update({"subs": len(subs), "payments": len(pays), "payments_sum": sum(parse_money(p.get("amount", "")) or 0 for p in pays),
+    stats.update({"subs": len(subs) - stats["subs_trials"] - stats["subs_makeups"], "payments": len(pays),
+                  "payments_sum": sum(parse_money(p.get("amount", "")) or 0 for p in pays),
                   "visits": len(visits), "tasks": len(tasks)})
     groups = erp_groups(con)
     unmapped = [g["erp"] for g in groups if not g["group_id"]]
@@ -545,11 +705,12 @@ def plan(con) -> dict:
         problems.append("Группы без пары в CRM (дети встанут без группы): " + ", ".join(unmapped[:20]))
     by_month: dict[str, int] = {}
     for p in pays:
-        d = parse_date(p.get("date", ""))
+        d = pay_date(p)[0]
         if d:
             by_month[d[:7]] = by_month.get(d[:7], 0) + (parse_money(p.get("amount", "")) or 0)
     current = con.execute("SELECT COUNT(*) FROM students").fetchone()[0]
-    return {"stats": stats, "problems": problems[:300], "problems_total": len(problems), "groups": groups,
+    return {"stats": stats, "problems": problems[:300], "problems_total": len(problems), "problem_types": _problem_types(problems),
+            "groups": groups,
             "pay_by_month": dict(sorted(by_month.items())), "will_remove": current,
             "uploads": [{"filename": u["filename"], "kind_label": u["kind_label"], "count": u["count"]} for u in uploads(con, 0)]}
 
@@ -585,40 +746,41 @@ def wipe_clients(con) -> int:
     return len(ids)
 
 
-def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "") -> dict:
+def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: datetime | None = None) -> dict:
     if not rkn_confirmed:
         raise ImportError_("Отметьте, что изменения в Роскомнадзор поданы и политика опубликована")
     if con.execute("SELECT 1 FROM erp_batches WHERE undone_at IS NULL").fetchone():
         raise ImportError_("Перенос уже сделан. Чтобы перенести заново, сначала отмените прошлый перенос")
-    p = plan(con)
+    now = now or datetime.now()
+    p = plan(con, now.date())
     if not p["stats"]["children"]:
         raise ImportError_("Нет клиентов для переноса: загрузите файл с клиентами")
-    now = datetime.now()
     nowi = now.isoformat(timespec="minutes")
+    # кто есть кто считаем до удаления выдуманных: группы берутся из сопоставления
+    children, by_key = _children(con)
+    find_child = _child_finder(children, by_key)
+    sub_recs = _records(con, "subs")
+    cls = _classify(con, children, sub_recs, lambda r: (lambda c: _key(c) if c else None)(find_child(r)), now.date())
     removed = wipe_clients(con)
     batch = con.execute("INSERT INTO erp_batches(started_at, user_name, backup) VALUES (?,?,?)",
                         (nowi, user.get("name", ""), backup_path)).lastrowid
     olga = con.execute("SELECT id FROM users WHERE active=1 AND role='operator' AND name LIKE 'Ольга%' ORDER BY id LIMIT 1").fetchone()
     from . import sources as _src
-    clients = _records(con, "clients")
-    seen, fam_by_phone, sid_by_key, name_index = set(), {}, {}, {}
-    st = {"families": 0, "children": 0, "subs": 0, "payments": 0, "visits": 0, "tasks": 0, "comments": 0, "missed_trial": 0}
+    fam_by_phone, sid_by_key, name_index = {}, {}, {}
+    st = {"families": 0, "children": 0, "subs": 0, "payments": 0, "visits": 0, "tasks": 0, "comments": 0, "missed_trial": 0,
+          "no_name": 0, "skipped_trials": 0, "skipped_makeups": 0, "pay_date_from_sale": 0}
     month_now = logic.month_of(now.date())
-    for rec in clients:
+    for rec in children:
         name = _split_name(rec)
-        if not name:
-            continue
         k = _key(rec)
-        if k in seen:
-            continue
-        seen.add(k)
+        info = cls[k]
         phone_raw = rec.get("phone", "").strip()
         ph = normalize_phone(phone_raw)
         fk = ph[-10:] if len(ph) >= 11 else None
         fid = fam_by_phone.get(fk) if fk else None
         if not fid:
             parent = " ".join((rec.get("parent_name") or "").split())
-            fid = con.execute("INSERT INTO families(name) VALUES (?)", (parent or name.split()[-1],)).lastrowid
+            fid = con.execute("INSERT INTO families(name) VALUES (?)", (parent or (phone_raw if rec.get("_no_name") else name.split()[-1]),)).lastrowid
             _track(con, batch, "families", fid)
             st["families"] += 1
             if fk:
@@ -631,15 +793,16 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "") -> dict:
                 pid2 = con.execute("INSERT INTO parents(family_id, name, phone, phone_norm) VALUES (?,?,?,?)",
                                    (fid, "Второй контакт", ph2, normalize_phone(ph2))).lastrowid
                 _track(con, batch, "parents", pid2)
-        funnel, stage = client_stage(rec.get("status", ""))
-        trial = parse_date(rec.get("trial_at", ""))
+        funnel, stage = info["funnel"], info["stage"]
+        trial = parse_date(rec.get("trial_at", "")) or info["trial"]
         if trial and len(trial) == 10:
             trial += "T18:00"
         # «зависшие» с сентября-октября: записаны на пробное, дата прошла, не купили → «Не дошёл до ПУ» (решение Юлии)
         if funnel == "sales" and stage in ("trial_booked",) and trial and trial[:10] < now.date().isoformat():
             stage = "missed_trial"
             st["missed_trial"] += 1
-        gid = _group_id(con, rec.get("branch", ""), rec.get("group", ""))
+        # группа: та, куда продан абонемент на текущий или будущий месяц (решение Юлии 01.11.2026), см. _classify
+        gid = info["groups"][0] if info["groups"] else (_group_id(con, rec.get("branch", ""), rec.get("group", "")) if funnel == "members" else None)
         created = parse_date(rec.get("created", "")) or nowi
         if len(created) == 10:
             created += "T10:00"
@@ -657,15 +820,20 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "") -> dict:
                     con.execute("UPDATE students SET source_id=? WHERE id=?", (sid_src, sid))
             except Exception:  # noqa: BLE001
                 pass
-        if funnel == "members" and gid:
-            eid = con.execute("INSERT INTO enrollments(student_id, group_id, tariff, active, created_at) VALUES (?,?,?,?,?)",
-                              (sid, gid, tariff, 0 if stage == "left" else 1, created)).lastrowid
-            _track(con, batch, "enrollments", eid)
+        if funnel == "members":
+            for g in (info["groups"] or ([gid] if gid else [])):
+                eid = con.execute("INSERT INTO enrollments(student_id, group_id, tariff, active, created_at) VALUES (?,?,?,?,?)",
+                                  (sid, g, tariff, 0 if stage == "left" else 1, created)).lastrowid
+                _track(con, batch, "enrollments", eid)
         sid_by_key[k] = sid
-        name_index.setdefault(_norm(name), []).append(sid)
+        if not rec.get("_no_name"):
+            name_index.setdefault(_norm(name), []).append(sid)
+        else:
+            st["no_name"] += 1
         st["children"] += 1
         hid = con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
-                          (sid, nowi, "Перенос из ERP", "system", f"Перенесено из ERP ({rec['_where']}), статус в ERP: «{rec.get('status', '')}»")).lastrowid
+                          (sid, nowi, "Перенос из ERP", "system", f"Перенесено из ERP ({rec['_where']}), статус в ERP: «{rec.get('status', '')}»"
+                           + (". Имя ребёнка в ERP не указано, уточните у родителя" if rec.get("_no_name") else ""))).lastrowid
         _track(con, batch, "history", hid)
         if (rec.get("comment") or "").strip():
             hid = con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
@@ -706,11 +874,14 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "") -> dict:
         ym = parse_month(rec.get("month", ""))
         if not sid or not ym:
             continue
+        kind = sub_kind(rec.get("tariff", ""))
+        if kind in ("trial", "makeup"):  # вводные и отработки - не абонементы: деньги есть в оплатах, посещения в журнале
+            st["skipped_trials" if kind == "trial" else "skipped_makeups"] += 1
+            continue
         eid = enrollment(sid, rec.get("group", ""))
         price = parse_money(rec.get("price", "")) or 0
-        lessons = parse_money(rec.get("lessons", "")) or 0
-        sraw = _norm(rec.get("status", ""))
-        status = "cancelled" if "отмен" in sraw else "paid" if ("оплач" in sraw and "не" not in sraw) or sraw in ("да", "1", "+") else "invoiced"
+        lessons = sub_lessons(rec)
+        status = sub_status(rec.get("status", ""), price)
         tariff = "flex" if "гибк" in _norm(rec.get("tariff", "")) else (con.execute("SELECT tariff FROM students WHERE id=?", (sid,)).fetchone()[0])
         sub = con.execute("""INSERT INTO subscriptions(student_id, enrollment_id, month, tariff, lessons, per_lesson, price, status, created_at, paid_at)
                              VALUES (?,?,?,?,?,?,?,?,?,?)""",
@@ -721,10 +892,11 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "") -> dict:
         st["subs"] += 1
     for rec in _records(con, "payments"):
         sid = find_sid(rec)
-        d = parse_date(rec.get("date", ""))
+        d, from_sale = pay_date(rec)
         amt = parse_money(rec.get("amount", ""))
         if not sid or not d or not amt:
             continue
+        st["pay_date_from_sale"] += from_sale
         ym = parse_month(rec.get("month", "")) if rec.get("month") else None
         pid = con.execute("""INSERT INTO payments(student_id, amount, method, paid_at, comment, user_name, confirmed, confirmed_by,
                              confirmed_at, subscription_id, created_at) VALUES (?,?,?,?,?,?,1,'Перенос из ERP',?,?,?)""",
