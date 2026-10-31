@@ -1218,6 +1218,11 @@ def student_archive(con, h, user, body, q, sid):
     return {"ok": True}
 
 
+@route("GET", "/api/archive/students", role="members:full")
+def archive_students(con, h, user, body, q):
+    return schedule.archived_students(con)
+
+
 @route("GET", "/api/archive", role="admin")
 def archive(con, h, user, body, q):
     return schedule.archive_list(con)

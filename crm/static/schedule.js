@@ -379,7 +379,7 @@ async function renderArchive(box) {
   const block = (title, list, render, kind) => `<div class="small" style="margin-top:10px"><b>${title}</b></div>
     ${list.length ? `<div class="chips" style="margin-top:6px">${list.map((x) => `<span class="chip">${render(x)} <button class="linkish" data-restore="${kind}:${x.id}">вернуть</button></span>`).join("")}</div>` : `<div class="small muted">Пусто</div>`}`;
   box.innerHTML = `<h3>Архив</h3><div class="small muted">Сюда попадает всё, что убрали. Ничего не удаляется навсегда</div>
-    ${block("Ученики и лиды", d.students, (x) => `${esc(x.name)} <span class="muted">${esc(x.family)}</span>`, "student")}
+    <div class="small muted" style="margin-top:6px">Ученики и лиды из архива: раздел «Ученики» → кнопка «Архив»</div>
     ${block("Группы", d.groups, (x) => `${esc(x.name)} <span class="muted">${esc(x.branch)}</span>`, "group")}
     ${block("Филиалы", d.branches, (x) => esc(x.name), "branch")}
     ${block("Сотрудники", d.users, (x) => `${esc(x.name)} <span class="muted">${esc(x.login)}</span>`, "user")}`;

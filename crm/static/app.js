@@ -455,11 +455,35 @@ async function renderBoard(page, funnel) {
   const data = await api("GET", "/api/board/" + funnel);
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">${BOARD_TITLES[funnel]}</h2>
+      ${funnel === "members" && can("members", "full") ? `<button class="btn sm" id="arch-btn">🗄 Архив ▾</button>` : ""}
       <button class="btn sm" id="refresh">Обновить</button></div>
+    <div class="section arch-box" id="arch-box" hidden></div>
     ${data.note ? `<div class="note">${esc(data.note)}</div>` : ""}
     ${boardHtml(data)}`;
   $("#refresh").onclick = render;
+  if ($("#arch-btn")) membersArchive(page);
   wireBoard(page, funnel, data);
+}
+
+/* Архив учеников и лидов: кнопка над доской «Ученики», список раскрывается под ней */
+async function membersArchive(page) {
+  const btn = $("#arch-btn"), box = $("#arch-box");
+  let list = await api("GET", "/api/archive/students").catch(() => []);
+  const label = () => { btn.textContent = `🗄 Архив (${list.length}) ${box.hidden ? "▾" : "▴"}`; };
+  const draw = (q = "") => {
+    const n = q.toLowerCase().replace(/\D/g, "") ? q.replace(/\D/g, "") : "";
+    const rows = list.filter((x) => !q || (x.name + " " + x.family).toLowerCase().includes(q.toLowerCase()) || (n && (x.phone || "").replace(/\D/g, "").includes(n)));
+    $("#arch-rows").innerHTML = rows.length ? rows.map((x) => `<div class="arch-row"><button class="linkish grow" data-aopen="${x.id}"><b>${esc(x.name)}</b> <span class="muted small">${esc(x.family)}${x.funnel === "sales" ? " · лид" : ""}</span></button>
+      <button class="btn sm" data-aback="${x.id}">Вернуть</button></div>`).join("") : `<div class="small muted">${list.length ? "Никого не нашли" : "В архиве пусто"}</div>`;
+    box.querySelectorAll("[data-aopen]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.aopen)));
+    box.querySelectorAll("[data-aback]").forEach((b) => (b.onclick = async () => {
+      try { await api("POST", `/api/students/${b.dataset.aback}/archive`, { archived: false }); toast("Вернули из архива"); render(); } catch (e) { fail(e); }
+    }));
+  };
+  box.innerHTML = `<input id="arch-q" placeholder="Поиск по архиву: имя или телефон"><div id="arch-rows" style="margin-top:8px"></div>`;
+  $("#arch-q").oninput = (e) => draw(e.target.value.trim());
+  btn.onclick = () => { box.hidden = !box.hidden; label(); if (!box.hidden) $("#arch-q").focus(); };
+  label(); draw();
 }
 
 /* ---------- рабочий стол: что горит + воронка ---------- */

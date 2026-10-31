@@ -667,6 +667,14 @@ def set_student_archived(con, sid: int, archived: bool, user: dict):
                  "Карточка перенесена в архив" if archived else "Карточка возвращена из архива"))
 
 
+def archived_students(con) -> list[dict]:
+    """Архив учеников и лидов для раздела «Ученики»: имя, семья, телефон родителя для поиска."""
+    return [dict(r) for r in con.execute(
+        """SELECT s.id, s.name, s.funnel, f.name AS family,
+                  (SELECT p.phone FROM parents p WHERE p.family_id=s.family_id AND p.phone!='' ORDER BY p.id LIMIT 1) AS phone
+           FROM students s JOIN families f ON f.id=s.family_id WHERE s.archived=1 ORDER BY s.name""")]
+
+
 def archive_list(con) -> dict:
     return {
         "students": [dict(r) for r in con.execute(
