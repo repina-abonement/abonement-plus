@@ -1086,3 +1086,9 @@ h1, h2, h3, h4, b, strong, th { font-weight: 800; }
   .m-parent, .m-group { grid-column: 1 / -1; order: 3; }
   .m-filters select { flex: 1 1 45%; }
 }
+
+/* оргструктура: старший администратор и юрист на одном уровне, оба подчиняются руководителю */
+.tm-level { display: flex; justify-content: center; align-items: flex-start; gap: 24px; width: 100%; padding-top: 12px; border-top: 2px solid var(--line); }
+.tm-main { flex: 1; min-width: 0; } .tm-main .tm-depts { border-top: 0; padding-top: 0; }
+@media (max-width: 700px) { .tm-level { flex-direction: column-reverse; align-items: stretch; } }
+.tm-col { display: flex; flex-direction: column; align-items: center; gap: 8px; }

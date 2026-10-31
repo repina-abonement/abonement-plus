@@ -26,13 +26,17 @@ async function renderTeam(page) {
     <section class="tm-sec"><div class="tm-h"><div><b>Оргструктура</b><small>кто кому подчиняется</small></div></div>
       <div class="tm-tree">
         ${node(ids("owner")[0], "Руководитель", true)}
-        ${ids("control").length ? `<i class="tm-line"></i>${node(ids("control")[0], "Старший администратор")}` : ""}
         <i class="tm-line"></i>
-        <div class="tm-depts">
-          ${dept("admins", "Администрирование", "#d99a0b", "Администратор")}
-          ${dept("coaches", "Тренеры", "#23a26d", "Тренер")}
-          ${dept("promoters", "Промоутеры", "#2c6fd1", "Промоутер")}
-          ${dept("lawyers", "Юридический отдел", "#2a9d9b", "Юрист")}
+        <div class="tm-level">
+          <div class="tm-col tm-main">
+            ${ids("control").length ? `${node(ids("control")[0], "Старший администратор")}<i class="tm-line"></i>` : ""}
+            <div class="tm-depts">
+              ${dept("admins", "Администрирование", "#d99a0b", "Администратор")}
+              ${dept("coaches", "Тренеры", "#23a26d", "Тренер")}
+              ${dept("promoters", "Промоутеры", "#2c6fd1", "Промоутер")}
+            </div>
+          </div>
+          ${ids("lawyers").length ? `<div class="tm-col">${ids("lawyers").map((id) => node(id, "Юрист")).join("")}</div>` : ""}
         </div>
       </div>
     </section>
