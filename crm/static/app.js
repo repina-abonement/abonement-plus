@@ -648,6 +648,9 @@ async function renderWorkdesk(page) {
     operator: ["tasks", "call", "wait", "sched", "bday", "marks", "subs", "merch", "spend", "checkins", "reports"],
   }[who];
   const widgets = ORDER.filter((k) => W[k].html);
+  // на виду только то, где есть что делать, и задачи; остальное свёрнуто строкой внизу (раскрывается по нажатию)
+  S.dwOpen = S.dwOpen || {};
+  const dwShown = (k) => k === "tasks" || !!W[k].n || (k === "call" && who === "operator");
   const tiles = widgets.filter((k) => W[k].n).map((k) => `<button class="dtile ${W[k].red ? "red" : "yellow"}" data-jump="dw-${k}"><span>${W[k].icon}</span><b>${W[k].n}</b><small>${W[k].label}</small></button>`);
   const hot = `<section class="now ${u.length ? "" : "calm"}" id="dw-hot">
       <div class="now-head"><h3>${u.length ? (reds ? `🔥 Горит прямо сейчас: ${reds}` : "Ждут ответа") : "Всё обработано"}</h3>
@@ -666,8 +669,7 @@ async function renderWorkdesk(page) {
     </section>`;
   page.innerHTML = `
     ${bar}
-    <div class="page-head"><h2 class="grow">Рабочий стол${S.viewAs ? `: ${esc(S.viewAs.name)}` : ""}</h2>
-      <span class="muted small">Обновляется сам каждые 20 секунд</span></div>
+    <div class="page-head"><h2 class="grow">Рабочий стол${S.viewAs ? `: ${esc(S.viewAs.name)}` : ""}</h2></div>
     ${tiles.length ? `<div class="dtiles">${reds ? `<button class="dtile red" data-jump="dw-hot"><span>🔥</span><b>${reds}</b><small>Горит</small></button>` : ""}${tiles.join("")}</div>` : ""}
     <div class="desk">
       <div class="desk-main">
@@ -675,8 +677,11 @@ async function renderWorkdesk(page) {
         <div class="page-head" style="margin-top:18px"><h2 class="grow sub">Воронка продаж</h2></div>
         ${boardHtml(d.board)}
       </div>
-      <div class="desk-side">${widgets.map((k) => `<div class="dw" id="dw-${k}">${W[k].html}</div>`).join("")}</div>
+      <div class="desk-side">${widgets.filter(dwShown).map((k) => `<div class="dw" id="dw-${k}">${W[k].html}</div>`).join("")}
+        ${widgets.some((k) => !dwShown(k)) ? `<div class="dw-folded">${widgets.filter((k) => !dwShown(k)).map((k) => `<details class="dwf" data-dwk="${k}" ${S.dwOpen[k] ? "open" : ""}>
+          <summary><span>${W[k].icon}</span> ${W[k].label}</summary><div class="dw" id="dw-${k}">${W[k].html}</div></details>`).join("")}</div>` : ""}</div>
     </div>`;
+  page.querySelectorAll(".dwf").forEach((x) => x.addEventListener("toggle", () => { S.dwOpen[x.dataset.dwk] = x.open; }));
   page.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => { const el = document.getElementById(b.dataset.jump); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }));
   if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
   wireBoard(page, "sales", d.board);

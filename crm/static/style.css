@@ -1222,3 +1222,12 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 .tm-example-fold > summary::-webkit-details-marker { display: none; }
 .tm-example-fold > summary::before { content: "▸ "; }
 .tm-example-fold[open] > summary::before { content: "▾ "; }
+
+/* рабочий стол: спокойные блоки свёрнуты внизу правой колонки */
+.dw-folded { display: flex; flex-direction: column; gap: 6px; }
+.dwf { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow); }
+.dwf > summary { list-style: none; cursor: pointer; padding: 11px 14px; font-weight: 600; font-size: 14.5px; display: flex; gap: 8px; align-items: center; }
+.dwf > summary::-webkit-details-marker { display: none; }
+.dwf > summary::after { content: "▸"; margin-left: auto; color: var(--ink-2); transition: transform .15s; }
+.dwf[open] > summary::after { transform: rotate(90deg); }
+.dwf > .dw { padding: 0 4px 4px; }
