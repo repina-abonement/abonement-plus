@@ -1298,3 +1298,28 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 .erp-stats { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 10px; }
 .erp-stats b { font-size: 18px; }
 .erp-grow { margin-top: 6px; }
+
+/* ---------- праздничное оформление ---------- */
+.festive-deco { position: fixed; right: 14px; bottom: 12px; z-index: 5; font-size: 22px; letter-spacing: 6px; opacity: .85; pointer-events: none;
+  animation: festiveFloat 4s ease-in-out infinite; }
+@keyframes festiveFloat { 50% { transform: translateY(-6px); } }
+@media (prefers-reduced-motion: reduce) { .festive-deco { animation: none; } }
+@media (max-width: 760px) { .festive-deco { bottom: 74px; right: 10px; font-size: 18px; } }
+.festive-banner { display: flex; gap: 12px; align-items: center; margin: 0 0 14px; padding: 12px 16px; border-radius: 14px;
+  background: var(--fest-soft, var(--accent-soft)); border: 1px solid var(--fest-line, transparent); }
+.festive-ic { font-size: 30px; line-height: 1; }
+html[data-festive="halloween"] { --accent: #e0700b; --accent-soft: #fdeedd; --pitch: #1c1229; --fest-soft: #fbe7d3; --fest-line: #f2b37a; }
+html[data-festive="halloween"] .topbar { background-image: radial-gradient(circle at 85% 8%, rgba(255,166,77,.18), transparent 40%); }
+html[data-festive="halloween"] .brand span { color: #ffa64d; }
+html[data-festive="newyear"] { --accent: #c8322b; --accent-soft: #fbe5e3; --pitch: #0d2440; --fest-soft: #e6f0fb; --fest-line: #b7d0ec; }
+html[data-festive="newyear"] .brand span { color: #9fd3ff; }
+html[data-festive="feb23"] { --pitch: #1a2a1c; --fest-soft: #e8efe2; --fest-line: #b9cdb0; }
+html[data-festive="mar8"] { --accent: #c2367a; --accent-soft: #fbe3ef; --fest-soft: #fde8f1; --fest-line: #f2b5d0; }
+html[data-festive="june1"] { --fest-soft: #fff3d6; --fest-line: #f5d27a; }
+html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
+@media (prefers-color-scheme: dark) {
+  html[data-festive] { --fest-soft: rgba(255,255,255,.06); }
+  html[data-festive="halloween"] { --accent-soft: #3a2410; }
+  html[data-festive="newyear"] { --accent-soft: #3a1714; }
+  html[data-festive="mar8"] { --accent-soft: #3a1529; }
+}

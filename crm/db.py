@@ -162,6 +162,7 @@ CREATE TABLE IF NOT EXISTS audit (
 """
 
 DEFAULT_SETTINGS = {
+    "festive": "1",  # праздничное оформление по календарю (Хэллоуин, Новый год, 23 февраля, 8 марта...)
     "price_fixed": "1350",
     "price_flex": "1550",
     "late_fee_enabled": "0",

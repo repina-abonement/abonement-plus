@@ -15,7 +15,10 @@ c = analytics.report(con, None, None, "churn")
 assert c["left_count"] == len(c["left"]) and len(c["series"]) == 12 and c["avg_months"]
 r = c["renewal"]
 assert r["paid"] + r["invoiced"] + r["none"] == g["branches"][0]["kids"]
-s = analytics.report(con, None, None, "sources")
+# траты на рекламу в выдуманных данных приходятся на 1-5 число: в первые дни месяца смотрим прошлый месяц
+from crm import logic
+from datetime import date
+s = analytics.report(con, logic.shift_month(logic.month_of(date.today()), -1), None, "sources")
 assert s["total"]["leads"] >= s["total"]["bought"] and s["total"]["spend"] > 0
 assert analytics.report(con, None, b, "coaches") is not None
 print("ok")

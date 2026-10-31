@@ -291,6 +291,45 @@ document.addEventListener("keydown", (e) => {
   } else if (e.code === "KeyN" && $("#new-client")) { e.preventDefault(); openNewClient(); }
 });
 
+/* Праздничное оформление по календарю: цвета, значок в меню, украшения в углу и поздравление на столе.
+   Выключается в Настройки → Мой профиль (только руководитель, для всех сразу) */
+const FESTIVE = [
+  { key: "halloween", from: "10-25", to: "11-01", icon: "🎃", deco: "🦇 🎃 👻", title: "С Хэллоуином!",
+    text: "Пусть сегодня на тренировках будут только сладости, а гадости пусть достанутся соперникам 🎃⚽" },
+  { key: "newyear", from: "12-15", to: "01-10", icon: "🎄", deco: "❄️ 🎄 ✨", title: "С наступающим Новым годом!",
+    text: "Пусть в новом году будет полный зал, все продлятся, а мяч всегда летит в девятку 🎄⚽" },
+  { key: "feb23", from: "02-22", to: "02-23", icon: "🎖", deco: "⭐ 🎖", title: "С Днём защитника Отечества!",
+    text: "Защитникам на поле и в жизни: крепкой обороны и быстрых контратак ⭐" },
+  { key: "mar8", from: "03-07", to: "03-08", icon: "🌷", deco: "🌷 💐 🌸", title: "С 8 Марта!",
+    text: "Девушки нашей команды, вы лучшие игроки в составе 💐" },
+  { key: "june1", from: "06-01", to: "06-01", icon: "🎈", deco: "🎈 🎉", title: "С Днём защиты детей!",
+    text: "Сегодня главный праздник наших футболистов 🎈⚽" },
+  { key: "sep1", from: "09-01", to: "09-01", icon: "🍁", deco: "🍁 📚 ⚽", title: "С новым сезоном!",
+    text: "1 сентября: новые группы, новые дети, новые голы 🍁" },
+];
+function festiveNow(today) {
+  const md = today.slice(5, 10);
+  return FESTIVE.find((f) => (f.from <= f.to ? md >= f.from && md <= f.to : md >= f.from || md <= f.to)) || null;
+}
+function applyFestive() {
+  const f = S.meta && S.meta.festive !== false ? festiveNow(S.meta.today) : null;
+  document.documentElement.dataset.festive = f ? f.key : "";
+  document.querySelectorAll(".festive-deco").forEach((x) => x.remove());
+  if (!f) return;
+  const brand = document.querySelector(".brand i"); if (brand) brand.textContent = f.icon;
+  const d = document.createElement("div"); d.className = "festive-deco"; d.setAttribute("aria-hidden", "true"); d.textContent = f.deco;
+  document.body.appendChild(d);
+}
+function festiveBanner(page) {
+  const f = S.meta && S.meta.festive !== false ? festiveNow(S.meta.today) : null;
+  if (!f || !page) return;
+  const k = `crm.festive.${f.key}.${S.meta.today}`;
+  try { if (localStorage.getItem(k)) return; } catch (_) {}
+  const head = page.querySelector(".page-head"); if (!head) return;
+  head.insertAdjacentHTML("afterend", `<div class="festive-banner"><span class="festive-ic">${f.icon}</span><div class="grow"><b>${esc(f.title)}</b><div class="small">${esc(f.text)}</div></div><button class="icon-btn" data-fclose title="Скрыть до завтра">✕</button></div>`);
+  page.querySelector("[data-fclose]").onclick = (e) => { try { localStorage.setItem(k, "1"); } catch (_) {} e.target.closest(".festive-banner").remove(); };
+}
+
 function shell() {
   const views = visibleViews();
   if (S.view !== "meet" && !views.some(([k]) => k === S.view)) S.view = views[0][0];
@@ -369,6 +408,7 @@ async function render() {
   page.classList.remove("readonly");
   if (S.meta && S.meta.staff_docs_pending) return renderStaffDocs(page);
   await renderView(page);
+  if (["sales", "today"].includes(S.view) && !S.viewAs) festiveBanner(page);
   if (S.meta && S.meta.tour_pending && !S.tourOn) startTour();
   if (navDepth() > 0 && !(history.state && history.state.menu) && !page.querySelector(".back-btn")) {
     page.insertAdjacentHTML("afterbegin", `<button class="back-btn" type="button">← Назад</button>`);
@@ -1781,6 +1821,9 @@ async function renderSettings(page) {
     <div class="section" data-tab="profile"><h3>Быстрый вход по коду</h3><div id="pin-set" class="small muted">…</div></div>
     <div class="section" data-tab="profile"><h3>Обучение</h3><div class="small muted" style="margin-bottom:8px">Короткая экскурсия по твоим разделам CRM</div>
       <button class="btn sm" id="tour-again">🎓 Пройти обучение ещё раз</button></div>
+    ${S.user.role === "admin" ? `<div class="section" data-tab="profile"><h3>Праздничное оформление</h3>
+      <label class="check"><input type="checkbox" id="festive-on" ${S.meta.festive !== false ? "checked" : ""}> 🎉 Украшать CRM к праздникам по календарю (у всех сотрудников)</label>
+      <div class="small muted" style="margin-top:4px">Хэллоуин, Новый год, 23 февраля, 8 марта, 1 июня, 1 сентября</div></div>` : ""}
     ${admin ? `
     <form class="section" id="set" data-tab="prices">
       <h3>Цены и правила</h3>
@@ -1856,6 +1899,9 @@ async function renderSettings(page) {
     try { await api("POST", "/api/users", Object.fromEntries(new FormData(e.target))); toast("Сотрудник добавлен"); render(); } catch (err) { fail(err); }
   };
   if ($("#tour-again")) $("#tour-again").onclick = () => startTour(true);
+  if ($("#festive-on")) $("#festive-on").onchange = async (e) => {
+    try { await api("PUT", "/api/settings", { festive: e.target.checked ? "1" : "0" }); S.meta.festive = e.target.checked; shell(); applyFestive(); render(); toast(e.target.checked ? "Праздники включены 🎉" : "Праздничное оформление выключено"); } catch (err) { fail(err); }
+  };
   (async () => {
     const box = $("#pin-set"); if (!box) return;
     const dev = deviceToken(true);
@@ -2013,6 +2059,7 @@ async function boot() {
   S.view = visibleViews()[0][0];
   try { const v = localStorage.getItem("crm.view"); if (v && visibleViews().some(([k]) => k === v)) S.view = v; } catch (_) {}
   shell();
+  applyFestive();
   try { history.replaceState({ view: S.view, sub: navSnap(), depth: 0 }, "", "#" + S.view); } catch (_) {}
   render();
   setInterval(() => { if ($("#drawer").hidden && ["members", "skips"].includes(S.view)) render(); }, 60000);

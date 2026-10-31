@@ -461,6 +461,7 @@ def meta(con, h, user, body, q):
         m["settings"] = {}
     elif not perms.allowed(user, "any"):  # юрист: группы и цены ему не нужны
         m["groups"], m["settings"] = [], {}
+    m["festive"] = (con.execute("SELECT value FROM settings WHERE key='festive'").fetchone() or ["1"])[0] != "0"
     from . import staffdocs
     m["staff_docs_pending"] = staffdocs.pending(con, user)
     from . import tour
