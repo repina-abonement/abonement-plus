@@ -1066,3 +1066,23 @@ h1, h2, h3, h4, b, strong, th { font-weight: 800; }
 .arch-box[hidden] { display: none; }
 .arch-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line, #eee); }
 .arch-row .grow { flex: 1; text-align: left; }
+
+/* «Ученики» списком */
+.m-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.m-filters input { flex: 1 1 240px; } .m-filters select { flex: 0 1 220px; width: auto; }
+.chip.on { background: var(--accent); color: #fff; } .chip.on .muted { color: #fff; opacity: .8; }
+.m-list { padding: 4px 16px; }
+.m-row { display: grid; grid-template-columns: 200px minmax(0, 1fr) minmax(0, 1fr) 210px; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line, #eee); }
+.m-row:last-child { border-bottom: 0; }
+.m-name { text-align: left; }
+.m-red .m-name b { color: #c0392b; } .m-yellow .m-name b { color: #b7791f; }
+.m-st { justify-self: end; }
+.m-grp .m-row { grid-template-columns: 200px minmax(0, 1fr) 210px; }
+.m-filters .check { flex: 0 0 auto; white-space: nowrap; display: flex; align-items: center; gap: 6px; } .m-filters .check input { width: auto; flex: 0 0 auto; }
+.m-branch { margin: 14px 0 4px; font-size: 16px; }
+.m-grp summary { cursor: pointer; padding: 6px 0; }
+@media (max-width: 700px) {
+  .m-row, .m-grp .m-row { grid-template-columns: 1fr auto; }
+  .m-parent, .m-group { grid-column: 1 / -1; order: 3; }
+  .m-filters select { flex: 1 1 45%; }
+}

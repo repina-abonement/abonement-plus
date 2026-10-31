@@ -493,6 +493,12 @@ def board(con, funnel: str) -> dict:
             if s["family_id"] in missed:
                 card["color"] = "red"
                 card["badge"] = "📞 Пропущенный звонок " + missed[s["family_id"]][11:16]
+            card["status"] = key
+            card["groups"] = [dict(r) for r in con.execute(
+                """SELECT g.id, g.name, b.name AS branch FROM enrollments e JOIN groups g ON g.id=e.group_id
+                   JOIN branches b ON b.id=g.branch_id WHERE e.student_id=? AND e.active=1 ORDER BY b.name, g.name""", (s["id"],))] or [
+                dict(r) for r in con.execute("""SELECT g.id, g.name, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id
+                                               WHERE g.id=?""", (s["group_id"] or 0,))]
             by[key]["cards"].append(card)
         return {"funnel": "members", "columns": cols, "draggable": False,
                 "note": f"Этапы ставятся сами по оплатам. Продление — до {deadline_day} числа."}

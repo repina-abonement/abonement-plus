@@ -453,6 +453,7 @@ function wireBoard(page, funnel, data) {
 
 async function renderBoard(page, funnel) {
   const data = await api("GET", "/api/board/" + funnel);
+  if (funnel === "members") return renderMembersList(page, data);
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">${BOARD_TITLES[funnel]}</h2>
       ${funnel === "members" && can("members", "full") ? `<button class="btn sm" id="arch-btn">🗄 Архив ▾</button>` : ""}
@@ -463,6 +464,73 @@ async function renderBoard(page, funnel) {
   $("#refresh").onclick = render;
   if ($("#arch-btn")) membersArchive(page);
   wireBoard(page, funnel, data);
+}
+
+/* «Ученики»: список с поиском, фильтрами и группировкой по филиалам и группам */
+S.mf = (() => { try { return JSON.parse(localStorage.getItem("crm.mf") || "null") || {}; } catch (_) { return {}; } })();
+const M_STATUS = [["", "Все"], ["unpaid_cur", "Не оплатили"], ["renew", "Продлить"], ["invoiced", "Счёт выставлен"], ["paid_next", "Оплачено"], ["left", "Ушли"]];
+function renderMembersList(page, data) {
+  const cols = Object.fromEntries(data.columns.map((c) => [c.key, c.title]));
+  const all = data.columns.flatMap((c) => c.cards);
+  const f = S.mf;
+  const save = () => { try { localStorage.setItem("crm.mf", JSON.stringify(f)); } catch (_) {} };
+  const branches = [...new Set(all.flatMap((k) => k.groups.map((g) => g.branch)))].sort();
+  const groups = [...new Map(all.flatMap((k) => k.groups).filter((g) => !f.branch || g.branch === f.branch).map((g) => [String(g.id), g])).values()]
+    .sort((a, b) => (a.branch + a.name).localeCompare(b.branch + b.name));
+  if (f.group && !groups.some((g) => String(g.id) === f.group)) f.group = "";
+  const inPlace = (k) => (!f.branch || k.groups.some((g) => g.branch === f.branch)) && (!f.group || k.groups.some((g) => String(g.id) === f.group));
+  const q = (f.q || "").toLowerCase(), qd = q.replace(/\D/g, "");
+  const hit = (k) => !q || (k.name + " " + k.parent + " " + k.family).toLowerCase().includes(q) || (qd.length > 2 && (k.phone || "").replace(/\D/g, "").includes(qd));
+  const base = all.filter((k) => inPlace(k) && hit(k));
+  const cnt = (s) => base.filter((k) => (s ? k.status === s : k.status !== "left")).length;
+  const rows = base.filter((k) => (f.status ? k.status === f.status : k.status !== "left"));
+  const pill = { unpaid_cur: "red", renew: "", invoiced: "", paid_next: "green", left: "" };
+  const row = (k, g) => `<div class="m-row ${k.color === "red" ? "m-red" : k.color === "yellow" ? "m-yellow" : ""}">
+    <button class="linkish m-name" data-open="${k.id}"><b>${esc(k.name)}</b></button>
+    <span class="small muted m-parent">${esc(k.parent)}${k.phone ? ", " + esc(k.phone) : ""}</span>
+    ${g ? "" : `<span class="small m-group">${esc(k.groups.map((x) => x.branch + " · " + x.name).join(", ") || k.group)}</span>`}
+    <span class="m-st"><span class="pill ${pill[k.status]}">${esc(k.badge || cols[k.status] || "")}</span></span></div>`;
+  let body;
+  if (!rows.length) body = `<div class="muted small" style="padding:12px">Никого не нашли</div>`;
+  else if (f.grouped) {
+    const by = new Map();
+    for (const k of rows) for (const g of (k.groups.length ? k.groups : [{ id: 0, name: "Без группы", branch: "" }])) {
+      if (f.group && String(g.id) !== f.group) continue;
+      if (f.branch && g.branch !== f.branch) continue;
+      const key = g.branch + "|" + g.name;
+      if (!by.has(key)) by.set(key, { g, list: [] });
+      by.get(key).list.push(k);
+    }
+    let lastBr = null;
+    body = [...by.values()].sort((a, b) => (a.g.branch + a.g.name).localeCompare(b.g.branch + b.g.name)).map(({ g, list }) => {
+      const brHead = g.branch !== lastBr ? `<h3 class="m-branch">${esc(g.branch || "Без филиала")}</h3>` : "";
+      lastBr = g.branch;
+      return `${brHead}<details class="m-grp" open><summary><b>${esc(g.name)}</b> <span class="muted small">${list.length}</span></summary>${list.map((k) => row(k, true)).join("")}</details>`;
+    }).join("");
+  } else body = rows.map((k) => row(k, false)).join("");
+  page.innerHTML = `
+    <div class="page-head"><h2 class="grow">${BOARD_TITLES.members}</h2>
+      ${can("members", "full") ? `<button class="btn sm" id="arch-btn">🗄 Архив ▾</button>` : ""}
+      <button class="btn sm" id="refresh">Обновить</button></div>
+    <div class="section arch-box" id="arch-box" hidden></div>
+    <div class="m-filters">
+      <input id="mf-q" placeholder="Поиск: ребёнок, родитель или телефон" value="${esc(f.q || "")}">
+      <select id="mf-branch"><option value="">Все филиалы</option>${branches.map((b) => `<option ${f.branch === b ? "selected" : ""}>${esc(b)}</option>`).join("")}</select>
+      <select id="mf-group"><option value="">Все группы</option>${groups.map((g) => `<option value="${g.id}" ${f.group === String(g.id) ? "selected" : ""}>${esc((f.branch ? "" : g.branch + " · ") + g.name)}</option>`).join("")}</select>
+      <label class="check small"><input type="checkbox" id="mf-grouped" ${f.grouped ? "checked" : ""}> По филиалам и группам</label>
+    </div>
+    <div class="chips" style="margin:10px 0">${M_STATUS.map(([k, t]) => `<button class="chip ${(f.status || "") === k ? "on" : ""}" data-mst="${k}">${t} <span class="muted">${cnt(k)}</span></button>`).join("")}</div>
+    ${data.note ? `<div class="note">${esc(data.note)}</div>` : ""}
+    <div class="section m-list">${body}</div>`;
+  const rerender = () => { save(); renderMembersList(page, data); };
+  $("#refresh").onclick = render;
+  $("#mf-q").oninput = (e) => { f.q = e.target.value; const pos = e.target.selectionStart; rerender(); const i = $("#mf-q"); i.focus(); i.setSelectionRange(pos, pos); };
+  $("#mf-branch").onchange = (e) => { f.branch = e.target.value; f.group = ""; rerender(); };
+  $("#mf-group").onchange = (e) => { f.group = e.target.value; rerender(); };
+  $("#mf-grouped").onchange = (e) => { f.grouped = e.target.checked; rerender(); };
+  page.querySelectorAll("[data-mst]").forEach((b) => (b.onclick = () => { f.status = b.dataset.mst; rerender(); }));
+  page.querySelectorAll(".m-list [data-open]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.open)));
+  if ($("#arch-btn")) membersArchive(page);
 }
 
 /* Архив учеников и лидов: кнопка над доской «Ученики», список раскрывается под ней */
