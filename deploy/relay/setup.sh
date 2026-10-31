@@ -34,3 +34,14 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
 certbot --nginx -d "$HOST" --non-interactive --agree-tos --register-unsafely-without-email --redirect || true
 echo "https://$HOST" > /root/relay-url.txt
+echo
+echo "=============================================="
+if curl -fs --max-time 10 "https://$HOST/" >/dev/null; then
+  echo " Готово. Адрес моста (вставить в CRM):"
+  echo "   https://$HOST"
+else
+  echo " Мост поставлен, но https пока не отвечает."
+  echo " Пришлите этот экран в чат с Claude."
+  echo " Адрес моста: https://$HOST"
+fi
+echo "=============================================="
