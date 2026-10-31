@@ -13,7 +13,7 @@ function memoLines(d) {
     return [
       { h: `ОПЛАТА ДО ${d.deadline_day} ЧИСЛА`, t: [`Продлевайте абонемент на следующий месяц до ${d.deadline_day} числа`, late || "Покупка абонемента закрепляет место в группе"] },
       { h: "ДВА ТАРИФА", tariffs: [
-        { name: d.ofp_sched ? "АРКТИКА + ОФП" : "АРКТИКА", price: rub(d.arena), unit: "/ занятие", t: d.ofp ? [`ОФП ${rub(d.ofp)} за занятие`, "День ОФП выбираете при продлении"] : [] },
+        { name: d.ofp ? "АРКТИКА + ОФП" : "АРКТИКА", price: rub(d.arena), unit: "/ занятие", t: d.ofp ? [`ОФП ${rub(d.ofp)} за занятие`, "День ОФП выбираете при продлении"] : [] },
         { name: "ТОЛЬКО АРКТИКА", price: rub(d.arena_only), unit: "/ занятие", t: ["ОФП в счёт отработки не идёт"] }],
         t: [...(d.next ? [`${cap(d.next.from)}: ${rub(d.next.arena)}, ОФП ${rub(d.next.ofp)}, только Арктика ${rub(d.next.arena_only)}`] : []), "Второму ребёнку в семье скидка 20% на любом тарифе"] },
       ...(d.arena_sched || d.ofp_sched ? [{ h: "РАСПИСАНИЕ", t: [d.arena_sched ? `Арктика: ${d.arena_sched}` : "", d.ofp_sched ? `ОФП: ${d.ofp_sched}` : ""].filter(Boolean) }] : []),
@@ -58,7 +58,7 @@ async function drawMemo(d) {
   x.fillStyle = MEMO.navy; font(900, 64); center("ФУТБОЛИКА 💚", 92);
   font(800, 26); center(d.title, 132);
   x.fillStyle = MEMO.orange; font(900, 56); center("ПРАВИЛА АБОНЕМЕНТА", 200);
-  x.fillStyle = MEMO.teal; font(700, 22); center("— Сохраните эту памятку —", 240);
+  x.fillStyle = MEMO.teal; font(700, 22); center("Сохраните эту памятку", 240);
   // блоки 01-05: высоту считаем по тексту и ужимаем, если не помещается
   const blocks = memoLines(d);
   const left = 46, width = W - 92, textX = left + 104, textW = width - 104 - 22;

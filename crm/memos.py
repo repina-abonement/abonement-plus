@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS memo_images (
     created_at TEXT NOT NULL
 );
 """
+# Поменяли тексты или рисунок в memos.js: увеличьте номер, и все памятки перерисуются
+VERSION = 2
 WD = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
 WD_FULL = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
 
@@ -114,7 +116,7 @@ def targets(con, today: date | None = None) -> list[dict]:
     except Exception:  # noqa: BLE001 — нет таблицы направлений
         pass
     for t in out:
-        t["hash"] = hashlib.sha256(json.dumps(t["data"], ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
+        t["hash"] = hashlib.sha256(json.dumps([VERSION, t["data"]], ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
     return out
 
 
