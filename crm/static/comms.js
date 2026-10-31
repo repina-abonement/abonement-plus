@@ -327,7 +327,7 @@ async function renderCommsSettings(box, users) {
     <div class="small muted" style="margin-bottom:10px">Ключи хранятся на вашем сервере. Чтобы заменить ключ, вставьте новый и нажмите «Сохранить».</div>
 
     <div class="int"><div class="int-head"><b>Телефония Sipuni</b>${ok(st.sipuni)}</div>
-      <div class="row"><div class="field"><label>Номер кабинета</label><input data-k="sipuni_user" value="${esc(v.sipuni_user)}" placeholder="064629"></div>
+      <div class="row"><div class="field"><label>Номер кабинета</label><input data-k="sipuni_user" value="${esc(v.sipuni_user)}" placeholder="«Кабинет №…» слева вверху в Sipuni"></div>
         <div class="field"><label>Ключ интеграции</label><input data-k="sipuni_secret" value="${esc(v.sipuni_secret)}"></div></div>
       <div class="field"><label>Адрес для событий (вставить в Sipuni)</label><div class="copy"><input readonly value="${esc(d.hooks.sipuni)}"><button class="btn sm" data-copy="${esc(d.hooks.sipuni)}">Копировать</button></div></div>
       <div class="small muted">Последнее событие: ${inf.sipuni_last ? dtShort(inf.sipuni_last) : "ещё не было"}. Внутренние номера сотрудников указываются ниже, в списке сотрудников</div>
