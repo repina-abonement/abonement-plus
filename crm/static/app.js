@@ -1784,12 +1784,12 @@ async function renderSearch(page) {
 
 /* ---------- настройки ---------- */
 const SET_TABS = [
-  ["users", "👥", "Сотрудники", "Должности, телефоны, пароли"], ["prices", "💰", "Цены и правила", "Прайс, срок продления, пробное"],
+  ["users", "👥", "Сотрудники", "Должности, телефоны, пароли"], ["prices", "💰", "Цены и правила", "Прайс, скидки, сборная ПРО, дни без занятий"],
   ["structure", "🏟", "Филиалы, группы и смены", "Расписание и лимиты"], ["resp", "🎯", "Ответственные по филиалам", "Кому задачи по пробным"],
   ["comms", "💬", "Связь с клиентами", "Telegram, MAX, WhatsApp, Sipuni, заявки"], ["trials", "📋", "Задачи по пробным", "Автосообщения и сроки"],
   ["tips", "💡", "Подсказки по этапам", "Что сказать на каждом этапе воронки"], ["chains", "🔁", "Автоцепочки сообщений", "Серии сообщений родителям"],
   ["erp", "📦", "Перенос из ERP", "Клиенты, абонементы, оплаты, история"],
-  ["coachpay", "⏱", "Тренеры: приход и оплата", "Отметка прихода, ставки"], ["program", "🏆", "Сборная ПРО", "Цены и правила сборной"],
+  ["coachpay", "⏱", "Тренеры: приход и оплата", "Отметка прихода, ставки"],
   ["sources", "📣", "Рекламные каналы", "Источники лидов"], ["offers", "📄", "Оферты", "Редакции и ссылки"],
   ["backup", "💾", "Резервные копии", "Яндекс Диск, копия сейчас"], ["archive", "🗄", "Архив", "Вернуть из архива"],
   ["test", "🧪", "Тестовые клиенты", "Выдуманные клиенты для проверки"], ["profile", "👤", "Мой профиль", "Вид, код входа, пароль"],
@@ -1840,12 +1840,12 @@ async function renderSettings(page) {
       <button class="btn primary">Сохранить</button>
     </form>
     ${can("payments", "full") ? `<div class="section" id="discount-settings" data-tab="prices"></div>` : ""}
+    <div id="program-settings" data-tab="prices"></div>
     ${S.user.role === "admin" ? `<div class="section" id="tips-settings" data-tab="tips"></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" id="chains-settings" data-tab="chains"></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" id="erp-settings" data-tab="erp"></div>` : ""}
     <div class="section" id="backup-settings" data-tab="backup"></div>
     <div class="section" id="resp-settings" data-tab="resp"></div>
-    <div id="program-settings" data-tab="program"></div>
     <div class="section" data-tab="users">
       <h3>Сотрудники</h3>
       <div class="list" style="box-shadow:none;margin-bottom:10px">${users.map((u) => `<div class="list-row staff-row"><div class="grow"><span class="who" data-prof="${u.id}">${avatar(u.id, u.name, 34)}<span>${esc(u.name)} <span class="muted small">${esc(u.login)}</span></span></span></div>
