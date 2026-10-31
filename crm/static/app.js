@@ -1494,7 +1494,7 @@ async function renderSettings(page) {
         ${u.role === "coach" ? "" : `<input data-sip="${u.id}" value="${esc(u.sip_number || "")}" placeholder="вн. номер" title="Внутренний номер Sipuni: на него придёт звонок из карточки" inputmode="numeric" style="flex:0 0 96px;padding:5px 8px">`}
         <select data-upost="${u.id}" title="Должность: от неё зависят разделы и права" style="flex:0 0 auto;width:auto;padding:5px 8px" ${u.id === S.user.id ? "disabled" : ""}>${POSTS.map(([k, t]) => `<option value="${k}" ${postOf(u) === k ? "selected" : ""}>${t}</option>`).join("")}</select>
         <label class="check small" title="Промоутер: права промоутера добавляются к должности" style="flex:0 0 auto"><input type="checkbox" data-uprom="${u.id}" ${u.is_promoter ? "checked" : ""}> промоутер</label>
-        ${u.id !== S.user.id ? `<button class="icon-btn" data-upw="${u.id}" title="Задать новый пароль">🔑</button><button class="icon-btn" data-uarch="${u.id}" title="В архив">🗄</button>` : ""}</div>`).join("")}</div>
+        ${u.id !== S.user.id ? `<button class="icon-btn" data-ucopy="${u.id}" data-login="${esc(u.login)}" data-name="${esc(u.name)}" title="Скопировать вход: новый пароль и сообщение с логином">📋</button><button class="icon-btn" data-upw="${u.id}" title="Задать новый пароль">🔑</button><button class="icon-btn" data-uarch="${u.id}" title="В архив">🗄</button>` : ""}</div>`).join("")}</div>
       <div class="small muted" style="margin:-4px 0 10px">Внутренний номер Sipuni нужен, чтобы звонить клиенту прямо из карточки</div>
       <form id="nu">
         <div class="row"><div class="field"><label>Имя</label><input name="name" required></div><div class="field"><label>Логин</label><input name="login" required></div></div>
@@ -1577,6 +1577,19 @@ async function renderSettings(page) {
     const pw = prompt("Новый пароль для сотрудника (от 8 символов). Передайте его лично");
     if (!pw) return;
     try { await api("PATCH", `/api/users/${b.dataset.upw}`, { password: pw }); toast("Пароль задан"); } catch (e) { fail(e); }
+  }));
+  page.querySelectorAll("[data-ucopy]").forEach((b) => (b.onclick = async () => {
+    const name = b.dataset.name.split(" ")[0];
+    if (!confirm(`Создать ${name} новый пароль и скопировать вход?\n\nСтарый пароль перестанет работать. Если ${name} сейчас в CRM, его не выкинет, и код быстрого входа на его телефоне останется.`)) return;
+    const abc = "abcdefghjkmnpqrstuvwxyz23456789", rnd = crypto.getRandomValues(new Uint32Array(10));
+    const pw = [...rnd].map((x) => abc[x % abc.length]).join("").replace(/(.{5})/, "$1-");
+    try { await api("PATCH", `/api/users/${b.dataset.ucopy}`, { password: pw, keep_sessions: true }); } catch (e) { return fail(e); }
+    const text = `Вход в CRM «Абонемент Плюс»\nСсылка: ${location.origin}\nЛогин: ${b.dataset.login}\nПароль: ${pw}`;
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (_) {}
+    if (ok) return toast(`Скопировано! Вставьте и отправьте ${name} лично`);
+    openDrawer(`<h2>Вход для ${esc(name)}</h2><p class="muted">Браузер не дал скопировать сам: выделите текст и скопируйте</p>
+      <textarea readonly rows="5" style="width:100%" onclick="this.select()">${esc(text)}</textarea>`);
   }));
   page.querySelectorAll("[data-uarch]").forEach((b) => (b.onclick = async () => {
     if (!confirm("Перенести сотрудника в архив? Он больше не сможет войти, вернуть можно в Архиве")) return;

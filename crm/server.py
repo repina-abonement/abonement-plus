@@ -277,10 +277,11 @@ def users_patch(con, h, user, body, q, uid):
         if len(body["password"]) < 8:
             raise ApiError("Пароль от 8 символов")
         con.execute("UPDATE users SET pw_hash=? WHERE id=?", (db.hash_password(body["password"]), int(uid)))
-        con.execute("DELETE FROM sessions WHERE user_id=? AND ?!=?", (int(uid), int(uid), user["id"]))
-        from . import pin
-        pin.remove_all(con, int(uid))
-        sv.audit(con, user, "user.password", str(uid))
+        if not body.get("keep_sessions"):  # «Скопировать вход»: сотрудника не выкидываем, код быстрого входа оставляем
+            con.execute("DELETE FROM sessions WHERE user_id=? AND ?!=?", (int(uid), int(uid), user["id"]))
+            from . import pin
+            pin.remove_all(con, int(uid))
+        sv.audit(con, user, "user.password", str(uid) + (" копия входа" if body.get("keep_sessions") else ""))
     if "sip_number" in body:
         sip = "".join(ch for ch in str(body["sip_number"] or "") if ch.isdigit())[:10]
         con.execute("UPDATE users SET sip_number=? WHERE id=?", (sip, int(uid)))
