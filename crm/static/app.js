@@ -229,7 +229,7 @@ function sideNav(views) {
   const item = ([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}<span>${t}</span>${badge(k)}</button>`;
   if (views.length <= 8) return views.map(item).join("");
   const has = (k) => views.find(([v]) => v === k);
-  const search = has("search") ? `<input class="nav-q" id="nav-q" type="search" name="crm-client-search" autocomplete="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="🔍 Найти клиента   /" title="Имя, фамилия или телефон. Быстро открыть поиск: клавиша /">` : "";
+  const search = has("search") ? `<input class="nav-q" id="nav-q" type="search" name="crm-client-search" readonly autocomplete="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="🔍 Найти клиента   /" title="Имя, фамилия или телефон. Быстро открыть поиск: клавиша /">` : "";
   const placed = new Set(["search"]);
   const top = NAV_TOP.filter(has).map((k) => { placed.add(k); return item(has(k)); }).join("");
   const o = navOpen();
@@ -351,6 +351,10 @@ function shell() {
   }));
   const nq = $("#nav-q");
   if (nq) {
+    // поле только для чтения, пока человек сам в него не нажал: браузер не подставляет туда сохранённый логин
+    const unlock = () => nq.removeAttribute("readonly");
+    nq.addEventListener("pointerdown", unlock); nq.addEventListener("focus", unlock);
+    nq.addEventListener("blur", () => { if (!nq.value) nq.setAttribute("readonly", ""); });
     wireNavSearch(nq);
     // браузер иногда сам вписывает сюда сохранённый логин: стираем, если человек не печатал
     [50, 400, 1200].forEach((ms) => setTimeout(() => { if (document.activeElement !== nq) nq.value = ""; }, ms));
@@ -1853,8 +1857,8 @@ async function renderSettings(page) {
         ${u.id !== S.user.id ? `<button class="icon-btn" data-ucopy="${u.id}" data-login="${esc(u.login)}" data-name="${esc(u.name)}" title="Скопировать вход: новый пароль и сообщение с логином">📋</button><button class="icon-btn" data-upw="${u.id}" title="Задать новый пароль">🔑</button><button class="icon-btn" data-uarch="${u.id}" title="В архив">🗄</button>` : ""}</div>`).join("")}</div>
       <div class="small muted" style="margin:-4px 0 10px">Внутренний номер Sipuni нужен, чтобы звонить клиенту прямо из карточки</div>
       <form id="nu">
-        <div class="row"><div class="field"><label>Имя</label><input name="name" required></div><div class="field"><label>Логин</label><input name="login" required></div></div>
-        <div class="row"><div class="field"><label>Пароль (от 8 символов)</label><div class="pw-wrap"><input name="password" type="password" minlength="8" required><button type="button" class="pw-eye" aria-label="Показать пароль">👁</button></div></div>
+        <div class="row"><div class="field"><label>Имя</label><input name="name" required></div><div class="field"><label>Логин</label><input name="login" autocomplete="off" required></div></div>
+        <div class="row"><div class="field"><label>Пароль (от 8 символов)</label><div class="pw-wrap"><input name="password" type="password" autocomplete="new-password" minlength="8" required><button type="button" class="pw-eye" aria-label="Показать пароль">👁</button></div></div>
           <div class="field"><label>Должность</label><select name="post">${POSTS.map(([k, t]) => `<option value="${k}" ${k === "operator" ? "selected" : ""}>${t}</option>`).join("")}</select></div></div>
         <label class="check small" style="margin-bottom:8px"><input type="checkbox" name="is_promoter" value="1"> Ещё и промоутер</label>
         <button class="btn sm">Добавить сотрудника</button>
@@ -1882,8 +1886,8 @@ async function renderSettings(page) {
       <button class="btn sm danger" id="demo-reset">Пересоздать тестовые данные</button></div>` : ""}
     <form class="section" id="pw" data-tab="profile">
       <h3>Мой пароль</h3>
-      <div class="field"><label>Текущий пароль</label><input name="old" type="password" required></div>
-      <div class="field"><label>Новый пароль</label><input name="new" type="password" minlength="8" required></div>
+      <div class="field"><label>Текущий пароль</label><input name="old" type="password" autocomplete="current-password" required></div>
+      <div class="field"><label>Новый пароль</label><input name="new" type="password" autocomplete="new-password" minlength="8" required></div>
       <button class="btn sm">Сменить пароль</button>
     </form>
     <div class="small muted" data-tab="profile" style="margin-top:12px">Вы вошли как ${esc(S.user.name)}. Версия 0.2, тестовая.</div>
@@ -2207,7 +2211,7 @@ async function renderBackup(box) {
     ${d.last_error ? `<div class="alert" style="margin-top:6px">${esc(d.last_error)}</div>` : ""}
     ${d.excel_error ? `<div class="alert" style="margin-top:6px">Excel: ${esc(d.excel_error)}</div>` : ""}
     <div class="field" style="margin-top:10px"><label>Токен Яндекс Диска</label>
-      <div class="row"><input id="bk-token" type="password" placeholder="${d.yadisk ? "подключён, вставьте новый, чтобы заменить" : "вставьте токен"}"><button class="btn sm" id="bk-save" style="flex:0">Сохранить</button></div>
+      <div class="row"><input id="bk-token" type="password" autocomplete="off" placeholder="${d.yadisk ? "подключён, вставьте новый, чтобы заменить" : "вставьте токен"}"><button class="btn sm" id="bk-save" style="flex:0">Сохранить</button></div>
       <div class="small muted">Как получить: откройте yandex.ru/dev/disk/poligon под аккаунтом, где хотите хранить копии, нажмите «Получить OAuth-токен», скопируйте его и вставьте сюда</div></div>
     <div class="field"><label>Пароль шифрования копий</label><div class="row"><code id="bk-key" style="flex:1;padding:8px;background:var(--surface-2);border-radius:8px">${esc(d.key)}</code>
       <button class="btn sm" id="bk-copy" style="flex:0">Копировать</button></div>
