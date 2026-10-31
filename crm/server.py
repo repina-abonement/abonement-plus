@@ -322,6 +322,8 @@ def paylinks_list(con, h, user, body, q, sid):
 @route("POST", "/api/students/{sid}/paylinks", role="members:full")
 def paylinks_create(con, h, user, body, q, sid):
     from . import paylinks
+    from . import smart
+    smart.require(con, int(sid), "sale")  # чек PayKeeper уходит на почту родителя
     try:
         sub = int(body["subscription_id"]) if body.get("subscription_id") else None
         if sub and not con.execute("SELECT 1 FROM subscriptions WHERE id=? AND student_id=?", (sub, int(sid))).fetchone():
@@ -541,6 +543,19 @@ def views_post(con, h, user, body, q):
 def views_delete(con, h, user, body, q, vid):
     from . import smart
     smart.delete_view(con, user["id"], int(vid))
+    return {"ok": True}
+
+
+@route("GET", "/api/students/{sid}/required", role="operator")
+def required_get(con, h, user, body, q, sid):
+    from . import smart
+    return smart.required_info(con, int(sid), q.get("for", "trial"))
+
+
+@route("POST", "/api/students/{sid}/required", role="operator")
+def required_post(con, h, user, body, q, sid):
+    from . import smart
+    smart.fill_required(con, int(sid), body, user)
     return {"ok": True}
 
 
@@ -2335,7 +2350,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, result)
             raise ApiError("Не найдено", 404)
         except ApiError as e:
-            return self._send(e.status, {"error": e.message})
+            return self._send(e.status, {"error": e.message, **getattr(e, "extra", {})})
         except (json.JSONDecodeError, ValueError, TypeError) as e:
             traceback.print_exc()
             return self._send(400, {"error": "Неверные данные запроса"})

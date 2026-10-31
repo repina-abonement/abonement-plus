@@ -6,7 +6,9 @@ from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from crm import db, logic, services as sv  # noqa: E402
+from crm import db, logic, services as sv, smart  # noqa: E402
+
+smart.REQUIRE = False  # обязательные данные перед пробным и продажей проверяет tests/test_required.py
 
 PRICES = {"fixed": 1350, "flex": 1550}
 USER = {"id": 1, "name": "Тест"}

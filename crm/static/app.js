@@ -26,8 +26,44 @@ async function api(method, url, body) {
   let data = null;
   try { data = await r.json(); } catch (_) { /* пусто */ }
   if (r.status === 401 && url !== "/api/login") { renderLogin(); throw new Error("Нужно войти"); }
+  if (r.status === 422 && data && data.need && !opt.noNeed) {
+    // не хватает обязательных данных (перед пробным или продажей): спросим и повторим то же действие
+    if (await askRequired(data.need)) return api(method, url, body);
+    throw Object.assign(new Error("Действие не выполнено: не хватает данных"), { status: 422, silent: true });
+  }
   if (!r.ok) throw Object.assign(new Error((data && data.error) || "Ошибка"), { status: r.status });
   return data;
+}
+
+/* Окошко «Не хватает данных»: имя и фамилия ребёнка, дата рождения, имя и телефон родителя, для продажи ещё почта */
+function askRequired(need) {
+  return new Promise((resolve) => {
+    const types = { child_name: "text", birth: "date", parent_name: "text", phone: "tel", email: "email" };
+    const ph = { child_name: "Например: Петя Иванов", parent_name: "Например: Анна", phone: "+7 900 123-45-67", email: "Например: anna@mail.ru" };
+    const wrap = document.createElement("div");
+    wrap.className = "need-wrap";
+    wrap.innerHTML = `<form class="need-card"><h3>${need.kind === "sale" ? "Перед продажей абонемента" : "Перед записью на пробное"}</h3>
+      <p class="small muted">${need.kind === "sale" ? "Заполните данные клиента. На почту PayKeeper пришлёт родителю чек" : "Уточните у родителя и заполните. Без этого на пробное не записать"}</p>
+      ${need.fields.map((k) => `<div class="field ${need.missing.includes(k) ? "need-miss" : ""}"><label>${esc(need.labels[k])}${need.missing.includes(k) ? " · нужно заполнить" : ""}</label>
+        <input name="${k}" type="${types[k]}" value="${esc(need.values[k] || "")}" placeholder="${esc(ph[k] || "")}" ${k === "email" ? 'autocomplete="off"' : ""} required></div>`).join("")}
+      <div class="need-err small"></div>
+      <div class="row" style="gap:10px;margin-top:6px"><button class="btn primary" style="flex:1">Сохранить и продолжить</button><button type="button" class="btn" data-ncancel style="flex:0 0 auto">Отмена</button></div></form>`;
+    document.body.appendChild(wrap);
+    const f = wrap.querySelector("form");
+    const first = f.querySelector(".need-miss input") || f.querySelector("input"); if (first) setTimeout(() => first.focus(), 50);
+    const done = (v) => { wrap.remove(); resolve(v); };
+    wrap.querySelector("[data-ncancel]").onclick = () => done(false);
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const body = Object.fromEntries(need.fields.map((k) => [k, f.elements[k].value.trim()]));
+      try {
+        const r = await fetch(`/api/students/${need.student_id}/required`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { wrap.querySelector(".need-err").textContent = d.error || "Ошибка"; return; }
+        toast("Данные сохранены"); done(true);
+      } catch (_) { wrap.querySelector(".need-err").textContent = "Нет связи, попробуйте ещё раз"; }
+    };
+  });
 }
 
 let toastTimer;
@@ -36,7 +72,7 @@ function toast(msg, err = false) {
   t.textContent = msg; t.className = "toast" + (err ? " err" : ""); t.hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), 3200);
 }
-const fail = (e) => toast(e.message || "Ошибка", true);
+const fail = (e) => { if (!e || !e.silent) toast((e && e.message) || "Ошибка", true); };
 
 /* ---------- быстрый вход по коду ---------- */
 function deviceToken(create = false) {
@@ -986,7 +1022,13 @@ function quoteHtml(q) {
 }
 
 /* «Продать абонемент»: месяц, группа, тариф, скидка → цена по всем правилам → ссылка на оплату, оплата сейчас или только счёт */
-function openSell(d, reload) {
+/* перед продажей и ссылкой на оплату: все данные клиента и почта для чека */
+async function ensureRequired(sid, kind) {
+  const info = await api("GET", `/api/students/${sid}/required?for=${kind}`).catch(() => null);
+  return !info || !info.missing.length || await askRequired(info);
+}
+async function openSell(d, reload) {
+  if (!(await ensureRequired(d.student.id, "sale"))) return;
   const id = d.student.id, box = $("#sell-box");
   scTab("abon");
   const ens = d.enrollments.filter((e) => e.lesson_kind !== "ofp");
@@ -1086,7 +1128,7 @@ async function openStudent(id) {
     ${d.siblings.length ? `<div class="chips sc-kids"><span class="chip on">${esc(s.name.split(" ")[0])}</span>${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}</div>` : ""}
     <div class="sc-meta">${isMember ? (regular.length ? regular.map((e) => `<span class="pill">${esc(e.group_name)}</span>`).join(" ") : `<span class="muted small">Группа не выбрана</span>`)
       : `${s.trial_at ? `<span class="pill">Пробное ${dtShort(s.trial_at)}</span>` : ""}`}</div>
-    <div class="sc-parents">${d.parents.map((p) => `<span class="sc-parent"><b>${esc(p.name)}</b>${p.phone ? ` <a href="tel:${esc(p.phone)}">${esc(p.phone)}</a> <button class="icon-btn" data-dial="${esc(p.phone)}" title="Позвонить через Sipuni">📞</button>` : ""}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}</span>`).join("")}</div>
+    <div class="sc-parents">${d.parents.map((p) => `<span class="sc-parent"><b>${esc(p.name)}</b>${p.phone ? ` <a href="tel:${esc(p.phone)}">${esc(p.phone)}</a> <button class="icon-btn" data-dial="${esc(p.phone)}" title="Позвонить через Sipuni">📞</button>` : ""}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}${p.email ? ` <span class="small muted">✉ ${esc(p.email)}</span>` : ""}</span>`).join("")}</div>
     ${alerts ? `<div class="chips sc-alerts">${alerts}</div>` : ""}
     ${d.next_step ? `<div class="next-step"><span>👉 <b>Следующий шаг:</b> ${esc(d.next_step.text)}</span><button class="btn sm primary" id="ns-go">${NEXT_GO[d.next_step.action] || "Сделать"}</button></div>` : ""}
     ${!isMember && d.stage_tip ? `<details class="stage-tip" ${S.tipsOpen === false ? "" : "open"}><summary>💡 Подсказка на этапе «${esc(d.stage_label)}»</summary>
@@ -1281,7 +1323,7 @@ async function openStudent(id) {
   const firstPhone = (d.parents.find((p) => p.phone) || {}).phone;
   if ($("#act-call")) $("#act-call").onclick = () => dial(firstPhone);
   if ($("#act-sell")) $("#act-sell").onclick = () => openSell(d, reload);
-  if ($("#act-link")) $("#act-link").onclick = () => { scTab("abon"); const b = $("#pay-link"); if (b) b.click(); };
+  if ($("#act-link")) $("#act-link").onclick = async () => { if (!(await ensureRequired(id, "sale"))) return; scTab("abon"); const b = $("#pay-link"); if (b) b.click(); };
   if ($("#act-pay")) $("#act-pay").onclick = () => { scTab("abon"); $("#pay-free").click(); };
   if ($("#act-vac")) $("#act-vac").onclick = () => openFold(body, "vac");
   if ($("#act-move")) $("#act-move").onclick = () => { const b = body.querySelector("[data-entr]"); if (b) { b.click(); b.scrollIntoView({ block: "center", behavior: "smooth" }); } };

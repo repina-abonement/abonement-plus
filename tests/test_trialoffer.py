@@ -3,6 +3,7 @@ import os, sys, tempfile
 from datetime import date, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from crm import db, schedule, trialoffer
+from crm import smart; smart.REQUIRE = False  # обязательные данные проверяет tests/test_required.py
 
 con = db.connect(os.path.join(tempfile.mkdtemp(), "t.sqlite3")); db.init_db(con)
 b = schedule.save_branch(con, {"name": "ТЦ «Небо»", "address": "3 этаж"})

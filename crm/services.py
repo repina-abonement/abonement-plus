@@ -8,10 +8,11 @@ from .db import normalize_phone, now_iso, settings
 
 
 class ApiError(Exception):
-    def __init__(self, message: str, status: int = 400):
+    def __init__(self, message: str, status: int = 400, extra: dict | None = None):
         super().__init__(message)
         self.message = message
         self.status = status
+        self.extra = extra or {}
 
 
 SALES_STAGES = [
@@ -310,6 +311,8 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None) -> d
 
 
 def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id=None) -> dict:
+    from . import smart
+    smart.require(con, sid, "sale")  # почта родителя нужна для чека PayKeeper
     e = _pick_enrollment(con, sid, enrollment_id)
     existing = con.execute("SELECT 1 FROM subscriptions WHERE enrollment_id=? AND month=? AND status != 'cancelled'",
                            (e["id"], ym)).fetchone()
@@ -531,6 +534,9 @@ def board(con, funnel: str) -> dict:
 
 def move_card(con, sid: int, funnel: str, stage: str, user, reason: str = "", comment: str = "") -> dict | None:
     s = get_student_row(con, sid)
+    if funnel == "sales" and stage in ("trial_booked", "trial_reminder"):
+        from . import smart
+        smart.require(con, sid, "trial")
     if funnel == "sales":
         if stage not in SALES_LABELS or stage in AUTO_SALES:
             raise ApiError("В этот этап карточка попадает сама")
@@ -600,7 +606,7 @@ def student_detail(con, sid: int) -> dict:
     s = get_student_row(con, sid)
     st = settings(con)
     fam = dict(con.execute("SELECT * FROM families WHERE id=?", (s["family_id"],)).fetchone())
-    parents = _rows(con.execute("SELECT id, name, phone, messenger FROM parents WHERE family_id=?", (s["family_id"],)))
+    parents = _rows(con.execute("SELECT id, name, phone, messenger, email FROM parents WHERE family_id=?", (s["family_id"],)))
     siblings = _rows(con.execute("SELECT id, name, birth FROM students WHERE family_id=? AND id != ?",
                                  (s["family_id"], sid)))
     grp = dict(con.execute("SELECT * FROM groups WHERE id=?", (s["group_id"],)).fetchone()) if s["group_id"] else None
@@ -721,6 +727,9 @@ UPDATABLE = {"name", "birth", "group_id", "branch_id", "tariff", "trial_at", "so
 
 def update_student(con, sid: int, data: dict, user) -> None:
     s = get_student_row(con, sid)
+    if data.get("trial_at") and data.get("trial_at") != s.get("trial_at") and s["funnel"] == "sales":
+        from . import smart
+        smart.require(con, sid, "trial")  # без имени, фамилии, даты рождения, имени и телефона родителя на пробное не записать
     changes = []
     for k, v in data.items():
         if k not in UPDATABLE:

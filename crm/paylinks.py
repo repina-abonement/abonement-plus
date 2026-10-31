@@ -65,9 +65,12 @@ def create(con, sid: int, amount: int, user: dict, purpose: str = "", subscripti
         if not token:
             raise PayLinkError("PayKeeper не выдал токен для счёта")
         phone = re.sub(r"[^\d+]", "", s[2] or "")
+        em = con.execute("""SELECT p.email FROM parents p JOIN students s ON s.family_id=p.family_id
+                            WHERE s.id=? AND p.email != '' ORDER BY p.id LIMIT 1""", (sid,)).fetchone()
         js = fiscal.pk_call(con, "/change/invoice/preview/", form={
             "pay_amount": f"{amount:.2f}", "clientid": s[1] or s[0], "orderid": orderid,
-            "service_name": purpose, "client_phone": phone, "token": token}) or {}
+            "service_name": purpose, "client_phone": phone,
+            **({"client_email": em[0]} if em else {}), "token": token}) or {}
     except fiscal.FxError as e:
         raise PayLinkError(str(e))
     inv = str(js.get("invoice_id") or "")

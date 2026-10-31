@@ -3,6 +3,7 @@ import os, sys, tempfile
 from datetime import date
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from crm import db, schedule, program, money, services as sv, closures
+from crm import smart; smart.REQUIRE = False  # обязательные данные проверяет tests/test_required.py
 from crm.services import ApiError
 
 con = db.connect(os.path.join(tempfile.mkdtemp(), "s.sqlite3")); db.init_db(con)

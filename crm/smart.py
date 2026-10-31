@@ -189,6 +189,8 @@ CREATE TABLE IF NOT EXISTS not_duplicates (
 
 def init(con):
     con.executescript(SCHEMA)
+    if "email" not in [c[1] for c in con.execute("PRAGMA table_info(parents)")]:
+        con.execute("ALTER TABLE parents ADD COLUMN email TEXT NOT NULL DEFAULT ''")
 
 
 def views(con, uid: int, section: str) -> list[dict]:
@@ -286,3 +288,103 @@ def merge_families(con, keep: int, drop: int, user: dict) -> dict:
     for (sid,) in con.execute("SELECT id FROM students WHERE family_id=?", (keep,)).fetchall():
         log(con, sid, "Семья склеена с дублем", user, "system")
     return {"ok": True, "parents_moved": moved_parents}
+
+
+# ---------------- обязательные данные (Юлия, 31.10) ----------------
+# Перед записью на пробное: имя и фамилия ребёнка, дата рождения, имя и телефон родителя.
+# Перед продажей абонемента и ссылкой на оплату: ещё почта родителя (туда PayKeeper шлёт чек). Без исключений.
+
+import re as _re
+
+EMAIL_RE = _re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
+FIELD_LABELS = {"child_name": "Имя и фамилия ребёнка", "birth": "Дата рождения ребёнка", "parent_name": "Как зовут родителя",
+                "phone": "Телефон родителя", "email": "Почта родителя (для чека)"}
+_PLACEHOLDER = ("заявка", "лид", "без имени", "ребёнок", "ребенок", "клиент")
+
+
+def _first_parent(con, family_id: int):
+    return con.execute("SELECT id, name, phone, phone_norm, email FROM parents WHERE family_id=? ORDER BY id LIMIT 1", (family_id,)).fetchone()
+
+
+def required_info(con, sid: int, kind: str) -> dict:
+    s = con.execute("SELECT id, name, birth, family_id FROM students WHERE id=?", (sid,)).fetchone()
+    if not s:
+        from .services import ApiError
+        raise ApiError("Ученик не найден", 404)
+    p = _first_parent(con, s["family_id"])
+    name = " ".join((s["name"] or "").split())
+    vals = {"child_name": name, "birth": (s["birth"] or "")[:10], "parent_name": (p["name"] if p else "") or "",
+            "phone": (p["phone"] if p else "") or "", "email": (p["email"] if p else "") or ""}
+    miss = []
+    if len(name.split()) < 2 or any(w in name.lower() for w in _PLACEHOLDER):
+        miss.append("child_name")
+    if not vals["birth"]:
+        miss.append("birth")
+    pn = vals["parent_name"].strip().lower()
+    if not pn or any(pn.startswith(w) for w in _PLACEHOLDER) or pn in ("родитель", "мама", "папа"):
+        miss.append("parent_name")
+    if not p or len(p["phone_norm"] or "") < 11:
+        miss.append("phone")
+    if kind == "sale" and not EMAIL_RE.match(vals["email"].strip()):
+        miss.append("email")
+    return {"kind": kind, "student_id": sid, "missing": miss, "values": vals,
+            "fields": ["child_name", "birth", "parent_name", "phone"] + (["email"] if kind == "sale" else []),
+            "labels": FIELD_LABELS}
+
+
+REQUIRE = True  # старые автотесты выключают проверку (tests/test_crm.py), её проверяет tests/test_required.py
+
+
+def require(con, sid: int, kind: str):
+    if not REQUIRE:
+        return
+    info = required_info(con, sid, kind)
+    if info["missing"]:
+        from .services import ApiError
+        what = ", ".join(FIELD_LABELS[k].lower() for k in info["missing"])
+        msg = ("Чтобы записать на пробное" if kind == "trial" else "Чтобы продать абонемент") + f", заполните: {what}"
+        raise ApiError(msg, 422, {"need": info})
+
+
+def fill_required(con, sid: int, data: dict, user: dict):
+    from .services import ApiError, log
+    from .db import normalize_phone
+    s = con.execute("SELECT id, name, birth, family_id FROM students WHERE id=?", (sid,)).fetchone()
+    if not s:
+        raise ApiError("Ученик не найден", 404)
+    name = " ".join(str(data.get("child_name", s["name"]) or "").split())
+    if "child_name" in data and len(name.split()) < 2:
+        raise ApiError("Впишите имя и фамилию ребёнка")
+    birth = str(data.get("birth", s["birth"]) or "")[:10]
+    if "birth" in data:
+        try:
+            b = datetime.fromisoformat(birth).date()
+        except ValueError:
+            raise ApiError("Неверная дата рождения")
+        if not (date(2000, 1, 1) < b < date.today()):
+            raise ApiError("Проверьте дату рождения")
+    email = str(data.get("email", "") or "").strip()
+    if "email" in data and not EMAIL_RE.match(email):
+        raise ApiError("Проверьте почту: например, ivanova@mail.ru")
+    phone = str(data.get("phone", "") or "").strip()
+    if "phone" in data and len(normalize_phone(phone)) < 11:
+        raise ApiError("Проверьте телефон: 11 цифр, например +7 900 123-45-67")
+    pname = " ".join(str(data.get("parent_name", "") or "").split())
+    if "parent_name" in data and len(pname) < 2:
+        raise ApiError("Впишите, как зовут родителя")
+    con.execute("UPDATE students SET name=?, birth=? WHERE id=?", (name, birth, sid))
+    p = _first_parent(con, s["family_id"])
+    if not p:
+        con.execute("INSERT INTO parents(family_id, name, phone, phone_norm, email) VALUES (?,?,?,?,?)",
+                    (s["family_id"], pname or "Родитель", phone, normalize_phone(phone) if phone else "", email))
+    else:
+        sets, args = [], []
+        if pname:
+            sets.append("name=?"); args.append(pname)
+        if phone:
+            sets += ["phone=?", "phone_norm=?"]; args += [phone, normalize_phone(phone)]
+        if email:
+            sets.append("email=?"); args.append(email)
+        if sets:
+            con.execute(f"UPDATE parents SET {', '.join(sets)} WHERE id=?", (*args, p["id"]))
+    log(con, sid, "Заполнены обязательные данные: " + ", ".join(FIELD_LABELS[k].lower() for k in data if k in FIELD_LABELS), user, "system")
