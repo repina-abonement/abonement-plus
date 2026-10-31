@@ -1,7 +1,7 @@
 "use strict";
 /* Абонемент Плюс — чаты и звонки. Подключается после app.js и пользуется его функциями. */
 
-const CH = { telegram: "Telegram", max: "MAX", whatsapp: "WhatsApp" };
+const CH = { telegram: "Telegram", max: "MAX", whatsapp: "WhatsApp", wazzup_telegram: "Telegram школы" };
 const chLabel = (c) => CH[c] || String(c || "").replace("wazzup_", "");
 const CALL_ST = { ringing: "звонит", talking: "разговор", answered: "принят", missed: "пропущен", busy: "занято", failed: "не дозвонились" };
 const secs = (n) => n == null ? "" : n < 60 ? `${n} сек` : `${Math.floor(n / 60)} мин ${n % 60 ? (n % 60) + " сек" : ""}`.trim();
@@ -150,6 +150,8 @@ async function loadFamilyComms(familyId, parents, studentId) {
   const targets = d.conversations.map((c) => ({ v: "c" + c.id, t: `${chLabel(c.channel)}${c.title ? " · " + c.title : ""}` }));
   if (st.whatsapp) parents.filter((p) => p.phone && !d.conversations.some((c) => c.channel === "whatsapp" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
     .forEach((p) => targets.push({ v: "w" + p.id, t: `WhatsApp · ${p.name} (новый чат)` }));
+  if (st.wazzup_telegram) parents.filter((p) => p.phone && !d.conversations.some((c) => c.channel === "wazzup_telegram" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
+    .forEach((p) => targets.push({ v: "t" + p.id, t: `Telegram от школы · ${p.name} (новый чат)` }));
   box.innerHTML = `
     <h3>Связь с семьёй</h3>
     <div class="chips" style="margin-bottom:10px">${parents.filter((p) => p.phone).map((p) => `<button class="btn sm" data-dial="${esc(p.phone)}">📞 ${esc(p.name.split(" ")[0])} · ${esc(p.phone)}</button>`).join("")}</div>
@@ -158,7 +160,7 @@ async function loadFamilyComms(familyId, parents, studentId) {
       <div class="composer">
         ${targets.length > 1 ? `<select id="cm-to">${targets.map((x) => `<option value="${x.v}">${esc(x.t)}</option>`).join("")}</select>` : `<div class="small muted">Ответ уйдёт: ${esc(targets[0].t)}</div><input type="hidden" id="cm-to" value="${targets[0].v}">`}
         <div class="row"><textarea id="cm-text" rows="2" placeholder="Сообщение родителю…"></textarea><button class="btn primary" id="cm-send" style="flex:0">Отправить</button></div>
-      </div>` : `<div class="small muted">Написать отсюда можно, когда родитель напишет школе в Telegram или MAX${st.whatsapp ? "" : ", а в WhatsApp после подключения Wazzup"}</div>`}`;
+      </div>` : `<div class="small muted">Написать отсюда можно, когда родитель напишет школе в Telegram или MAX${st.whatsapp || st.wazzup_telegram ? "" : ". Первыми написать можно после подключения Wazzup"}</div>`}`;
   const feed = $("#feed"); if (feed) feed.scrollTop = feed.scrollHeight;
   box.querySelectorAll("[data-dial]").forEach((b) => (b.onclick = () => dial(b.dataset.dial)));
   const send = $("#cm-send");
@@ -168,7 +170,7 @@ async function loadFamilyComms(familyId, parents, studentId) {
     send.disabled = true;
     try {
       if (to[0] === "c") await api("POST", `/api/conversations/${to.slice(1)}/send`, { text });
-      else await api("POST", `/api/families/${familyId}/whatsapp`, { parent_id: +to.slice(1), text });
+      else await api("POST", `/api/families/${familyId}/whatsapp`, { parent_id: +to.slice(1), text, channel: to[0] === "t" ? "telegram" : "whatsapp" });
       loadFamilyComms(familyId, parents, studentId);
     } catch (e) { fail(e); send.disabled = false; }
   };
@@ -346,7 +348,8 @@ async function renderCommsSettings(box, users) {
       <button class="btn sm" data-connect="max">Сохранить и подключить</button>
     </div>
 
-    <div class="int"><div class="int-head"><b>WhatsApp через Wazzup</b>${ok(st.whatsapp)}</div>
+    <div class="int"><div class="int-head"><b>WhatsApp и Telegram через Wazzup</b>${ok(st.whatsapp || st.wazzup_telegram)}</div>
+      <div class="small muted" style="margin-bottom:6px">Подключает рабочие аккаунты школы: из карточки можно написать родителю первыми по номеру телефона</div>
       <div class="field"><label>API-ключ Wazzup</label><input data-k="wazzup_key" value="${esc(v.wazzup_key)}"></div>
       ${inf.wazzup_channels.length ? `<div class="small">Каналы: ${inf.wazzup_channels.map((c) => esc(`${c.transport} ${c.name} (${c.state})`)).join(", ")}</div>` : ""}
       ${inf.wazzup_error ? `<div class="error">${esc(inf.wazzup_error)}</div>` : ""}

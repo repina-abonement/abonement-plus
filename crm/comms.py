@@ -161,6 +161,7 @@ def status(con) -> dict:
         "telegram_business": get(con, "tg_business_enabled") == "1",
         "max": bool(get(con, "max_token")) and get(con, "max_ok") == "1",
         "whatsapp": bool(get(con, "wazzup_key") and get(con, "wazzup_channel")),
+        "wazzup_telegram": bool(get(con, "wazzup_key") and get(con, "wazzup_tg_channel")),
         "ai": get(con, "ai_enabled") == "1" and bool(get(con, "yc_api_key")),
     }
 
@@ -617,7 +618,9 @@ def wz_connect(con, base_url: str) -> dict:
     wa = [c for c in lst if c["transport"] in ("whatsapp", "wapi")]
     if wa and not any(c["id"] == get(con, "wazzup_channel") for c in wa):
         put(con, "wazzup_channel", wa[0]["id"])
-    put(con, "wazzup_error", "" if wa else "В Wazzup нет канала WhatsApp")
+    tg = [c for c in lst if c["transport"] in ("telegram", "tgapi")]  # рабочий аккаунт Telegram через Wazzup
+    put(con, "wazzup_tg_channel", tg[0]["id"] if tg else "")
+    put(con, "wazzup_error", "" if wa or tg else "В Wazzup нет каналов WhatsApp или Telegram")
     return {"channels": lst}
 
 
@@ -646,10 +649,13 @@ def wz_hook(con, payload: dict) -> None:
 def _wz_send_raw(con, cid, conv: dict, text: str) -> str:
     meta = json.loads(conv["meta"] or "{}")
     crm_id = uuid.uuid4().hex
-    js = wz_call(con, "POST", "message", {
-        "channelId": meta.get("channelId") or get(con, "wazzup_channel"),
-        "chatType": meta.get("chatType") or "whatsapp", "chatId": conv["external_id"],
-        "text": text, "crmMessageId": crm_id})
+    body = {"channelId": meta.get("channelId") or get(con, "wazzup_channel"),
+            "chatType": meta.get("chatType") or "whatsapp", "text": text, "crmMessageId": crm_id}
+    if conv["external_id"].startswith("phone:"):  # первое сообщение в Telegram по номеру: чата ещё нет
+        body["phone"] = conv["external_id"][6:]
+    else:
+        body["chatId"] = conv["external_id"]
+    js = wz_call(con, "POST", "message", body)
     return (js or {}).get("messageId") or crm_id
 
 
@@ -699,6 +705,17 @@ def start_whatsapp(con, phone: str) -> int:
         raise CommsError("Неверный номер телефона")
     return upsert_conversation(con, "whatsapp", p, phone=p,
                                meta={"channelId": get(con, "wazzup_channel"), "chatType": "whatsapp"})
+
+
+def start_wazzup_telegram(con, phone: str) -> int:
+    """Новая переписка в Telegram от рабочего аккаунта (через Wazzup) по номеру родителя: можно написать первыми."""
+    if not status(con)["wazzup_telegram"]:
+        raise CommsError("Telegram через Wazzup не подключён")
+    p = normalize_phone(phone)
+    if len(p) < 11:
+        raise CommsError("Неверный номер телефона")
+    return upsert_conversation(con, "wazzup_telegram", "phone:" + p, phone=p,
+                               meta={"channelId": get(con, "wazzup_tg_channel"), "chatType": "telegram"})
 
 
 def media_for(con, mid: int) -> tuple[bytes, str]:
