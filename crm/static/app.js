@@ -193,7 +193,7 @@ function sideNav(views) {
   const item = ([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}<span>${t}</span>${badge(k)}</button>`;
   if (views.length <= 8) return views.map(item).join("");
   const has = (k) => views.find(([v]) => v === k);
-  const search = has("search") ? `<input class="nav-q" id="nav-q" type="search" placeholder="🔍 Найти клиента   /" title="Имя, фамилия или телефон. Быстро открыть поиск: клавиша /">` : "";
+  const search = has("search") ? `<input class="nav-q" id="nav-q" type="search" name="crm-client-search" autocomplete="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="🔍 Найти клиента   /" title="Имя, фамилия или телефон. Быстро открыть поиск: клавиша /">` : "";
   const placed = new Set(["search"]);
   const top = NAV_TOP.filter(has).map((k) => { placed.add(k); return item(has(k)); }).join("");
   const o = navOpen();
@@ -275,7 +275,11 @@ function shell() {
     try { const o = navOpen(); o[b.dataset.fold] = open; localStorage.setItem("crm.nav_open", JSON.stringify(o)); } catch (_) {}
   }));
   const nq = $("#nav-q");
-  if (nq) wireNavSearch(nq);
+  if (nq) {
+    wireNavSearch(nq);
+    // браузер иногда сам вписывает сюда сохранённый логин: стираем, если человек не печатал
+    [50, 400, 1200].forEach((ms) => setTimeout(() => { if (document.activeElement !== nq) nq.value = ""; }, ms));
+  }
   const more = $("[data-more]");
   if (more) more.onclick = () => { $(".more-sheet").hidden = !$(".more-sheet").hidden; };
   $(".more-sheet").onclick = (e) => { if (e.target.classList.contains("more-sheet")) e.currentTarget.hidden = true; };
