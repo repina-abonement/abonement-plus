@@ -1578,7 +1578,10 @@ async function renderBackup(box) {
     <div class="field"><label>Пароль шифрования копий</label><div class="row"><code id="bk-key" style="flex:1;padding:8px;background:var(--surface-2);border-radius:8px">${esc(d.key)}</code>
       <button class="btn sm" id="bk-copy" style="flex:0">Копировать</button></div>
       <div class="small" style="color:#b42318">Сохраните этот пароль отдельно от CRM, например в заметках телефона. Без него копию с Диска не открыть</div></div>
-    <button class="btn sm primary" id="bk-run">Сделать копию сейчас</button>`;
+    <button class="btn sm primary" id="bk-run">Сделать копию сейчас</button>
+    ${can("export") ? `<div class="field" style="margin-top:14px"><label>Копия, которую можно прочитать</label>
+      <a class="btn sm" href="/api/export/all?t=${Date.now()}">📥 Скачать базу в Excel</a>
+      <div class="small muted" style="margin-top:6px">Один файл: дети и родители с телефонами, абонементы, оплаты, посещения, группы, сотрудники. Открывается в Excel. Храните его в надёжном месте: в нём персональные данные клиентов</div></div>` : ""}`;
   $("#bk-copy").onclick = () => navigator.clipboard.writeText(d.key).then(() => toast("Пароль скопирован"));
   $("#bk-save").onclick = async () => { try { await api("POST", "/api/backup", { yadisk_token: $("#bk-token").value }); toast("Сохранено"); renderBackup(box); } catch (e) { fail(e); } };
   $("#bk-run").onclick = async (e) => {

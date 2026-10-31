@@ -68,6 +68,7 @@ python3 -m tests.test_balance   # проверка баланса: оплата 
 python3 -m tests.test_trials    # проверка пробных: возраст, конверсия, задачи по итогам тренера
 python3 -m tests.test_schedversions # проверка версий расписания с даты
 python3 -m tests.test_cert      # проверка медсправок: перерасчёт на «Гибком» только по справке
+python3 -m tests.test_fullexport # проверка выгрузки всей базы в Excel
 ```
 
 Пароль администратора задаётся переменной `CRM_ADMIN_PASSWORD`, иначе генерируется

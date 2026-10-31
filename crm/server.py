@@ -312,6 +312,15 @@ def backup_status(con, h, user, body, q):
     return backup.status(con)
 
 
+@route("GET", "/api/export/all", role="export")
+def export_all(con, h, user, body, q):
+    """Вся база понятными таблицами Excel: дети и родители, абонементы, оплаты, посещения, группы, сотрудники."""
+    from . import fullexport
+    data, name = fullexport.build(con)
+    sv.audit(con, user, "export.all", name)
+    return Raw(data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", name)
+
+
 @route("POST", "/api/backup", role="admin")
 def backup_save(con, h, user, body, q):
     from . import backup, comms
