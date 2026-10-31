@@ -642,6 +642,8 @@ def student_detail(con, sid: int) -> dict:
     out["lead_score"] = smart.lead_score(con, s)
     out["next_step"] = smart.next_step(con, s, out)
     out["stage_tip"] = smart.tips(con).get(s["stage"]) if s["funnel"] == "sales" else None
+    from . import chains
+    out["chains"] = chains.for_student(con, sid)
     return out
 
 

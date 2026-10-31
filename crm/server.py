@@ -500,6 +500,27 @@ def stage_tips_put(con, h, user, body, q):
     return {"ok": True}
 
 
+@route("GET", "/api/chains", role="admin")
+def chains_get(con, h, user, body, q):
+    from . import chains
+    return {"chains": chains.config(con), "stats": chains.stats(con)}
+
+
+@route("PUT", "/api/chains", role="admin")
+def chains_put(con, h, user, body, q):
+    from . import chains
+    chains.save_config(con, body.get("chains") or {})
+    sv.audit(con, user, "chains.save", ",".join(k for k, v in (body.get("chains") or {}).items() if v.get("enabled")))
+    return {"ok": True}
+
+
+@route("POST", "/api/chain-runs/{rid}/stop", role="operator")
+def chain_stop(con, h, user, body, q, rid):
+    from . import chains
+    chains.stop_by_user(con, int(rid), user)
+    return {"ok": True}
+
+
 @route("GET", "/api/views", role="all")
 def views_get(con, h, user, body, q):
     from . import smart

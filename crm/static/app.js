@@ -631,6 +631,30 @@ async function renderTipsSettings(box) {
   };
 }
 
+/* Настройки → Автоцепочки: серии сообщений родителям, по умолчанию выключены */
+async function renderChainsSettings(box) {
+  const d = await api("GET", "/api/chains");
+  box.innerHTML = `<h3>Автоцепочки сообщений</h3>
+    <div class="small muted" style="margin-bottom:10px">CRM сама пишет родителю серию сообщений в мессенджер, с 10:00 до 20:00. Любой ответ родителя останавливает цепочку и ставит задачу ответить. Цепочка заканчивается сама, когда цель достигнута. В текстах можно писать {child} (имя ребёнка), {group} (группа), {month} (месяц)</div>
+    ${Object.entries(d.chains).map(([k, c]) => { const st = d.stats[k]; return `<div class="section chain-box" data-chain="${k}" style="box-shadow:none;border:1px solid var(--line)">
+      <div class="row" style="align-items:center;gap:10px"><b class="grow">${esc(c.title)}</b>
+        <label class="check" style="flex:0 0 auto"><input type="checkbox" data-cen ${c.enabled ? "checked" : ""}> Включена</label></div>
+      <div class="small muted">Когда: ${esc(c.when)}. Остановится сама: ${esc(c.goal)}</div>
+      ${st.total ? `<div class="small" style="margin-top:4px">Сейчас идёт: ${st.active} · ответили родители: ${st.replied} · дошли до цели: ${st.goal}</div>` : ""}
+      ${c.steps.map((x, i) => `<div class="chain-step"><div class="field" style="flex:0 0 120px"><label>Сообщение ${i + 1}: через, дней</label><input type="number" min="0" max="60" data-cdays value="${x.days}"></div>
+        <div class="field" style="flex:1 1 auto"><label>Текст</label><textarea rows="3" data-ctext>${esc(x.text)}</textarea></div></div>`).join("")}
+      </div>`; }).join("")}
+    <button class="btn primary" id="chains-save">Сохранить</button>`;
+  $("#chains-save").onclick = async () => {
+    const chains = {};
+    box.querySelectorAll("[data-chain]").forEach((el) => {
+      chains[el.dataset.chain] = { enabled: el.querySelector("[data-cen]").checked,
+        steps: [...el.querySelectorAll(".chain-step")].map((r) => ({ days: +r.querySelector("[data-cdays]").value, text: r.querySelector("[data-ctext]").value })) };
+    });
+    try { await api("PUT", "/api/chains", { chains }); toast("Сохранено"); renderChainsSettings(box); } catch (e) { fail(e); }
+  };
+}
+
 /* Мои списки: сохранённые фильтры «Учеников», у каждого сотрудника свои */
 async function membersViews(page, f, rerender) {
   const box = $("#m-views"); if (!box) return;
@@ -1052,6 +1076,7 @@ async function openStudent(id) {
     !s.birth ? `<span class="pill yellow">Нет даты рождения</span>` : "",
     ...d.enrollments.filter((e) => e.age_warn).map((e) => `<span class="pill red">⚠️ ${esc(e.group_name)}: ${esc(e.age_warn)}</span>`),
     d.trial_age_warn ? `<span class="pill red">⚠️ Пробное ${esc(d.trial_age_warn)}</span>` : "",
+    ...(d.chains || []).map((r) => `<span class="pill chain-pill">🔁 Автоцепочка «${esc(r.title)}»: отправлено ${r.step} из ${r.total} <button class="chip-x" data-chstop="${r.id}" title="Остановить цепочку">×</button></span>`),
   ].filter(Boolean).join("");
   const html = `
   <div class="sc-head">
@@ -1261,6 +1286,10 @@ async function openStudent(id) {
   if ($("#act-vac")) $("#act-vac").onclick = () => openFold(body, "vac");
   if ($("#act-move")) $("#act-move").onclick = () => { const b = body.querySelector("[data-entr]"); if (b) { b.click(); b.scrollIntoView({ block: "center", behavior: "smooth" }); } };
   if ($("#act-trial")) $("#act-trial").onclick = () => { scTab("feed"); const b = $("#to-book"); if (b) { b.click(); b.scrollIntoView({ block: "center", behavior: "smooth" }); } else { const f = $("#f-trial"); if (f) f.scrollIntoView({ block: "center", behavior: "smooth" }); } };
+  body.querySelectorAll("[data-chstop]").forEach((b) => (b.onclick = async () => {
+    if (!confirm("Остановить автоцепочку для этого клиента? Больше сообщений по ней не уйдёт")) return;
+    try { await api("POST", `/api/chain-runs/${b.dataset.chstop}/stop`, {}); toast("Цепочка остановлена"); reload(); } catch (e) { fail(e); }
+  }));
   const tip = body.querySelector(".stage-tip"); if (tip) tip.addEventListener("toggle", () => { S.tipsOpen = tip.open; });
   if ($("#ns-go")) $("#ns-go").onclick = () => {
     const a = d.next_step.action, click = (sel) => { const b = $(sel); if (b) { b.click(); return true; } return false; };
@@ -1585,7 +1614,7 @@ const SET_TABS = [
   ["users", "👥", "Сотрудники", "Должности, телефоны, пароли"], ["prices", "💰", "Цены и правила", "Прайс, срок продления, пробное"],
   ["structure", "🏟", "Филиалы, группы и смены", "Расписание и лимиты"], ["resp", "🎯", "Ответственные по филиалам", "Кому задачи по пробным"],
   ["comms", "💬", "Связь с клиентами", "Telegram, MAX, WhatsApp, Sipuni, заявки"], ["trials", "📋", "Задачи по пробным", "Автосообщения и сроки"],
-  ["tips", "💡", "Подсказки по этапам", "Что сказать на каждом этапе воронки"],
+  ["tips", "💡", "Подсказки по этапам", "Что сказать на каждом этапе воронки"], ["chains", "🔁", "Автоцепочки сообщений", "Серии сообщений родителям"],
   ["coachpay", "⏱", "Тренеры: приход и оплата", "Отметка прихода, ставки"], ["program", "🏆", "Сборная ПРО", "Цены и правила сборной"],
   ["sources", "📣", "Рекламные каналы", "Источники лидов"], ["offers", "📄", "Оферты", "Редакции и ссылки"],
   ["backup", "💾", "Резервные копии", "Яндекс Диск, копия сейчас"], ["archive", "🗄", "Архив", "Вернуть из архива"],
@@ -1635,6 +1664,7 @@ async function renderSettings(page) {
     </form>
     ${can("payments", "full") ? `<div class="section" id="discount-settings" data-tab="prices"></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" id="tips-settings" data-tab="tips"></div>` : ""}
+    ${S.user.role === "admin" ? `<div class="section" id="chains-settings" data-tab="chains"></div>` : ""}
     <div class="section" id="backup-settings" data-tab="backup"></div>
     <div class="section" id="resp-settings" data-tab="resp"></div>
     <div id="program-settings" data-tab="program"></div>
@@ -1723,6 +1753,7 @@ async function renderSettings(page) {
   if ($("#resp-settings")) renderResponsibles($("#resp-settings")).catch(fail);
   if ($("#backup-settings")) renderBackup($("#backup-settings")).catch(() => { $("#backup-settings").remove(); $('[data-tile="backup"]')?.remove(); });
   else if ($("#offers-settings")) $("#offers-settings").remove();
+  if ($("#chains-settings")) renderChainsSettings($("#chains-settings")).catch(fail);
   if ($("#tips-settings")) renderTipsSettings($("#tips-settings")).catch(fail);
   if ($("#discount-settings")) renderDiscounts($("#discount-settings")).catch(() => $("#discount-settings").remove());
   if ($("#structure-settings")) renderStructure($("#structure-settings"), users).catch(fail);

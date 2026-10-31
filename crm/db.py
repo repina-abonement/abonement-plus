@@ -270,8 +270,9 @@ def init_db(con: sqlite3.Connection):
     staffdocs.init(con)
     from . import tour
     tour.init(con)
-    from . import smart
+    from . import smart, chains
     smart.init(con)
+    chains.init(con)
     staff.init(con)
     merch.init(con)
     sources.init(con)

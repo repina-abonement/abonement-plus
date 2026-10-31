@@ -1279,3 +1279,6 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 .dup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .dup-fam { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
 @media (max-width: 640px) { .dup-grid { grid-template-columns: 1fr; } }
+.chain-step { display: flex; gap: 10px; align-items: flex-start; margin-top: 8px; }
+.chain-pill { display: inline-flex; align-items: center; gap: 4px; }
+@media (max-width: 640px) { .chain-step { flex-direction: column; gap: 0; } .chain-step .field { flex: 1 1 auto !important; width: 100%; } }
