@@ -99,30 +99,39 @@ async function renderMerch(page) {
   if (!C.to) { C.to = S.meta.today; C.from = S.meta.today.slice(0, 8) + "01"; }
   const [r, it] = await Promise.all([api("GET", `/api/merch/sales?from=${C.from}&to=${C.to}`), api("GET", "/api/merch/items" + (S.user.role === "admin" ? "?all=1" : ""))]);
   const ok = r.rows.filter((x) => x.status === "ok");
+  const tabs = [["sales", "Продажи"], ...(can("merch", "full") ? [["stock", "Склад и заказ"]] : []), ...(S.user.role === "admin" ? [["price", "Прайс"]] : [])];
+  if (!tabs.some(([k]) => k === C.tab)) C.tab = "sales";
+  const per = payPeriods(S.meta.today);
   page.innerHTML = `<div class="page-head"><h2 class="grow">Мерч</h2><button class="btn primary" id="m-new">+ Продажа</button></div>
     <div id="m-form"></div>
-    <div class="row" style="max-width:420px;margin-bottom:12px"><div class="field"><label>С</label><input type="date" id="m-from" value="${C.from}"></div><div class="field"><label>По</label><input type="date" id="m-to" value="${C.to}"></div></div>
+    ${r.qr_no_receipt.length ? `<div class="alert" style="margin-bottom:12px">По QR не пробит чек: ${r.qr_no_receipt.length}. Пробейте на кассе и нажмите «Чек пробит» в строке</div>` : ""}
+    ${tabs.length > 1 ? `<div class="seg" style="margin-bottom:14px">${tabs.map(([k, t]) => `<button data-mtab="${k}" class="${C.tab === k ? "active" : ""}">${t}</button>`).join("")}</div>` : ""}
+    ${C.tab === "sales" ? `
+    <div class="pay-filters">
+      <div class="seg">${per.map(([t, a, b]) => `<button data-mper="${a}|${b}" class="${C.from === a && C.to === b ? "active" : ""}">${t}</button>`).join("")}</div>
+      <span class="pay-dates"><input type="date" id="m-from" value="${C.from}"> <span class="muted">по</span> <input type="date" id="m-to" value="${C.to}"></span></div>
     <div class="cfacts" style="margin-bottom:14px"><div class="cfact green"><b>${rub(r.total)}</b><span>всего за период</span></div>
       ${Object.entries(r.by_method).map(([k, v]) => `<div class="cfact"><b>${rub(v)}</b><span>${MERCH_METHODS[k]}</span></div>`).join("")}</div>
-    ${r.qr_no_receipt.length ? `<div class="alert" style="margin-bottom:12px">По QR не пробит чек: ${r.qr_no_receipt.length}. Пробейте на кассе и нажмите «Чек пробит» в строке</div>` : ""}
-    <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:14px">
-      <section class="panel" style="padding:14px;flex:1 1 280px"><h3 style="margin-top:0">По товарам</h3>${r.by_item.length ? r.by_item.map((x) => `<div class="kid-row"><span class="grow">${esc(x.name)}</span><span class="small muted">${x.qty} шт.</span><b>${rub(x.amount)}</b></div>`).join("") : `<div class="muted small">Продаж нет</div>`}</section>
-      <section class="panel" style="padding:14px;flex:1 1 280px"><h3 style="margin-top:0">По продавцам</h3>${r.by_seller.length ? r.by_seller.map((x) => `<div class="kid-row"><span class="grow">${esc(x.name)}</span><b>${rub(x.amount)}</b>${x.cash_not_handed ? `<span class="pill yellow">наличные не сданы ${rub(x.cash_not_handed)}</span>` : ""}</div>`).join("") : `<div class="muted small">Продаж нет</div>`}</section>
-    </div>
-    ${can("merch", "full") ? merchStockHtml(it) : ""}
-    <h3 style="margin:18px 0 8px">Все продажи</h3>
+    ${r.rows.length ? `<div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:14px;margin-bottom:14px">
+      <section class="panel" style="padding:14px;flex:1 1 280px"><h3 style="margin-top:0">По товарам</h3>${r.by_item.map((x) => `<div class="kid-row"><span class="grow">${esc(x.name)}</span><span class="small muted">${x.qty} шт.</span><b>${rub(x.amount)}</b></div>`).join("")}</section>
+      <section class="panel" style="padding:14px;flex:1 1 280px"><h3 style="margin-top:0">По продавцам</h3>${r.by_seller.map((x) => `<div class="kid-row"><span class="grow">${esc(x.name)}</span><b>${rub(x.amount)}</b>${x.cash_not_handed ? `<span class="pill yellow">наличные не сданы ${rub(x.cash_not_handed)}</span>` : ""}</div>`).join("")}</section>
+    </div>` : ""}
     <div class="list">${r.rows.length ? r.rows.map((x) => `<div class="list-row ${x.status === "cancelled" ? "muted" : ""}">
       <div class="grow"><b>${esc(x.item_name)}</b> × ${x.qty} · ${rub(x.amount)} · ${MERCH_METHODS[x.method]}${x.status === "cancelled" ? " · <b>отменена</b>" : ""}
         <div class="small muted">${dShort(x.date)}, ${esc(x.branch || "")}, продал ${esc(x.seller)}${x.note ? `, ${esc(x.note)}` : ""}</div></div>
       ${x.status === "ok" && x.method === "qr" ? (x.receipt_done ? `<span class="pill green">чек пробит</span>` : `<button class="btn sm primary" data-flag="${x.id}" data-f="receipt_done">Чек пробит</button>`) : ""}
       ${x.status === "ok" && x.method === "cash" ? (x.cash_handed ? `<span class="pill green">деньги сданы</span>` : `<button class="btn sm" data-flag="${x.id}" data-f="cash_handed">Деньги сданы</button>`) : ""}
       ${x.status === "ok" && S.user.role === "admin" ? `<button class="btn sm" data-mcancel="${x.id}" title="Отменить продажу">✕</button>` : ""}
-    </div>`).join("") : `<div class="list-row muted">За этот период продаж нет</div>`}</div>
-    ${S.user.role === "admin" ? `<h3 style="margin:18px 0 8px">Прайс</h3><div class="list">${it.items.map((i) => `<div class="list-row"><input data-in="${i.id}" value="${esc(i.name)}" style="flex:1"><input data-ip="${i.id}" type="number" value="${i.price}" style="width:110px;flex:0 0 110px"><label class="check" style="flex:0 0 auto"><input type="checkbox" data-ia="${i.id}" ${i.active ? "checked" : ""}> в продаже</label><button class="btn sm" data-isave="${i.id}">Сохранить</button></div>`).join("")}
+    </div>`).join("") : `<div class="list-row muted">За этот период продаж нет</div>`}</div>` : ""}
+    ${C.tab === "stock" ? merchStockHtml(it) : ""}
+    ${C.tab === "price" ? `<div class="small muted" style="margin-bottom:8px">Цена и название сохраняются сами, как только вы их поменяли</div>
+      <div class="list">${it.items.map((i) => `<div class="list-row"><input data-in="${i.id}" value="${esc(i.name)}" style="flex:1"><input data-ip="${i.id}" type="number" value="${i.price}" style="width:110px;flex:0 0 110px"><span class="muted" style="flex:0 0 auto">₽</span><label class="check" style="flex:0 0 auto"><input type="checkbox" data-ia="${i.id}" ${i.active ? "checked" : ""}> в продаже</label></div>`).join("")}
       <div class="list-row"><input id="i-new-n" placeholder="Новый товар" style="flex:1"><input id="i-new-p" type="number" placeholder="Цена" style="width:110px;flex:0 0 110px"><button class="btn sm primary" id="i-add">Добавить</button></div></div>` : ""}`;
+  page.querySelectorAll("[data-mtab]").forEach((b) => (b.onclick = () => { C.tab = b.dataset.mtab; render(); }));
+  page.querySelectorAll("[data-mper]").forEach((b) => (b.onclick = () => { [C.from, C.to] = b.dataset.mper.split("|"); render(); }));
   wireMerchStock(page, it);
-  $("#m-from").onchange = (e) => { C.from = e.target.value; render(); };
-  $("#m-to").onchange = (e) => { C.to = e.target.value; render(); };
+  if ($("#m-from")) $("#m-from").onchange = (e) => { C.from = e.target.value; render(); };
+  if ($("#m-to")) $("#m-to").onchange = (e) => { C.to = e.target.value; render(); };
   $("#m-new").onclick = () => {
     const box = $("#m-form");
     if (box.innerHTML) { box.innerHTML = ""; return; }
@@ -136,11 +145,11 @@ async function renderMerch(page) {
     if (!confirm("Отменить продажу? Она останется в списке зачёркнутой")) return;
     try { await api("POST", `/api/merch/sales/${b.dataset.mcancel}/cancel`, {}); render(); } catch (e) { fail(e); }
   }));
-  page.querySelectorAll("[data-isave]").forEach((b) => (b.onclick = async () => {
-    const id = b.dataset.isave;
+  const saveItem = async (id) => {
     try { await api("PUT", `/api/merch/items/${id}`, { name: page.querySelector(`[data-in="${id}"]`).value, price: page.querySelector(`[data-ip="${id}"]`).value, active: page.querySelector(`[data-ia="${id}"]`).checked }); toast("Сохранено"); }
     catch (e) { fail(e); }
-  }));
+  };
+  page.querySelectorAll("[data-in],[data-ip],[data-ia]").forEach((x) => (x.onchange = () => saveItem(x.dataset.in || x.dataset.ip || x.dataset.ia)));
   if ($("#i-add")) $("#i-add").onclick = async () => {
     try { await api("POST", "/api/merch/items", { name: $("#i-new-n").value, price: $("#i-new-p").value }); render(); } catch (e) { fail(e); }
   };
