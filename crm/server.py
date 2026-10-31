@@ -161,7 +161,7 @@ def change_password(con, h, user, body, q):
         raise ApiError("Текущий пароль неверный")
     new = body.get("new") or ""
     if len(new) < 8:
-        raise ApiError("Новый пароль — минимум 8 символов")
+        raise ApiError("Новый пароль: минимум 8 символов")
     con.execute("UPDATE users SET pw_hash=? WHERE id=?", (db.hash_password(new), user["id"]))
     sv.audit(con, user, "password.change")
     return {"ok": True}

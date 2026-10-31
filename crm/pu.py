@@ -322,7 +322,7 @@ def complete(con, tid: int, result: str, data: dict, user: dict, now: datetime |
         except ValueError:
             raise ApiError("Укажите дату, когда перезвонить")
         if d.date() > (now + timedelta(days=14)).date():
-            raise ApiError("Перезвонить можно не позже чем через 14 дней. Если родитель просит позже — это «Отказ: пока не может»")
+            raise ApiError("Перезвонить можно не позже чем через 14 дней. Если родитель просит позже, это «Отказ: пока не может»")
         if d < now:
             raise ApiError("Дата уже прошла")
         close(f"Перезвонить {d.strftime('%d.%m %H:%M')}" + (f": {data.get('note')}" if data.get("note") else ""))

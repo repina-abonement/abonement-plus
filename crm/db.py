@@ -305,7 +305,7 @@ def init_db(con: sqlite3.Connection):
     if not exists:
         if not pw:
             pw = secrets.token_urlsafe(9)
-            print(f"\n*** Создан администратор: логин '{login}', пароль '{pw}' — смените его! ***\n", flush=True)
+            print(f"\n*** Создан администратор: логин '{login}', пароль '{pw}', смените его! ***\n", flush=True)
         con.execute("INSERT INTO users(login, name, role, pw_hash) VALUES (?, ?, 'admin', ?)",
                     (login, "Администратор", hash_password(pw)))
 

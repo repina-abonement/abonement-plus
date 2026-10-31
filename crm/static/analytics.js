@@ -50,7 +50,7 @@ function anGroups(box, d) {
       <tbody>${d.groups.map((g) => `<tr><td><b>${esc(g.name)}</b>${S.dashBranch ? "" : `<div class="small muted">${esc(g.branch)}</div>`}</td><td>${esc(g.coach || "—")}</td>
         <td>${anFillCell(g.fill, g.kids, g.capacity)}</td><td class="${anGood(g.retention, 90, 80)}">${anPct(g.retention)}</td>
         <td class="${anGood(g.attendance, 88, 80)}">${anPct(g.attendance)}</td><td>${g.left || ""}</td><td class="r">${rub(g.revenue)}</td></tr>`).join("")}</tbody></table></div>
-      <div class="small muted" style="margin-top:8px">Зелёная полоса — группа почти полная (90%+), красная — меньше половины мест. «Продлили» — кто занимался в прошлом месяце и оплатил этот</div>
+      <div class="small muted" style="margin-top:8px">Зелёная полоса: группа почти полная (90%+), красная: меньше половины мест. «Продлили»: кто занимался в прошлом месяце и оплатил этот</div>
     </section>`;
 }
 
@@ -116,7 +116,7 @@ function anSources(box, d) {
       <tbody>${d.sources.map((x) => `<tr><td><b>${esc(x.source)}</b><div class="small muted">${esc(x.channel)}</div></td><td>${x.leads}</td><td>${x.trial}</td><td>${x.came}</td><td><b>${x.bought}</b></td>
         <td class="${anGood(x.conv, 25, 12)}">${anPct(x.conv)}</td><td class="r">${money(x.spend)}</td><td class="r">${money(x.per_lead)}</td><td class="r">${money(x.per_buy)}</td><td class="r">${money(x.revenue)}</td></tr>`).join("")}
       <tr class="an-total"><td>Итого</td><td>${t.leads}</td><td>${t.trial}</td><td>${t.came}</td><td>${t.bought}</td><td>${anPct(t.conv)}</td><td class="r">${money(t.spend)}</td><td></td><td></td><td class="r">${money(t.revenue)}</td></tr></tbody></table></div>
-      <div class="small muted" style="margin-top:8px">Лиды, пришедшие в этом месяце. «Принесли» — оплаченные абонементы тех, кто купил впервые в этом месяце</div>
+      <div class="small muted" style="margin-top:8px">Лиды, пришедшие в этом месяце. «Принесли»: оплаченные абонементы тех, кто купил впервые в этом месяце</div>
     </section>`;
 }
 

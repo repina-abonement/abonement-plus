@@ -250,8 +250,8 @@ function navRestore(sub) {
   if (sub.inbox && S.inbox) Object.assign(S.inbox, sub.inbox);
 }
 const navDepth = () => (history.state && history.state.depth) || 0;
-function pushNav() {
-  try { history.pushState({ view: S.view, sub: navSnap(), depth: navDepth() + 1 }, "", "#" + S.view); } catch (_) {}
+function pushNav(menu = false) {
+  try { history.pushState({ view: S.view, sub: navSnap(), depth: navDepth() + 1, menu }, "", "#" + S.view); } catch (_) {}
 }
 function step(fn) { fn(); pushNav(); window.scrollTo(0, 0); render(); }
 let drawerInHistory = false, skipPop = false;
@@ -267,7 +267,7 @@ window.addEventListener("popstate", (e) => {
 function go(view, fromHistory = false) {
   if (view === "settings" && !fromHistory) S.setTab = null;  // из меню: сначала плитки
   S.view = view;
-  if (!fromHistory) pushNav();
+  if (!fromHistory) pushNav(true);  // переход из меню: кнопку «Назад» не показываем
   try { localStorage.setItem("crm.view", view); } catch (_) {}
   app.querySelectorAll("[data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   app.querySelectorAll(".nav-fold").forEach((f) => { if (f.querySelector(`[data-view="${view}"]`)) f.classList.add("open"); });
@@ -284,7 +284,7 @@ async function render() {
   if (S.meta && S.meta.staff_docs_pending) return renderStaffDocs(page);
   await renderView(page);
   if (S.meta && S.meta.tour_pending && !S.tourOn) startTour();
-  if (navDepth() > 0 && !page.querySelector(".back-btn")) {
+  if (navDepth() > 0 && !(history.state && history.state.menu) && !page.querySelector(".back-btn")) {
     page.insertAdjacentHTML("afterbegin", `<button class="back-btn" type="button">← Назад</button>`);
     page.querySelector(".back-btn").onclick = () => history.back();
   }
@@ -490,11 +490,10 @@ async function renderBoard(page, funnel) {
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">${BOARD_TITLES[funnel]}</h2>
       ${funnel === "members" && can("members", "full") ? `<button class="btn sm" id="arch-btn">🗄 Архив ▾</button>` : ""}
-      <button class="btn sm" id="refresh">Обновить</button></div>
+</div>
     <div class="section arch-box" id="arch-box" hidden></div>
     ${data.note ? `<div class="note">${esc(data.note)}</div>` : ""}
     ${boardHtml(data)}`;
-  $("#refresh").onclick = render;
   if ($("#arch-btn")) membersArchive(page);
   wireBoard(page, funnel, data);
 }
@@ -544,7 +543,7 @@ function renderMembersList(page, data) {
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">${BOARD_TITLES.members}</h2>
       ${can("members", "full") ? `<button class="btn sm" id="arch-btn">🗄 Архив ▾</button>` : ""}
-      <button class="btn sm" id="refresh">Обновить</button></div>
+</div>
     <div class="section arch-box" id="arch-box" hidden></div>
     <div class="m-filters">
       <input id="mf-q" placeholder="Поиск: ребёнок, родитель или телефон" value="${esc(f.q || "")}">
@@ -556,7 +555,6 @@ function renderMembersList(page, data) {
     ${data.note ? `<div class="note">${esc(data.note)}</div>` : ""}
     <div class="section m-list">${body}</div>`;
   const rerender = () => { save(); renderMembersList(page, data); };
-  $("#refresh").onclick = render;
   $("#mf-q").oninput = (e) => { f.q = e.target.value; const pos = e.target.selectionStart; rerender(); const i = $("#mf-q"); i.focus(); i.setSelectionRange(pos, pos); };
   $("#mf-branch").onchange = (e) => { f.branch = e.target.value; f.group = ""; rerender(); };
   $("#mf-group").onchange = (e) => { f.group = e.target.value; rerender(); };
@@ -1072,7 +1070,7 @@ async function openStudent(id) {
       <div class="field"><label>По</label><input id="v-end" type="date"></div>
     </div>
     <button class="btn sm" id="v-add">Добавить отпуск</button>
-    ${d.vacations.length ? `<ul class="history" style="margin-top:10px">${d.vacations.map((v) => `<li>${dShort(v.start)} — ${dShort(v.end)} <button class="btn sm danger" data-vdel="${v.id}">Удалить</button></li>`).join("")}</ul>` : ""}
+    ${d.vacations.length ? `<ul class="history" style="margin-top:10px">${d.vacations.map((v) => `<li>${dShort(v.start)}–${dShort(v.end)} <button class="btn sm danger" data-vdel="${v.id}">Удалить</button></li>`).join("")}</ul>` : ""}
     <div class="small muted" style="margin-top:6px">Дни отпуска не входят в цену абонемента. Предупредить нужно до оплаты месяца.</div>
   </div>
 
@@ -1130,7 +1128,7 @@ async function openStudent(id) {
   if ($("#mk-slots")) loadSlots($("#mk-slots"), async (x) => {
     if (!confirm(`Записать ${s.name} на отработку ${dayLabel(x.date)} ${x.time} в группу ${x.group}?`)) return;
     try { await api("POST", `/api/students/${id}/makeups`, { group_id: x.group_id, date: x.date }); toast("Записан на отработку"); reload(); } catch (e) { fail(e); }
-  }, "Или на свободное место в обычной группе (жёлтые — освободились, потому что кто-то предупредил):", s.birth);
+  }, "Или на свободное место в обычной группе (жёлтые освободились, потому что кто-то предупредил):", s.birth);
   if ($("#trial-slots")) {
     if (s.group_id && s.trial_at) api("GET", `/api/occupancy?group_id=${s.group_id}&date=${s.trial_at.slice(0, 10)}`).then((o) => {
       if (o.limit) $("#trial-occ").innerHTML = `На эту тренировку записано <b>${o.count} из ${o.limit}</b>${o.warned.length ? ` (предупредили, что не придут: ${esc(o.warned.join(", "))})` : ""}`;

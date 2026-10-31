@@ -70,7 +70,7 @@ async function renderProgramSettings(box) {
         <button class="btn sm" style="flex:0;align-self:flex-end">Сохранить</button></div>` : ""}
     </div>`).join("") + `<div class="section"><h3>Дни без занятий</h3>
       <div class="small muted">Праздники и другие даты: их нет в расчёте абонемента, журнале и на столе тренера</div>
-      <ul class="history" style="margin-top:8px">${c.items.map((x) => `<li>${dShort(x.date_from)}${x.date_to !== x.date_from ? " — " + dShort(x.date_to) : ""} · ${x.grp ? esc(x.grp) : x.branch ? esc(x.branch) : "вся школа"}${x.note ? " · " + esc(x.note) : ""}
+      <ul class="history" style="margin-top:8px">${c.items.map((x) => `<li>${dShort(x.date_from)}${x.date_to !== x.date_from ? "–" + dShort(x.date_to) : ""} · ${x.grp ? esc(x.grp) : x.branch ? esc(x.branch) : "вся школа"}${x.note ? " · " + esc(x.note) : ""}
         ${admin ? `<button class="btn sm danger" data-cdel="${x.id}">Удалить</button>` : ""}</li>`).join("") || "<li class='muted'>Пока нет</li>"}</ul>
       ${admin ? `<div class="row" style="flex-wrap:wrap" id="cl-form"><div class="field"><label>С</label><input type="date" name="date_from"></div><div class="field"><label>По</label><input type="date" name="date_to"></div>
         <div class="field"><label>Где</label><select name="where"><option value="">Вся школа</option>${S.meta.branches.map((b) => `<option value="b${b.id}">${esc(b.name)}</option>`).join("")}${S.meta.groups.map((g) => `<option value="g${g.id}">${esc(g.name)}</option>`).join("")}</select></div>

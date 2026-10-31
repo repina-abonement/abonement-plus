@@ -179,7 +179,7 @@ async function renderTaskSettings(box, users) {
     <div class="field"><label>Текст за 2 часа</label><textarea data-t="msg_2h_before" rows="3">${esc(v.msg_2h_before)}</textarea></div>
     <div class="field"><label>Через 10 минут после пробного</label>${yn("auto_after")}</div>
     <div class="field"><label>Текст после пробного</label><textarea data-t="msg_after" rows="2">${esc(v.msg_after)}</textarea></div>
-    <div class="field"><label>Предложение ближайших пробных (кнопка «📅 Предложить ближайшие ПУ» в переписке). {slots} — список дат</label><textarea data-t="msg_trial_offer" rows="4">${esc(v.msg_trial_offer || "")}</textarea></div>
+    <div class="field"><label>Предложение ближайших пробных (кнопка «📅 Предложить ближайшие ПУ» в переписке). {slots}: список дат</label><textarea data-t="msg_trial_offer" rows="4">${esc(v.msg_trial_offer || "")}</textarea></div>
     <div class="small muted" style="margin-bottom:10px">В текст подставятся: {child} имя ребёнка, {date} дата, {time} время, {place} филиал. Сообщение уходит туда, где семья уже переписывалась со школой (Telegram, MAX или WhatsApp). Если переписки нет, в задаче будет видно «не ушло», и Оля напишет вручную</div>
     <button class="btn primary" id="t-save">Сохранить</button>`;
   $("#t-save").onclick = async () => {

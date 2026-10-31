@@ -175,7 +175,7 @@ def update_enrollment(con, eid: int, data: dict, user) -> None:
     if "weekdays" in data:
         days = _clean_days(data["weekdays"], e["gw"])
         con.execute("UPDATE enrollments SET weekdays=? WHERE id=?", (days, eid))
-        log(con, e["student_id"], f"{e['name']}: дни — {_days_label(days) if days else 'все дни группы'}", user, "system")
+        log(con, e["student_id"], f"{e['name']}: дни: {_days_label(days) if days else 'все дни группы'}", user, "system")
     if "tariff" in data:
         if data["tariff"] not in ("fixed", "flex"):
             raise ApiError("Неизвестный тариф")
@@ -544,7 +544,7 @@ def move_card(con, sid: int, funnel: str, stage: str, user, reason: str = "", co
                             (sid, s["group_id"], "", s["tariff"], now_iso()))
                 from . import capacity
                 capacity.ensure_roster(con, s["group_id"])
-            log(con, sid, "Купил абонемент — переведён в учеников", user, "stage")
+            log(con, sid, "Купил абонемент, переведён в ученики", user, "stage")
             return
         contacted = 1 if stage in ("how_was", "refused") else s["contacted_after_trial"]
         con.execute("UPDATE students SET stage=?, stage_changed_at=?, contacted_after_trial=?, priority=0 WHERE id=?",
@@ -682,7 +682,7 @@ def create_student(con, data: dict, user) -> int:
         if not pname or not phone:
             raise ApiError("Укажите родителя и телефон")
         if find_families_by_phone(con, phone) and not data.get("force_new_family"):
-            raise ApiError("Семья с этим телефоном уже есть — добавьте ребёнка в неё", 409)
+            raise ApiError("Семья с этим телефоном уже есть, добавьте ребёнка в неё", 409)
         fam_name = (data.get("family_name") or "").strip() or pname.split()[-1]
         family_id = con.execute("INSERT INTO families(name) VALUES (?)", (fam_name,)).lastrowid
         con.execute("INSERT INTO parents(family_id, name, phone, phone_norm, messenger) VALUES (?,?,?,?,?)",
@@ -762,7 +762,7 @@ def add_vacation(con, sid: int, start: str, end: str, note: str, user) -> None:
     con.execute("INSERT INTO vacations(student_id, start, end, note) VALUES (?,?,?,?)", (sid, start, end, note or ""))
     paid = con.execute("""SELECT month FROM subscriptions WHERE student_id=? AND status != 'cancelled'
                           AND month BETWEEN ? AND ?""", (sid, start[:7], end[:7])).fetchall()
-    warn = " — внимание: на этот месяц абонемент уже выставлен" if paid else ""
+    warn = ". Внимание: на этот месяц абонемент уже выставлен" if paid else ""
     log(con, sid, f"Отпуск {fmt_date(start)}–{fmt_date(end)}{warn}", user, "vacation")
 
 
