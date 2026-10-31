@@ -294,7 +294,7 @@ async function renderStructure(box, users) {
             <span class="gt-coach">${esc(g.coach_name || "без тренера")}${g.assistant_name ? ` / ${esc(g.assistant_name)}` : ""}${extra ? ` <span class="pill">${esc(extra)}</span>` : ""}${g.is_makeup ? ` <span class="pill">отработки</span>` : ""}</span>
             ${g.is_makeup ? `<span></span>` : `<span class="gt-fill ${g.kids > g.capacity ? "over" : ""}"><i style="width:${pc}%"></i></span><span class="gt-num">${g.kids}/${g.capacity}</span>`}</div>`; }).join("")}`).join("") || `<div class="small muted">Групп пока нет</div>`}
         <button class="btn sm" data-gadd="${b.id}" style="margin-top:10px">+ Группа</button>
-        <details class="br-shifts"><summary><b>Смены администраторов</b> <span class="muted">(${b.shifts.length})</span></summary>
+        <details class="br-shifts" data-shb="${b.id}" ${(S.shiftOpen || {})[b.id] ? "open" : ""}><summary><b>Смены администраторов</b> <span class="muted">(${b.shifts.length})</span></summary>
         ${b.shifts.map((sh) => `<div class="row" style="align-items:center;margin-top:6px"><div class="small">${esc(sh.user_name)} · ${sh.weekdays.split(",").map((x) => WD[+x]).join(", ")}${sh.time_from ? ` · ${esc(sh.time_from)}–${esc(sh.time_to)}` : ""}</div>
           <button class="btn sm danger" data-shdel="${sh.id}" style="flex:0">Убрать</button></div>`).join("") || `<div class="small muted">Смен пока нет</div>`}
         <div class="shift-form" data-sb="${b.id}">
@@ -310,6 +310,8 @@ async function renderStructure(box, users) {
   const refreshMeta = async () => { S.meta = await api("GET", "/api/meta"); reload(); };
   box.querySelectorAll("[data-gadd]").forEach((b) => (b.onclick = () => groupForm(null, +b.dataset.gadd, d, coaches, refreshMeta)));
   box.querySelectorAll("[data-gedit]").forEach((b) => (b.onclick = () => groupForm(+b.dataset.gedit, +b.dataset.b, d, coaches, refreshMeta)));
+  // «Смены администраторов» остаются раскрытыми после добавления или удаления смены
+  box.querySelectorAll("[data-shb]").forEach((d) => d.addEventListener("toggle", () => { S.shiftOpen = S.shiftOpen || {}; S.shiftOpen[d.dataset.shb] = d.open; }));
   box.querySelectorAll("[data-brt]").forEach((h) => (h.onclick = (e) => {
     if (e.target.closest("[data-bedit]")) return;
     const blk = h.closest(".br-block"), on = blk.classList.toggle("open");
