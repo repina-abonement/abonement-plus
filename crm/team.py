@@ -44,8 +44,9 @@ def config(con) -> dict:
     except ValueError:
         c = {}
     users = [dict(r) for r in con.execute("SELECT id, name, role, is_senior, is_promoter FROM users WHERE active=1 ORDER BY name")]
-    owner = next((u["id"] for u in users if u["role"] == "admin" and u["name"] != "Администратор"), None) or \
-        next((u["id"] for u in users if u["role"] == "admin"), None)
+    # владелец: первая учётная запись руководителя (Юлия); кому потом дали полный доступ, тот не становится «владельцем»
+    admins = sorted((u for u in users if u["role"] == "admin"), key=lambda u: u["id"])
+    owner = next((u["id"] for u in admins if u["name"] != "Администратор"), None) or (admins[0]["id"] if admins else None)
     real = [u for u in users if "тест" not in u["name"].lower()]
     auto = {
         "owner": [owner] if owner else [],
@@ -53,6 +54,7 @@ def config(con) -> dict:
         "admins": [u["id"] for u in real if u["role"] == "operator" and not u["is_senior"]],
         "coaches": [u["id"] for u in real if u["role"] == "coach"],
         "lawyers": [u["id"] for u in real if u["role"] == "lawyer"],
+        "others": [u["id"] for u in real if u["role"] == "admin" and u["id"] != owner and u["name"] != "Администратор"],
         "promoters": [u["id"] for u in real if u["is_promoter"]],
     }
     zones = c.get("zones") or DEFAULT_ZONES
