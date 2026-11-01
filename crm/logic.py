@@ -102,6 +102,8 @@ def age_warning(birth: str, age_txt: str, branch: str = "", on: date | None = No
     on = on or date.today()
     months = (on.year - b.year) * 12 + on.month - b.month - (on.day < b.day)
     y, lo, hi = months // 12, n[0], n[-1]
+    if "+" in age_txt or "старше" in age_txt.lower() or "от" in age_txt.lower().split():
+        hi = 99  # «8+», «от 8 лет»: верхней границы нет
     if "чобот" in (branch or "").lower() and (lo, hi) == (6, 8):
         hi = 9
     if lo <= y <= hi:

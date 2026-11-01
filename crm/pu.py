@@ -174,7 +174,8 @@ def _to_stage(con, s, kind: str, reason: str, user: dict | None, now: datetime):
     sv.log(con, s["id"], f"Не дошёл до ПУ ({KINDS[kind]}{', ' + reason.strip() if reason.strip() else ''}). Всего не доходил: {n}",
            user, "stage")
     due = end_of_workday(con, now) if kind == "cancel" else add_work(con, now, 120)
-    ensure_task(con, s["id"], due, now)
+    # нет отметки: ребёнок мог прийти, а тренер забыть журнал. Сначала спрашиваем тренера, родителям не пишем «вы не пришли»
+    ensure_task(con, s["id"], due, now, title="Нет отметки тренера: уточнить у тренера, был ли ребёнок" if kind == "no_mark" else "")
 
 
 def cancel_trial(con, sid: int, reason: str, user: dict, now: datetime | None = None):
@@ -480,7 +481,7 @@ def tick(con, now: datetime | None = None) -> dict:
             who = " ".join(x for x in (_mention(con, _controller(con)), _mention(con, _owner_admin(con))) if x)
             notify_chat(con, "care", f"🔴 {who} Прошло 2 часа, тренер {m['coach'] or '—'} не отметил детей: {m['group']}, {m['branch']}, "
                                      f"{m['date'][8:]}.{m['date'][5:7]} {m['time']}. Без отметки: {m['missing']}. "
-                                     "Пробные без отметки ушли на этап «Не дошёл до ПУ», нужно позвонить родителям")
+                                     "Пробные без отметки ушли на этап «Не дошёл до ПУ»: сначала уточните у тренера, был ли ребёнок, потом звоните родителям")
         for sid in m["trials"]:
             s = sv.get_student_row(con, sid)
             if s["stage"] in ("trial_booked", "trial_reminder", "on_trial", "trial_done") and s["funnel"] == "sales":

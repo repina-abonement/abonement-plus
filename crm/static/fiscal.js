@@ -23,10 +23,17 @@ async function renderFiscal(page) {
 
 function fxList(box, d) {
   const C = S.fx;
-  const runs = Object.entries(d.runs).filter(([k]) => d.configured[k]).map(([k, r]) =>
-    `<span class="chip ${r && !r.ok ? "red" : ""}">${FX_SRC[k]}: ${r ? (r.ok ? "ок " + r.ts.slice(11, 16) : "ошибка") : "ещё не было"}</span>`).join(" ");
+  // три разных состояния, чтобы не путать: не подключено / подключено, но проверки ещё не было / проверено (или ошибка)
+  const ent = Object.entries(d.runs);
+  const runs = ent.map(([k, r]) => !d.configured[k] ? `<span class="chip muted">${FX_SRC[k]}: не подключено</span>`
+    : `<span class="chip ${r ? (r.ok ? "green" : "red") : "yellow"}">${FX_SRC[k]}: ${r ? (r.ok ? "проверено в " + r.ts.slice(11, 16) : "ошибка проверки") : "подключено, проверки ещё не было"}</span>`).join(" ");
+  const on = ent.filter(([k]) => d.configured[k]);
+  const empty = !on.length ? "Сверка не подключена: проверить чеки пока не по чему"
+    : on.some(([, r]) => r && !r.ok) ? "Список пуст, но последняя проверка прошла с ошибкой: данные могут быть неполными"
+    : on.every(([, r]) => !r) ? "Проверок ещё не было: данных пока нет"
+    : "Всё в порядке: по всем поступлениям есть чеки";
   const rows = C.filter === "problems" ? d.rows.filter((r) => r.status === "missing" || r.status === "wait" || (r.need === -1 && r.status !== "skip")) : d.rows;
-  box.innerHTML = `<div class="chips" style="margin-bottom:10px">${runs || "Сверка ещё не подключена"}</div>
+  box.innerHTML = `<div class="chips" style="margin-bottom:10px">${runs}</div>
     <div class="seg" style="margin-bottom:12px"><button data-ff="problems" class="${C.filter === "problems" ? "active" : ""}">Требуют внимания (${d.problems})</button>
       <button data-ff="all" class="${C.filter === "all" ? "active" : ""}">Все за 30 дней</button></div>
     ${rows.length ? `<div class="fx-list">${rows.map((r) => `<div class="fx-item ${r.status === "missing" ? "bad" : ""}">
@@ -36,7 +43,7 @@ function fxList(box, d) {
       ${["wait", "missing"].includes(r.status) ? `<div class="fx-act">
         ${r.need !== -1 ? `<button class="btn sm primary" data-fxa="done" data-id="${r.id}">Чек пробит</button>` : `<button class="btn sm primary" data-fxa="need" data-id="${r.id}">Чек нужен</button>`}
         ${S.user.role === "admin" ? `<button class="btn sm" data-fxa="skip" data-id="${r.id}">Чек не нужен</button>` : ""}</div>` : ""}
-    </div>`).join("")}</div>` : `<p class="small">${C.filter === "problems" ? "Всё в порядке: по всем поступлениям есть чеки" : "Поступлений пока нет"}</p>`}`;
+    </div>`).join("")}</div>` : `<p class="small">${C.filter === "problems" ? empty : "Поступлений пока нет"}</p>`}`;
   box.querySelectorAll("[data-ff]").forEach((b) => (b.onclick = () => step(() => { C.filter = b.dataset.ff; })));
   box.querySelectorAll("[data-fxa]").forEach((b) => (b.onclick = async () => {
     const a = b.dataset.fxa;

@@ -889,6 +889,8 @@ html.theme-soft .col-body { overflow-y: auto; overscroll-behavior: contain; scro
 /* чеки 54-ФЗ */
 .chip.red { background: #fde8e6; border-color: #f3b5ae; color: #a3271a; cursor: default; }
 .chip.green { background: #e6f5ea; border-color: #b3dcbd; color: #1d6b33; cursor: default; }
+.chip.yellow { background: #fff6dc; border-color: #f0d68a; color: #7a5a00; cursor: default; }
+.chip.muted { color: #8a93a6; cursor: default; }
 .fx-list { display: flex; flex-direction: column; gap: 8px; }
 .fx-item { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
 .fx-item.bad { border-color: #f3b5ae; }

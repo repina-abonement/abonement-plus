@@ -123,6 +123,12 @@ def enrollments_of(con, sid: int, active_only: bool = True) -> list[dict]:
     return _rows(con.execute(q + " ORDER BY e.id", (sid,)))
 
 
+def unpaid_groups(con, sid: int, ym: str) -> list[str]:
+    """Группы ребёнка, за которые месяц не оплачен (у ребёнка в двух группах может быть оплачена только одна)."""
+    paid = {r[0] for r in con.execute("SELECT enrollment_id FROM subscriptions WHERE student_id=? AND month=? AND status='paid'", (sid, ym))}
+    return [e["group_name"] for e in enrollments_of(con, sid) if e["id"] not in paid]
+
+
 def enrollment_days(e: dict) -> list[int]:
     group_days = logic.parse_weekdays(e["group_weekdays"])
     own = logic.parse_weekdays(e["weekdays"] or "")
@@ -485,6 +491,9 @@ def board(con, funnel: str) -> dict:
             elif month_state(cur) != "paid":
                 key = "unpaid_cur"
                 card["color"] = "red"
+                gs = unpaid_groups(con, s["id"], cur)
+                if ens and len(gs) < len(ens):
+                    card["badge"] = "Не оплачена группа " + ", ".join(gs)
             elif month_state(nxt) == "paid":
                 key = "paid_next"
             elif month_state(nxt) == "invoiced":
@@ -634,6 +643,7 @@ def student_detail(con, sid: int) -> dict:
         "trial_age_warn": logic.age_warning(s["birth"], grp["age"], _branch_name(con, grp["branch_id"])) if grp and s["funnel"] == "sales" else "", "makeups": makeups, "history": hist,
         "counters": absence_counters(con, sid) if s["funnel"] == "members" else None,
         "balance": _balance_out(con, sid),
+        "unpaid_cur": unpaid_groups(con, sid, cur) if s["funnel"] == "members" and s["stage"] != "left" else [],
         "ledger": __import__("crm.money", fromlist=["ledger"]).ledger(con, sid),
         "family_kids": _rows(con.execute("SELECT id, name FROM students WHERE family_id=? AND id!=? AND archived=0", (s["family_id"], sid))),
         "payments": _rows(con.execute("SELECT * FROM payments WHERE student_id=? ORDER BY paid_at DESC, id DESC LIMIT 30", (sid,))),

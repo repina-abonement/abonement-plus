@@ -1250,7 +1250,8 @@ async function openStudent(id) {
     isMember && d.balance.debt ? `<span class="pill red">Долг ${rub(d.balance.debt)}</span>` : "",
     isMember && d.balance.upcoming ? `<span class="pill yellow">К оплате ${rub(d.balance.upcoming)}</span>` : "",
     isMember && d.balance.deposit ? `<span class="pill green">На балансе ${rub(d.balance.deposit)}</span>` : "",
-    isMember && !d.balance.debt && !d.balance.upcoming ? `<span class="pill green">Долга нет</span>` : "",
+    ...(d.unpaid_cur || []).map((g) => `<span class="pill red" title="Абонемент за этот месяц по этой группе не оплачен и счёт не выставлен">Не оплачен ${esc(monthLabel(S.meta.today.slice(0, 7)).split(" ")[0])}: ${esc(g)}</span>`),
+    isMember && !d.balance.debt && !d.balance.upcoming && !(d.unpaid_cur || []).length ? `<span class="pill green">Долга нет</span>` : "",
     isMember && c.available ? `<span class="pill">Можно отработать: ${c.available}</span>` : "",
     !s.birth ? `<span class="pill yellow">Нет даты рождения</span>` : "",
     ...d.enrollments.filter((e) => e.age_warn).map((e) => `<span class="pill red">⚠️ ${esc(e.group_name)}: ${esc(e.age_warn)}</span>`),
@@ -1382,7 +1383,8 @@ async function openStudent(id) {
   <div class="section" data-sc="balance">
     <h3>Баланс и оплаты</h3>
     <div class="chips">
-      <span class="pill ${d.balance.debt ? "red" : "green"}">${d.balance.debt ? `Долг ${rub(d.balance.debt)}` : "Долга нет"}</span>
+      <span class="pill ${d.balance.debt ? "red" : "green"}">${d.balance.debt ? `Долг ${rub(d.balance.debt)}` : "Долга по выставленным счетам нет"}</span>
+      ${(d.unpaid_cur || []).map((g) => `<span class="pill red">Не оплачен ${esc(monthLabel(S.meta.today.slice(0, 7)).split(" ")[0])}: ${esc(g)}</span>`).join("")}
       ${d.balance.upcoming ? `<span class="pill yellow">К оплате за следующий месяц ${rub(d.balance.upcoming)}</span>` : ""}
       ${d.balance.deposit ? `<span class="pill green">Депозит ${rub(d.balance.deposit)}</span>` : ""}
     </div>
