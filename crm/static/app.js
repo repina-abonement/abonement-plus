@@ -103,6 +103,31 @@ function askRequiredText(kind, miss, onlySurname = false) {
     : `Здравствуйте! Чтобы записать ребёнка на пробное занятие, пришлите, пожалуйста:\n${list}\nСпасибо! Как только получим, сразу запишем 😊`;
 }
 
+/* Руководитель: всё красное с рабочего стола лично в Telegram (crm/ownerbot.py) */
+async function renderOwnerTg(box) {
+  let d; try { d = await api("GET", "/api/me/owner-tg"); } catch (e) { box.innerHTML = `<h3>🔴 Красное в Telegram</h3><div class="error">${esc(e.message)}</div>`; return; }
+  const head = `<h3>🔴 Красное в Telegram</h3><div class="small muted" style="margin-bottom:8px">Всё, что горит красным на вашем рабочем столе, бот школы пришлёт вам лично. Пропущенные звонки и заявки: только если админы не обработали их за 30 минут. Ночью с 22:00 до 8:00 бот молчит, утром присылает сводку</div>`;
+  if (!d.bot) { box.innerHTML = head + `<div class="small">Сначала подключите бота школы: Настройки → «Связь с клиентами» → Telegram</div>`; return; }
+  if (d.linked) {
+    box.innerHTML = head + `<div>✅ Подключено: пишет бот @${esc(d.bot)}</div><button class="btn sm" id="otg-off" style="margin-top:8px">Отключить</button>`;
+    $("#otg-off").onclick = async () => { await api("POST", "/api/me/owner-tg/unlink", {}).catch(fail); renderOwnerTg(box); };
+    return;
+  }
+  box.innerHTML = head + `<button class="btn primary" id="otg-on">Подключить</button><div id="otg-code"></div>`;
+  $("#otg-on").onclick = async () => {
+    try {
+      const r = await api("POST", "/api/me/owner-tg/code", {});
+      $("#otg-code").innerHTML = `<ol class="small" style="padding-left:18px;line-height:1.7;margin-top:10px">
+        <li>Откройте в Telegram бота школы: <a href="https://t.me/${esc(d.bot)}" target="_blank" rel="noopener">@${esc(d.bot)}</a></li>
+        <li>Отправьте ему сообщение: <b>/crm_me ${esc(r.code)}</b> <button class="btn sm" data-copy="/crm_me ${esc(r.code)}">Копировать</button></li>
+        <li>Бот ответит «✅ Готово». Код действует 30 минут</li>
+        <li>Вернитесь сюда и нажмите <button class="btn sm" id="otg-check">Проверить</button></li></ol>`;
+      $("#otg-code").querySelector("[data-copy]").onclick = (e) => { navigator.clipboard.writeText(e.target.dataset.copy).then(() => toast("Скопировано"), () => {}); };
+      $("#otg-check").onclick = () => renderOwnerTg(box);
+    } catch (e) { fail(e); }
+  };
+}
+
 let toastTimer;
 function toast(msg, err = false) {
   const t = $("#toast");
@@ -1895,6 +1920,7 @@ async function renderSettings(page) {
     <div class="section" data-tab="profile"><h3>Быстрый вход по коду</h3><div id="pin-set" class="small muted">…</div></div>
     <div class="section" data-tab="profile"><h3>Обучение</h3><div class="small muted" style="margin-bottom:8px">Короткая экскурсия по твоим разделам CRM</div>
       <button class="btn sm" id="tour-again">🎓 Пройти обучение ещё раз</button></div>
+    ${S.user.role === "admin" ? `<div class="section" data-tab="profile" id="owner-tg"><h3>🔴 Красное в Telegram</h3><div class="small muted">…</div></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" data-tab="profile"><h3>Праздничное оформление</h3>
       <label class="check"><input type="checkbox" id="festive-on" ${S.meta.festive !== false ? "checked" : ""}> 🎉 Украшать CRM к праздникам по календарю (у всех сотрудников)</label>
       <div class="small muted" style="margin-top:4px">Хэллоуин, Новый год, 23 февраля, 8 марта, 1 июня, 1 сентября</div></div>` : ""}
@@ -1974,6 +2000,7 @@ async function renderSettings(page) {
     try { await api("POST", "/api/users", Object.fromEntries(new FormData(e.target))); toast("Сотрудник добавлен"); render(); } catch (err) { fail(err); }
   };
   if ($("#tour-again")) $("#tour-again").onclick = () => startTour(true);
+  if ($("#owner-tg")) renderOwnerTg($("#owner-tg"));
   if ($("#festive-on")) $("#festive-on").onchange = async (e) => {
     try { await api("PUT", "/api/settings", { festive: e.target.checked ? "1" : "0" }); S.meta.festive = e.target.checked; shell(); applyFestive(); render(); toast(e.target.checked ? "Праздники включены 🎉" : "Праздничное оформление выключено"); } catch (err) { fail(err); }
   };

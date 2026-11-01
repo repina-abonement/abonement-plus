@@ -23,6 +23,11 @@ async function pollCounts() {
       const what = c.last_lead > p.last_lead ? "🔥 Заявка с сайта" : c.last_in > p.last_in ? "💬 Новое сообщение" : c.last_missed > p.last_missed ? "📞 Пропущенный звонок" : "";
       if (what) newInboxAlert(what);
     }
+    // пропущенный звонок не обработан: напоминаем звуком каждые 3 минуты (дальше «Служба заботы», через 30 минут руководитель)
+    if (c.missed > 0 && ["admin", "operator"].includes(S.user.role)) {
+      if (!S.missedSince) S.missedSince = Date.now();
+      else if (Date.now() - (S.missedDing || S.missedSince) >= 180000) { S.missedDing = Date.now(); newInboxAlert("📞 Пропущенный звонок не обработан"); }
+    } else { S.missedSince = 0; S.missedDing = 0; }
     S.counts = c;
   } catch (_) { /* тихо */ }
 }

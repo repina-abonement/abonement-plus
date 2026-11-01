@@ -2068,6 +2068,25 @@ def review_close(con, h, user, body, q, rid):
     return {"ok": True}
 
 
+@route("GET", "/api/me/owner-tg", role="admin")
+def owner_tg(con, h, user, body, q):
+    from . import ownerbot
+    return {"linked": ownerbot.linked(con, user["id"]), "bot": (comms.get(con, "tg_bot") or "").lstrip("@")}
+
+
+@route("POST", "/api/me/owner-tg/code", role="admin")
+def owner_tg_code(con, h, user, body, q):
+    from . import ownerbot
+    return {"code": ownerbot.new_code(con, user["id"])}
+
+
+@route("POST", "/api/me/owner-tg/unlink", role="admin")
+def owner_tg_unlink(con, h, user, body, q):
+    from . import ownerbot
+    ownerbot.unlink(con, user["id"])
+    return {"ok": True}
+
+
 @route("GET", "/api/alerts", role="operator")
 def alerts_list(con, h, user, body, q):
     from . import pu

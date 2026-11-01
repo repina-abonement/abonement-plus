@@ -430,6 +430,13 @@ def tg_hook(con, upd: dict, headers) -> None:
         return
     if chat.get("type") != "private":
         return
+    if (m.get("text") or "").strip().lower().startswith("/crm_me") and not m.get("business_connection_id"):
+        from . import ownerbot  # руководитель подключает личный Telegram к уведомлениям CRM
+        try:
+            tg_call(con, "sendMessage", {"chat_id": chat.get("id"), "text": ownerbot.link(con, chat.get("id"), m.get("text") or "")})
+        except CommsError:
+            pass
+        return
     biz = m.get("business_connection_id")
     sender = m.get("from") or {}
     if biz:

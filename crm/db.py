@@ -274,8 +274,9 @@ def init_db(con: sqlite3.Connection):
     staffdocs.init(con)
     from . import tour
     tour.init(con)
-    from . import smart, chains, erpimport, memos, reviews
+    from . import smart, chains, erpimport, memos, reviews, ownerbot
     reviews.init(con)
+    ownerbot.init(con)
     smart.init(con)
     chains.init(con)
     erpimport.init(con)

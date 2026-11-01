@@ -273,8 +273,13 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     from . import planner, program
     planner.generate(con, now.date())
     program.apply_pending(con, now.date())
-    from . import pu, waitlist
+    from . import pu, waitlist, ownerbot
     pu.tick(con, now)
+    try:
+        if send:
+            ownerbot.tick(con, now)  # красное руководителю в Telegram, напоминания в «Службу заботы»
+    except Exception:  # noqa: BLE001 — уведомления не должны ломать проход
+        pass
     from . import coachreport, schedule
     coachreport.tick(con, now)
     schedule.apply_versions(con, now.date())  # с даты изменения в карточке группы новое расписание  # несданные отчёты о смене: 30 минут и 2 часа
