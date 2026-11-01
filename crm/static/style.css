@@ -1366,3 +1366,9 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .conv-row.unread::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 5px; border-radius: 0 4px 4px 0; background: var(--red); }
 .conv-row.unread b { font-weight: 800; }
 .call-sum { margin: 6px 0 4px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); font-size: 13.5px; line-height: 1.4; }
+
+/* «Открытый вопрос» в диалоге */
+.oq-on { display: flex; gap: 10px; align-items: center; padding: 10px 12px; margin: 8px 0; border-radius: 12px; background: var(--red-soft); border-left: 4px solid var(--red); }
+.oq-form { padding: 10px 12px; margin: 8px 0; border-radius: 12px; background: var(--surface-2); }
+.oq-form input { width: 100%; }
+#oq-open { margin: 8px 0; }

@@ -1932,6 +1932,18 @@ def conv_send(con, h, user, body, q, cid):
     return cx(comms.send, con, int(cid), body.get("text") or "", user)
 
 
+@route("POST", "/api/conversations/{cid}/question", role="operator")
+def conv_question(con, h, user, body, q, cid):
+    cx(comms.set_question, con, int(cid), body.get("note") or "", body.get("due") or "", user)
+    return {"ok": True}
+
+
+@route("POST", "/api/conversations/{cid}/question/close", role="operator")
+def conv_question_close(con, h, user, body, q, cid):
+    cx(comms.close_question, con, int(cid), user)
+    return {"ok": True}
+
+
 @route("POST", "/api/conversations/{cid}/link", role="operator")
 def conv_link(con, h, user, body, q, cid):
     cx(comms.link, con, int(cid), body.get("family_id"))

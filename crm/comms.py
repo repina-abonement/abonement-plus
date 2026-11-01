@@ -136,6 +136,11 @@ def init(con):
     scols = {r[1] for r in con.execute("PRAGMA table_info(students)")}
     if "priority" not in scols:
         con.execute("ALTER TABLE students ADD COLUMN priority INTEGER NOT NULL DEFAULT 0")
+    ccols = {r[1] for r in con.execute("PRAGMA table_info(conversations)")}
+    for col in ("open_q INTEGER NOT NULL DEFAULT 0", "open_note TEXT NOT NULL DEFAULT ''", "open_due TEXT",
+                "open_by TEXT NOT NULL DEFAULT ''", "open_at TEXT"):
+        if ccols and col.split()[0] not in ccols:  # «Открытый вопрос» в диалоге (Юлия, 01.11)
+            con.execute(f"ALTER TABLE conversations ADD COLUMN {col}")
     if not get(con, "hook_token"):
         put(con, "hook_token", secrets.token_urlsafe(18))
     if con.execute("SELECT name FROM sqlite_master WHERE name='conversations'").fetchone():
@@ -1035,6 +1040,8 @@ def inbox(con, filt: str = "all", q: str = "") -> dict:
         where.append("c.unread > 0")
     elif filt == "nofamily":
         where.append("c.family_id IS NULL")
+    elif filt == "open":
+        where.append("c.open_q = 1")
     if q.strip():
         like = f"%{q.strip().lower()}%"
         pq = normalize_phone(q)
@@ -1077,6 +1084,37 @@ def conversation(con, cid: int, mark_read: bool = True) -> dict:
                                               "channel_label": convs_label, **m} for m in msgs]
     return {"conversation": _conv_out(con, r), "messages": msgs, "history": items,
             "targets": [{"id": c["id"], "label": c["channel_label"] + (" · " + c["title"] if c["title"] else "")} for c in convs]}
+
+
+def _family_log(con, family_id, text: str, user: dict):
+    if not family_id:
+        return
+    from .services import log
+    for (sid,) in con.execute("SELECT id FROM students WHERE family_id=? AND archived=0", (family_id,)).fetchall():
+        log(con, sid, text, user, "message")
+
+
+def set_question(con, cid: int, note: str, due: str, user: dict) -> None:
+    """«Открытый вопрос»: в диалоге осталось незакрытое дело. Видно всем админам на столе, пока не нажмут «Вопрос решён».
+    Ребёнок при этом остаётся в своих воронках."""
+    r = con.execute("SELECT family_id FROM conversations WHERE id=?", (cid,)).fetchone()
+    if not r:
+        raise CommsError("Переписка не найдена")
+    now = datetime.now().replace(second=0, microsecond=0)
+    eve, morn = now.replace(hour=18, minute=0), (now + timedelta(days=1)).replace(hour=10, minute=0)
+    due = {"1h": now + timedelta(hours=1), "eve": eve if eve > now else morn, "morn": morn}.get(due, now).isoformat(timespec="minutes")
+    note = (note or "").strip()[:300]
+    con.execute("UPDATE conversations SET open_q=1, open_note=?, open_due=?, open_by=?, open_at=? WHERE id=?",
+                (note, due, user.get("name", ""), ts_now(), cid))
+    _family_log(con, r["family_id"], f"❗ Открытый вопрос в переписке{': ' + note if note else ''}. Вернуться к {due[8:10]}.{due[5:7]} {due[11:16]}", user)
+
+
+def close_question(con, cid: int, user: dict) -> None:
+    r = con.execute("SELECT family_id, open_q, open_note FROM conversations WHERE id=?", (cid,)).fetchone()
+    if not r or not r["open_q"]:
+        return
+    con.execute("UPDATE conversations SET open_q=0 WHERE id=?", (cid,))
+    _family_log(con, r["family_id"], f"✅ Вопрос в переписке решён{': ' + r['open_note'] if r['open_note'] else ''}", user)
 
 
 def link(con, cid: int, family_id) -> None:
@@ -1212,6 +1250,13 @@ def urgent(con) -> list[dict]:
                             WHERE s.priority=1 ORDER BY s.stage_changed_at DESC"""):
         items.append({"kind": "site_lead", "level": "red", "ts": s["stage_changed_at"], "student_id": s["id"],
                       "phone": s["phone"] or "", "title": s["name"], "text": "Заявка с сайта, позвонить сейчас"})
+    now = datetime.now().isoformat(timespec="minutes")
+    for c in con.execute("""SELECT * FROM conversations WHERE open_q=1 ORDER BY open_due"""):
+        items.append({"kind": "open_q", "level": "red" if (c["open_due"] or "") <= now else "yellow", "ts": c["open_at"],
+                      "conversation_id": c["id"], "title": c["title"] or c["username"] or c["phone"] or "Без имени",
+                      "text": f"❗ Открытый вопрос{': ' + c['open_note'] if c['open_note'] else ''} · вернуться к "
+                              f"{(c['open_due'] or '')[11:16]}{'' if (c['open_due'] or '')[:10] == now[:10] else ' ' + (c['open_due'] or '')[8:10] + '.' + (c['open_due'] or '')[5:7]}"
+                              f"{' · отметил(а) ' + c['open_by'] if c['open_by'] else ''}"})
     for c in con.execute("""SELECT c.*, f.name AS family_name FROM conversations c LEFT JOIN families f ON f.id=c.family_id
                             WHERE c.unread > 0 ORDER BY c.last_at DESC LIMIT 50"""):
         items.append({"kind": "message", "level": "yellow", "ts": c["last_at"], "conversation_id": c["id"],

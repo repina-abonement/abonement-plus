@@ -188,8 +188,12 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     .forEach((p) => targets.push({ v: "w" + p.id, t: `WhatsApp · ${p.name} (новый чат)` }));
   if (st.wazzup_telegram) parents.filter((p) => p.phone && !d.conversations.some((c) => c.channel === "wazzup_telegram" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
     .forEach((p) => targets.push({ v: "t" + p.id, t: `Telegram от школы · ${p.name} (новый чат)` }));
+  const oq = d.conversations.filter((c) => c.open_q);
   box.innerHTML = `
     <h3>Связь с семьёй</h3>
+    ${oq.map((c) => `<div class="oq-on"><div class="grow"><b>❗ Открытый вопрос</b>${c.open_note ? `: ${esc(c.open_note)}` : ""}
+      <div class="small muted">Вернуться к ${esc(dtShort(c.open_due))}${c.open_by ? ` · отметил(а) ${esc(c.open_by)}` : ""}</div></div>
+      <button class="btn sm" data-oqchat="${c.id}">Открыть диалог</button></div>`).join("")}
     <div class="chips" style="margin-bottom:10px">${parents.filter((p) => p.phone).map((p) => `<button class="btn sm" data-dial="${esc(p.phone)}">📞 ${esc(p.name.split(" ")[0])} · ${esc(p.phone)}</button>`).join("")}</div>
     <div class="feed" id="feed">${d.items.length ? d.items.map((i) => i.type === "call" ? callHtml(i) : msgHtml(i)).join("") : `<div class="muted small">Пока ни переписки, ни звонков</div>`}</div>
     ${kid && kid.funnel === "sales" ? `<div class="to-bar" style="margin-top:10px"><button class="btn sm" id="to-open">📅 Предложить дни для пробного</button><button class="btn sm" id="to-book">✅ Записать на пробное</button></div><div id="to-panel" hidden></div>` : ""}
@@ -217,6 +221,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     if (atEnd) f.scrollTop = f.scrollHeight;
   }, 10000);
   box.querySelectorAll("[data-dial]").forEach((b) => (b.onclick = () => dial(b.dataset.dial)));
+  box.querySelectorAll("[data-oqchat]").forEach((b) => (b.onclick = () => openChat(+b.dataset.oqchat)));
   if (kid && kid.funnel === "sales") wireTrialOffer({ students: [kid], family_id: familyId, onBooked: kid.onBooked }, "#cm-text");
   const send = $("#cm-send");
   if (send) send.onclick = async () => {
@@ -244,7 +249,7 @@ async function renderInbox(page) {
   const body = $("#inbox-body");
   body.innerHTML = `
     <div class="row" style="max-width:720px;margin-bottom:12px;align-items:center">
-      <div class="seg" style="flex:0 0 auto">${[["all", "Все"], ["unread", "Непрочитанные"], ["nofamily", "Без карточки"]].map(([k, t]) => `<button data-f="${k}" class="${I.filter === k ? "active" : ""}">${t}</button>`).join("")}</div>
+      <div class="seg" style="flex:0 0 auto">${[["all", "Все"], ["unread", "Непрочитанные"], ["open", "❗ Открытые вопросы"], ["nofamily", "Без карточки"]].map(([k, t]) => `<button data-f="${k}" class="${I.filter === k ? "active" : ""}">${t}</button>`).join("")}</div>
       <input class="search" id="iq" placeholder="Имя, телефон, семья" value="${esc(I.q)}">
     </div>
     ${connectHint()}
@@ -256,7 +261,7 @@ async function renderInbox(page) {
     const list = $("#conv-list"); if (!list) return;
     list.innerHTML = d.conversations.length ? d.conversations.map((c) => `
       <div class="list-row click conv-row ${c.unread ? "unread" : ""}" data-conv="${c.id}" title="${esc(chLabel(c.channel))}">
-        <div class="grow"><b>${esc(c.title || c.username || c.phone || "Без имени")}</b>${c.family_name ? ` <span class="muted small">· семья ${esc(c.family_name)}</span>` : ` <span class="pill yellow">нет карточки</span>`}${c.demo ? ` <span class="pill">тест</span>` : ""}
+        <div class="grow"><b>${esc(c.title || c.username || c.phone || "Без имени")}</b>${c.open_q ? ` <span class="pill red" title="${esc(c.open_note || "Открытый вопрос")}">❗ открытый вопрос</span>` : ""}${c.family_name ? ` <span class="muted small">· семья ${esc(c.family_name)}</span>` : ` <span class="pill yellow">нет карточки</span>`}${c.demo ? ` <span class="pill">тест</span>` : ""}
           <div class="small muted ellipsis">${esc(c.last_text)}</div></div>
         <div class="right"><div class="small muted">${dtWhen(c.last_at)}</div>${c.unread ? `<span class="nbadge static">${c.unread}</span>` : ""}</div>
       </div>`).join("") : `<div class="list-row muted">Переписок нет</div>`;
@@ -321,6 +326,10 @@ async function openChat(cid, keepScroll = false) {
           <div class="row" style="margin-top:8px"><input id="link-q" placeholder="Найти ученика или родителя"><button class="btn sm" id="new-lead" style="flex:0">+ Новый лид</button></div>
           <div id="link-res" class="chips" style="margin-top:6px"></div>`}
       </div>
+      <div id="oq-box">${c.open_q ? `<div class="oq-on"><div class="grow"><b>❗ Открытый вопрос</b>${c.open_note ? `: ${esc(c.open_note)}` : ""}
+          <div class="small muted">Вернуться к ${esc(dtShort(c.open_due))}${c.open_by ? ` · отметил(а) ${esc(c.open_by)}` : ""}</div></div>
+          <button class="btn sm primary" id="oq-close">✅ Вопрос решён</button></div>`
+        : `<button class="btn sm" id="oq-open" title="В диалоге осталось незакрытое дело: он появится на рабочем столе у всех администраторов">❗ Открытый вопрос</button>`}</div>
       <div class="feed chat-feed" id="chat-feed">${(d.history || d.messages).map((m) => m.type === "call" ? callHtml(m) : msgHtml(m)).join("") || `<div class="muted small">Сообщений нет</div>`}</div>
       <div class="composer sticky">
         <div class="to-bar"><button class="btn sm" id="to-open">📅 Предложить ближайшие ПУ</button></div>
@@ -354,12 +363,17 @@ async function openChat(cid, keepScroll = false) {
       }, 250);
     };
   }
+  wireOpenQuestion(cid, c);
   const sendBtn = $("#chat-send");
   sendBtn.onclick = async () => {
     const text = $("#chat-text").value.trim(); if (!text) return;
     sendBtn.disabled = true;
     const to = $("#chat-to") ? +$("#chat-to").value : cid;
-    try { await api("POST", `/api/conversations/${to}/send`, { text }); $("#chat-text").value = ""; openChat(cid); }
+    try {
+      await api("POST", `/api/conversations/${to}/send`, { text }); $("#chat-text").value = "";
+      if (c.open_q && confirm("В этом диалоге открытый вопрос. Он решён?")) await api("POST", `/api/conversations/${cid}/question/close`, {});
+      openChat(cid);
+    }
     catch (e) { fail(e); sendBtn.disabled = false; }
   };
   $("#chat-text").onkeydown = (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendBtn.click(); };
@@ -373,6 +387,28 @@ async function openChat(cid, keepScroll = false) {
   }, 8000);
   pollCounts();
   if (S.view === "inbox" && !keepScroll) render();
+}
+/* «Открытый вопрос»: отметка на диалоге, видна всем админам на столе, пока не нажмут «Вопрос решён» */
+function wireOpenQuestion(cid, c) {
+  const close = $("#oq-close");
+  if (close) close.onclick = async () => { try { await api("POST", `/api/conversations/${cid}/question/close`, {}); toast("Вопрос закрыт"); openChat(cid); pollCounts(); } catch (e) { fail(e); } };
+  const open = $("#oq-open");
+  if (!open) return;
+  open.onclick = () => {
+    const h = new Date().getHours();
+    const when = [["Через час", "1h"], ...(h < 17 ? [["Сегодня в 18:00", "eve"]] : []), ["Завтра в 10:00", "morn"], ["Сейчас", "now"]];
+    $("#oq-box").innerHTML = `<div class="oq-form">
+      <input id="oq-note" maxlength="300" placeholder="Что осталось сделать (необязательно). Например: уточнить у тренера про субботу">
+      <div class="row" style="margin-top:6px;flex-wrap:wrap;gap:6px">${when.map(([t, v], i) => `<button class="btn sm ${i ? "" : "primary"}" data-oqw="${v}">${t}</button>`).join("")}
+        <button class="btn sm ghost" id="oq-cancel">Отмена</button></div>
+      <div class="small muted" style="margin-top:4px">Выберите, когда вернуться: диалог появится на рабочем столе у всех администраторов</div></div>`;
+    $("#oq-note").focus();
+    $("#oq-cancel").onclick = () => openChat(cid, true);
+    $("#oq-box").querySelectorAll("[data-oqw]").forEach((b) => (b.onclick = async () => {
+      try { await api("POST", `/api/conversations/${cid}/question`, { note: $("#oq-note").value, due: b.dataset.oqw }); toast("Отмечено: открытый вопрос на рабочем столе"); openChat(cid, true); }
+      catch (e) { fail(e); }
+    }));
+  };
 }
 function stopChatTimer() { if (chatTimer) clearInterval(chatTimer); chatTimer = null; }
 

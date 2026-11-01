@@ -958,7 +958,7 @@ async function membersArchive(page) {
 }
 
 /* ---------- рабочий стол: что горит + воронка ---------- */
-const URG_ACTION = { missed_call: "Перезвонить", site_lead: "Открыть", message: "Ответить", trial: "Открыть" };
+const URG_ACTION = { missed_call: "Перезвонить", site_lead: "Открыть", message: "Ответить", trial: "Открыть", open_q: "Открыть диалог" };
 const ago = (iso) => {
   if (!iso) return "";
   const m = Math.max(0, Math.round((Date.now() - new Date(iso.length <= 16 ? iso + ":00" : iso).getTime()) / 60000));
@@ -1081,7 +1081,7 @@ async function renderWorkdesk(page) {
   page.querySelectorAll("[data-u]").forEach((b) => (b.onclick = async () => {
     const x = u[+b.dataset.u];
     if (x.kind === "missed_call") { await dial(x.phone); if (x.student_id) openStudent(x.student_id); else openNewClient({ phone: x.phone }); }
-    else if (x.kind === "message") openChat(x.conversation_id, true);
+    else if (x.kind === "message" || x.kind === "open_q") openChat(x.conversation_id, true);
     else if (x.student_id) openStudent(x.student_id);
   }));
   page.querySelectorAll("[data-useen]").forEach((b) => (b.onclick = async () => {
