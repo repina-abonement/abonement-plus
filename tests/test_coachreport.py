@@ -65,6 +65,17 @@ def main():
     check(not v["ready"] and v["tasks"][0]["photos"], "Задание с фото появилось в отчёте, без него не сдать")
     cr.task_done(con, tid, NIK)
 
+    print("Задачи из «Планера» на тренера")
+    from crm import tasks as tk
+    t1 = tk.add_task(con, "plan", None, f"{d}T15:00", title="Повесить расписание на стенд", source="manual", assignee=nik)
+    t2 = tk.add_task(con, "plan", None, f"{(today - timedelta(days=1)).isoformat()}T15:00", title="Забрать мячи со склада", source="manual", assignee=art)
+    v = cr.view(con, cr._row(con, rid), sh[0])
+    check({t["title"] for t in v["crm_tasks"]} == {"Повесить расписание на стенд", "Забрать мячи со склада"} and not v["ready"],
+          "Задачи главного и помощника (и вчерашняя несделанная) в отчёте, без ответа не сдать")
+    cr.update(con, rid, {"crm_tasks": {t1: {"state": "done"}, t2: {"state": "not"}}})
+    check(not cr.view(con, cr._row(con, rid), sh[0])["ready"], "«Не сделал» без причины: не сдать")
+    cr.update(con, rid, {"crm_tasks": {t2: {"state": "not", "why": "склад был закрыт"}}})
+
     print("Сдаём")
     v = cr.submit(con, rid, NIK)
     check(v["status"] == "done", "Все шаги готовы: отчёт сдан")
@@ -72,6 +83,9 @@ def main():
     check(len(issues) == 1 and issues[0]["note"] == "порвана сетка" and issues[0]["photos"], "Неисправность с фото на столе старшего администратора")
     txt = cr.text(con, v)
     check("ОТЧЁТ ТРЕНЕРА О СМЕНЕ" in txt and "Петров - 2500 ₽ - QR - индив" in txt and "Ребёнок 1 - Болеет" in txt, "Текст для чата в привычном виде")
+    st = {r[0]: (r[1], r[2]) for r in con.execute("SELECT id, status, note FROM tasks WHERE id IN (?,?)", (t1, t2))}
+    check(st[t1][0] == "done" and st[t2][0] == "open" and "склад был закрыт" in st[t2][1], "Сделанная закрыта, несделанная осталась с причиной")
+    check("🟢Повесить расписание" in txt and "🔴Забрать мячи со склада - не сделано: склад был закрыт" in txt, "Задачи в тексте отчёта для чата")
 
     print("Напоминания")
     con.execute("UPDATE settings SET value=? WHERE key='coach_reports_from'", ((today + timedelta(days=1)).isoformat(),))

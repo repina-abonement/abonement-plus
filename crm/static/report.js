@@ -12,7 +12,7 @@ const REP_STEPS = {
   merch: ["👕", "Мерч", "Сегодня кто-нибудь стал модным?"],
   inventory: ["⚽", "Инвентарь", "Мячи, фишки, ворота. Всё живое?"],
   photos: ["📸", "Фото филиала", "Восемь кадров, как в старом добром отчёте. Камера откроется сама"],
-  tasks: ["📌", "Задания на сегодня", "Это от старшего администратора. Без них отчёт не уйдёт"],
+  tasks: ["📌", "Задания на сегодня", "Задания старшего администратора и задачи из «Планера». По каждой: сделал или почему нет. Без этого отчёт не уйдёт"],
 };
 const PAY_WHAT = ["Абонемент", "Индив", "Разовое", "Мерч"];
 S.rep = null;
@@ -122,7 +122,10 @@ function repStepHtml(st, v) {
   if (st.key === "photos") return `<div class="rep-slots">${v.slots.map(([k, t]) => `<div class="rep-slot ${(v.photos[k] || []).length ? "ok" : ""}"><b>${esc(t)}</b>
       <div class="rep-ph">${repThumbs(v.photos[k], !ro)}${ro ? "" : repPhotoBtn(k, (v.photos[k] || []).length ? "📷 Ещё" : "📷 Снять")}</div></div>`).join("")}</div>`;
   if (st.key === "tasks") return v.tasks.map((t) => `<div class="rep-item"><b>${esc(t.text)}</b><small>от ${esc(t.created_by)}</small>
-      <div class="rep-ph">${repThumbs(t.photos, false)}</div>${big(`data-rtask="${t.id}"`, t.done_at ? "✅ Сделано" : "Сделал!", !!t.done_at)}</div>`).join("");
+      <div class="rep-ph">${repThumbs(t.photos, false)}</div>${big(`data-rtask="${t.id}"`, t.done_at ? "✅ Сделано" : "Сделал!", !!t.done_at)}</div>`).join("")
+    + (v.crm_tasks || []).map((t) => `<div class="rep-item"><b>${esc(t.title)}</b><small>${t.due_at.slice(0, 10) < v.date ? "⏰ просрочено с " + dShort(t.due_at) + " · " : ""}${esc(t.note || "")}</small>
+      <div class="rep-two">${big(`data-rct="${t.id}" data-k="done"`, "✅ Сделал", t.answer === "done")}${big(`data-rct="${t.id}" data-k="not"`, "❌ Не сделал", t.answer === "not")}</div>
+      ${t.answer === "not" ? `<input class="rep-why" data-rctw="${t.id}" placeholder="Почему не сделал? Обязательно" value="${esc(t.why || "")}" ${ro ? "disabled" : ""}>` : ""}</div>`).join("");
   return "";
 }
 
@@ -159,6 +162,8 @@ function repRender() {
   $$("[data-rmerch]").forEach((b) => (b.onclick = () => repSave({ merch: b.dataset.rmerch })));
   $$("[data-rinv]").forEach((b) => (b.onclick = () => repSave({ inv: b.dataset.rinv })));
   if (box.querySelector("#ri-note")) box.querySelector("#ri-note").onchange = (e) => repSave({ inv_note: e.target.value });
+  $$("[data-rct]").forEach((b) => (b.onclick = () => { const cur = ((v.data.crm_tasks || {})[b.dataset.rct]) || {}; repSave({ crm_tasks: { [b.dataset.rct]: { ...cur, state: b.dataset.k } } }); }));
+  $$("[data-rctw]").forEach((i) => (i.onchange = () => repSave({ crm_tasks: { [i.dataset.rctw]: { state: "not", why: i.value } } })));
   $$("[data-rtask]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/report-tasks/${b.dataset.rtask}/done`, {}); repSave({}); } catch (e) { fail(e); } }));
   // пришли без записи
   if (box.querySelector("#ru-add")) box.querySelector("#ru-add").onclick = () => {

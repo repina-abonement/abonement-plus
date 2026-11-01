@@ -174,6 +174,16 @@ def tasks_for(con, coach_ids: list[int], d: str) -> list[dict]:
     return [dict(t) | {"photos": _photos(con, "task", t["id"]).get("", [])} for t in con.execute(q, (d, *coach_ids))]
 
 
+def crm_tasks_for(con, coach_ids: list[int], d: str) -> list[dict]:
+    """Задачи из «Планера» и карточек, поставленные на тренеров смены: на этот день и просроченные (Юлия, 01.11)."""
+    if not coach_ids:
+        return []
+    q = f"""SELECT t.*, u.name AS assignee FROM tasks t LEFT JOIN users u ON u.id=t.assignee_id
+            WHERE t.assignee_id IN ({','.join('?' * len(coach_ids))}) AND t.kind IN ('manual','plan')
+            AND (t.status='open' AND substr(t.due_at,1,10) <= ? OR t.status='done' AND substr(t.done_at,1,10) = ?) ORDER BY t.due_at"""
+    return [dict(t) for t in con.execute(q, (*coach_ids, d, d))]
+
+
 def view(con, r: dict, s: dict) -> dict:
     from . import pu, services as sv
     data = json.loads(r["data"] or "{}")
@@ -191,6 +201,12 @@ def view(con, r: dict, s: dict) -> dict:
     photos = _photos(con, "report", r["id"])
     people = [s["main_id"], *s["assistants"]]
     tasks = tasks_for(con, people, r["date"])
+    crm_tasks = crm_tasks_for(con, people, r["date"])
+    ct = data.get("crm_tasks") or {}
+    for t in crm_tasks:  # отчитаться по каждой: сделано или почему нет
+        a = ct.get(str(t["id"])) or {}
+        t["answer"] = "done" if t["status"] == "done" else a.get("state", "")
+        t["why"] = a.get("why", "")
     names = {u["id"]: dict(u) for u in con.execute(f"SELECT id, name FROM users WHERE id IN ({','.join('?' * len(people))})", people)}
     arrivals = {c["user_id"]: c["at"] for c in con.execute(
         f"SELECT user_id, at FROM checkins WHERE branch_id=? AND date=? AND user_id IN ({','.join('?' * len(people))})",
@@ -209,20 +225,21 @@ def view(con, r: dict, s: dict) -> dict:
          or (data.get("inv") == "broken" and bool(photos.get("inv_broken")) and len((data.get("inv_note") or "").strip()) >= 3)},
         {"key": "photos", "title": "Фото филиала", "done": all(photos.get(k) for k, _ in PHOTO_SLOTS)},
     ]
-    if tasks:
-        steps.append({"key": "tasks", "title": "Задания на сегодня", "done": all(t["done_at"] for t in tasks)})
+    if tasks or crm_tasks:
+        steps.append({"key": "tasks", "title": "Задания на сегодня", "done": all(t["done_at"] for t in tasks)
+                      and all(t["answer"] == "done" or (t["answer"] == "not" and len(t["why"].strip()) >= 3) for t in crm_tasks)})
     end = s["end"]
     return {"id": r["id"], "branch_id": r["branch_id"], "branch": s["branch"], "date": r["date"], "status": r["status"],
             "submitted_at": r["submitted_at"], "submitted_by": r["submitted_by"], "end": _iso(end) if end else None,
             "main": names.get(s["main_id"], {}).get("name", ""), "main_id": s["main_id"],
             "assistants": [names.get(a, {}).get("name", "") for a in s["assistants"]],
             "arrivals": {names.get(k, {}).get("name", ""): v[11:16] for k, v in arrivals.items()},
-            "groups": groups, "absent": absent, "trials": trials, "data": data, "photos": photos, "tasks": tasks,
+            "groups": groups, "absent": absent, "trials": trials, "data": data, "photos": photos, "tasks": tasks, "crm_tasks": crm_tasks,
             "steps": steps, "ready": all(x["done"] for x in steps),
             "slots": PHOTO_SLOTS, "cash_items": CASH, "absent_reasons": ABSENT, "trial_outcomes": TRIAL, "pay_methods": PAY_METHODS}
 
 
-ALLOWED = {"absent", "trials", "unlisted", "unlisted_none", "pays", "pays_none", "cash", "merch", "inv", "inv_note"}
+ALLOWED = {"absent", "trials", "unlisted", "unlisted_none", "pays", "pays_none", "cash", "merch", "inv", "inv_note", "crm_tasks"}
 
 
 def update(con, rid: int, patch: dict) -> None:
@@ -233,7 +250,7 @@ def update(con, rid: int, patch: dict) -> None:
     for k, v in patch.items():
         if k not in ALLOWED:
             continue
-        if k in ("absent", "trials", "cash"):  # словари дополняем: шаги заполняются по одному
+        if k in ("absent", "trials", "cash", "crm_tasks"):  # словари дополняем: шаги заполняются по одному
             data[k] = {**(data.get(k) or {}), **{str(a): b for a, b in (v or {}).items()}}
         elif k in ("unlisted", "pays"):
             data[k] = [x for x in (v or []) if isinstance(x, dict)][:30]
@@ -298,6 +315,12 @@ def submit(con, rid: int, user: dict) -> dict:
                     (rid, r["branch_id"], r["date"], v["data"].get("inv_note", ""), now))
         pu.notify_chat(con, "care", f"🔴 {_managers(con)} Неисправный инвентарь, {s['branch']}: {v['data'].get('inv_note', '')}. Фото в CRM")
     trial_tasks(con, v)
+    from . import tasks as _tasks
+    for t in v["crm_tasks"]:  # задачи из «Планера»: сделанные закрываем, по несделанным причину в заметку (задача остаётся)
+        if t["status"] == "open" and t["answer"] == "done":
+            _tasks.complete(con, t["id"], user, "Сделано (отчёт о смене)")
+        elif t["status"] == "open" and t["answer"] == "not":
+            con.execute("UPDATE tasks SET note=TRIM(note || ' ' || ?) WHERE id=?", (f"[{r['date'][8:]}.{r['date'][5:7]} не сделано: {t['why'].strip()}]", t["id"]))
     merch.report_shift(con, {"id": s["main_id"], "name": v["main"]}, r["branch_id"], v["data"].get("merch") == "yes", r["date"])
     for a in s["assistants"]:  # помощник тоже ответил про мерч: отчёт общий
         merch.report_shift(con, {"id": a, "name": ""}, r["branch_id"], v["data"].get("merch") == "yes", r["date"])
@@ -356,6 +379,9 @@ def text(con, v: dict) -> str:
     lines += [""] + [f"{i}) {g['time'] or ''} {g['name']}: {g['came']} из {g['plan']}" for i, g in enumerate(v["groups"], 1)]
     if v["absent"]:
         lines += [""] + [f"{a['name']} - {ABSENT.get((data.get('absent') or {}).get(str(a['id'])), '')}" for a in v["absent"]]
+    if v.get("tasks") or v.get("crm_tasks"):
+        lines += ["", "Задания:"] + [f"{'🟢' if t['done_at'] else '🔴'}{t['text']}" for t in v.get("tasks") or []] \
+            + [f"{'🟢' if t['answer'] == 'done' else '🔴'}{t['title']}{'' if t['answer'] == 'done' else ' - не сделано: ' + t['why']}" for t in v.get("crm_tasks") or []]
     lines += ["", f"{'🟢инвентарь исправен' if data.get('inv') == 'ok' else '🔴неисправность: ' + data.get('inv_note', '')}",
               f"🟢мерч: {'продавали' if data.get('merch') == 'yes' else 'не продавали'}", "🟢фото в CRM", "", "#отчет_тренера_о_смене"]
     return "\n".join(lines)

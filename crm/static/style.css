@@ -1412,3 +1412,6 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .mt-card { cursor: pointer; }
 .mt-card.done { opacity: .65; cursor: default; }
 .mt-act { margin-top: 8px; display: flex; justify-content: flex-end; }
+
+.rep-two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.rep-why { width: 100%; margin-top: 8px; }
