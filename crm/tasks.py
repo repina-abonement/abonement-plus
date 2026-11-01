@@ -166,7 +166,7 @@ def render_template(con, key: str, s: dict, channel: str = "") -> str:
     t = datetime.fromisoformat(s["trial_at"])
     child = s["name"] if "заявка" not in s["name"].lower() else "ребёнка"
     return (setting(con, key).replace("{child}", child.split()[0]).replace("{time}", t.strftime("%H:%M"))
-            .replace("{date}", f"{t.day:02d}.{t.month:02d}").replace("{place}", _place(con, s))
+            .replace("{date}", f"{t.day:02d}.{t.month:02d}").replace("{place}", _place_full(con, s))
             .replace("{admin}", admin_link(con, channel)))
 
 
@@ -183,6 +183,13 @@ def best_conversation(con, family_id: int) -> int | None:
             comms.link(con, cid, family_id)
             return cid
     return None
+
+
+def _place_full(con, s: dict) -> str:
+    """Где проходит пробное: адрес и как найти из Настроек → Скрипты, иначе название филиала."""
+    g = con.execute("SELECT branch_id FROM groups WHERE id=?", (s.get("group_id") or 0,)).fetchone()
+    pl = booked_places(con).get(str(g[0]) if g else "", {})
+    return pl.get("place") or _place(con, s)
 
 
 def booked_places(con) -> dict:
@@ -297,6 +304,17 @@ def send_auto(con, s: dict, kind: str, tpl: str) -> dict:
     if con.execute("SELECT 1 FROM auto_messages WHERE student_id=? AND kind=? AND trial_at=?",
                    (s["id"], kind, s["trial_at"])).fetchone():
         return {"skipped": True}
+    # 01.11: напоминание ушло лиду, который уже отказался, и с «Адрес: в школе». Теперь не пишем, если
+    # отказался/не дошёл/отложил, и если не выбрана группа (неизвестно, куда приходить)
+    cur = con.execute("SELECT stage, group_id, dnd, archived FROM students WHERE id=?", (s["id"],)).fetchone()
+    if not cur or cur["stage"] in ("refused", "missed_trial", "later", "bought") or cur["dnd"] or cur["archived"]:
+        return {"skipped": True}
+    if not cur["group_id"]:
+        con.execute("INSERT OR IGNORE INTO auto_messages(student_id, kind, trial_at, ts, ok, channel, error) VALUES (?,?,?,?,0,'',?)",
+                    (s["id"], kind, s["trial_at"], _iso(_now()), "не выбрана группа"))
+        con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
+                    (s["id"], _iso(_now()), "Автосообщение", "message", "Напоминание о пробном не ушло: не выбрана группа. Выберите группу или напишите вручную"))
+        return {"ok": False, "error": "не выбрана группа"}
     cid = best_conversation(con, s["family_id"])
     ok, err, channel = True, "", ""
     text = render_template(con, tpl, s)
