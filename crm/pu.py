@@ -449,7 +449,7 @@ def _owner_admin(con):
 
 
 def notify_chat(con, which: str, text: str) -> bool:
-    """Сообщение в рабочий чат Telegram (ТРЕНЕРЫ или Служба заботы), если чат подключён к боту."""
+    """Сообщение в рабочий чат Telegram (ТРЕНЕРЫ, Служба заботы или ДЕНЬГИ), если чат подключён к боту."""
     from . import comms
     chat = comms.get(con, "tg_chat_" + which)
     if not chat or not comms.get(con, "tg_token"):

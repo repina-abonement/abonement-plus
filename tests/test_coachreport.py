@@ -86,6 +86,14 @@ def main():
     st = {r[0]: (r[1], r[2]) for r in con.execute("SELECT id, status, note FROM tasks WHERE id IN (?,?)", (t1, t2))}
     check(st[t1][0] == "done" and st[t2][0] == "open" and "склад был закрыт" in st[t2][1], "Сделанная закрыта, несделанная осталась с причиной")
     check("🟢Повесить расписание" in txt and "🔴Забрать мячи со склада - не сделано: склад был закрыт" in txt, "Задачи в тексте отчёта для чата")
+    mt = cr.money_text(v)
+    check("ОПЛАТЫ НА СМЕНЕ" in mt and "Петров - 2500 ₽ - QR - индив" in mt and "Итого: 2500 ₽" in mt and "Наличные" not in mt,
+          "В «ДЕНЬГИ»: оплаты смены и итог")
+    v2 = dict(v, data=dict(v["data"], pays=[{"name": "Иванов", "amount": "1 200", "method": "cash", "what": "разовое"},
+                                            {"name": "Петров", "amount": 2500, "method": "card", "what": "абон"}]))
+    mt = cr.money_text(v2)
+    check("Наличные: 1200 ₽" in mt and "Итого: 3700 ₽" in mt and "сдать администратору" in mt, "Наличные считаются отдельно")
+    check("Оплат на месте не было" in cr.money_text(dict(v, data=dict(v["data"], pays=[]))), "Без оплат: так и пишем")
 
     print("Напоминания")
     con.execute("UPDATE settings SET value=? WHERE key='coach_reports_from'", ((today + timedelta(days=1)).isoformat(),))

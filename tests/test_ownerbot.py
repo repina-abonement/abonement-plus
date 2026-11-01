@@ -35,4 +35,9 @@ check(len([p for p in sent if p["chat_id"] == "555"]) == 1, "Ночью руко
 ownerbot.tick(con, datetime(2026, 11, 3, 8, 1))
 last = [p for p in sent if p["chat_id"] == "555"][-1]["text"]
 check("Нет отметок" in last, "Утром накопленное приходит")
+comms.put(con, "tg_secret", "s"); sent.clear()
+comms.tg_hook(con, {"message": {"chat": {"id": -200, "type": "supergroup"}, "text": "/crm_money@footbolika_solntsevo_bot"}},
+              {"X-Telegram-Bot-Api-Secret-Token": "s"})
+check(comms.get(con, "tg_chat_money") == "-200" and "«ДЕНЬГИ»" in sent[-1]["text"], "Команда /crm_money подключает чат «ДЕНЬГИ»")
+
 print("ok")

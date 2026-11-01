@@ -326,6 +326,7 @@ def submit(con, rid: int, user: dict) -> dict:
         merch.report_shift(con, {"id": a, "name": ""}, r["branch_id"], v["data"].get("merch") == "yes", r["date"])
     con.execute("UPDATE alerts SET closed_at=? WHERE key LIKE ? AND closed_at IS NULL", (now, f"rep%:{rid}:%"))
     pu.notify_chat(con, "coaches", text(con, view(con, _row(con, rid), s)))
+    pu.notify_chat(con, "money", money_text(view(con, _row(con, rid), s)))
     return view(con, _row(con, rid), s)
 
 
@@ -384,6 +385,31 @@ def text(con, v: dict) -> str:
             + [f"{'🟢' if t['answer'] == 'done' else '🔴'}{t['title']}{'' if t['answer'] == 'done' else ' - не сделано: ' + t['why']}" for t in v.get("crm_tasks") or []]
     lines += ["", f"{'🟢инвентарь исправен' if data.get('inv') == 'ok' else '🔴неисправность: ' + data.get('inv_note', '')}",
               f"🟢мерч: {'продавали' if data.get('merch') == 'yes' else 'не продавали'}", "🟢фото в CRM", "", "#отчет_тренера_о_смене"]
+    return "\n".join(lines)
+
+
+def _rub(x) -> int:
+    try:
+        return int(round(float(str(x).replace(" ", "").replace(",", "."))))
+    except ValueError:
+        return 0
+
+
+def money_text(v: dict) -> str:
+    """Короткое сообщение в чат «ДЕНЬГИ»: оплаты на месте за смену и итог по способам."""
+    d = date.fromisoformat(v["date"])
+    pays = v["data"].get("pays") or []
+    lines = ["💰 ОПЛАТЫ НА СМЕНЕ", f"{d:%d.%m.%Y}, {v['branch']}", f"Тренер {v['main']}", ""]
+    if not pays:
+        return "\n".join(lines + ["Оплат на месте не было"])
+    lines += [f"{p.get('name', '')} - {_rub(p.get('amount'))} ₽ - {PAY_METHODS.get(p.get('method'), '')} - {p.get('what', '')}" for p in pays]
+    by = {}
+    for p in pays:
+        by[p.get("method")] = by.get(p.get("method"), 0) + _rub(p.get("amount"))
+    lines += [""] + [f"{t}: {by[k]} ₽" for k, t in PAY_METHODS.items() if k in by]
+    lines.append(f"Итого: {sum(by.values())} ₽")
+    if by.get("cash"):
+        lines.append(f"🔴 Наличные {by['cash']} ₽ сдать администратору")
     return "\n".join(lines)
 
 

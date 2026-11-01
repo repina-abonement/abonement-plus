@@ -109,8 +109,8 @@ async function renderResponsibles(box) {
     <div class="small muted">На них встают задачи «Перезаписать на ПУ». Видят и могут взять задачу все админы и операторы</div>
     ${d.items.map((x) => `<div class="row" style="align-items:center;margin-top:8px"><div class="grow">${esc(x.branch)}</div>
       <select data-resp="${x.branch_id}" style="flex:0 0 220px"><option value="">— ответственный за пробные —</option>${d.staff.map((u) => `<option value="${u.id}" ${u.id === x.user_id ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select></div>`).join("")}
-    <div class="small" style="margin-top:12px"><b>Рабочие чаты в Telegram.</b> Чтобы CRM писала в чаты «ТРЕНЕРЫ» и «Служба заботы» о неотмеченных тренировках:
-      добавьте бота школы в чат и отправьте там команду <code>/crm_coaches</code> (в чате тренеров) или <code>/crm_care</code> (в Службе заботы).
+    <div class="small" style="margin-top:12px"><b>Рабочие чаты в Telegram.</b> Чтобы CRM писала в чаты «ТРЕНЕРЫ», «Служба заботы» и «ДЕНЬГИ»:
+      добавьте бота школы в чат и отправьте там команду <code>/crm_coaches</code> (в чате тренеров) <code>/crm_care</code> (в Службе заботы) или <code>/crm_money</code> (в чате «ДЕНЬГИ», туда уходят оплаты из отчёта о смене).
       Ники сотрудников для отметок впишите в списке «Сотрудники» ниже</div>`;
   box.querySelectorAll("[data-resp]").forEach((s) => (s.onchange = async () => {
     try { await api("POST", "/api/responsibles", { branch_id: +s.dataset.resp, user_id: s.value ? +s.value : null }); toast("Сохранено"); } catch (e) { fail(e); }
