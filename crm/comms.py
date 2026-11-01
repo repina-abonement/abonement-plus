@@ -164,6 +164,7 @@ def status(con) -> dict:
         "max": bool(get(con, "max_token")) and get(con, "max_ok") == "1",
         "whatsapp": bool(get(con, "wazzup_key") and get(con, "wazzup_channel")),
         "wazzup_telegram": bool(get(con, "wazzup_key") and get(con, "wazzup_tg_channel")),
+        "wazzup_max": bool(get(con, "wazzup_key") and get(con, "wazzup_max_channel")),
         "ai": get(con, "ai_enabled") == "1" and bool(get(con, "yc_api_key")),
     }
 
@@ -622,7 +623,9 @@ def wz_connect(con, base_url: str) -> dict:
         put(con, "wazzup_channel", wa[0]["id"])
     tg = [c for c in lst if c["transport"] in ("telegram", "tgapi")]  # рабочий аккаунт Telegram через Wazzup
     put(con, "wazzup_tg_channel", tg[0]["id"] if tg else "")
-    put(con, "wazzup_error", "" if wa or tg else "В Wazzup нет каналов WhatsApp или Telegram")
+    mx = [c for c in lst if c["transport"] in ("max", "maxapi")]  # MAX школы через Wazzup
+    put(con, "wazzup_max_channel", mx[0]["id"] if mx else "")
+    put(con, "wazzup_error", "" if wa or tg or mx else "В Wazzup нет каналов WhatsApp, Telegram или MAX")
     return {"channels": lst}
 
 

@@ -1,0 +1,30 @@
+"""MAX и WhatsApp через Wazzup: входящее приходит в «Чаты», ответ уходит в тот же канал. Запуск: python -m tests.test_wazzup_max"""
+import os
+import sys
+import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from crm import comms, db  # noqa: E402
+from tests.test_crm import check  # noqa: E402
+
+
+def main():
+    con = db.connect(os.path.join(tempfile.mkdtemp(), "w.sqlite3"))
+    db.init_db(con)
+    comms.wz_hook(con, {"messages": [
+        {"chatType": "max", "chatId": "m-1", "channelId": "ch-max", "messageId": "a1", "type": "text", "text": "Здравствуйте",
+         "dateTime": "2026-11-01T10:00:00Z", "contact": {"name": "Мама", "phone": "79001112233"}},
+        {"chatType": "whatsapp", "chatId": "79001112244", "channelId": "ch-wa", "messageId": "a2", "type": "text", "text": "Добрый день",
+         "dateTime": "2026-11-01T10:01:00Z", "contact": {"name": "Папа"}}]})
+    rows = {r["channel"]: dict(r) for r in con.execute("SELECT * FROM conversations")}
+    check("wazzup_max" in rows and "whatsapp" in rows, "Обе переписки пришли в «Чаты»")
+    sent = {}
+    comms.wz_call = lambda con, m, path, data=None, key=None: sent.update(data or {}) or {"messageId": "out1"}
+    comms.send(con, rows["wazzup_max"]["id"], "Ответ", {"name": "Оля"})
+    check(sent.get("chatType") == "max" and sent.get("channelId") == "ch-max" and sent.get("chatId") == "m-1", "Ответ ушёл в MAX тем же каналом")
+    print("ok")
+
+
+if __name__ == "__main__":
+    main()

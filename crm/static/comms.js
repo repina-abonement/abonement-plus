@@ -1,7 +1,7 @@
 "use strict";
 /* Абонемент Плюс — чаты и звонки. Подключается после app.js и пользуется его функциями. */
 
-const CH = { telegram: "Telegram", max: "MAX", whatsapp: "WhatsApp", wazzup_telegram: "Telegram школы" };
+const CH = { telegram: "Telegram", max: "MAX", whatsapp: "WhatsApp", wazzup_telegram: "Telegram школы", wazzup_max: "MAX" };
 const chLabel = (c) => CH[c] || String(c || "").replace("wazzup_", "");
 const CALL_ST = { ringing: "звонит", talking: "разговор", answered: "принят", missed: "пропущен", busy: "занято", failed: "не дозвонились" };
 const secs = (n) => n == null ? "" : n < 60 ? `${n} сек` : `${Math.floor(n / 60)} мин ${n % 60 ? (n % 60) + " сек" : ""}`.trim();
@@ -250,7 +250,7 @@ async function renderInbox(page) {
 
 function connectHint() {
   const c = S.meta.comms;
-  if (c.telegram || c.max || c.whatsapp) return "";
+  if (c.telegram || c.max || c.whatsapp || c.wazzup_telegram || c.wazzup_max) return "";
   return `<div class="note">Мессенджеры пока не подключены, ниже тестовые переписки. ${S.user.role === "admin" ? "Подключить: Настройки → Связь с клиентами" : "Подключает администратор в Настройках"}</div>`;
 }
 
@@ -385,8 +385,8 @@ async function renderCommsSettings(box, users) {
       <button class="btn sm" data-connect="max">Сохранить и подключить</button>
     </div>
 
-    <div class="int"><div class="int-head"><b>WhatsApp и Telegram через Wazzup</b>${ok(st.whatsapp || st.wazzup_telegram)}</div>
-      <div class="small muted" style="margin-bottom:6px">Подключает рабочие аккаунты школы: из карточки можно написать родителю первыми по номеру телефона</div>
+    <div class="int"><div class="int-head"><b>WhatsApp, MAX и Telegram через Wazzup</b>${ok(st.whatsapp || st.wazzup_telegram || st.wazzup_max)}</div>
+      <div class="small muted" style="margin-bottom:6px">Подключает рабочие аккаунты школы. Сообщения родителей в WhatsApp и MAX приходят в «Чаты», ответ уходит из CRM. В WhatsApp можно написать родителю первыми по номеру из карточки</div>
       <div class="field"><label>API-ключ Wazzup</label><input data-k="wazzup_key" value="${esc(v.wazzup_key)}"></div>
       ${inf.wazzup_channels.length ? `<div class="small">Каналы: ${inf.wazzup_channels.map((c) => esc(`${c.transport} ${c.name} (${c.state})`)).join(", ")}</div>` : ""}
       ${inf.wazzup_error ? `<div class="error">${esc(inf.wazzup_error)}</div>` : ""}
