@@ -181,7 +181,7 @@ function startTour(again = false) {
       card.innerHTML = `<div class="tour-step">Шаг ${total} из ${total}</div><div class="tour-bar"><i style="width:100%"></i></div>
         <h3>${S.user.role === "coach" ? "Финальный свисток: 3 вопроса" : "Проверим: 3 вопроса"}</h3>
         <div class="small muted">Ответ сразу засчитывается. Ошибёшься: вопрос сменится на другой</div>
-        ${quiz.map((x, k) => `<div class="tour-q">${missed[k] ? `<div class="tour-hint">Прошлый вопрос был не так. ${esc(missed[k])}. Вот другой:</div>` : ""}<b>${k + 1}. ${esc(x.q)}</b>
+        ${quiz.map((x, k) => `<div class="tour-q">${missed[k] ? `<div class="tour-hint">✖ Ответ неверный. ${esc(missed[k])}. Вопрос заменили на новый:</div>` : ""}<b>${k + 1}. ${esc(x.q)}</b>
           ${x.a.map((t, j) => {
             const st = picked[k] === j ? (j === x.ok ? "ok" : "bad") : "";
             return `<button class="tour-a ${st}" data-q="${k}" data-a="${j}" ${picked[k] === x.ok ? "disabled" : ""}>${st === "ok" ? "✅ " : st === "bad" ? "✖ " : ""}${esc(t)}</button>`;
