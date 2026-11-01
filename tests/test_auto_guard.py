@@ -33,4 +33,17 @@ con.execute("UPDATE students SET stage='refused', dnd=1, refusal_reason='Дор�
 sv.update_student(con, ref["id"], {"group_id": g, "trial_at": f"{d.isoformat()}T17:45"}, U)
 st = con.execute("SELECT stage, dnd, refusal_reason FROM students WHERE id=?", (ref["id"],)).fetchone()
 check(tuple(st) == ("trial_booked", 0, ""), "Записали на пробное: этап «Записан на пробное», отказ и «не беспокоить» сняты")
+# выдуманным клиентам не пишем никогда
+fk = kid("Тест Тестов", "79000000009")
+con.execute("UPDATE families SET fake=1 WHERE id=(SELECT family_id FROM students WHERE id=?)", (fk["id"],))
+n = len(sent)
+tasks.send_auto(con, fk, "day_before", "msg_day_before")
+check(len(sent) == n, "Выдуманному (тестовому) клиенту автосообщение не уходит")
+# без группы на пробное не записать
+nb = sv.create_student(con, {"name": "Без Группы", "parent_name": "Мама", "phone": "79000000010", "funnel": "sales"}, U)
+try:
+    sv.update_student(con, nb, {"trial_at": f"{d.isoformat()}T17:45"}, U); okg = False
+except sv.ApiError as e:
+    okg = "группу" in e.message
+check(okg, "Без группы на пробное не записать")
 print("ok")

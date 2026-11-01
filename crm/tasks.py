@@ -177,7 +177,11 @@ def render_template(con, key: str, s: dict, channel: str = "") -> str:
 
 
 def best_conversation(con, family_id: int) -> int | None:
-    """Куда писать семье: последняя живая переписка, иначе новый WhatsApp через Wazzup."""
+    """Куда писать семье: последняя живая переписка, иначе новый WhatsApp через Wazzup.
+    Выдуманным (тестовым) семьям не пишем никогда: их случайные номера могут оказаться чужими."""
+    fam = con.execute("SELECT * FROM families WHERE id=?", (family_id or 0,)).fetchone()
+    if not fam or ("fake" in fam.keys() and fam["fake"]):
+        return None
     r = con.execute("""SELECT id FROM conversations WHERE family_id=? AND external_id NOT LIKE 'demo-%'
                        ORDER BY last_at IS NULL, last_at DESC LIMIT 1""", (family_id,)).fetchone()
     if r:
@@ -268,8 +272,10 @@ def missed_call_messages(con, now: datetime) -> int:
                             AND started_at <= ? AND started_at >= ? ORDER BY started_at""",
                          (_iso(now - timedelta(minutes=MISSED_WAIT_MIN)), _iso(now - timedelta(hours=14)))).fetchall():
         p = k["phone_norm"] or comms.normalize_phone(k["phone"] or "")
-        if len(p) < 11 or p in staff:
+        if len(p) < 11 or p in staff or (k["external_id"] or "").startswith(("fake-", "demo")):
             continue
+        if con.execute("""SELECT 1 FROM parents pa JOIN families f ON f.id=pa.family_id WHERE pa.phone_norm=? AND f.fake=1""", (p,)).fetchone():
+            continue  # номер выдуманного клиента
         if con.execute("""SELECT 1 FROM calls WHERE phone_norm=? AND started_at > ? AND (status='answered' OR direction='out')""",
                        (p, k["started_at"])).fetchone():
             continue  # уже поговорили: клиент дозвонился или ему перезвонили

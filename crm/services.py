@@ -776,6 +776,8 @@ def update_student(con, sid: int, data: dict, user) -> None:
                 _pu._close_family_task_if_empty(con, s["family_id"], "Записан на пробное")
     if ("trial_at" in changes or "group_id" in changes) and s["funnel"] == "sales":
         cur = get_student_row(con, sid)
+        if cur["trial_at"] and not cur["group_id"]:  # Юлия, 01.11: при записи на ПУ группа обязательна
+            raise ApiError("Выберите группу: без группы на пробное не записать")
         if cur["trial_at"] and cur["group_id"] and cur["trial_at"][:10] >= today().isoformat():
             from . import capacity
             capacity.check_trial_group(con, cur["group_id"])
