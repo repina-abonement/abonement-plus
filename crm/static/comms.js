@@ -321,10 +321,11 @@ async function openChat(cid, keepScroll = false) {
           <div class="row" style="margin-top:8px"><input id="link-q" placeholder="Найти ученика или родителя"><button class="btn sm" id="new-lead" style="flex:0">+ Новый лид</button></div>
           <div id="link-res" class="chips" style="margin-top:6px"></div>`}
       </div>
-      <div class="feed chat-feed" id="chat-feed">${d.messages.map((m) => msgHtml(m)).join("") || `<div class="muted small">Сообщений нет</div>`}</div>
+      <div class="feed chat-feed" id="chat-feed">${(d.history || d.messages).map((m) => m.type === "call" ? callHtml(m) : msgHtml(m)).join("") || `<div class="muted small">Сообщений нет</div>`}</div>
       <div class="composer sticky">
         <div class="to-bar"><button class="btn sm" id="to-open">📅 Предложить ближайшие ПУ</button></div>
         <div id="to-panel" hidden></div>
+        ${(d.targets || []).length > 1 ? `<select id="chat-to" style="margin-bottom:6px">${d.targets.map((x) => `<option value="${x.id}" ${x.id === cid ? "selected" : ""}>Ответ уйдёт: ${esc(x.label)}</option>`).join("")}</select>` : ""}
         <div class="row"><textarea id="chat-text" rows="2" placeholder="Ответ…">${esc(draft)}</textarea><button class="btn primary" id="chat-send" style="flex:0">Отправить</button></div>
         ${c.channel === "telegram" && !c.meta.biz ? `<div class="small muted">Ответ уйдёт от бота школы</div>` : ""}
       </div>
@@ -357,7 +358,8 @@ async function openChat(cid, keepScroll = false) {
   sendBtn.onclick = async () => {
     const text = $("#chat-text").value.trim(); if (!text) return;
     sendBtn.disabled = true;
-    try { await api("POST", `/api/conversations/${cid}/send`, { text }); $("#chat-text").value = ""; openChat(cid); }
+    const to = $("#chat-to") ? +$("#chat-to").value : cid;
+    try { await api("POST", `/api/conversations/${to}/send`, { text }); $("#chat-text").value = ""; openChat(cid); }
     catch (e) { fail(e); sendBtn.disabled = false; }
   };
   $("#chat-text").onkeydown = (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendBtn.click(); };
@@ -366,7 +368,8 @@ async function openChat(cid, keepScroll = false) {
     const open = $(`#drawer-body [data-chat="${cid}"]`);
     if (!open || $("#drawer").hidden) return stopChatTimer();
     const n = await api("GET", `/api/conversations/${cid}`).catch(() => null);
-    if (n && n.messages.length !== d.messages.length) { stopChatTimer(); openChat(cid); }
+    const len = (x) => (x.history || x.messages).length + ":" + JSON.stringify(((x.history || x.messages).slice(-1)[0] || {}).id);
+    if (n && len(n) !== len(d)) { stopChatTimer(); openChat(cid); }
   }, 8000);
   pollCounts();
   if (S.view === "inbox" && !keepScroll) render();

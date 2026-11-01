@@ -29,6 +29,14 @@ def main():
                                       "type": "text", "text": "Ответ", "dateTime": "2026-11-01T14:03:00Z"}]})
     n = con.execute("SELECT COUNT(*) FROM messages WHERE conversation_id=? AND direction='in'", (cid,)).fetchone()[0]
     check(n == 1, "Ответ в WhatsApp попал в переписку, начатую из карточки")
+    # один и тот же номер: WhatsApp, MAX и звонок видны одной лентой при открытии любого из чатов
+    mx = comms.upsert_conversation(con, "wazzup_max", "m-9", phone="79005556677", meta={"chatType": "max"})
+    comms.add_message(con, mx, "in", "Привет из MAX")
+    con.execute("INSERT INTO calls(phone, phone_norm, direction, status, started_at) VALUES ('+79005556677','79005556677','in','missed','2026-11-01T12:00:00')")
+    d = comms.conversation(con, cid)
+    kinds = {(i["type"], i.get("channel")) for i in d["history"]}
+    check(("msg", "whatsapp") in kinds and ("msg", "wazzup_max") in kinds and ("call", None) in kinds, "В чате вся история: WhatsApp, MAX и звонки")
+    check({t["id"] for t in d["targets"]} == {cid, mx}, "Ответить можно в любой мессенджер этого человека")
     print("ok")
 
 

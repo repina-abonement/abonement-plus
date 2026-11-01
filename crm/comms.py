@@ -101,7 +101,7 @@ EDITABLE_KEYS = {"sipuni_user", "sipuni_secret", "tg_token", "tg_relay", "max_to
                  "yc_api_key", "yc_folder", "ai_enabled", "ai_mode", "ai_model", "ai_min_talk", "lead_notify"}
 DEFAULT_GREETING = ("Здравствуйте! Вы написали в нашу школу. Задайте вопрос здесь, администратор скоро ответит.\n"
                     "Чтобы мы сразу нашли вашу карточку, нажмите кнопку «Поделиться номером» ниже")
-CHANNEL_LABELS = {"telegram": "Telegram", "max": "MAX", "whatsapp": "WhatsApp"}
+CHANNEL_LABELS = {"telegram": "Telegram", "max": "MAX", "whatsapp": "WhatsApp", "wazzup_max": "MAX", "wazzup_telegram": "Telegram школы"}
 KIND_LABELS = {"image": "📷 Фото", "file": "📎 Файл", "audio": "🎤 Голосовое", "video": "🎬 Видео",
                "sticker": "Стикер", "contact": "👤 Контакт", "other": "Вложение"}
 
@@ -1056,7 +1056,17 @@ def conversation(con, cid: int, mark_read: bool = True) -> dict:
         "SELECT * FROM (SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 200) ORDER BY id", (cid,))]
     if mark_read and r["unread"]:
         con.execute("UPDATE conversations SET unread=0 WHERE id=?", (cid,))
-    return {"conversation": _conv_out(con, r), "messages": msgs}
+    # открыли чат: показываем всю историю этой семьи (все мессенджеры и звонки), а не только этот канал
+    phones = [r["phone_norm"]] if r["phone_norm"] else []
+    if r["family_id"]:
+        phones += [x[0] for x in con.execute("SELECT phone_norm FROM parents WHERE family_id=? AND phone_norm != ''", (r["family_id"],))]
+    convs, items = history(con, r["family_id"], phones, mark_read)
+    if not any(c["id"] == cid for c in convs):  # переписка без телефона и семьи: только она сама
+        convs_label = _conv_out(con, r)["channel_label"]
+        convs, items = [_conv_out(con, r)], [{"type": "msg", "channel": r["channel"], "conversation_id": cid,
+                                              "channel_label": convs_label, **m} for m in msgs]
+    return {"conversation": _conv_out(con, r), "messages": msgs, "history": items,
+            "targets": [{"id": c["id"], "label": c["channel_label"] + (" · " + c["title"] if c["title"] else "")} for c in convs]}
 
 
 def link(con, cid: int, family_id) -> None:
@@ -1084,12 +1094,12 @@ def mark_calls_seen(con):
     con.execute("UPDATE calls SET seen=1 WHERE seen=0")
 
 
-def family_comms(con, family_id: int) -> dict:
-    phones = [r[0] for r in con.execute("SELECT phone_norm FROM parents WHERE family_id=? AND phone_norm != ''",
-                                        (family_id,))]
+def history(con, family_id: int | None, phones: list[str], mark_read: bool = True) -> tuple[list[dict], list[dict]]:
+    """Вся история семьи (или номера, если семьи нет): переписки во всех мессенджерах и звонки одной лентой."""
+    phones = [p for p in phones if p]
     ph_sql = ",".join("?" * len(phones)) or "''"
     convs = [_conv_out(con, r) for r in con.execute(
-        f"SELECT * FROM conversations WHERE family_id=? OR phone_norm IN ({ph_sql}) ORDER BY last_at DESC",
+        f"SELECT * FROM conversations WHERE (family_id=? AND family_id IS NOT NULL) OR phone_norm IN ({ph_sql}) ORDER BY last_at DESC",
         (family_id, *phones))]
     items = []
     for c in convs:
@@ -1098,17 +1108,25 @@ def family_comms(con, family_id: int) -> dict:
             items.append({"type": "msg", "ts": m["ts"], "channel": c["channel"], "channel_label": c["channel_label"],
                           "conversation_id": c["id"], **{k: m[k] for k in ("id", "direction", "text", "kind", "media",
                                                                             "user_name", "status", "error")}})
-    for k in con.execute(f"SELECT * FROM calls WHERE family_id=? OR phone_norm IN ({ph_sql}) ORDER BY id DESC LIMIT 60",
+    for k in con.execute(f"SELECT * FROM calls WHERE (family_id=? AND family_id IS NOT NULL) OR phone_norm IN ({ph_sql}) ORDER BY id DESC LIMIT 60",
                          (family_id, *phones)):
         items.append({"type": "call", "ts": k["started_at"], "id": k["id"], "direction": k["direction"],
                       "status": k["status"], "talk": k["talk"], "duration": k["duration"], "phone": k["phone"],
                       "operator": k["operator"], "has_record": bool(k["record_url"]), "transcript": k["transcript"],
                       "score": k["score"], "ai_status": k["ai_status"]})
     items.sort(key=lambda x: (x["ts"] or "", x["id"]))
-    for c in convs:
-        if c["unread"]:
-            con.execute("UPDATE conversations SET unread=0 WHERE id=?", (c["id"],))
-    return {"conversations": convs, "items": items[-120:], "status": status(con)}
+    if mark_read:
+        for c in convs:
+            if c["unread"]:
+                con.execute("UPDATE conversations SET unread=0 WHERE id=?", (c["id"],))
+    return convs, items[-120:]
+
+
+def family_comms(con, family_id: int) -> dict:
+    phones = [r[0] for r in con.execute("SELECT phone_norm FROM parents WHERE family_id=? AND phone_norm != ''",
+                                        (family_id,))]
+    convs, items = history(con, family_id, phones)
+    return {"conversations": convs, "items": items, "status": status(con)}
 
 
 # ---------------- тестовые данные ----------------
