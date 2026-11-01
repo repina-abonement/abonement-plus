@@ -1383,3 +1383,7 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .rv-alert { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; padding: 14px 16px; border-radius: 16px;
   background: var(--red-soft); border: 1px solid #f3b5ae; border-left: 6px solid var(--red); }
 .rv-star { font-size: 26px; }
+
+/* кем приходится ребёнку */
+.rel-chip { font: inherit; font-size: 12.5px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2); cursor: pointer; }
+.rel-chip.empty { border-style: dashed; color: var(--orange, #e8711b); }

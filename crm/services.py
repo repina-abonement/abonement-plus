@@ -615,7 +615,7 @@ def student_detail(con, sid: int) -> dict:
     s = get_student_row(con, sid)
     st = settings(con)
     fam = dict(con.execute("SELECT * FROM families WHERE id=?", (s["family_id"],)).fetchone())
-    parents = _rows(con.execute("SELECT id, name, phone, messenger, email FROM parents WHERE family_id=?", (s["family_id"],)))
+    parents = _rows(con.execute("SELECT id, name, phone, messenger, email, relation FROM parents WHERE family_id=?", (s["family_id"],)))
     siblings = _rows(con.execute("SELECT id, name, birth FROM students WHERE family_id=? AND id != ?",
                                  (s["family_id"], sid)))
     grp = dict(con.execute("SELECT * FROM groups WHERE id=?", (s["group_id"],)).fetchone()) if s["group_id"] else None

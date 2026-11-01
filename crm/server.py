@@ -2087,6 +2087,13 @@ def owner_tg_unlink(con, h, user, body, q):
     return {"ok": True}
 
 
+@route("PATCH", "/api/parents/{pid}/relation", role="operator")
+def parent_relation(con, h, user, body, q, pid):
+    from . import smart
+    smart.set_relation(con, int(pid), body.get("relation") or "")
+    return {"ok": True}
+
+
 @route("GET", "/api/alerts", role="operator")
 def alerts_list(con, h, user, body, q):
     from . import pu

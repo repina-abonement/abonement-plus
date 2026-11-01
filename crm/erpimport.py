@@ -141,6 +141,7 @@ FIELDS = {
         ("child_last", "Фамилия ребёнка (если отдельно)", ["фамилия ребенка", "фамилия"]),
         ("birth", "Дата рождения", ["дата рождения", "д.р", "др", "рождения"]),
         ("parent_name", "Родитель", ["фио родителя", "родитель", "контактное лицо", "представитель", "мама", "папа"]),
+        ("relation", "Кем приходится (мама, папа…)", ["кем приходится", "родство", "степень родства", "роль представителя", "кто это"]),
         ("phone", "Телефон", ["телефон родителя", "телефон", "моб", "тел"]),
         ("phone2", "Второй телефон", ["телефон 2", "доп. телефон", "второй телефон", "доп телефон"]),
         ("email", "Почта", ["email", "e-mail", "почта", "эл. почта"]),
@@ -798,8 +799,10 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
             st["families"] += 1
             if fk:
                 fam_by_phone[fk] = fid
-            pid = con.execute("INSERT INTO parents(family_id, name, phone, phone_norm, email) VALUES (?,?,?,?,?)",
-                              (fid, parent or "Родитель", phone_raw, ph, (rec.get("email") or "").strip())).lastrowid
+            from .smart import guess_relation
+            rel = guess_relation(rec.get("relation") or "") or guess_relation(rec.get("parent_name") or "")
+            pid = con.execute("INSERT INTO parents(family_id, name, phone, phone_norm, email, relation) VALUES (?,?,?,?,?,?)",
+                              (fid, parent or "Родитель", phone_raw, ph, (rec.get("email") or "").strip(), rel)).lastrowid
             _track(con, batch, "parents", pid)
             ph2 = rec.get("phone2", "").strip()
             if ph2 and normalize_phone(ph2) != ph:

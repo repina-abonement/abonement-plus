@@ -1354,7 +1354,7 @@ async function openStudent(id) {
     ${d.siblings.length ? `<div class="chips sc-kids"><span class="chip on">${esc(s.name.split(" ")[0])}</span>${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}</div>` : ""}
     <div class="sc-meta">${isMember ? (regular.length ? regular.map((e) => `<span class="pill">${esc(e.group_name)}</span>`).join(" ") : `<span class="muted small">Группа не выбрана</span>`)
       : `${s.trial_at ? `<span class="pill">Пробное ${dtShort(s.trial_at)}</span>` : ""}`}</div>
-    <div class="sc-parents">${d.parents.map((p) => `<span class="sc-parent"><b>${esc(p.name)}</b>${p.phone ? ` <a href="tel:${esc(p.phone)}">${esc(p.phone)}</a> <button class="icon-btn" data-dial="${esc(p.phone)}" title="Позвонить через Sipuni">📞</button>` : ""}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}${p.email ? ` <span class="small muted">✉ ${esc(p.email)}</span>` : ""}</span>`).join("")}</div>
+    <div class="sc-parents">${d.parents.map((p) => `<span class="sc-parent"><b>${esc(p.name)}</b> <button class="rel-chip ${p.relation ? "" : "empty"}" data-rel="${p.id}" title="Кем приходится ребёнку">${p.relation ? esc(p.relation) : "кем приходится?"}</button>${p.phone ? ` <a href="tel:${esc(p.phone)}">${esc(p.phone)}</a> <button class="icon-btn" data-dial="${esc(p.phone)}" title="Позвонить через Sipuni">📞</button>` : ""}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}${p.email ? ` <span class="small muted">✉ ${esc(p.email)}</span>` : ""}</span>`).join("")}</div>
     ${alerts ? `<div class="chips sc-alerts">${alerts}</div>` : ""}
     ${d.next_step ? `<div class="next-step"><span>👉 <b>Следующий шаг:</b> ${esc(d.next_step.text)}</span><button class="btn sm primary" id="ns-go">${NEXT_GO[d.next_step.action] || "Сделать"}</button></div>` : ""}
     ${!isMember && d.stage_tip ? `<details class="stage-tip" ${S.tipsOpen === false ? "" : "open"}><summary>💡 Подсказка на этапе «${esc(d.stage_label)}»</summary>
@@ -1544,6 +1544,15 @@ async function openStudent(id) {
   body.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.open)));
   $("#add-sibling").onclick = () => openNewClient({ family_id: s.family_id, family_name: d.family.name });
   loadFamilyComms(s.family_id, d.parents, id, { id, name: s.name, funnel: s.funnel, birth: s.birth, onBooked: reload });
+  // кем приходится ребёнку: нажали на метку, выбрали из списка
+  document.querySelectorAll("[data-rel]").forEach((b) => (b.onclick = () => {
+    const REL = ["мама", "папа", "бабушка", "дедушка", "тётя", "дядя", "сестра", "брат", "няня", "опекун", "другое"];
+    const sel = document.createElement("select");
+    sel.className = "rel-chip";
+    sel.innerHTML = `<option value="">кем приходится?</option>` + REL.map((r) => `<option ${b.textContent === r ? "selected" : ""}>${r}</option>`).join("");
+    b.replaceWith(sel); sel.focus();
+    sel.onchange = async () => { try { await api("PATCH", `/api/parents/${b.dataset.rel}/relation`, { relation: sel.value }); toast("Сохранено"); reload(); } catch (e) { fail(e); } };
+  }));
   wireConsent(d.family, reload);
   body.querySelectorAll(".sc-head [data-dial]").forEach((b) => (b.onclick = () => dial(b.dataset.dial)));
   const firstPhone = (d.parents.find((p) => p.phone) || {}).phone;

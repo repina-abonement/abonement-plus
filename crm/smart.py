@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, timedelta
 
 from . import logic
@@ -191,6 +192,36 @@ def init(con):
     con.executescript(SCHEMA)
     if "email" not in [c[1] for c in con.execute("PRAGMA table_info(parents)")]:
         con.execute("ALTER TABLE parents ADD COLUMN email TEXT NOT NULL DEFAULT ''")
+    if "relation" not in [c[1] for c in con.execute("PRAGMA table_info(parents)")]:
+        # кем приходится ребёнку: мама, папа, бабушка… (Юлия, 01.11)
+        con.execute("ALTER TABLE parents ADD COLUMN relation TEXT NOT NULL DEFAULT ''")
+        for pid, name in con.execute("SELECT id, name FROM parents").fetchall():
+            rel = guess_relation(name)
+            if rel:
+                con.execute("UPDATE parents SET relation=? WHERE id=?", (rel, pid))
+
+
+RELATIONS = ["мама", "папа", "бабушка", "дедушка", "тётя", "дядя", "сестра", "брат", "няня", "опекун", "другое"]
+
+
+def guess_relation(text: str) -> str:
+    """«Мама Ольга», «Ольга (мама)», «папа» → роль. Не угадали: пусто."""
+    t = (text or "").lower().replace("ё", "е")
+    words = re.findall(r"[а-я]+", t)
+    table = {"мама": "мама", "мать": "мама", "мамочка": "мама", "папа": "папа", "отец": "папа", "бабушка": "бабушка",
+             "бабуля": "бабушка", "дедушка": "дедушка", "дед": "дедушка", "тетя": "тётя", "дядя": "дядя", "сестра": "сестра",
+             "брат": "брат", "няня": "няня", "опекун": "опекун"}
+    for w in words:  # только целые слова: фамилия «Братеева» не «брат»
+        if w in table:
+            return table[w]
+    return ""
+
+
+def set_relation(con, pid: int, rel: str) -> None:
+    rel = (rel or "").strip().lower()
+    if rel and rel not in RELATIONS:
+        rel = rel[:30]
+    con.execute("UPDATE parents SET relation=? WHERE id=?", (rel, pid))
 
 
 def views(con, uid: int, section: str) -> list[dict]:

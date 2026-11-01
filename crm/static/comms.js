@@ -199,7 +199,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     ${oq.map((c) => `<div class="oq-on"><div class="grow"><b>❗ Открытый вопрос</b>${c.open_note ? `: ${esc(c.open_note)}` : ""}
       <div class="small muted">Вернуться к ${esc(dtShort(c.open_due))}${c.open_by ? ` · отметил(а) ${esc(c.open_by)}` : ""}</div></div>
       <button class="btn sm" data-oqchat="${c.id}">Открыть диалог</button></div>`).join("")}
-    <div class="chips" style="margin-bottom:10px">${parents.filter((p) => p.phone).map((p) => `<button class="btn sm" data-dial="${esc(p.phone)}">📞 ${esc(p.name.split(" ")[0])} · ${esc(p.phone)}</button>`).join("")}</div>
+    <div class="chips" style="margin-bottom:10px">${parents.filter((p) => p.phone).map((p) => `<button class="btn sm" data-dial="${esc(p.phone)}">📞 ${esc(p.name.split(" ")[0])}${p.relation ? ` (${esc(p.relation)})` : ""} · ${esc(p.phone)}</button>`).join("")}</div>
     <div class="feed" id="feed">${d.items.length ? d.items.map((i) => i.type === "call" ? callHtml(i) : msgHtml(i)).join("") : `<div class="muted small">Пока ни переписки, ни звонков</div>`}</div>
     ${kid && kid.funnel === "sales" ? `<div class="to-bar" style="margin-top:10px"><button class="btn sm" id="to-open">📅 Предложить дни для пробного</button><button class="btn sm" id="to-book">✅ Записать на пробное</button></div><div id="to-panel" hidden></div>` : ""}
     ${targets.length ? `
