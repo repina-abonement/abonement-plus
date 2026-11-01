@@ -764,6 +764,15 @@ def task_add(con, h, user, body, q, sid):
                                  source="manual", assignee=int(body["assignee"]) if body.get("assignee") else user["id"])}
 
 
+@route("PUT", "/api/auto-live", role="admin")
+def auto_live_put(con, h, user, body, q):
+    """Главный выключатель автосообщений клиентам: включает руководитель, когда сам решит запускать."""
+    comms.put(con, "auto_live", "1" if body.get("on") else "0")
+    log_action = f"Автосообщения клиентам {'ВКЛЮЧЕНЫ' if body.get('on') else 'выключены'}: {user.get('name', '')}"
+    print(log_action, flush=True)
+    return {"auto_live": comms.auto_live(con)}
+
+
 @route("GET", "/api/tasks/settings", role="admin")
 def tasks_settings(con, h, user, body, q):
     return tasks.settings_view(con)

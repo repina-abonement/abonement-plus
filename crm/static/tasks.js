@@ -167,6 +167,10 @@ async function renderTaskSettings(box, users) {
   const yn = (k) => `<select data-t="${k}"><option value="1" ${v[k] === "1" ? "selected" : ""}>Отправлять</option><option value="0" ${v[k] !== "1" ? "selected" : ""}>Не отправлять</option></select>`;
   box.innerHTML = `
     <h3>Задачи и автосообщения по пробным</h3>
+    <div class="alert ${d.auto_live ? "" : "red"}" style="margin-bottom:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <div class="grow"><b>${d.auto_live ? "✅ Автосообщения клиентам включены" : "⛔ Автосообщения клиентам выключены"}</b>
+        <div class="small">${d.auto_live ? "CRM сама пишет родителям: после записи на пробное, напоминания, после пробного, автоцепочки, автоответ бота" : "Клиентам автоматически ничего не уходит: ни напоминания, ни сообщения после записи, ни автоцепочки, ни автоответ бота. Сотрудники пишут сами"}</div></div>
+      <button class="btn sm ${d.auto_live ? "" : "primary"}" id="auto-live">${d.auto_live ? "Выключить" : "Запустить"}</button></div>
     <div class="field"><label>Кто отвечает за задачи по пробным</label>
       <select data-t="task_owner_trials">${staff.map((u) => `<option value="${u.id}" ${String(u.id) === v.task_owner_trials ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select></div>
     <div class="small muted" style="margin:-4px 0 12px">На этого сотрудника встают все задачи по пробным, и при переносе из ERP задачи со статусами: ${d.erp_statuses.map((x) => `«${esc(x)}»`).join(", ")}</div>
@@ -192,6 +196,10 @@ async function renderTaskSettings(box, users) {
     <div class="field"><label>Предложение ближайших пробных (кнопка «📅 Предложить ближайшие ПУ» в переписке). {slots}: список дат</label><textarea data-t="msg_trial_offer" rows="4">${esc(v.msg_trial_offer || "")}</textarea></div>
     <div class="small muted" style="margin-bottom:10px">В текст подставятся: {child} имя ребёнка, {date} дата, {time} время, {place} филиал. Сообщение уходит туда, где семья уже переписывалась со школой (Telegram, MAX или WhatsApp). Если переписки нет, в задаче будет видно «не ушло», и Оля напишет вручную</div>
     <button class="btn primary" id="t-save">Сохранить</button>`;
+  $("#auto-live").onclick = async () => {
+    if (!d.auto_live && !confirm("Запустить автосообщения клиентам? С этой минуты CRM сама будет писать родителям")) return;
+    try { await api("PUT", "/api/auto-live", { on: !d.auto_live }); renderTaskSettings(box, users); } catch (e) { fail(e); }
+  };
   $("#t-save").onclick = async () => {
     const body = Object.fromEntries([...box.querySelectorAll("[data-t]")].map((i) => [i.dataset.t, i.value]));
     body.booked_places = Object.fromEntries([...box.querySelectorAll("[data-bk]")].map((el) => [el.dataset.bk,

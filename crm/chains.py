@@ -161,6 +161,9 @@ def tick(con, now: datetime | None = None, send: bool = True) -> dict:
     now = (now or datetime.now()).replace(second=0, microsecond=0)
     cfg = config(con)
     started = sent = 0
+    from . import comms as _comms
+    if not _comms.auto_live(con):  # автосообщения клиентам ещё не запущены руководителем
+        return {"started": 0, "sent": 0}
     for k, c in cfg.items():
         if not c["enabled"] or not c["steps"]:
             continue

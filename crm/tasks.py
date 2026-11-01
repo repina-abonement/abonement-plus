@@ -202,7 +202,7 @@ def booked_text(con, s: dict, channel: str = "") -> str:
 def send_booked(con, sid: int) -> dict:
     """Сразу после записи на пробное: скрипт со всеми данными в мессенджер семьи (один раз на каждое время пробного)."""
     s = dict(con.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone())
-    if setting(con, "auto_booked") != "1" or not s.get("trial_at") or s["funnel"] != "sales":
+    if not comms.auto_live(con) or setting(con, "auto_booked") != "1" or not s.get("trial_at") or s["funnel"] != "sales":
         return {"skipped": True}
     if con.execute("SELECT 1 FROM auto_messages WHERE student_id=? AND kind='booked' AND trial_at=?", (sid, s["trial_at"])).fetchone():
         return {"skipped": True}
@@ -228,6 +228,8 @@ def send_booked(con, sid: int) -> dict:
 
 def send_auto(con, s: dict, kind: str, tpl: str) -> dict:
     """Отправить автосообщение один раз за пробное. Возвращает, что получилось."""
+    if not comms.auto_live(con):  # автосообщения клиентам ещё не запущены руководителем
+        return {"skipped": True}
     if con.execute("SELECT 1 FROM auto_messages WHERE student_id=? AND kind=? AND trial_at=?",
                    (s["id"], kind, s["trial_at"])).fetchone():
         return {"skipped": True}
@@ -397,7 +399,7 @@ def settings_view(con) -> dict:
     vals[OWNER_KEY] = str(owner(con) or "")
     from . import trialoffer
     vals["msg_trial_offer"] = setting(con, "msg_trial_offer") or trialoffer.DEFAULT
-    return {"values": vals, "erp_statuses": list(ERP_STATUSES), "booked_places": booked_places(con)}
+    return {"values": vals, "erp_statuses": list(ERP_STATUSES), "booked_places": booked_places(con), "auto_live": comms.auto_live(con)}
 
 
 def save_settings(con, data: dict):

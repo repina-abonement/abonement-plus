@@ -21,6 +21,7 @@ def main():
     comms.http = fake
     con = db.connect(os.path.join(tempfile.mkdtemp(), "t.sqlite3"))
     db.init_db(con)
+    __import__("crm.comms", fromlist=["put"]).put(con, "auto_live", "1")  # тест проверяет отправку: автосообщения включены
     br = con.execute("INSERT INTO branches(name) VALUES ('ТЦ «Небо»')").lastrowid
     g = con.execute("INSERT INTO groups(branch_id,name,weekdays,time) VALUES (?, 'Небо Пн/Чт', '0,3', '17:00')", (br,)).lastrowid
     olga = con.execute("INSERT INTO users(login,name,role,pw_hash) VALUES ('olga','Ольга','operator','x$y')").lastrowid

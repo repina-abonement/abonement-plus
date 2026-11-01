@@ -51,6 +51,7 @@ comms.http = fake_http
 def main():
     con = db.connect()
     db.init_db(con)
+    __import__("crm.comms", fromlist=["put"]).put(con, "auto_live", "1")  # тест проверяет отправку: автосообщения включены
     db.seed_demo(con)
     comms.seed_demo(con)
     con.close()

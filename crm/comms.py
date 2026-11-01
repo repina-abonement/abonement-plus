@@ -150,6 +150,12 @@ def get(con, key: str, default: str = "") -> str:
     return r[0] if r else default
 
 
+def auto_live(con) -> bool:
+    """Главный выключатель автосообщений клиентам (Юлия, 01.11: пока не скажу «запускаем», клиентам автоматически ничего
+    не уходит). Включает только руководитель: Настройки → Задачи и автосообщения. По умолчанию выключено."""
+    return get(con, "auto_live") == "1"
+
+
 def put(con, key: str, value: str):
     con.execute("INSERT INTO integrations(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, value if value is not None else ""))
@@ -466,6 +472,8 @@ def consent_from_bot(con, cid: int):
 
 
 def _tg_send_raw(con, cid, chat_id, text, *, biz=None, keyboard=None) -> str:
+    if not auto_live(con):  # автоответ бота клиенту: только после запуска автосообщений
+        return ""
     payload = {"chat_id": chat_id, "text": text}
     if biz:
         payload["business_connection_id"] = biz
@@ -580,6 +588,8 @@ def max_hook(con, upd: dict, headers) -> None:
 
 
 def _max_send_raw(con, cid, chat_id, text, *, contact_button=False) -> str:
+    if not auto_live(con):  # автоответ бота клиенту: только после запуска автосообщений
+        return ""
     data = {"text": text}
     if contact_button:
         data["attachments"] = [{"type": "inline_keyboard", "payload": {

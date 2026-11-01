@@ -18,6 +18,10 @@ comms.link(con, cid, fam)
 sent = []
 comms.send = lambda con, c, text, user: sent.append((c, text)) or {"id": 1}
 sv.update_student(con, sid, {"group_id": g, "trial_at": f"{d.isoformat()}T17:45"}, U)
+check(not sent, "Пока руководитель не запустил автосообщения, клиенту ничего не уходит")
+con.execute("UPDATE students SET trial_at=NULL WHERE id=?", (sid,))
+comms.put(con, "auto_live", "1")
+sv.update_student(con, sid, {"group_id": g, "trial_at": f"{d.isoformat()}T17:45"}, U)
 check(len(sent) == 1 and sent[0][0] == cid, "Сразу после записи ушло одно сообщение в переписку семьи")
 t = sent[0][1]
 check("Авиаторов 3А" in t and "17:45" in t and "бутылку с водой" in t, "В сообщении место, время и что взять")

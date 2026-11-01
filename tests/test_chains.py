@@ -16,6 +16,7 @@ SENT = []
 def main():
     con = db.connect(os.path.join(tempfile.mkdtemp(), "c.sqlite3"))
     db.init_db(con)
+    __import__("crm.comms", fromlist=["put"]).put(con, "auto_live", "1")  # тест проверяет отправку: автосообщения включены
     comms.send = lambda con, cid, text, user: SENT.append((cid, text)) or {"ok": True}
     br = con.execute("INSERT INTO branches(name) VALUES ('Небо')").lastrowid
     g = con.execute("INSERT INTO groups(branch_id,name,weekdays) VALUES (?, 'Небо Сб 10:00', '5')", (br,)).lastrowid
