@@ -1365,3 +1365,4 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .conv-row { position: relative; padding-left: 18px; }
 .conv-row.unread::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 5px; border-radius: 0 4px 4px 0; background: var(--red); }
 .conv-row.unread b { font-weight: 800; }
+.call-sum { margin: 6px 0 4px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); font-size: 13.5px; line-height: 1.4; }

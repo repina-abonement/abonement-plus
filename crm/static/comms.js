@@ -77,6 +77,7 @@ function callHtml(k) {
     <span class="call-ico">${k.direction === "in" ? "↙" : "↗"}</span>
     <div class="grow"><b>${k.direction === "in" ? "Входящий" : "Исходящий"}</b> · ${esc(CALL_ST[k.status] || k.status)}${k.talk ? " · " + secs(k.talk) : ""}
       <div class="small muted">${dtWhen(k.ts || k.started_at)}${k.operator ? " · сотрудник " + esc(k.operator) : ""}</div>
+      ${k.summary ? `<div class="call-sum">💬 ${esc(k.summary)}</div>` : ""}
       ${k.has_record ? `<audio controls preload="none" src="/api/calls/${k.id}/record"></audio>` : ""}
       ${aiChip(k)}
     </div></div>`;

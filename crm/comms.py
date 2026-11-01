@@ -1094,6 +1094,14 @@ def mark_calls_seen(con):
     con.execute("UPDATE calls SET seen=1 WHERE seen=0")
 
 
+def _call_summary(k) -> str:
+    """Кратко, о чём был разговор (из разбора звонка), чтобы видеть в истории без прослушивания."""
+    try:
+        return (json.loads(k["analysis"] or "{}").get("summary") or "").strip()
+    except (ValueError, TypeError, IndexError, KeyError):
+        return ""
+
+
 def history(con, family_id: int | None, phones: list[str], mark_read: bool = True) -> tuple[list[dict], list[dict]]:
     """Вся история семьи (или номера, если семьи нет): переписки во всех мессенджерах и звонки одной лентой."""
     phones = [p for p in phones if p]
@@ -1113,7 +1121,7 @@ def history(con, family_id: int | None, phones: list[str], mark_read: bool = Tru
         items.append({"type": "call", "ts": k["started_at"], "id": k["id"], "direction": k["direction"],
                       "status": k["status"], "talk": k["talk"], "duration": k["duration"], "phone": k["phone"],
                       "operator": k["operator"], "has_record": bool(k["record_url"]), "transcript": k["transcript"],
-                      "score": k["score"], "ai_status": k["ai_status"]})
+                      "score": k["score"], "ai_status": k["ai_status"], "summary": _call_summary(k)})
     items.sort(key=lambda x: (x["ts"] or "", x["id"]))
     if mark_read:
         for c in convs:
