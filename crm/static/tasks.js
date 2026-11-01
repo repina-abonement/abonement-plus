@@ -281,6 +281,7 @@ async function renderCoachToday(page, coachId, viewBar = "") {
       ${up.covered.map((x) => `<div class="small muted">↪ ${dShort(x.date)}, ${wd(x.date)}, ${esc(x.time || "")}: ${esc(x.group_name)} ведёт ${esc(x.sub_name)}, у тебя выходной</div>`).join("")}</section>` : ""}
     ${coachId || shiftOver ? "" : `<div id="rep-cards" style="margin-top:14px"></div>`}
     ${merchShiftBox(d, !!coachId)}
+    ${coachId ? "" : `<div style="margin-top:12px">${envelopeButton()}</div>`}
     ${coachId ? "" : `<details class="panel" id="my-pay" style="margin-top:14px"><summary><b>💰 Моя зарплата за месяц</b></summary><div class="my-pay-body small muted">Считаю…</div></details>`}
     <div class="small muted" style="margin-top:14px">Отмечай детей сразу после тренировки: от этого зависят отработки, перерасчёт абонементов и твоё место в таблице тренеров</div>`;
   page.querySelectorAll("[data-j]").forEach((b) => (b.onclick = () => { S.journal.group = +b.dataset.j; S.journal.date = b.dataset.d; go("journal"); }));
@@ -289,6 +290,7 @@ async function renderCoachToday(page, coachId, viewBar = "") {
   if (!coachId) wireTasks(page);
   if ($("#rep-cards")) coachReportCards($("#rep-cards"));
   wireMerchShift(page, d);
+  wireEnvelope(page, ((d.checkins || [])[0] || {}).branch_id);
   d.today.forEach((g) => wireStaffPicker(page, "c" + g.id, g.id, d.date, render));
   const mp = page.querySelector("#my-pay");
   if (mp) mp.ontoggle = async () => {

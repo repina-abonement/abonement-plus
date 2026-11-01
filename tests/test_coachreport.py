@@ -124,6 +124,19 @@ def main():
     check(con.execute("SELECT 1 FROM report_tasks WHERE date=? AND text LIKE 'Убери стаканчики%'", (tomorrow,)).fetchone(),
           "Задание на отчёт вернулось тренеру новым заданием на завтра")
 
+    print("Конверт: взяли деньги")
+    check(cr.envelope_prev(con, br)["amount"] == 12150, "В конверте Неба 12 150 ₽ по отчёту")
+    try:
+        cr.envelope_take(con, OP, br, 5000, "other", "")
+        ok = False
+    except cr.ReportError:
+        ok = True
+    check(ok, "Без причины не записать")
+    left = cr.envelope_take(con, OP, br, 5000, "bank")["left"]
+    e = cr.envelope_prev(con, br)
+    check(left == 7150 and e["amount"] == 7150 and e["taken"] == 5000, f"Варя взяла 5 000 ₽ в банк: осталось 7 150 ₽ ({e})")
+    check([x["amount"] for x in cr.envelopes(con) if x["branch_id"] == br] == [7150], "Остаток виден в окне «Взял из конверта»")
+
     print("Напоминания")
     con.execute("UPDATE settings SET value=? WHERE key='coach_reports_from'", ((today + timedelta(days=1)).isoformat(),))
     check(not cr.overdue(con, sh[0]["end"] + timedelta(hours=3)), "Смены до запуска отчётов не считаются несданными")

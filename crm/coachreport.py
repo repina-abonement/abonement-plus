@@ -54,6 +54,14 @@ CREATE TABLE IF NOT EXISTS inventory_issues (
     created_at TEXT NOT NULL,
     closed_at TEXT, closed_by TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS envelope_moves (
+    id INTEGER PRIMARY KEY,
+    branch_id INTEGER NOT NULL,
+    amount INTEGER NOT NULL,                   -- сколько забрали из конверта (₽)
+    reason TEXT NOT NULL DEFAULT '',
+    user_id INTEGER, user_name TEXT NOT NULL DEFAULT '',
+    at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS task_answers (
     id INTEGER PRIMARY KEY,
     kind TEXT NOT NULL,                        -- crm (задача из «Планера» или карточки) | report (задание на отчёт)
@@ -114,14 +122,56 @@ def pay_label(p: dict) -> str:
         + ("" if p.get("student_id") else " ⚠️ не найден в CRM")
 
 
-def envelope_prev(con, branch_id: int, rid: int) -> dict | None:
-    """Сколько было в конверте филиала: последний сданный отчёт с остатком (до этого отчёта)."""
-    for r in con.execute("""SELECT id, date, data FROM coach_reports WHERE branch_id=? AND status='done' AND id != ?
+def envelope_prev(con, branch_id: int, rid: int = 0) -> dict | None:
+    """Сколько сейчас в конверте филиала: остаток из последнего сданного отчёта минус то, что забрали после него
+    кнопкой «Взял из конверта» (Юлия, 01.11)."""
+    for r in con.execute("""SELECT id, date, data, submitted_at FROM coach_reports WHERE branch_id=? AND status='done' AND id != ?
                             ORDER BY submitted_at DESC LIMIT 30""", (branch_id, rid)):
         d = json.loads(r["data"] or "{}")
         if d.get("envelope") is not None:
-            return {"amount": int(d["envelope"]), "date": r["date"]}
+            taken = con.execute("SELECT COALESCE(SUM(amount), 0) FROM envelope_moves WHERE branch_id=? AND at >= ?",
+                                (branch_id, r["submitted_at"] or "")).fetchone()[0]
+            return {"amount": int(d["envelope"]) - taken, "date": r["date"], "report": int(d["envelope"]), "taken": taken}
     return None
+
+
+ENV_REASONS = {"bank": "сдать в банк", "change": "сдача", "other": ""}
+
+
+def envelope_take(con, user: dict, branch_id: int, amount, reason: str, note: str = "") -> dict:
+    """Кто-то взял деньги из конверта: запоминаем и пишем в чат «ДЕНЬГИ», остаток уменьшается сам."""
+    from . import pu
+    try:
+        amount = int(float(amount or 0))
+    except (TypeError, ValueError):
+        amount = 0
+    if amount <= 0:
+        raise ReportError("Напишите, сколько взяли")
+    br = con.execute("SELECT name FROM branches WHERE id=?", (branch_id,)).fetchone()
+    if not br:
+        raise ReportError("Выберите филиал")
+    why = (note or "").strip() if reason == "other" else ENV_REASONS.get(reason, "")
+    if not why:
+        raise ReportError("Напишите, зачем взяли")
+    before = envelope_prev(con, branch_id)
+    con.execute("INSERT INTO envelope_moves(branch_id, amount, reason, user_id, user_name, at) VALUES (?,?,?,?,?,?)",
+                (branch_id, amount, why[:200], user.get("id"), user.get("name", ""), _iso(_now())))
+    rub = lambda n: f"{int(n):,} ₽".replace(",", " ")
+    msg = f"✉️ {user.get('name', '')} взял(а) из конверта {br['name']}: {rub(amount)} ({why})."
+    if before:
+        msg += f" Было {rub(before['amount'])}, осталось {rub(before['amount'] - amount)}"
+    pu.notify_chat(con, "money", msg)
+    return {"left": before["amount"] - amount if before else None}
+
+
+def envelopes(con) -> list[dict]:
+    """Конверты всех филиалов: сколько сейчас (для окна «Взял из конверта»)."""
+    out = []
+    for b in con.execute("SELECT id, name FROM branches WHERE active=1 ORDER BY name" if
+                         "active" in {r[1] for r in con.execute("PRAGMA table_info(branches)")} else "SELECT id, name FROM branches ORDER BY name"):
+        e = envelope_prev(con, b["id"])
+        out.append({"branch_id": b["id"], "branch": b["name"], "amount": e["amount"] if e else None})
+    return out
 
 
 def search_clients(con, q: str) -> list[dict]:

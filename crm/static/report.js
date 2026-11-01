@@ -108,7 +108,7 @@ async function coachReportCards(box) {
       <span class="rep-ico">${done ? "✅" : "📝"}</span>
       <span class="grow"><b>${done ? "Отчёт о смене сдан" : "Сдать отчёт о смене"}</b>
         <small>${esc(s.branch)}${s.date !== S.meta.today ? `, вчера (${dShort(s.date)})` : ""} · ${done ? "красавчик, можно домой 🏠"
-          : over ? "смена закончилась, жми и заполняй" : `после последней тренировки${end ? `, в ${s.end.slice(11, 16)}` : ""}`}</small></span></button>`;
+          : over ? `смена закончилась, сдай до ${new Date(end.getTime() + 30 * 60000).toTimeString().slice(0, 5)}` : `не позднее 30 минут после последней тренировки${end ? ` (до ${new Date(end.getTime() + 30 * 60000).toTimeString().slice(0, 5)})` : ""}`}</small></span></button>`;
   }).join("");
   box.querySelectorAll("[data-rep]").forEach((b) => (b.onclick = () => openCoachReport(+b.dataset.rep, b.dataset.rd)));
 }
@@ -191,7 +191,7 @@ function repStepHtml(st, v) {
         <small>${esc(v.pay_methods[p.method] || "")}${p.method === "cash" ? " (чек ✅, конверт ✅)" : ""} · ${esc(repPayWhat(v, p))}${p.trial_id ? " · пробное" : ""}${p.student_id ? "" : " · ⚠️ нет в CRM, админ разберёт"}</small></span>
         ${ro || p.trial_id ? "" : `<button class="icon-btn" data-rpay="${i}">✕</button>`}</div>`).join("")}
       ${v.cash_sum ? `<div class="rep-item rep-env"><b>✉️ Остаток в конверте</b>
-        <small>${prev ? `Было ${rub(prev.amount)} (отчёт ${dShort(prev.date)}) + наличные сегодня ${rub(v.cash_sum)} = должно быть <b>${rub(need)}</b>` : `Наличные сегодня: ${rub(v.cash_sum)}. Посчитай, сколько всего в конверте`}</small>
+        <small>${prev ? `Было ${rub(prev.amount)} (отчёт ${dShort(prev.date)}${prev.taken ? `, потом забрали ${rub(prev.taken)}` : ""}) + наличные сегодня ${rub(v.cash_sum)} = должно быть <b>${rub(need)}</b>` : `Наличные сегодня: ${rub(v.cash_sum)}. Посчитай, сколько всего в конверте`}</small>
         <input id="rp-env" type="number" inputmode="numeric" placeholder="Сколько денег в конверте сейчас, ₽" value="${env ?? ""}" ${ro ? "disabled" : ""}>
         ${env != null && prev && !v.env_match ? `<div class="rep-bad">⚠️ Не сходится: должно быть ${rub(need)}, а в конверте ${rub(env)}. Пересчитай или объясни</div>
           <input id="rp-envnote" placeholder="Почему не сходится? Обязательно" value="${esc(D.env_note || "")}" ${ro ? "disabled" : ""}>` : env != null && prev ? `<div class="rep-good">✅ Сходится</div>` : ""}
@@ -359,4 +359,36 @@ function wireCoachAnswers(page) {
       catch (e) { fail(e); }
     };
   }));
+}
+
+/* «✉️ Взял из конверта»: любой сотрудник, CRM пишет в чат «ДЕНЬГИ» и уменьшает остаток (Юлия, 01.11) */
+function envelopeButton() {
+  return `<button class="btn env-take-btn" data-env-take>✉️ Взял из конверта</button>`;
+}
+
+async function openEnvelopeTake(branchId) {
+  let d;
+  try { d = await api("GET", "/api/envelope"); } catch (e) { return fail(e); }
+  let reason = "";
+  openDrawer(`<h2>✉️ Взял из конверта</h2><div class="small muted" style="margin-bottom:10px">CRM сама напишет в чат «ДЕНЬГИ», и у следующего тренера остаток сойдётся</div>
+    <div class="field"><label>Филиал</label><select id="env-br">${d.items.map((x) => `<option value="${x.branch_id}" ${x.branch_id === branchId ? "selected" : ""}>${esc(x.branch)}${x.amount != null ? ` · в конверте ${rub(x.amount)}` : ""}</option>`).join("")}</select></div>
+    <div class="field"><label>Сколько взял, ₽</label><input id="env-sum" type="number" inputmode="numeric" placeholder="Например: 10000"></div>
+    <div class="field"><label>Зачем</label><div class="rep-btns">${[["bank", "Сдать в банк"], ["change", "Сдача"], ["other", "Другое"]].map(([k, t]) => `<button class="rep-big sm" data-envr="${k}">${t}</button>`).join("")}</div>
+      <input id="env-note" placeholder="Зачем взял?" style="display:none;margin-top:8px"></div>
+    <button class="btn primary" id="env-save">Записать</button>`);
+  document.querySelectorAll("[data-envr]").forEach((b) => (b.onclick = () => {
+    reason = b.dataset.envr;
+    document.querySelectorAll("[data-envr]").forEach((x) => x.classList.toggle("on", x === b));
+    $("#env-note").style.display = reason === "other" ? "" : "none";
+  }));
+  $("#env-save").onclick = async () => {
+    try {
+      const r = await api("POST", "/api/envelope/take", { branch_id: +$("#env-br").value, amount: $("#env-sum").value, reason, note: $("#env-note").value });
+      toast(r.left != null ? `Записано. В конверте осталось ${rub(r.left)}` : "Записано, ушло в чат «ДЕНЬГИ»"); closeDrawer(); render();
+    } catch (e) { fail(e); }
+  };
+}
+
+function wireEnvelope(page, branchId) {
+  page.querySelectorAll("[data-env-take]").forEach((b) => (b.onclick = () => openEnvelopeTake(branchId)));
 }

@@ -1148,7 +1148,8 @@ async function renderWorkdesk(page) {
     ${bar}
     <div class="desk-hello">
       <div class="grow"><h2>${S.viewAs ? `Рабочий стол: ${esc(S.viewAs.name)}` : `${hello}, ${esc(firstName)}`}</h2>
-        <div class="muted small">${esc(dateTxt)}${u.length || tiles.length ? "" : " · всё спокойно ⚽"}</div></div>
+        <div class="muted small">${esc(dateTxt)}${u.length || tiles.length ? "" : " · всё спокойно ⚽"}</div>
+        ${S.viewAs ? "" : `<div style="margin-top:8px">${envelopeButton()}</div>`}</div>
       ${tiles.length || reds ? `<div class="dtiles">${reds ? `<button class="dtile red" data-jump="dw-hot"><span>🔥</span><b>${reds}</b><small>Горит</small></button>` : ""}${tiles.join("")}</div>` : ""}
     </div>
     ${(d.reviews || []).map((r) => `<div class="rv-alert"><span class="rv-star">⭐</span>
@@ -1181,6 +1182,7 @@ async function renderWorkdesk(page) {
   wireCheckinReport(page);
   wireShiftReports(page, d);
   wireCoachAnswers(page);
+  wireEnvelope(page);
   wireSpend(page);
   wireMerchAlerts(page);
   if (page.querySelector(".sched-widget")) { if (wasOpen === false) page.querySelector(".sched-widget").open = false; wireSchedule(page.querySelector(".sched-widget"), S.meta.today); }

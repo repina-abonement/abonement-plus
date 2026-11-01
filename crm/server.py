@@ -1838,6 +1838,20 @@ def report_search(con, h, user, body, q):
     return {"items": coachreport.search_clients(con, q.get("q") or "")}
 
 
+@route("GET", "/api/envelope", role="any")
+def envelope_get(con, h, user, body, q):
+    from . import coachreport
+    return {"items": coachreport.envelopes(con), "reasons": coachreport.ENV_REASONS}
+
+
+@route("POST", "/api/envelope/take", role="any")
+def envelope_take(con, h, user, body, q):
+    """Взял деньги из конверта филиала: CRM пишет в чат «ДЕНЬГИ», остаток уменьшается."""
+    from . import coachreport
+    return crx(coachreport.envelope_take, con, user, int(body.get("branch_id") or 0), body.get("amount"),
+               str(body.get("reason") or ""), body.get("note") or "")
+
+
 @route("POST", "/api/task-answers/{aid}", role="operator")
 def task_answer_decide(con, h, user, body, q, aid):
     """Ответ тренера по заданию: принять (задача закрыта) или вернуть тренеру с комментарием и датой."""
