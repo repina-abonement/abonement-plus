@@ -152,6 +152,8 @@ FIELDS = {
         ("trial_at", "Дата пробного", ["пробное", "дата пробного", "пу"]),
         ("source", "Источник", ["источник", "откуда", "канал"]),
         ("created", "Дата обращения", ["дата создания", "дата обращения", "создан", "дата заявки", "дата добавления"]),
+        ("status_at", "Дата статуса (последнего изменения)", ["дата статуса", "дата изменения статуса", "дата изменения", "изменен",
+                                                               "последнее изменение", "дата последнего контакта", "последний контакт"]),
         ("comment", "Комментарий", ["комментарий", "примечание", "заметка"]),
     ],
     "subs": [
@@ -822,11 +824,18 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
         created = parse_date(rec.get("created", "")) or nowi
         if len(created) == 10:
             created += "T10:00"
+        # 01.11: этап «случился» в реальную дату, а не в день переноса: дата статуса из ERP, иначе дата пробного, иначе обращения.
+        # От неё считаются горячий/тёплый/холодный и цепочки задач (иначе вся база выглядела бы свежей)
+        ev = parse_date(rec.get("status_at", "")) or ""
+        if not ev and trial and stage in ("trial_booked", "missed_trial", "how_was"):
+            ev = trial
+        ev = (ev if len(ev) > 10 else (ev + "T10:00" if ev else "")) or created
+        stage_at = min(ev, nowi)
         tariff = "flex" if "гибк" in _norm(rec.get("tariff", "")) else "fixed"
         src = (rec.get("source") or "").strip()
         sid = con.execute("""INSERT INTO students(family_id, name, birth, group_id, tariff, funnel, stage, stage_changed_at, trial_at,
                              source, created_at, erp_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                          (fid, name, parse_date(rec.get("birth", "")) or "", gid, tariff, funnel, stage, nowi, trial,
+                          (fid, name, parse_date(rec.get("birth", "")) or "", gid, tariff, funnel, stage, stage_at, trial,
                            src, created, (rec.get("erp_id") or "").strip())).lastrowid
         _track(con, batch, "students", sid)
         if src:

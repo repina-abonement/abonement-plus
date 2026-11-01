@@ -77,6 +77,7 @@ def main():
     gosha = con.execute("SELECT * FROM students WHERE erp_id='103'").fetchone()
     check(gosha["stage"] == "missed_trial" and gosha["birth"] == "2023-03-15", f"Зависший на пробном: «Не дошёл до ПУ»; дата рождения из числа Excel ({gosha['stage']}, {gosha['birth']})")
     check(con.execute("SELECT stage FROM students WHERE erp_id='104'").fetchone()[0] == "left", "Ушедший перенесён как ушедший")
+    check(gosha["stage_changed_at"][:10] == "2026-10-15", f"Дата этапа: настоящая (дата пробного), а не день переноса ({gosha['stage_changed_at']})")
     subs = con.execute("SELECT month, price, status FROM subscriptions WHERE student_id=? ORDER BY month", (petya["id"],)).fetchall()
     check([tuple(x) for x in subs] == [("2026-09", 12400, "paid"), ("2026-10", 12400, "paid")], f"История абонементов Пети: {[tuple(x) for x in subs]}")
     check(con.execute("SELECT status FROM subscriptions WHERE student_id=?", (masha["id"],)).fetchone()[0] == "invoiced", "Неоплаченный абонемент так и остался неоплаченным")

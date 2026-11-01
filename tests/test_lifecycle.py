@@ -97,4 +97,19 @@ old_lead = kid(stage="lead", ago_days=200)
 old_ref = kid(stage="refused", ago_days=400, refusal_reason="Дорого")
 lifecycle.tick(con, now)
 check(not open_kinds(old_lead) and not open_kinds(old_ref), "Лид полугодовой давности и отказ годичной: задач нет")
+print("Старую базу оживляем порциями: горячие первыми")
+con.execute("UPDATE tasks SET status='done' WHERE status='open'")
+con.execute("UPDATE students SET funnel='members', stage='left' WHERE funnel='sales'")  # убираем лидов из прошлых проверок
+olds = []
+for i in range(15):
+    sid = kid(stage="lead", ago_days=100 + i)
+    con.execute("UPDATE students SET created_at=? WHERE id=?", ((now - timedelta(days=100 + i)).isoformat(timespec="minutes"), sid))
+    olds.append(sid)
+hot = kid(stage="missed_trial", ago_days=40, trial_came=1, source="Заявка с сайта")
+lifecycle.revive(con, now.replace(hour=12))
+got = [r[0] for r in con.execute("SELECT student_id FROM tasks WHERE kind='revive' AND status='open'")]
+check(len(got) == lifecycle.REVIVE_PER_DAY, f"За день не больше {lifecycle.REVIVE_PER_DAY} «оживлений»: без завала")
+check(hot in got, "Был на пробном и сам оставлял заявку: в первой порции")
+lifecycle.revive(con, now.replace(hour=13))
+check(con.execute("SELECT COUNT(*) FROM tasks WHERE kind='revive'").fetchone()[0] == lifecycle.REVIVE_PER_DAY, "Второй раз в тот же день не добавляет")
 print("ok")
