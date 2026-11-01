@@ -421,7 +421,8 @@ def tg_hook(con, upd: dict, headers) -> None:
     if chat.get("type") in ("group", "supergroup"):
         # рабочие чаты сотрудников: команда в чате подключает его к уведомлениям CRM
         cmd = (m.get("text") or "").split("@")[0].strip().lower()
-        names = {"/crm_coaches": ("tg_chat_coaches", "ТРЕНЕРЫ"), "/crm_care": ("tg_chat_care", "Служба заботы")}
+        names = {"/crm_coaches": ("tg_chat_coaches", "ТРЕНЕРЫ"), "/crm_care": ("tg_chat_care", "Служба заботы"),
+                 "/crm_money": ("tg_chat_money", "ДЕНЬГИ")}
         if cmd in names:
             put(con, names[cmd][0], str(chat.get("id")))
             try:

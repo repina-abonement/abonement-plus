@@ -25,7 +25,7 @@ function taskRow(t) {
     <span class="small muted when">${dtWhen(t.due_at)}</span>
     <div class="now-act">
       ${s.phone ? `<button class="btn sm" data-dial="${esc(s.phone)}">📞</button>` : ""}
-      ${t.kind === "rebook" ? `<button class="btn sm primary" data-rebook="${t.id}">Итог звонка</button>` : `<button class="btn sm" data-done>Выполнено</button>`}
+      ${t.kind === "rebook" ? `<button class="btn sm primary" data-rebook="${t.id}">Итог звонка</button>` : S.user.role === "coach" ? "" : `<button class="btn sm" data-done>Выполнено</button>`}
       ${["admin", "operator"].includes(S.user.role) ? `<button class="btn sm" data-tpass title="Передать другому сотруднику">Передать</button>` : ""}
       ${t.kind === "plan" && (S.tasks.canManage || t.created_by_id === S.user.id) ? `<button class="btn sm" data-tcancel="${t.id}" title="Убрать задачу">✕</button>` : ""}
     </div>
@@ -235,6 +235,8 @@ async function renderCoachToday(page, coachId, viewBar = "") {
   const t = d.totals, wd = (iso) => WD_LOW[(new Date(iso + "T00:00").getDay() + 6) % 7];
   const line = COACH_LINES[new Date(d.date + "T00:00").getDate() % COACH_LINES.length];
   const up = d.upcoming || { covering: [], covered: [] };
+  // карточка «Сдать отчёт о смене» наверху, когда тренировки закончились; до этого внизу, под тренировками
+  const shiftOver = !d.today.length || d.today.every((g) => lessonOver(d.date, g.time));
   const fact = (n, label, cls = "") => n ? `<div class="cfact ${cls}"><b>${n}</b><span>${label}</span></div>` : "";
   page.innerHTML = `${viewBar}
     <div class="page-head"><h2 class="grow hello-ava">${avatar((d.coach && d.coach.id) || S.user.id, (d.coach && d.coach.name) || S.user.name, 44)}<span>Привет, ${esc(first)}!</span></h2><span class="muted small">${dShort(d.date)}, ${wd(d.date)}</span></div>
@@ -244,7 +246,7 @@ async function renderCoachToday(page, coachId, viewBar = "") {
     ${d.today.length ? `<section class="now coach-sum"><div class="now-head"><h3>Сегодня ${d.today.length} ${d.today.length === 1 ? "тренировка" : d.today.length < 5 ? "тренировки" : "тренировок"}, ждём ${t.total} ${kidsWord(t.total)}</h3></div>
       <div class="cfacts">${fact(t.paid, "по абонементу", "green")}${fact(t.trials, "на пробном", "blue")}${fact(t.single, "разовое")}${fact(t.makeups, "на отработке")}${fact(t.unpaid, "без оплаты", "yellow")}${fact(t.vacation, "в отпуске, не придут")}</div></section>` : ""}
     ${checkinBox(d, !!coachId)}
-    ${coachId ? "" : `<div id="rep-cards"></div>`}
+    ${coachId || !shiftOver ? "" : `<div id="rep-cards"></div>`}
     ${(d.tasks || []).length ? `<section class="now tasks-box" style="margin-bottom:12px"><div class="now-head"><h3>📌 Задачи на сегодня: ${d.tasks.length}</h3><span class="small muted">По каждой отчитаешься в отчёте о смене</span></div>${d.tasks.map(taskRow).join("")}</section>` : ""}
     ${d.away ? `<section class="now calm"><div class="now-head"><h3>🏖 Ты сейчас отдыхаешь до ${dShort(d.away.date_to)}</h3></div><div class="small">Тренировки на эти дни передаём другим тренерам</div></section>` : ""}
     ${d.replaced.length ? `<section class="now calm" style="margin-top:12px"><div class="now-head"><h3>Сегодня тебя заменяют</h3></div>
@@ -277,6 +279,7 @@ async function renderCoachToday(page, coachId, viewBar = "") {
     ${up.covering.length || up.covered.length ? `<section class="now calm" style="margin-top:16px"><div class="now-head"><h3>Замены на ближайшие 2 недели</h3></div>
       ${up.covering.map((x) => `<div class="small">🔁 ${dShort(x.date)}, ${wd(x.date)}, ${esc(x.time || "")}: <b>ты выходишь</b> в ${esc(x.group_name)} (${esc(x.branch)}) вместо ${esc(x.own_name || "другого тренера")}</div>`).join("")}
       ${up.covered.map((x) => `<div class="small muted">↪ ${dShort(x.date)}, ${wd(x.date)}, ${esc(x.time || "")}: ${esc(x.group_name)} ведёт ${esc(x.sub_name)}, у тебя выходной</div>`).join("")}</section>` : ""}
+    ${coachId || shiftOver ? "" : `<div id="rep-cards" style="margin-top:14px"></div>`}
     ${merchShiftBox(d, !!coachId)}
     ${coachId ? "" : `<details class="panel" id="my-pay" style="margin-top:14px"><summary><b>💰 Моя зарплата за месяц</b></summary><div class="my-pay-body small muted">Считаю…</div></details>`}
     <div class="small muted" style="margin-top:14px">Отмечай детей сразу после тренировки: от этого зависят отработки, перерасчёт абонементов и твоё место в таблице тренеров</div>`;

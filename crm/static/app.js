@@ -311,7 +311,8 @@ const isCoach = () => S.user && S.user.role === "coach";
 const LEVELS = { own: 1, view: 2, full: 3 };
 const can = (sec, lvl = "own") => (LEVELS[((S.user && S.user.perms) || {})[sec]] || 0) >= LEVELS[lvl];
 const isOwner = () => can("settings", "full");
-const visibleViews = () => VIEWS.filter(([k]) => can(k === "manual" ? "planner" : k) && (k !== "today" || !isOwner()))  // руководитель смотрит стол тренера через «Как видит»
+const visibleViews = () => VIEWS.filter(([k]) => can(k === "manual" ? "planner" : k) && (k !== "today" || !isOwner())
+  && (k !== "manual" || S.user.role !== "coach"))  // тренеру задачи приходят на «Сегодня» и в отчёт, отдельная вкладка не нужна  // руководитель смотрит стол тренера через «Как видит»
   .map(([k, t]) => [k, k === "coaches" && !can("coaches", "view") ? "Мои результаты" : k === "members" && !can("members", "full") ? "Мои ученики" : t]);
 const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
 function isCoachShort() { return "Результаты"; }
@@ -1110,13 +1111,14 @@ async function renderWorkdesk(page) {
     sched: { html: schedHtml, icon: "📅", label: "Сегодня в филиалах" },
     bday: { html: birthdaysBox(d.birthdays), icon: "🎂", label: "Дни рождения" },
     tasks: { html: tasksHtml, icon: "✅", label: "Мои задачи" },
+    answers: { html: coachAnswersBox(d.coach_answers), icon: "💬", label: "Ответы тренеров", n: (d.coach_answers || []).length },
     reports: { html: shiftReportsBox(d.shift_reports), icon: "📝", label: "Отчёты о смене",
       n: d.shift_reports ? d.shift_reports.late.length + d.shift_reports.issues.length : 0, red: true },
   };
   const ORDER = {
-    owner: ["spend", "reports", "marks", "subs", "checkins", "tasks", "call", "wait", "merch", "sched", "bday"],
-    control: ["reports", "marks", "checkins", "subs", "merch", "tasks", "wait", "sched", "bday", "call", "spend"],
-    operator: ["tasks", "call", "wait", "sched", "bday", "marks", "subs", "merch", "spend", "checkins", "reports"],
+    owner: ["spend", "reports", "answers", "marks", "subs", "checkins", "tasks", "call", "wait", "merch", "sched", "bday"],
+    control: ["reports", "answers", "marks", "checkins", "subs", "merch", "tasks", "wait", "sched", "bday", "call", "spend"],
+    operator: ["tasks", "answers", "call", "wait", "sched", "bday", "marks", "subs", "merch", "spend", "checkins", "reports"],
   }[who];
   const widgets = ORDER.filter((k) => W[k].html);
   // на виду только то, где есть что делать, и задачи; остальное свёрнуто строкой внизу (раскрывается по нажатию)
@@ -1178,6 +1180,7 @@ async function renderWorkdesk(page) {
   wireMarks(page);
   wireCheckinReport(page);
   wireShiftReports(page, d);
+  wireCoachAnswers(page);
   wireSpend(page);
   wireMerchAlerts(page);
   if (page.querySelector(".sched-widget")) { if (wasOpen === false) page.querySelector(".sched-widget").open = false; wireSchedule(page.querySelector(".sched-widget"), S.meta.today); }

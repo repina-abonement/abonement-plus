@@ -57,6 +57,7 @@ async function renderMeet(page) {
       <span class="meet-check">✓</span><span class="meet-name">${esc(r.name)}</span><span class="meet-tags">${tags(r)}</span></button>`;
   page.innerHTML = `
     <div class="meet">
+      <button class="btn sm meet-back" id="m-back">← Назад</button>
       <div class="meet-head">
         <div class="grow"><div class="meet-title">${esc(g.name)}</div>
           <div class="small muted">${dShort(date)}, ${esc(g.branch)}${g.time ? ", " + esc(g.time) : ""}</div></div>
@@ -79,7 +80,7 @@ async function renderMeet(page) {
     const b = $("#m-done");
     b.dataset.left = left;
     b.dataset.armed = "";
-    b.textContent = left ? `Готово: остальные ${left} не пришли` : "Готово, все отмечены 👍";
+    b.textContent = left ? `Готово: ${left} ${left === 1 ? "не пришёл" : "не пришли"}` : "Готово, все отмечены 👍";
   };
   const apply = (r, st) => {
     if (r.status === "trial") r.trial_came = st === "yes" ? 1 : st === "no" ? 0 : null;
@@ -104,11 +105,12 @@ async function renderMeet(page) {
       recount(); fail(e);
     }
   }));
+  $("#m-back").onclick = () => (history.length > 1 ? history.back() : go("today"));
   const done = $("#m-done");
   if (done) done.onclick = async () => {
     const left = kids.filter((r) => meetState(r) === "none" && !r.resolved);
     if (!left.length) { history.length > 1 ? history.back() : go("today"); return; }
-    if (!done.dataset.armed) { done.dataset.armed = "1"; done.textContent = `Точно? Не пришли: ${left.map((r) => r.name.split(" ")[0]).join(", ")}. Нажмите ещё раз`; return; }
+    if (!done.dataset.armed) { done.dataset.armed = "1"; done.textContent = `Точно? ${left.length === 1 ? "Не пришёл" : "Не пришли"}: ${left.map((r) => r.name.split(" ")[0]).join(", ")}. Жми ещё раз`; return; }
     done.disabled = true;
     try {
       for (const r of left) { await meetSend(r, "no", g, date); apply(r, "no"); }

@@ -843,6 +843,8 @@ def workdesk(con, h, user, body, q):
             "ads_alerts": expenses.ads_alerts(con) if user["role"] == "admin" else [],
             "reviews": __import__("crm.reviews", fromlist=["open_list"]).open_list(con) if user["role"] == "admin" else [],
             "absences": schedule.absences(con),
+            "coach_answers": __import__("crm.coachreport", fromlist=["answers"]).answers(con)
+            if perms.roles_of(user) & {"owner", "senior", "operator"} else [],
             "shift_reports": __import__("crm.coachreport", fromlist=["desk"]).desk(con, user["role"] == "admin")
             if perms.can(user, "schedule", "full") else None,
             "coaches": [dict(r) for r in con.execute("SELECT id, name FROM users WHERE role='coach' AND active=1 ORDER BY name")],
@@ -1826,6 +1828,21 @@ def report_task_done(con, h, user, body, q, tid):
 @route("DELETE", "/api/report-tasks/{tid}", role="schedule:full")
 def report_task_del(con, h, user, body, q, tid):
     con.execute("DELETE FROM report_tasks WHERE id=? AND done_at IS NULL", (int(tid),))
+    return {"ok": True}
+
+
+@route("GET", "/api/report-search", role="today|schedule:full")
+def report_search(con, h, user, body, q):
+    """Поиск ребёнка для оплаты в отчёте: только имя и группа, без телефонов."""
+    from . import coachreport
+    return {"items": coachreport.search_clients(con, q.get("q") or "")}
+
+
+@route("POST", "/api/task-answers/{aid}", role="operator")
+def task_answer_decide(con, h, user, body, q, aid):
+    """Ответ тренера по заданию: принять (задача закрыта) или вернуть тренеру с комментарием и датой."""
+    from . import coachreport
+    crx(coachreport.decide, con, int(aid), user, str(body.get("decision") or ""), body.get("note") or "", str(body.get("date") or ""))
     return {"ok": True}
 
 

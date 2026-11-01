@@ -49,21 +49,17 @@ function merchShiftBox(d, viewOnly) {
   const m = d.merch, shifts = d.checkins || [];
   if (!m || !shifts.length) return "";
   const sales = m.sales || [];
-  return `<section class="now merch-box" style="margin-top:16px"><div class="now-head"><h3>👕 Итог смены: мерч</h3></div>
+  return `<section class="now merch-box" style="margin-top:16px"><div class="now-head"><h3>👕 Мерч</h3><span class="small muted">Продал? Внеси сюда. Итог по мерчу в отчёте о смене</span></div>
     ${shifts.map((s) => {
-      const rep = m.reports[s.branch_id];
       const mine = sales.filter((x) => x.branch_id === s.branch_id);
       return `<div class="checkin-row" style="flex-direction:column;align-items:stretch">
-        <div class="row" style="align-items:center;flex-wrap:wrap"><b class="grow">${esc(s.branch)}</b>
-          ${rep === undefined ? `<span class="pill yellow">не отмечено</span>` : rep ? `<span class="pill green">продажи были</span>` : `<span class="pill">продаж не было</span>`}</div>
+        ${shifts.length > 1 ? `<b>${esc(s.branch)}</b>` : ""}
         ${mine.length ? `<div class="small" style="margin:4px 0">${mine.map((x) => `${esc(x.item_name)} × ${x.qty}, ${rub(x.amount)}, ${MERCH_METHODS[x.method]}${x.method === "qr" && !x.receipt_done ? " <b style='color:var(--red)'>чек не пробит</b>" : ""}`).join("<br>")}</div>` : ""}
         ${viewOnly ? "" : `<div class="row" style="flex-wrap:wrap;margin-top:6px">
-          ${rep === undefined ? `<button class="btn sm" data-nosale="${s.branch_id}" style="flex:0">Продаж не было</button>` : ""}
           <button class="btn sm primary" data-sale="${s.branch_id}" style="flex:0">+ Продажа мерча</button></div>
           <div data-saleform="${s.branch_id}"></div>`}
       </div>`;
     }).join("")}
-    ${viewOnly ? "" : `<div class="small muted" style="margin-top:6px">В конце смены обязательно отметь: были продажи или нет</div>`}
   </section>`;
 }
 
