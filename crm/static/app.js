@@ -47,12 +47,30 @@ function askRequired(need) {
       ${need.fields.map((k) => `<div class="field ${need.missing.includes(k) ? "need-miss" : ""}"><label>${esc(need.labels[k])}${need.missing.includes(k) ? " · нужно заполнить" : ""}</label>
         <input name="${k}" type="${types[k]}" value="${esc(need.values[k] || "")}" placeholder="${esc(ph[k] || "")}" ${k === "email" ? 'autocomplete="off"' : ""} required></div>`).join("")}
       <div class="need-err small"></div>
-      <div class="row" style="gap:10px;margin-top:6px"><button class="btn primary" style="flex:1">Сохранить и продолжить</button><button type="button" class="btn" data-ncancel style="flex:0 0 auto">Отмена</button></div></form>`;
+      <div class="row" style="gap:10px;margin-top:6px"><button class="btn primary" style="flex:1">Сохранить и продолжить</button><button type="button" class="btn" data-ncancel style="flex:0 0 auto">Отмена</button></div>
+      <button type="button" class="btn ghost" data-nask style="width:100%;margin-top:8px">💬 Данных нет: попросить у родителя</button></form>`;
     document.body.appendChild(wrap);
     const f = wrap.querySelector("form");
     const first = f.querySelector(".need-miss input") || f.querySelector("input"); if (first) setTimeout(() => first.focus(), 50);
     const done = (v) => { wrap.remove(); resolve(v); };
     wrap.querySelector("[data-ncancel]").onclick = () => done(false);
+    // данных нет: готовим вежливый запрос родителю ровно о том, чего не хватает, и вставляем его в поле ответа
+    wrap.querySelector("[data-nask]").onclick = async () => {
+      const miss = need.fields.filter((k) => need.missing.includes(k) || !f.elements[k].value.trim());
+      const nm = f.elements.child_name ? f.elements.child_name.value.trim() : "";
+      const text = askRequiredText(need.kind, miss, nm && !nm.includes(" "));
+      const box = [...document.querySelectorAll("#chat-text, #cm-text")].find((x) => x.offsetParent);
+      if (box) {
+        box.value = box.value.trim() ? box.value.trim() + "\n\n" + text : text;
+        box.rows = Math.min(8, box.value.split("\n").length + 1);
+        done(false); box.focus(); box.scrollIntoView({ block: "center" });
+        toast("Запрос вставлен в поле ответа: проверьте и нажмите «Отправить»");
+      } else {
+        try { await navigator.clipboard.writeText(text); toast("Текст запроса скопирован: вставьте его в переписку с родителем"); }
+        catch (_) { prompt("Скопируйте текст запроса родителю", text); }
+        done(false);
+      }
+    };
     f.onsubmit = async (e) => {
       e.preventDefault();
       const body = Object.fromEntries(need.fields.map((k) => [k, f.elements[k].value.trim()]));
@@ -64,6 +82,15 @@ function askRequired(need) {
       } catch (_) { wrap.querySelector(".need-err").textContent = "Нет связи, попробуйте ещё раз"; }
     };
   });
+}
+
+function askRequiredText(kind, miss, onlySurname = false) {
+  const ask = { child_name: onlySurname ? "фамилию ребёнка" : "имя и фамилию ребёнка", birth: "дату рождения ребёнка", parent_name: "как к вам можно обращаться",
+    phone: "номер телефона для связи", email: "электронную почту: на неё придёт чек об оплате" };
+  const list = (miss.length ? miss : ["child_name", "birth"]).map((k) => "• " + (ask[k] || k)).join("\n");
+  return kind === "sale"
+    ? `Здравствуйте! Чтобы оформить абонемент, пришлите, пожалуйста:\n${list}\nСпасибо!`
+    : `Здравствуйте! Чтобы записать ребёнка на пробное занятие, пришлите, пожалуйста:\n${list}\nСпасибо! Как только получим, сразу запишем 😊`;
 }
 
 let toastTimer;
