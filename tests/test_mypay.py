@@ -52,6 +52,20 @@ def main():
     from crm import logic
     a = mypay.view(con, {"id": olga, "role": "operator"}, logic.month_of(date.today()))["parts"]["admin"]  # записи сделаны сейчас
     check(a["trials"] == 1 and a["sales"] == 1, "Запись на пробное и продажа засчитаны тому, кто нажал")
+    # 01.11: 200 ₽ за покупку получает только ответственный за пробные (Оля), за тех, кого записала она, кто бы ни продал
+    vika = add("vika", "Вика", "operator")
+    VI = {"id": vika, "name": "Вика", "role": "operator"}
+    from crm import comms as _cm
+    _cm.put(con, "task_owner_trials", str(olga))
+    l2 = sv.create_student(con, {"name": "Лид Два", "parent_name": "Мама", "phone": "+7 900 000-00-98"}, OP)
+    sv.update_student(con, l2, {"group_id": g, "trial_at": "2026-11-24T18:00"}, OP)  # записала Оля
+    sv.move_card(con, l2, "sales", "bought", VI)  # продала Вика
+    inv = sv.create_invoice(con, l2, logic.month_of(date.today()), VI)
+    money.pay_subscription(con, inv["id"], "transfer", VI)
+    ym = logic.month_of(date.today())
+    a = mypay.view(con, {"id": olga, "role": "operator"}, ym)["parts"]["admin"]
+    av = mypay.view(con, {"id": vika, "role": "operator"}, ym)["parts"]["admin"]
+    check(a["sales"] == 2 and av["sales"] == 0, "Записала Оля, продала Вика: 200 ₽ у Оли, у Вики нет")
     print("ok")
 
 

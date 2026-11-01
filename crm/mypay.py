@@ -4,7 +4,8 @@
 - тренер: по salary.payroll (доля выручки группы за каждую тренировку, отработки, сборная, штрафы);
   «на сегодня» - тренировки до сегодняшнего дня включительно, «весь месяц» - все тренировки месяца;
 - администратор: смены по графику (pay_admin_shift за смену), запись на пробное (pay_admin_trial) и покупка
-  абонемента после пробного (pay_admin_sale): засчитываются тому, кто записал и кто перевёл в «Купил»;
+  абонемента после пробного (pay_admin_sale). Юлия, 01.11: 200 ₽ за покупку получает только ответственный за пробные
+  (Оля) за каждого, кого она записала на пробное и кто потом купил (оплатил), неважно, кто оформил продажу;
 - промоутер: контакты за месяц × pay_promoter_contact. Контакты пока в Google-таблице, число вписывает сам промоутер.
 Цель: сотрудник вводит, сколько хочет получить за месяц, и видит, сколько ещё нужно:
 тренеру - детей в его группы (и где свободные места), промоутеру - контактов (и сколько в день), администратору - записей.
@@ -79,7 +80,9 @@ def admin_part(con, uid: int, ym: str, today: date) -> dict:
     a, b = logic.month_bounds(ym)
     rng = (a.isoformat(), b.isoformat() + "T23:59")
     trials = con.execute("SELECT COUNT(*) FROM students WHERE trial_booked_by=? AND trial_booked_at BETWEEN ? AND ?", (uid, *rng)).fetchone()[0]
-    sales = con.execute("SELECT COUNT(*) FROM students WHERE converted_by=? AND converted_at BETWEEN ? AND ?", (uid, *rng)).fetchone()[0]
+    from . import tasks as _tasks
+    sales = con.execute("SELECT COUNT(*) FROM students WHERE trial_booked_by=? AND converted_at BETWEEN ? AND ?",
+                        (uid, *rng)).fetchone()[0] if _tasks.owner(con) == uid else 0  # только ответственный за пробные
     rs, rt, rl = _rate(con, "pay_admin_shift"), _rate(con, "pay_admin_trial"), _rate(con, "pay_admin_sale")
     now = done * rs + trials * rt + sales * rl
     elapsed = max(1, min((today - a).days + 1, (b - a).days + 1))
