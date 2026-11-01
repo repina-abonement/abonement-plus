@@ -104,6 +104,14 @@ def main():
     check(st[t1] == "review" and st[t2] == "review", "Ответы по задачам ждут администратора, у тренера задачи больше не висят")
     check("🟢Повесить расписание" in txt and "🔴Забрать мячи со склада - не сделано: склад был закрыт" in txt and "🟢Убери стаканчики с ресепшена: убрал, сфоткал" in txt,
           "Задания с комментариями в тексте отчёта")
+    mt = cr.money_text(v)
+    check("ОПЛАТЫ НА СМЕНЕ" in mt and "Петров - 2 500 ₽ - QR - Индив" in mt and "Наличные: 12 150 ₽" in mt and "Итого: 14 650 ₽" in mt
+          and "Остаток в конверте: 12 150 ₽" in mt, f"В «ДЕНЬГИ»: оплаты смены, итог по способам и конверт ({mt})")
+    v2 = dict(v, env_prev=None, data=dict(v["data"], envelope=1200, pays=[{"name": "Иванов", "amount": "1 200", "method": "cash", "what": "single", "check": 1, "env": 1},
+                                                                           {"name": "Петров", "amount": 2500, "method": "card", "what": "indiv"}]))
+    mt = cr.money_text(v2)
+    check("Наличные: 1 200 ₽" in mt and "Итого: 3 700 ₽" in mt, "Суммы вида «1 200» считаются, наличные отдельно")
+    check("Оплат на месте не было" in cr.money_text(dict(v, data=dict(v["data"], pays=[]))), "Без оплат: так и пишем")
     ans = {a["ref_id"]: a for a in cr.answers(con) if a["kind"] == "crm"}
     check(len(cr.answers(con)) == 3 and ans[t2]["comment"] == "склад был закрыт", "Три ответа на столе администраторов")
     cr.decide(con, ans[t1]["id"], OP, "accepted")

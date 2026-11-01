@@ -459,7 +459,6 @@ def submit(con, rid: int, user: dict) -> dict:
         pu.notify_chat(con, "care", f"🔴 {_managers(con)} Неисправный инвентарь, {s['branch']}: {v['data'].get('inv_note', '')}. Фото в CRM")
     trial_tasks(con, v)
     pay_tasks(con, v)
-    money_chat(con, v)
     # ответы по заданиям уходят на стол администраторам смены, старший администратор следит, чтобы закрыли (Юлия, 01.11)
     for t in v["crm_tasks"]:
         if t["status"] == "open" and t["answer"] in ("done", "not"):
@@ -478,6 +477,7 @@ def submit(con, rid: int, user: dict) -> dict:
         merch.report_shift(con, {"id": a, "name": ""}, r["branch_id"], v["data"].get("merch") == "yes", r["date"])
     con.execute("UPDATE alerts SET closed_at=? WHERE key LIKE ? AND closed_at IS NULL", (now, f"rep%:{rid}:%"))
     pu.notify_chat(con, "coaches", text(con, view(con, _row(con, rid), s)))
+    pu.notify_chat(con, "money", money_text(view(con, _row(con, rid), s)))
     return view(con, _row(con, rid), s)
 
 
@@ -520,26 +520,6 @@ def pay_tasks(con, v: dict) -> int:
     return n
 
 
-def money_chat(con, v: dict) -> bool:
-    """Наличные за смену и остаток в конверте: в чат «ДЕНЬГИ», с проверкой «было + сегодня = стало»."""
-    from . import pu
-    data = v["data"]
-    cash = [p for p in data.get("pays") or [] if isinstance(p, dict) and p.get("method") == "cash"]
-    if not cash:
-        return False
-    rub = lambda n: f"{int(n):,} ₽".replace(",", " ")
-    lines = [f"💰 {v['branch']}, {v['date'][8:]}.{v['date'][5:7]}, тренер {v['main']}", f"Наличные за смену: +{rub(v['cash_sum'])}"]
-    lines += [f"- {pay_label(p)}" for p in cash]
-    env, prev = data.get("envelope"), v.get("env_prev")
-    if prev:
-        lines.append(f"В конверте было {rub(prev['amount'])} (отчёт {prev['date'][8:]}.{prev['date'][5:7]}), стало {rub(env)}")
-        lines.append("✅ Сходится" if v.get("env_match") else
-                     f"⚠️ Не сходится: должно быть {rub(prev['amount'] + v['cash_sum'])}. Объяснение тренера: {data.get('env_note', '')}")
-    else:
-        lines.append(f"Остаток в конверте: {rub(env)} (первый отчёт с конвертом, сравнить не с чем)")
-    return pu.notify_chat(con, "money", "\n".join(lines))
-
-
 def _managers(con) -> str:
     from . import pu
     return " ".join(x for x in (pu._mention(con, pu._controller(con)), pu._mention(con, pu._owner_admin(con))) if x)
@@ -578,6 +558,43 @@ def text(con, v: dict) -> str:
                                      for t in [*(v.get("tasks") or []), *(v.get("crm_tasks") or [])]]
     lines += ["", f"{'🟢инвентарь исправен' if data.get('inv') == 'ok' else '🔴неисправность: ' + data.get('inv_note', '')}",
               f"🟢мерч: {'продавали' if data.get('merch') == 'yes' else 'не продавали'}", "🟢фото в CRM", "", "#отчет_тренера_о_смене"]
+    return "\n".join(lines)
+
+
+def _rub(x) -> int:
+    try:
+        return int(round(float(str(x).replace(" ", "").replace(",", "."))))
+    except ValueError:
+        return 0
+
+
+def money_text(v: dict) -> str:
+    """Сообщение в чат «ДЕНЬГИ» после отчёта о смене: оплаты на месте, итог по способам, наличные и остаток в конверте
+    с проверкой «было + сегодня = стало» (Юлия, 01.11: наличные кладём в конверт, пишем итоговый остаток)."""
+    d = date.fromisoformat(v["date"])
+    data = v["data"]
+    pays = [p for p in data.get("pays") or [] if isinstance(p, dict)]
+    rub = lambda n: f"{int(n):,} ₽".replace(",", " ")
+    lines = ["💰 ОПЛАТЫ НА СМЕНЕ", f"{d:%d.%m.%Y}, {v['branch']}", f"Тренер {v['main']}", ""]
+    if not pays:
+        return "\n".join(lines + ["Оплат на месте не было"])
+    lines += [pay_label(p | {"amount": _rub(p.get("amount"))}) for p in pays]
+    by = {}
+    for p in pays:
+        by[p.get("method")] = by.get(p.get("method"), 0) + _rub(p.get("amount"))
+    lines += [""] + [f"{t}: {rub(by[k])}" for k, t in PAY_METHODS.items() if k in by]
+    lines.append(f"Итого: {rub(sum(by.values()))}")
+    if by.get("cash"):
+        env, prev = data.get("envelope"), v.get("env_prev")
+        if env is None:
+            lines.append(f"🔴 Наличные {rub(by['cash'])}: остаток в конверте не указан")
+        elif prev:
+            taken = f", потом забрали {rub(prev['taken'])}" if prev.get("taken") else ""
+            lines.append(f"✉️ В конверте было {rub(prev['amount'])} (отчёт {prev['date'][8:]}.{prev['date'][5:7]}{taken}), стало {rub(env)}")
+            lines.append("✅ Сходится" if v.get("env_match") else
+                         f"⚠️ Не сходится: должно быть {rub(prev['amount'] + by['cash'])}. Объяснение тренера: {data.get('env_note', '')}")
+        else:
+            lines.append(f"✉️ Остаток в конверте: {rub(env)} (первый отчёт с конвертом, сравнить не с чем)")
     return "\n".join(lines)
 
 
