@@ -325,15 +325,21 @@ def sync_enrollments(con):
                    SELECT s.id, s.group_id, '', s.tariff, s.created_at FROM students s
                    WHERE s.group_id IS NOT NULL AND s.funnel = 'members'
                      AND NOT EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id = s.id)""")
-    # разовое занятие специально без группы (money.sell_single): его не трогаем. И не создаём второй абонемент
-    # на ту же группу и месяц: из-за этого 01.11.2026 CRM не запускалась (UNIQUE enrollment_id, month)
+    # разовое занятие специально без группы (money.sell_single): его не трогаем. Остальные чиним по одному и пропускаем
+    # те, где на эту группу и месяц уже есть абонемент: из-за этого 01.11.2026 CRM не запускалась (UNIQUE enrollment_id, month)
     cols = {r[1] for r in con.execute("PRAGMA table_info(subscriptions)")}
-    single = " AND COALESCE(kind, 'month') != 'single'" if "kind" in cols else ""
-    con.execute(f"""UPDATE subscriptions SET enrollment_id =
-                     (SELECT MIN(e.id) FROM enrollments e WHERE e.student_id = subscriptions.student_id)
-                   WHERE enrollment_id IS NULL{single}
-                     AND NOT EXISTS (SELECT 1 FROM subscriptions s2 WHERE s2.month = subscriptions.month
-                         AND s2.enrollment_id = (SELECT MIN(e.id) FROM enrollments e WHERE e.student_id = subscriptions.student_id))""")
+    single = " AND COALESCE(s.kind, 'month') != 'single'" if "kind" in cols else ""
+    rows = con.execute(f"""SELECT s.id, (SELECT MIN(e.id) FROM enrollments e WHERE e.student_id = s.student_id) AS eid
+                           FROM subscriptions s WHERE s.enrollment_id IS NULL{single}""").fetchall()
+    for r in rows:
+        if r["eid"] is None:
+            continue
+        try:
+            con.execute("""UPDATE subscriptions SET enrollment_id=? WHERE id=? AND NOT EXISTS
+                             (SELECT 1 FROM subscriptions s2 WHERE s2.enrollment_id=? AND s2.month=subscriptions.month)""",
+                        (r["eid"], r["id"], r["eid"]))
+        except sqlite3.IntegrityError:
+            continue
 
 
 def settings(con) -> dict:

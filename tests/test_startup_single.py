@@ -17,6 +17,10 @@ ym = logic.month_of(date.today())
 sv.create_invoice(con, sid, ym, U)
 con.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('price_single', '1500')")
 money.sell_single(con, sid, U)
+# ещё два «обычных» абонемента без группы на тот же месяц (как в базе 01.11): запуск не должен падать
+for _ in range(2):
+    con.execute("""INSERT INTO subscriptions(student_id, enrollment_id, month, tariff, lessons, per_lesson, price, status, created_at)
+                   VALUES (?, NULL, ?, 'fixed', 8, 1000, 8000, 'invoiced', '2026-11-01T10:00:00')""", (sid, logic.shift_month(ym, 1)))
 con.close()
 for i in range(2):
     con = db.connect(p); db.init_db(con)
