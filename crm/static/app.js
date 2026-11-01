@@ -131,7 +131,7 @@ async function renderOwnerTg(box) {
 /* Старая переписка из Telegram школы: файл экспорта Telegram Desktop (JSON). Браузер ужимает его до текста и шлёт в CRM */
 function renderTgImport(box) {
   box.innerHTML = `<h3>💬 Старая переписка из Telegram</h3>
-    <div class="small muted" style="margin-bottom:8px">Переписка школьного Telegram до подключения к CRM. В карточки попадут только чаты с теми, кто есть в CRM: по номеру телефона из контактов Telegram. Фото и файлы не переносятся, только текст. Повторная загрузка ничего не задвоит</div>
+    <div class="small muted" style="margin-bottom:8px">Переписка школьного Telegram до подключения к CRM. В карточки попадут только чаты с теми, кто есть в CRM: по номеру телефона из контактов Telegram, а если номера нет, по фамилии и имени ребёнка в названии чата. Фото и файлы не переносятся, только текст. Повторная загрузка ничего не задвоит</div>
     <details style="margin-bottom:8px"><summary class="small"><b>Как сделать файл (Telegram на компьютере)</b></summary><ol class="small" style="padding-left:18px;line-height:1.6">
       <li>Telegram → Настройки → Продвинутые настройки → «Экспорт данных Telegram»</li>
       <li>Оставьте галочки «Список контактов» и «Личные чаты», остальное выключите (фото, видео, файлы не нужны)</li>
@@ -156,8 +156,8 @@ function renderTgImport(box) {
       if (!chats.length) { res.innerHTML = `<span class="error">В файле нет личных чатов. Проверьте, что выбран формат «Машиночитаемый JSON» и галочка «Личные чаты»</span>`; return; }
       res.textContent = `Загружаю ${chats.length} чатов в CRM…`;
       const r = await api("POST", "/api/import/telegram", { contacts, chats });
-      res.innerHTML = `✅ Готово. Чатов в файле: ${r.chats}. Перенесено в карточки: <b>${r.clients}</b> (сообщений ${r.messages}).<br>
-        Не клиенты CRM (не перенесены): ${r.not_clients}. Без номера в контактах Telegram (не перенесены): ${r.no_phone}`;
+      res.innerHTML = `✅ Готово. Чатов в файле: ${r.chats}. Перенесено в карточки: <b>${r.clients}</b> (из них по имени ребёнка: ${r.by_name}), сообщений ${r.messages}.<br>
+        Не клиенты CRM: ${r.not_clients}. Не нашли ни по номеру, ни по имени: ${r.no_phone}. Подходят разные семьи (не перенесены, чтобы не перепутать): ${r.ambiguous}`;
     } catch (err) { res.innerHTML = `<span class="error">${esc(err.message || "Не получилось прочитать файл")}</span>`; }
   };
 }

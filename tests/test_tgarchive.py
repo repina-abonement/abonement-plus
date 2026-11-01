@@ -27,4 +27,13 @@ try:
 except comms.CommsError:
     ok = True
 check(ok, "В архив ответить нельзя")
+# номера нет: находим по фамилии и имени ребёнка в названии чата
+sv.create_student(con, {"name": "Урюпина Аглая", "parent_name": "Марина", "phone": "+7 900 333-44-55", "funnel": "members"}, {"name": "Оля"})
+sv.create_student(con, {"name": "Иван Петров", "parent_name": "А", "phone": "+7 900 333-44-56", "funnel": "members"}, {"name": "Оля"})
+sv.create_student(con, {"name": "Петров Иван", "parent_name": "Б", "phone": "+7 900 333-44-57", "funnel": "members"}, {"name": "Оля"})
+r3 = tgarchive.import_(con, {"contacts": [], "chats": [
+    {"id": 201, "name": "Урюпина Аглая, мама Марина", "msgs": [[1, "2026-09-03T10:00:00", False, "Записываем Аглаю?", ""]]},
+    {"id": 202, "name": "Петров Иван папа", "msgs": [[1, "2026-09-03T10:00:00", False, "привет", ""]]},
+    {"id": 203, "name": "Аглая", "msgs": [[1, "2026-09-03T10:00:00", False, "привет", ""]]}]}, {"name": "Юлия"})
+check(r3["by_name"] == 1 and r3["ambiguous"] == 1 and r3["no_phone"] == 1, "По имени ребёнка: один нашли, два Ивана Петрова не гадаем, по одному имени не угадываем")
 print("ok")
