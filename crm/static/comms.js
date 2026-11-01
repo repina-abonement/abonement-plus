@@ -198,6 +198,23 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
         <div class="row"><textarea id="cm-text" rows="2" placeholder="Сообщение родителю…"></textarea><button class="btn primary" id="cm-send" style="flex:0">Отправить</button></div>
       </div>` : `<div class="small muted">Написать отсюда можно, когда родитель напишет школе в Telegram или MAX${st.whatsapp || st.wazzup_telegram ? "" : ". Первыми написать можно после подключения Wazzup"}</div>`}`;
   const feed = $("#feed"); if (feed) feed.scrollTop = feed.scrollHeight;
+  // карточка открыта: новые сообщения подтягиваем сами каждые 10 секунд (раньше были видны только после повторного открытия)
+  const lastKey = (items) => items.length ? items[items.length - 1].type + items[items.length - 1].id + ":" + items.length : "";
+  let seen = lastKey(d.items);
+  clearInterval(S.commsTimer);
+  S.commsTimer = setInterval(async () => {
+    const f = $("#feed");
+    if (!f || !document.body.contains(box)) { clearInterval(S.commsTimer); return; }
+    if (document.hidden) return;
+    let n; try { n = await api("GET", `/api/families/${familyId}/comms`); } catch (_) { return; }
+    const k = lastKey(n.items);
+    if (k === seen || !$("#feed")) return;
+    seen = k;
+    if (n.conversations.length !== d.conversations.length) return loadFamilyComms(familyId, parents, studentId, kid);  // новый чат: перестроить и список «кому»
+    const atEnd = f.scrollHeight - f.scrollTop - f.clientHeight < 80;
+    f.innerHTML = n.items.map((i) => i.type === "call" ? callHtml(i) : msgHtml(i)).join("");
+    if (atEnd) f.scrollTop = f.scrollHeight;
+  }, 10000);
   box.querySelectorAll("[data-dial]").forEach((b) => (b.onclick = () => dial(b.dataset.dial)));
   if (kid && kid.funnel === "sales") wireTrialOffer({ students: [kid], family_id: familyId, onBooked: kid.onBooked }, "#cm-text");
   const send = $("#cm-send");
@@ -208,7 +225,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     try {
       if (to[0] === "c") await api("POST", `/api/conversations/${to.slice(1)}/send`, { text });
       else await api("POST", `/api/families/${familyId}/whatsapp`, { parent_id: +to.slice(1), text, channel: to[0] === "t" ? "telegram" : "whatsapp" });
-      loadFamilyComms(familyId, parents, studentId);
+      loadFamilyComms(familyId, parents, studentId, kid);
     } catch (e) { fail(e); send.disabled = false; }
   };
 }

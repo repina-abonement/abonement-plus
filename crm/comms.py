@@ -715,7 +715,13 @@ def wz_hook(con, payload: dict) -> None:
         phone = m.get("chatId") if ct == "whatsapp" else (contact.get("phone") or "")
         if ct == "telegram":
             _wz_tg_rekey(con, str(m.get("chatId") or ""), phone, str(m.get("messageId") or "") if m.get("isEcho") else "")
-        cid = upsert_conversation(con, channel, m.get("chatId"), title=contact.get("name") or "",
+        ext = m.get("chatId")
+        if ct == "whatsapp":  # чат, начатый из карточки, хранится по номеру 7XXXXXXXXXX: ответ должен попасть в него же
+            pn = normalize_phone(str(ext or ""))
+            if len(pn) == 11 and pn != str(ext) and not con.execute(
+                    "SELECT 1 FROM conversations WHERE channel='whatsapp' AND external_id=?", (str(ext),)).fetchone():
+                ext = pn
+        cid = upsert_conversation(con, channel, ext, title=contact.get("name") or "",
                                   username=contact.get("username") or "", phone=phone or "",
                                   meta={"channelId": m.get("channelId"), "chatType": ct})
         kind = WZ_KINDS.get(m.get("type") or "text", "other")

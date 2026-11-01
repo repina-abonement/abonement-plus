@@ -23,6 +23,12 @@ def main():
     comms.wz_call = lambda con, m, path, data=None, key=None: sent.update(data or {}) or {"messageId": "out1"}
     comms.send(con, rows["wazzup_max"]["id"], "Ответ", {"name": "Оля"})
     check(sent.get("chatType") == "max" and sent.get("channelId") == "ch-max" and sent.get("chatId") == "m-1", "Ответ ушёл в MAX тем же каналом")
+    # чат начат из карточки по номеру, ответ пришёл с «+» или другим видом номера: та же переписка
+    cid = comms.upsert_conversation(con, "whatsapp", "79005556677", phone="79005556677", meta={"chatType": "whatsapp"})
+    comms.wz_hook(con, {"messages": [{"chatType": "whatsapp", "chatId": "+7 900 555-66-77", "channelId": "ch-wa", "messageId": "a3",
+                                      "type": "text", "text": "Ответ", "dateTime": "2026-11-01T14:03:00Z"}]})
+    n = con.execute("SELECT COUNT(*) FROM messages WHERE conversation_id=? AND direction='in'", (cid,)).fetchone()[0]
+    check(n == 1, "Ответ в WhatsApp попал в переписку, начатую из карточки")
     print("ok")
 
 
