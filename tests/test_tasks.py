@@ -120,7 +120,7 @@ def main():
     check(all("Напомнить" not in x and "Как прошло" not in x for x in sum(cols.values(), [])), "Автоматические задачи сюда не попадают")
     tasks.complete(con, t_now, {"name": "Варвара"}, "сделано")
     b = tasks.manual_board(con, adm, "all")
-    check([x["title"] for x in b["columns"][2]["cards"]] == ["Сегодняшняя"], "Выполненная в «Выполнено сегодня»")
+    check(len(b["columns"]) == 2 and "Сегодняшняя" not in [x["title"] for c in b["columns"] for x in c["cards"]], "Выполненная задача пропадает из воронки")
     mine = tasks.manual_board(con, {"id": olga, "name": "Ольга", "role": "operator"}, "all")
     check(not sum((c["cards"] for c in mine["columns"]), []), "Обычный сотрудник видит только свои ручные задачи")
     check(tasks._task_out(con, con.execute("SELECT * FROM tasks WHERE id=?", (t_old,)).fetchone())["manual"] is True, "Метка «ручная»")

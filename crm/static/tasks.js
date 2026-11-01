@@ -84,7 +84,7 @@ function wireTasks(root) {
 
 const kindPill = (t) => t.manual ? `<span class="pill kp-man" title="Поставил сотрудник">ручная</span>` : `<span class="pill kp-auto" title="CRM поставила сама по цепочке событий">авто</span>`;
 
-/* Воронка «Ручные задачи»: задача появляется в свой день. Просрочено / Сегодня / Выполнено сегодня */
+/* Воронка «Ручные задачи»: задача появляется в свой день. Просрочено / Сегодня. Выполненная сразу пропадает */
 S.manual = { scope: "mine" };
 async function renderManualBoard(page) {
   const d = await api("GET", "/api/tasks/manual?scope=" + S.manual.scope);

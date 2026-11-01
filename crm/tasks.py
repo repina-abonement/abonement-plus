@@ -526,7 +526,7 @@ MANUAL_KINDS = ("manual", "plan")  # поставил сотрудник (кар
 
 
 def manual_board(con, user: dict, scope: str = "mine") -> dict:
-    """Воронка «Ручные задачи»: задача появляется в свой день. Просрочено / Сегодня / Выполнено сегодня."""
+    """Воронка «Ручные задачи»: задача появляется в свой день. Просрочено / Сегодня. Выполненные не показываем (Юлия, 01.11)."""
     from . import planner
     boss = planner.can_manage(con, user)
     today = date.today().isoformat()
@@ -538,7 +538,6 @@ def manual_board(con, user: dict, scope: str = "mine") -> dict:
     return {"columns": [
         {"key": "overdue", "title": "Просрочено", "cards": rows("status='open' AND substr(due_at,1,10) < ?", [today], "due_at")},
         {"key": "today", "title": "Сегодня", "cards": rows("status='open' AND substr(due_at,1,10) = ?", [today], "due_at")},
-        {"key": "done", "title": "Выполнено сегодня", "cards": rows("status='done' AND substr(done_at,1,10) = ?", [today], "done_at DESC")},
     ], "scope": scope if boss else "mine", "can_manage": boss,
         "later": con.execute(f"SELECT COUNT(*) FROM tasks WHERE kind IN ({kinds}) AND status='open' AND substr(due_at,1,10) > ?{who}",
                              (*MANUAL_KINDS, today, *args)).fetchone()[0]}
@@ -548,9 +547,7 @@ def for_student(con, sid: int) -> dict:
     """Задачи для карточки: открытые (ближайшая первой) и несколько последних выполненных."""
     fam = (con.execute("SELECT family_id FROM students WHERE id=?", (sid,)).fetchone() or [None])[0]
     q = "SELECT * FROM tasks WHERE (student_id=? OR (kind='rebook' AND family_id=?)) AND status=? ORDER BY "
-    open_ = [_task_out(con, r) for r in con.execute(q + "due_at", (sid, fam, "open"))]
-    done = [_task_out(con, r) for r in con.execute(q + "done_at DESC LIMIT 3", (sid, fam, "done"))]
-    return {"open": open_, "done": done}
+    return {"open": [_task_out(con, r) for r in con.execute(q + "due_at", (sid, fam, "open"))], "done": []}  # выполненные не показываем
 
 
 def complete(con, tid: int, user: dict, result: str = "") -> None:
