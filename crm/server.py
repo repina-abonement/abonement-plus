@@ -2506,7 +2506,58 @@ class Handler(BaseHTTPRequestHandler):
         self._handle("DELETE")
 
 
+class StartupFailed(BaseHTTPRequestHandler):
+    """CRM не смогла запуститься: вместо «502» показываем, что сломалось, чтобы починить без доступа к консоли сервера."""
+    text = ""
+
+    def log_message(self, fmt, *args):
+        pass
+
+    def _page(self):
+        body = ("<!doctype html><meta charset=utf-8><title>CRM: ошибка запуска</title>"
+                "<body style='font-family:sans-serif;max-width:900px;margin:30px auto;padding:0 16px'>"
+                "<h2>CRM не запустилась</h2><p>Сделайте скриншот этой страницы и пришлите разработчику. "
+                "Данные не пострадали, клиентам ничего не отправляется.</p>"
+                "<pre style='white-space:pre-wrap;background:#f4f4f4;padding:12px;border-radius:8px'>"
+                + html_escape(self.text) + "</pre></body>").encode()
+        self.send_response(503)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    do_GET = do_POST = do_HEAD = do_PUT = do_PATCH = do_DELETE = _page
+
+
+def html_escape(s: str) -> str:
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def main():
+    host = os.environ.get("CRM_HOST", "127.0.0.1")
+    port = int(os.environ.get("CRM_PORT", "8000"))
+    try:
+        _startup()
+    except Exception:  # noqa: BLE001 — показать ошибку на сайте вместо «502»
+        import traceback
+        tb = traceback.format_exc()
+        print(tb, flush=True)
+        StartupFailed.text = "\n".join(tb.strip().splitlines()[-25:])
+        srv = ThreadingHTTPServer((host, port), StartupFailed)
+        print(f"Абонемент Плюс: ошибка запуска, страница с ошибкой на http://{host}:{port}", flush=True)
+        srv.serve_forever()
+        return
+    srv = ThreadingHTTPServer((host, port), Handler)
+    srv.daemon_threads = True
+    print(f"Абонемент Плюс запущен: http://{host}:{port}", flush=True)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+def _startup():
     con = db.connect()
     db.init_db(con)
     if os.environ.get("CRM_DEMO", "1") == "1" and not perms.real_staff(con):  # при настоящей команде выдуманных не заводим
@@ -2525,15 +2576,6 @@ def main():
     ai.start_worker(db.connect)
     tasks.start_worker(db.connect)
     fiscal.start_worker(db.connect)
-    host = os.environ.get("CRM_HOST", "127.0.0.1")
-    port = int(os.environ.get("CRM_PORT", "8000"))
-    srv = ThreadingHTTPServer((host, port), Handler)
-    srv.daemon_threads = True
-    print(f"Абонемент Плюс запущен: http://{host}:{port}", flush=True)
-    try:
-        srv.serve_forever()
-    except KeyboardInterrupt:
-        pass
 
 
 if __name__ == "__main__":
