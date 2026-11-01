@@ -174,6 +174,11 @@ async function renderTaskSettings(box, users) {
     <div class="field"><label>Кто отвечает за задачи по пробным</label>
       <select data-t="task_owner_trials">${staff.map((u) => `<option value="${u.id}" ${String(u.id) === v.task_owner_trials ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select></div>
     <div class="small muted" style="margin:-4px 0 12px">На этого сотрудника встают все задачи по пробным, и при переносе из ERP задачи со статусами: ${d.erp_statuses.map((x) => `«${esc(x)}»`).join(", ")}</div>
+    <div class="bk-places">
+      <div class="bk-head"><b>💬 Чат с администратором</b>
+        <div class="small muted">В любом тексте ниже напишите {admin}: CRM подставит ссылку под мессенджер родителя (в MAX ссылку MAX, в остальных Telegram)</div></div>
+      <div class="row"><div class="field"><label>В Telegram</label><input data-t="admin_tg" value="${esc(v.admin_tg)}" placeholder="@footbolika_admin"></div>
+        <div class="field"><label>В MAX</label><input data-t="admin_max" value="${esc(v.admin_max)}" placeholder="https://max.ru/u/..."></div></div></div>
     <div class="field"><label>Сразу после записи на пробное (дата, время, место, что взять)</label>${yn("auto_booked")}</div>
     <div class="field"><label>Текст после записи. {date_time}: «Понедельник, 2 ноября, в 17:30», {place}: место филиала, {chat_line}: строка с чатом родителей</label><textarea data-t="msg_booked" rows="9">${esc(v.msg_booked)}</textarea></div>
     <div class="bk-places">
@@ -196,7 +201,7 @@ async function renderTaskSettings(box, users) {
     <div class="field"><label>Через 10 минут после пробного</label>${yn("auto_after")}</div>
     <div class="field"><label>Текст после пробного</label><textarea data-t="msg_after" rows="2">${esc(v.msg_after)}</textarea></div>
     <div class="field"><label>Предложение ближайших пробных (кнопка «📅 Предложить ближайшие ПУ» в переписке). {slots}: список дат</label><textarea data-t="msg_trial_offer" rows="4">${esc(v.msg_trial_offer || "")}</textarea></div>
-    <div class="small muted" style="margin-bottom:10px">В текст подставятся: {child} имя ребёнка, {date} дата, {time} время, {place} филиал. Сообщение уходит туда, где семья уже переписывалась со школой (Telegram, MAX или WhatsApp). Если переписки нет, в задаче будет видно «не ушло», и Оля напишет вручную</div>
+    <div class="small muted" style="margin-bottom:10px">В текст подставятся: {child} имя ребёнка, {date} дата, {time} время, {place} филиал, {admin} чат с администратором. Сообщение уходит туда, где семья уже переписывалась со школой (Telegram, MAX или WhatsApp). Если переписки нет, в задаче будет видно «не ушло», и Оля напишет вручную</div>
     <button class="btn primary" id="t-save">Сохранить</button>`;
   $("#auto-live").onclick = async () => {
     if (!d.auto_live && !confirm("Запустить автосообщения клиентам? С этой минуты CRM сама будет писать родителям")) return;

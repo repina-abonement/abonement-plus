@@ -32,4 +32,8 @@ check(len(sent) == 1, "Повторно не уходит, если время �
 tasks.save_settings(con, {"booked_places": {str(b): {"place": "ТРЦ Небо", "area": "в Солнцево", "tg": "t.me/x", "max": "max.ru/chat"}}})
 sv.update_student(con, sid, {"trial_at": f"{(d + timedelta(days=7)).isoformat()}T17:45"}, U)
 check(len(sent) == 2 and "max.ru/chat" in sent[1][1] and "t.me/x" not in sent[1][1], "Перенесли время: новое сообщение, в MAX ссылка на MAX-чат")
+tasks.save_settings(con, {"msg_booked": "Вопросы: {admin}"})
+sv.update_student(con, sid, {"trial_at": f"{(d + timedelta(days=14)).isoformat()}T17:45"}, U)
+check(sent[-1][1] == "Вопросы: " + tasks.CONTACT_SETTINGS["admin_max"], "{admin} в MAX: ссылка на админа в MAX")
+check(tasks.admin_link(con, "whatsapp") == "@footbolika_admin", "{admin} в остальных: @footbolika_admin")
 print("ok")

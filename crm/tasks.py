@@ -48,6 +48,9 @@ DEFAULT_TEMPLATES = {
                    "{chat_line}"
                    "☎️+7 991 615 09 60"),
 }
+# ссылка на чат с администратором (как в постах каналов); {admin} в текстах: в MAX ссылка MAX, иначе Telegram
+CONTACT_SETTINGS = {"admin_tg": "@footbolika_admin",
+                    "admin_max": "https://max.ru/u/f9LHodD0cOLaVBGOxjxYFwTe2vGHnJQswhXNnS5iJbwXlmYEqrQRm4LKGTI"}
 AUTO_SETTINGS = {"auto_day_before": "1", "auto_2h_before": "1", "auto_after": "1", "day_before_hour": "11", "auto_booked": "1"}
 
 # где проходит пробное (из скриптов Юлии); ссылки на чаты родителей вписываются в Настройках → Задачи и автосообщения
@@ -102,7 +105,12 @@ def setting(con, key: str) -> str:
     v = comms.get(con, key)
     if v:
         return v
-    return DEFAULT_TEMPLATES.get(key) or AUTO_SETTINGS.get(key, "")
+    return DEFAULT_TEMPLATES.get(key) or AUTO_SETTINGS.get(key) or CONTACT_SETTINGS.get(key, "")
+
+
+def admin_link(con, channel: str = "") -> str:
+    """Ссылка на чат с администратором под мессенджер родителя."""
+    return setting(con, "admin_max") if channel.endswith("max") else setting(con, "admin_tg")
 
 
 def owner(con) -> int | None:
@@ -151,11 +159,12 @@ def _place(con, s: dict) -> str:
     return f"{g[1]}" if g else "в школе"
 
 
-def render_template(con, key: str, s: dict) -> str:
+def render_template(con, key: str, s: dict, channel: str = "") -> str:
     t = datetime.fromisoformat(s["trial_at"])
     child = s["name"] if "заявка" not in s["name"].lower() else "ребёнка"
     return (setting(con, key).replace("{child}", child.split()[0]).replace("{time}", t.strftime("%H:%M"))
-            .replace("{date}", f"{t.day:02d}.{t.month:02d}").replace("{place}", _place(con, s)))
+            .replace("{date}", f"{t.day:02d}.{t.month:02d}").replace("{place}", _place(con, s))
+            .replace("{admin}", admin_link(con, channel)))
 
 
 def best_conversation(con, family_id: int) -> int | None:
@@ -196,7 +205,7 @@ def booked_text(con, s: dict, channel: str = "") -> str:
     chat_line = f"ℹ️Группа для родителей футболистов филиала {pl.get('area', '')} - {link}\n\n".replace("  ", " ") if link else ""
     dt = f"{WD_FULL[t.weekday()].capitalize()}, {t.day} {MON_GEN[t.month - 1]}, в {t.strftime('%H:%M')}"
     return (setting(con, "msg_booked").replace("{date_time}", dt).replace("{place}", pl.get("place") or _place(con, s))
-            .replace("{chat_line}", chat_line).replace("{child}", (s["name"] or "").split()[0] if s.get("name") else ""))
+            .replace("{chat_line}", chat_line).replace("{admin}", admin_link(con, channel)).replace("{child}", (s["name"] or "").split()[0] if s.get("name") else ""))
 
 
 def send_booked(con, sid: int) -> dict:
@@ -233,13 +242,14 @@ def send_auto(con, s: dict, kind: str, tpl: str) -> dict:
     if con.execute("SELECT 1 FROM auto_messages WHERE student_id=? AND kind=? AND trial_at=?",
                    (s["id"], kind, s["trial_at"])).fetchone():
         return {"skipped": True}
-    text = render_template(con, tpl, s)
     cid = best_conversation(con, s["family_id"])
     ok, err, channel = True, "", ""
+    text = render_template(con, tpl, s)
     if not cid:
         ok, err = False, "у семьи нет переписки в мессенджере"
     else:
         channel = con.execute("SELECT channel FROM conversations WHERE id=?", (cid,)).fetchone()[0]
+        text = render_template(con, tpl, s, channel)
         try:
             comms.send(con, cid, text, {"name": "Автосообщение"})
         except comms.CommsError as e:
@@ -395,7 +405,7 @@ def complete(con, tid: int, user: dict, result: str = "") -> None:
 
 
 def settings_view(con) -> dict:
-    vals = {k: setting(con, k) for k in list(DEFAULT_TEMPLATES) + list(AUTO_SETTINGS)}
+    vals = {k: setting(con, k) for k in list(DEFAULT_TEMPLATES) + list(AUTO_SETTINGS) + list(CONTACT_SETTINGS)}
     vals[OWNER_KEY] = str(owner(con) or "")
     from . import trialoffer
     vals["msg_trial_offer"] = setting(con, "msg_trial_offer") or trialoffer.DEFAULT
@@ -404,7 +414,7 @@ def settings_view(con) -> dict:
 
 def save_settings(con, data: dict):
     for k, v in data.items():
-        if k in DEFAULT_TEMPLATES or k in AUTO_SETTINGS or k in (OWNER_KEY, "msg_trial_offer"):
+        if k in DEFAULT_TEMPLATES or k in AUTO_SETTINGS or k in CONTACT_SETTINGS or k in (OWNER_KEY, "msg_trial_offer"):
             comms.put(con, k, str(v or "").strip())
         elif k == "booked_places" and isinstance(v, dict):
             comms.put(con, k, json.dumps({str(b): {f: str(x.get(f) or "").strip() for f in ("place", "area", "tg", "max")}
