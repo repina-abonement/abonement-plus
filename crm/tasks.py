@@ -478,6 +478,58 @@ def my_tasks(con, user: dict, scope: str = "mine") -> dict:
     return {"groups": groups, "done_today": done_today, "team": team, "scope": scope, "can_manage": boss}
 
 
+def edit(con, tid: int, data: dict, user: dict) -> dict:
+    """Правка открытой задачи из карточки или раздела «Задачи»: что сделать, срок, заметка, исполнитель.
+    Передать можно любому действующему сотруднику (в т.ч. тренеру); править могут админы и операторы (проверка в маршруте)."""
+    t = con.execute("SELECT * FROM tasks WHERE id=? AND status='open'", (tid,)).fetchone()
+    if not t:
+        raise comms.CommsError("Задача не найдена или уже закрыта")
+    sets, args, notes = [], [], []
+    if "assignee_id" in data:
+        uid = int(data.get("assignee_id") or 0)
+        u = con.execute("SELECT id, name FROM users WHERE id=? AND active=1", (uid,)).fetchone()
+        if not u:
+            raise comms.CommsError("Выберите сотрудника из списка")
+        if uid != t["assignee_id"]:
+            sets.append("assignee_id=?"); args.append(uid)
+            notes.append(f"Задача «{t['title']}» передана: {u['name']}")
+    if "title" in data:
+        title = (data.get("title") or "").strip()[:200]
+        if not title:
+            raise comms.CommsError("Напишите, что нужно сделать")
+        if title != t["title"]:
+            sets.append("title=?"); args.append(title)
+            notes.append(f"Задача «{t['title']}» переименована: «{title}»")
+    if "due_at" in data:
+        try:
+            due = datetime.fromisoformat(str(data.get("due_at"))[:16]).isoformat(timespec="minutes")
+        except ValueError:
+            raise comms.CommsError("Неверный срок") from None
+        if due != t["due_at"][:16]:
+            sets.append("due_at=?"); args.append(due)
+            notes.append(f"Задача «{t['title']}»: срок {due[8:10]}.{due[5:7]} {due[11:16]}")
+    if "note" in data:
+        note = (data.get("note") or "").strip()[:1000]
+        if note != (t["note"] or ""):
+            sets.append("note=?"); args.append(note)
+    if sets:
+        con.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id=?", (*args, tid))
+        if t["student_id"]:
+            from . import services as sv
+            for n in notes:
+                sv.log(con, t["student_id"], n, user, "note")
+    return _task_out(con, con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone())
+
+
+def for_student(con, sid: int) -> dict:
+    """Задачи для карточки: открытые (ближайшая первой) и несколько последних выполненных."""
+    fam = (con.execute("SELECT family_id FROM students WHERE id=?", (sid,)).fetchone() or [None])[0]
+    q = "SELECT * FROM tasks WHERE (student_id=? OR (kind='rebook' AND family_id=?)) AND status=? ORDER BY "
+    open_ = [_task_out(con, r) for r in con.execute(q + "due_at", (sid, fam, "open"))]
+    done = [_task_out(con, r) for r in con.execute(q + "done_at DESC LIMIT 3", (sid, fam, "done"))]
+    return {"open": open_, "done": done}
+
+
 def complete(con, tid: int, user: dict, result: str = "") -> None:
     t = con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
     if not t:

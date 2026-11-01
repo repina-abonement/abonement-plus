@@ -1403,6 +1403,7 @@ async function openStudent(id) {
       ${isMember && regular.length === 1 ? `<button class="btn" id="act-move">↔ Перевести</button>` : ""}
     </div>
   </div>
+  <div class="sc-tasks">${cardTasksBlock(d)}</div>
   <div class="sc-tabs"><button class="on" data-sctab="feed">💬 Общение</button><button data-sctab="abon">💳 Абонементы и инфо</button></div>
   <div class="sc-grid" data-tab="feed"><div class="sc-left"></div><div class="sc-right"><div id="sell-box"></div></div></div>
 
@@ -1578,6 +1579,7 @@ async function openStudent(id) {
   body.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.open)));
   $("#add-sibling").onclick = () => openNewClient({ family_id: s.family_id, family_name: d.family.name });
   loadFamilyComms(s.family_id, d.parents, id, { id, name: s.name, funnel: s.funnel, birth: s.birth, onBooked: reload });
+  if (document.querySelector(".sc-tasks")) wireCardTasks(document.querySelector(".sc-tasks"), reload, id);
   // кем приходится ребёнку: нажали на метку, выбрали из списка
   document.querySelectorAll("[data-rel]").forEach((b) => (b.onclick = () => {
     const REL = ["мама", "папа", "бабушка", "дедушка", "тётя", "дядя", "сестра", "брат", "няня", "опекун", "другое"];

@@ -2027,6 +2027,12 @@ def task_rebook(con, h, user, body, q, tid):
     return pu.complete(con, int(tid), body.get("result") or "", body, user)
 
 
+@route("PATCH", "/api/tasks/{tid}", role="operator")
+def task_edit(con, h, user, body, q, tid):
+    """Правка задачи: что сделать, срок, заметка, исполнитель. Тренерам нельзя (role=operator)."""
+    return cx(tasks.edit, con, int(tid), body, user)
+
+
 @route("POST", "/api/tasks/{tid}/assign", role="operator")
 def task_assign(con, h, user, body, q, tid):
     from . import pu

@@ -83,6 +83,34 @@ def main():
     check("Дорого" in con.execute("SELECT text FROM history WHERE student_id=? ORDER BY id DESC", (sid,)).fetchone()[0],
           "Итог задачи записан в историю клиента")
 
+    print("Смена исполнителя и правка задачи")
+    artem = con.execute("INSERT INTO users(login,name,role,pw_hash) VALUES ('artem','Артём Орёл','coach','x$y')").lastrowid
+    varya = con.execute("INSERT INTO users(login,name,role,pw_hash,is_senior) VALUES ('varya','Варвара Батарева','operator','x$y',1)").lastrowid
+    gone = con.execute("INSERT INTO users(login,name,role,pw_hash,active) VALUES ('gone','Уволен','operator','x$y',0)").lastrowid
+    tid = tasks.import_erp_task(con, "Как прошло пробное", sid, "2026-11-07T10:00")
+    con.execute("UPDATE tasks SET assignee_id=? WHERE id=?", (artem, tid))
+    r = tasks.edit(con, tid, {"assignee_id": varya}, {"name": "Юлия"})
+    check(r["assignee_id"] == varya and r["assignee"] == "Варвара Батарева", "Задачу с Артёма (тренер) передали Варваре")
+    check(any("передана: Варвара Батарева" in h[0] for h in con.execute("SELECT text FROM history WHERE student_id=?", (sid,))),
+          "В истории карточки: «Задача … передана: Варвара Батарева»")
+    tasks.edit(con, tid, {"assignee_id": artem}, {"name": "Юлия"})
+    check(con.execute("SELECT assignee_id FROM tasks WHERE id=?", (tid,)).fetchone()[0] == artem, "Тренеру передать можно")
+    for bad, why in (({"assignee_id": gone}, "уволенному"), ({"assignee_id": 999}, "несуществующему"), ({"title": "  "}, "без текста")):
+        try:
+            tasks.edit(con, tid, bad, {"name": "Юлия"}); ok = False
+        except comms.CommsError:
+            ok = True
+        check(ok, f"Нельзя: {why}")
+    tasks.edit(con, tid, {"title": "Перезвонить маме", "due_at": "2026-11-08T12:30", "note": "после работы"}, {"name": "Юлия"})
+    t = con.execute("SELECT title, due_at, note FROM tasks WHERE id=?", (tid,)).fetchone()
+    check(tuple(t) == ("Перезвонить маме", "2026-11-08T12:30", "после работы"), "Правка текста, срока и заметки")
+    ft = tasks.for_student(con, sid)
+    check(any(x["id"] == tid for x in ft["open"]) and ft["open"][0]["due_at"] <= ft["open"][-1]["due_at"], "В карточке открытые задачи, ближайшая первой")
+    # на сервере правка задач доступна только админам и операторам, тренерам нет
+    from crm import server
+    route = next(r for r in server.ROUTES if r[0] == "PATCH" and r[1].pattern.startswith("^/api/tasks/"))
+    check(route[3] == "operator", "PATCH /api/tasks/{id}: тренеру нельзя (роль operator и выше)")
+
 
 if __name__ == "__main__":
     main()

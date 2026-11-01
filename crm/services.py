@@ -644,6 +644,7 @@ def student_detail(con, sid: int) -> dict:
         "counters": absence_counters(con, sid) if s["funnel"] == "members" else None,
         "balance": _balance_out(con, sid),
         "trial_hold": __import__("crm.capacity", fromlist=["active_holds"]).active_holds(con, student_id=sid)[:1],
+        "tasks": __import__("crm.tasks", fromlist=["for_student"]).for_student(con, sid),
         "unpaid_cur": unpaid_groups(con, sid, cur) if s["funnel"] == "members" and s["stage"] != "left" else [],
         "ledger": __import__("crm.money", fromlist=["ledger"]).ledger(con, sid),
         "family_kids": _rows(con.execute("SELECT id, name FROM students WHERE family_id=? AND id!=? AND archived=0", (s["family_id"], sid))),

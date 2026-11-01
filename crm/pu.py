@@ -612,8 +612,8 @@ def marks_report(con, d_from: date, d_to: date) -> dict:
 
 def reassign(con, tid: int, user_id: int, by: dict):
     u = con.execute("SELECT id, name, role FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
-    if not u or u["role"] not in ("admin", "operator"):
-        raise ApiError("Передать можно только админу или оператору")
+    if not u:  # 01.11: передать можно любому действующему сотруднику, в т.ч. тренеру
+        raise ApiError("Выберите сотрудника из списка")
     t = con.execute("SELECT * FROM tasks WHERE id=? AND status='open'", (tid,)).fetchone()
     if not t:
         raise ApiError("Задача не найдена")

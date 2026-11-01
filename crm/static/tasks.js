@@ -8,6 +8,7 @@ function taskRow(t) {
   const s = t.student || {};
   const trial = s.trial_at ? `пробное ${dtWhen(s.trial_at)}` : "";
   const auto = (t.auto || []).map((a) => `<span class="pill ${a.ok ? "green" : "red"}" title="${esc(a.error || "")}">✉️ ${AUTO_LABEL[a.kind] || a.kind}: ${a.ok ? "ушло" : "не ушло"}</span>`).join("");
+  S.taskById = S.taskById || {}; S.taskById[t.id] = t;
   return `<div class="task" data-task="${t.id}">
     <span class="task-ico" aria-hidden="true">${t.icon}</span>
     <div class="grow">
@@ -18,13 +19,14 @@ function taskRow(t) {
       ${s.id ? `<button class="linkish" data-open="${s.id}">${esc(s.name)}</button> <span class="small muted">${esc([s.parent, s.phone, trial].filter(Boolean).join(", "))}</span>` : ""}
       ${t.note ? `<div class="small muted">${esc(t.note)}</div>` : ""}
       ${auto ? `<div class="chips" style="margin-top:6px">${auto}</div>` : ""}
-      ${S.tasks.scope === "all" && t.assignee ? `<div class="small muted">Ответственный: ${esc(t.assignee)}</div>` : ""}
+      ${t.assignee && (S.tasks.scope === "all" || t.assignee_id !== S.user.id) ? `<div class="small muted">Исполнитель: ${esc(t.assignee)}</div>` : ""}
       <div class="task-done" hidden><input placeholder="Итог: дозвонилась, подтвердили…" data-result><button class="btn sm primary" data-finish>Готово</button></div>
     </div>
     <span class="small muted when">${dtWhen(t.due_at)}</span>
     <div class="now-act">
       ${s.phone ? `<button class="btn sm" data-dial="${esc(s.phone)}">📞</button>` : ""}
       ${t.kind === "rebook" ? `<button class="btn sm primary" data-rebook="${t.id}">Итог звонка</button>` : `<button class="btn sm" data-done>Выполнено</button>`}
+      ${["admin", "operator"].includes(S.user.role) ? `<button class="btn sm" data-tpass title="Передать другому сотруднику">Передать</button>` : ""}
       ${t.kind === "plan" && (S.tasks.canManage || t.created_by_id === S.user.id) ? `<button class="btn sm" data-tcancel="${t.id}" title="Убрать задачу">✕</button>` : ""}
     </div>
   </div>`;
@@ -70,7 +72,106 @@ function wireTasks(root) {
     if (dl) dl.onclick = () => dial(dl.dataset.dial);
     const op = row.querySelector("[data-open]");
     if (op) op.onclick = () => openStudent(+op.dataset.open);
+    const pass = row.querySelector("[data-tpass]");
+    if (pass) pass.onclick = () => openTaskEdit(S.taskById[id], render, "assignee");
+    // нажали на саму задачу (не на кнопку): открыть правку
+    row.addEventListener("click", (e) => {
+      if (e.target.closest("button, a, input, .task-done") || !["admin", "operator"].includes(S.user.role)) return;
+      openTaskEdit(S.taskById[id], render);
+    });
   });
+}
+
+/* Правка задачи: что сделать, срок, исполнитель, заметка. Передать можно любому сотруднику, включая тренера */
+const TASK_ROLE = { admin: "руководитель", operator: "администратор", coach: "тренер" };
+function openTaskEdit(t, onDone, focus) {
+  if (!t) return;
+  const staff = ((S.meta && S.meta.staff) || []).slice().sort((a, b) => (a.role === "coach") - (b.role === "coach") || a.name.localeCompare(b.name));
+  const wrap = document.createElement("div");
+  wrap.className = "need-wrap";
+  wrap.innerHTML = `<form class="need-card"><h3>${t.icon || "✅"} Задача</h3>
+    ${t.student ? `<div class="small muted" style="margin-bottom:8px">${esc(t.student.name)}${t.student.family ? ` · семья ${esc(t.student.family)}` : ""}</div>` : ""}
+    <div class="field"><label>Что сделать</label><input name="title" value="${esc(t.title)}" required maxlength="200"></div>
+    <div class="row"><div class="field"><label>Срок</label><input name="due_at" type="datetime-local" value="${esc((t.due_at || "").slice(0, 16))}" required></div>
+      <div class="field"><label>Исполнитель</label><select name="assignee_id">${staff.map((u) => `<option value="${u.id}" ${u.id === t.assignee_id ? "selected" : ""}>${esc(u.name)} (${TASK_ROLE[u.role] || u.role})</option>`).join("")}
+        ${t.assignee_id && !staff.some((u) => u.id === t.assignee_id) ? `<option value="" selected disabled>${esc(t.assignee || "Сотрудник в архиве")}: выберите нового</option>` : ""}</select></div></div>
+    <div class="field"><label>Заметка</label><textarea name="note" rows="2" maxlength="1000" placeholder="Что важно знать исполнителю">${esc(t.note || "")}</textarea></div>
+    <div class="need-err small"></div>
+    <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap"><button class="btn primary" style="flex:1">Сохранить</button>
+      ${t.kind === "rebook" ? `<button type="button" class="btn" data-rebook="${t.id}" data-tclose>Итог звонка</button>` : `<button type="button" class="btn" data-tfinish>Выполнено</button>`}
+      <button type="button" class="btn" data-tcancelf style="flex:0 0 auto">Отмена</button></div>
+    <div class="task-done" hidden style="margin-top:8px"><input placeholder="Итог: дозвонилась, подтвердили…" data-tresult><button type="button" class="btn sm primary" data-tok>Готово</button></div></form>`;
+  document.body.appendChild(wrap);
+  const f = wrap.querySelector("form"), close = () => wrap.remove();
+  setTimeout(() => (focus === "assignee" ? f.elements.assignee_id : f.elements.title).focus(), 50);
+  wrap.querySelector("[data-tcancelf]").onclick = close;
+  wrap.addEventListener("click", (e) => { if (e.target === wrap) close(); });
+  const cl = wrap.querySelector("[data-tclose]"); if (cl) cl.addEventListener("click", () => setTimeout(close, 0));
+  const fin = wrap.querySelector("[data-tfinish]");
+  if (fin) fin.onclick = () => { const b = wrap.querySelector(".task-done"); b.hidden = false; b.querySelector("input").focus(); };
+  const ok = wrap.querySelector("[data-tok]");
+  if (ok) ok.onclick = async () => {
+    try { await api("POST", `/api/tasks/${t.id}/done`, { result: wrap.querySelector("[data-tresult]").value }); toast("Задача выполнена"); close(); onDone && onDone(); }
+    catch (e) { wrap.querySelector(".need-err").textContent = e.message; }
+  };
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = { title: f.elements.title.value, due_at: f.elements.due_at.value, note: f.elements.note.value };
+    if (f.elements.assignee_id.value) body.assignee_id = +f.elements.assignee_id.value;
+    try {
+      const r = await api("PATCH", `/api/tasks/${t.id}`, body);
+      toast(r.assignee_id !== t.assignee_id ? `Задача передана: ${r.assignee}` : "Задача сохранена");
+      close(); onDone && onDone();
+    } catch (err) { wrap.querySelector(".need-err").textContent = err.message; }
+  };
+}
+
+/* Блок задач наверху карточки клиента: ближайшая задача видна сразу, остальные по кнопке, последние записи истории */
+function cardTasksBlock(d) {
+  const T = d.tasks || { open: [], done: [] };
+  (T.open || []).concat(T.done || []).forEach((t) => { S.taskById = S.taskById || {}; S.taskById[t.id] = t; });
+  const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const row = (t, main) => `<div class="ct-row ${main ? "main" : ""} ${t.due_at < now ? "late" : ""}" data-ctask="${t.id}" role="button" tabindex="0" title="Нажмите, чтобы изменить или передать">
+    <span class="ct-ico">${t.icon || "✅"}</span><div class="grow"><b>${esc(t.title)}</b>
+    <div class="small muted">${t.due_at < now ? "⏰ просрочено, " : ""}${dtWhen(t.due_at)}${t.assignee ? ` · ${esc(t.assignee)}` : ""}${t.note ? ` · ${esc(t.note)}` : ""}</div></div>
+    <span class="ct-edit">✎</span></div>`;
+  const last = (d.history || []).slice(0, 2);
+  return `<div class="ct-box">
+    <div class="ct-head"><b>✅ Задачи</b>${T.open.length > 1 ? `<span class="small muted">открыто ${T.open.length}</span>` : ""}
+      <button class="btn sm" data-ctadd style="margin-left:auto">+ Задача</button></div>
+    ${T.open.length ? row(T.open[0], true) : `<div class="small muted">Открытых задач нет</div>`}
+    ${T.open.length > 1 ? `<details class="ct-more"><summary class="small">Ещё ${T.open.length - 1}</summary>${T.open.slice(1).map((t) => row(t)).join("")}</details>` : ""}
+    <div data-ctaddbox></div>
+    ${last.length ? `<div class="ct-hist small">${last.map((h) => `<div><span class="muted">${dtShort(h.ts)} · ${esc(h.user_name || "")}</span> ${esc(h.text)}</div>`).join("")}
+      <button class="linkish small" data-cthist>Вся история</button></div>` : ""}
+  </div>`;
+}
+function wireCardTasks(root, reload, sid) {
+  root.querySelectorAll("[data-ctask]").forEach((el) => {
+    const open = () => { if (["admin", "operator"].includes(S.user.role)) openTaskEdit(S.taskById[el.dataset.ctask], reload); };
+    el.onclick = open; el.onkeydown = (e) => { if (e.key === "Enter") open(); };
+  });
+  const add = root.querySelector("[data-ctadd]");
+  if (add) add.onclick = () => {
+    const box = root.querySelector("[data-ctaddbox]");
+    if (box.innerHTML) { box.innerHTML = ""; return; }
+    const staff = ((S.meta && S.meta.staff) || []).slice().sort((a, b) => (a.role === "coach") - (b.role === "coach") || a.name.localeCompare(b.name));
+    const soon = new Date(Date.now() + 3600e3 - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    box.innerHTML = `<div class="sub-form" style="margin-top:8px">
+      <div class="field"><label>Что сделать</label><input data-ctt placeholder="Например: перезвонить после 18:00"></div>
+      <div class="row"><div class="field"><label>Срок</label><input type="datetime-local" data-ctd value="${soon}"></div>
+        <div class="field"><label>Исполнитель</label><select data-cta>${staff.map((u) => `<option value="${u.id}" ${u.id === S.user.id ? "selected" : ""}>${esc(u.name)} (${TASK_ROLE[u.role] || u.role})</option>`).join("")}</select></div></div>
+      <button class="btn primary sm" data-cts>Поставить задачу</button></div>`;
+    box.querySelector("[data-ctt]").focus();
+    box.querySelector("[data-cts]").onclick = async () => {
+      const title = box.querySelector("[data-ctt]").value.trim();
+      if (!title) return toast("Напишите, что нужно сделать", true);
+      try { await api("POST", `/api/students/${sid}/tasks`, { title, due: box.querySelector("[data-ctd]").value, assignee: +box.querySelector("[data-cta]").value }); toast("Задача поставлена"); reload(); }
+      catch (e) { fail(e); }
+    };
+  };
+  const h = root.querySelector("[data-cthist]");
+  if (h) h.onclick = () => { const el = document.querySelector(".history"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
 }
 
 const yearsWord = (n) => n % 10 === 1 && n % 100 !== 11 ? "год" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "года" : "лет";

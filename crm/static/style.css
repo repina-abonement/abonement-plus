@@ -1387,3 +1387,21 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 /* кем приходится ребёнку */
 .rel-chip { font: inherit; font-size: 12.5px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2); cursor: pointer; }
 .rel-chip.empty { border-style: dashed; color: var(--orange, #e8711b); }
+
+/* Задачи наверху карточки клиента */
+.sc-tasks { margin: 12px 0; }
+.ct-box { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; box-shadow: var(--shadow); }
+.ct-head { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+.ct-row { display: flex; gap: 10px; align-items: center; padding: 9px 10px; border-radius: 12px; cursor: pointer; background: var(--surface-2); margin-top: 6px; }
+.ct-row:hover, .ct-row:focus { outline: 2px solid var(--line); }
+.ct-row.main { background: #fff6e8; border-left: 4px solid var(--orange, #e8711b); }
+.ct-row.late { background: var(--red-soft); border-left: 4px solid var(--red); }
+.ct-ico { font-size: 18px; } .ct-edit { color: var(--ink-2); }
+.ct-more > summary { cursor: pointer; margin-top: 6px; color: var(--ink-2); }
+.ct-hist { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); line-height: 1.5; }
+/* задачи в узкой колонке стола и на телефоне: кнопки отдельной строкой, текст не сжимается */
+.desk-side .task, .tasks-box .task { flex-wrap: wrap; }
+.desk-side .task > .grow { flex: 1 1 calc(100% - 90px); min-width: 0; }
+.desk-side .task > .now-act { flex: 1 0 100%; justify-content: flex-end; flex-wrap: wrap; margin-top: 6px; }
+@media (max-width: 700px) { .tasks-box .task > .now-act { flex: 1 0 100%; justify-content: flex-end; flex-wrap: wrap; margin-top: 6px; } }
+.task { cursor: pointer; }
