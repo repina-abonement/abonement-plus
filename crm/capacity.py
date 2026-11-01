@@ -18,7 +18,13 @@ class CapacityError(ApiError):
     pass
 
 
+HOLD_MIN = 10  # Юлия, 01.11: пока родитель присылает недостающие данные, место на пробном держим 10 минут
+
+
 def init(con):
+    con.execute("""CREATE TABLE IF NOT EXISTS trial_holds (
+        id INTEGER PRIMARY KEY, student_id INTEGER NOT NULL, group_id INTEGER NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL,
+        until TEXT NOT NULL, created_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)""")
     bcols = {r[1] for r in con.execute("PRAGMA table_info(branches)")}
     if "lesson_limit" not in bcols:
         con.execute("ALTER TABLE branches ADD COLUMN lesson_limit INTEGER NOT NULL DEFAULT 0")
@@ -98,6 +104,9 @@ def occupancy(con, group_id: int, day: str) -> dict:
             if pj["has_lesson"]:
                 rows += pj["rows"]
     coming, warned, vacation = 0, [], 0
+    # места, которые держим для пробного, пока родитель присылает данные (кроме детей, уже записанных сюда)
+    ids = {r.get("id") for r in rows}
+    coming += sum(1 for h in active_holds(con, group_id, day) if h["student_id"] not in ids)
     for r in rows:
         if r.get("status") == "vacation":
             vacation += 1
@@ -243,3 +252,32 @@ def free_slots(con, days: int = 14, branch_id: int | None = None, age_of: int | 
                             "time": t, "free": o["free"], "count": o["count"], "limit": o["limit"], "warned": o["warned"]})
     out.sort(key=lambda x: (x["date"], x["time"]))
     return out
+
+
+def _now_iso() -> str:
+    from datetime import datetime
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def active_holds(con, group_id: int | None = None, day: str | None = None, student_id: int | None = None) -> list[dict]:
+    q, a = "SELECT * FROM trial_holds WHERE until > ?", [_now_iso()]
+    for col, v in (("group_id", group_id), ("date", day), ("student_id", student_id)):
+        if v is not None:
+            q += f" AND {col}=?"; a.append(v)
+    return [dict(r) for r in con.execute(q, a)]
+
+
+def hold(con, student_id: int, group_id: int, day: str, time: str, user: dict) -> dict:
+    """Держим место на пробном HOLD_MIN минут: другим этот слот в это время не предлагается."""
+    from datetime import datetime, timedelta
+    if not con.execute("SELECT 1 FROM students WHERE id=?", (student_id,)).fetchone():
+        raise CapacityError("Ученик не найден")
+    con.execute("DELETE FROM trial_holds WHERE student_id=?", (student_id,))
+    g = con.execute("SELECT capacity FROM groups WHERE id=?", (group_id,)).fetchone()
+    lim = limit_for(con, group_id) or (g["capacity"] if g else 0)
+    if lim and occupancy(con, group_id, day)["count"] >= lim:
+        raise CapacityError("На это время мест уже нет: предложите родителю другое")
+    until = (datetime.now() + timedelta(minutes=HOLD_MIN)).isoformat(timespec="seconds")
+    con.execute("INSERT INTO trial_holds(student_id, group_id, date, time, until, created_by, created_at) VALUES (?,?,?,?,?,?,?)",
+                (student_id, group_id, day, time, until, user.get("name", ""), _now_iso()))
+    return {"until": until, "minutes": HOLD_MIN}

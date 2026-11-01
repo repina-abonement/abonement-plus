@@ -1905,6 +1905,14 @@ def inbox_counts(con, h, user, body, q):
     return comms.counts(con)
 
 
+@route("POST", "/api/trial-hold", role="operator")
+def trial_hold(con, h, user, body, q):
+    """Держать место на пробном 10 минут, пока родитель присылает недостающие данные."""
+    from . import capacity
+    return capacity.hold(con, int(body.get("student_id") or 0), int(body.get("group_id") or 0),
+                         str(body.get("date") or "")[:10], str(body.get("time") or "")[:5], user)
+
+
 @route("GET", "/api/conversations/{cid}", role="operator")
 def conv_get(con, h, user, body, q, cid):
     return cx(comms.conversation, con, int(cid))

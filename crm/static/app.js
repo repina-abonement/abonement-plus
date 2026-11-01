@@ -57,6 +57,12 @@ function askRequired(need) {
     // данных нет: готовим вежливый запрос родителю ровно о том, чего не хватает, и вставляем его в поле ответа
     wrap.querySelector("[data-nask]").onclick = async () => {
       const miss = need.fields.filter((k) => need.missing.includes(k) || !f.elements[k].value.trim());
+      // выбрано время: держим место 10 минут, пока родитель присылает данные
+      const sl = S.pendingSlot;
+      if (sl && sl.group_id) {
+        try { const h = await api("POST", "/api/trial-hold", { student_id: need.student_id, group_id: sl.group_id, date: sl.date, time: sl.time }); sl.until = h.until; sl.minutes = h.minutes; }
+        catch (e) { return fail(e); }
+      }
       const nm = f.elements.child_name ? f.elements.child_name.value.trim() : "";
       const text = askRequiredText(need.kind, miss, nm && !nm.includes(" "));
       const box = [...document.querySelectorAll("#chat-text, #cm-text")].find((x) => x.offsetParent);
@@ -65,7 +71,7 @@ function askRequired(need) {
         box.value = S.pendingSlot || !box.value.trim() ? text : box.value.trim() + "\n\n" + text;
         box.rows = Math.min(8, box.value.split("\n").length + 1);
         done(false); box.focus(); box.scrollIntoView({ block: "center" });
-        toast("Запрос вставлен в поле ответа: проверьте и нажмите «Отправить»");
+        toast(sl && sl.until ? `Место держим до ${sl.until.slice(11, 16)}. Запрос вставлен в поле ответа: нажмите «Отправить»` : "Запрос вставлен в поле ответа: проверьте и нажмите «Отправить»");
       } else {
         try { await navigator.clipboard.writeText(text); toast("Текст запроса скопирован: вставьте его в переписку с родителем"); }
         catch (_) { prompt("Скопируйте текст запроса родителю", text); }
@@ -90,7 +96,7 @@ function askRequiredText(kind, miss, onlySurname = false) {
     phone: "номер телефона для связи", email: "электронную почту: на неё придёт чек об оплате" };
   const list = (miss.length ? miss : ["child_name", "birth"]).map((k) => "• " + (ask[k] || k)).join("\n");
   const sl = kind !== "sale" && S.pendingSlot;
-  if (sl) return `Отлично, ждём вас на пробное: ${sl.label}, ${sl.branch} ⚽\nЧтобы закрепить место, пришлите, пожалуйста:\n${list}\nСпасибо! 😊`;
+  if (sl) return `Отлично, ждём вас на пробное: ${sl.label}, ${sl.branch} ⚽\nМесто держим за вами ${sl.minutes || 10} минут. Чтобы закрепить его, пришлите, пожалуйста:\n${list}\nСпасибо! 😊`;
   return kind === "sale"
     ? `Здравствуйте! Чтобы оформить абонемент, пришлите, пожалуйста:\n${list}\nСпасибо!`
     : `Здравствуйте! Чтобы записать ребёнка на пробное занятие, пришлите, пожалуйста:\n${list}\nСпасибо! Как только получим, сразу запишем 😊`;
@@ -1290,6 +1296,7 @@ async function openStudent(id) {
     isMember && d.balance.debt ? `<span class="pill red">Долг ${rub(d.balance.debt)}</span>` : "",
     isMember && d.balance.upcoming ? `<span class="pill yellow">К оплате ${rub(d.balance.upcoming)}</span>` : "",
     isMember && d.balance.deposit ? `<span class="pill green">На балансе ${rub(d.balance.deposit)}</span>` : "",
+    ...(d.trial_hold || []).map((h) => `<span class="pill yellow" title="Пока родитель присылает данные, другим это время не предлагается">⏳ Держим место на пробное ${esc(dShort(h.date))} в ${esc(h.time)} до ${esc(h.until.slice(11, 16))}</span>`),
     ...(d.unpaid_cur || []).map((g) => `<span class="pill red" title="Абонемент за этот месяц по этой группе не оплачен и счёт не выставлен">Не оплачен ${esc(monthLabel(S.meta.today.slice(0, 7)).split(" ")[0])}: ${esc(g)}</span>`),
     isMember && !d.balance.debt && !d.balance.upcoming && !(d.unpaid_cur || []).length ? `<span class="pill green">Долга нет</span>` : "",
     isMember && c.available ? `<span class="pill">Можно отработать: ${c.available}</span>` : "",

@@ -643,6 +643,7 @@ def student_detail(con, sid: int) -> dict:
         "trial_age_warn": logic.age_warning(s["birth"], grp["age"], _branch_name(con, grp["branch_id"])) if grp and s["funnel"] == "sales" else "", "makeups": makeups, "history": hist,
         "counters": absence_counters(con, sid) if s["funnel"] == "members" else None,
         "balance": _balance_out(con, sid),
+        "trial_hold": __import__("crm.capacity", fromlist=["active_holds"]).active_holds(con, student_id=sid)[:1],
         "unpaid_cur": unpaid_groups(con, sid, cur) if s["funnel"] == "members" and s["stage"] != "left" else [],
         "ledger": __import__("crm.money", fromlist=["ledger"]).ledger(con, sid),
         "family_kids": _rows(con.execute("SELECT id, name FROM students WHERE family_id=? AND id!=? AND archived=0", (s["family_id"], sid))),
@@ -772,6 +773,7 @@ def update_student(con, sid: int, data: dict, user) -> None:
             from . import capacity
             capacity.check_trial_group(con, cur["group_id"])
             capacity.ensure(con, cur["group_id"], cur["trial_at"][:10], "записать на пробное")
+            con.execute("DELETE FROM trial_holds WHERE student_id=?", (sid,))  # записали: место больше не держим
     names = {"name": "имя", "birth": "дата рождения", "group_id": "группа", "branch_id": "филиал", "tariff": "тариф",
              "trial_at": "пробное", "source": "источник", "source_id": "источник", "refusal_reason": "причина отказа"}
     if changes:

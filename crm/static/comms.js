@@ -610,7 +610,7 @@ function wireTrialOffer(c, textSel = "#chat-text") {
           const x = r.slots[+b.dataset.toBook];
           // шаг 3: если данных не хватает, запрос родителю будет уже с выбранным временем
           const kidRow = leads.find((k) => k.id === kidId) || kid || {};
-          S.pendingSlot = { label: x.label, group: x.group, branch: x.branch, kid: (kidRow.name || "").split(" ")[0] };
+          S.pendingSlot = { label: x.label, group: x.group, branch: x.branch, kid: (kidRow.name || "").split(" ")[0], group_id: x.group_id, date: x.date, time: x.time, student_id: kidId };
           try {
             await api("PATCH", `/api/students/${kidId}`, { group_id: x.group_id, trial_at: `${x.date}T${x.time}` });
             S.pendingSlot = null;
