@@ -427,6 +427,7 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
 def _task_out(con, r) -> dict:
     d = dict(r)
     d["icon"] = KINDS.get(d["kind"], ("", "✅"))[1]
+    d["manual"] = d["kind"] in MANUAL_KINDS
     if d["student_id"]:
         s = con.execute("""SELECT s.id, s.name, s.trial_at, s.trial_came, s.stage, s.family_id, f.name AS family,
                            (SELECT p.phone FROM parents p WHERE p.family_id=s.family_id ORDER BY p.id LIMIT 1) AS phone,
@@ -519,6 +520,28 @@ def edit(con, tid: int, data: dict, user: dict) -> dict:
             for n in notes:
                 sv.log(con, t["student_id"], n, user, "note")
     return _task_out(con, con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone())
+
+
+MANUAL_KINDS = ("manual", "plan")  # поставил сотрудник (карточка клиента или «Планер»); остальные CRM ставит сама по цепочке событий
+
+
+def manual_board(con, user: dict, scope: str = "mine") -> dict:
+    """Воронка «Ручные задачи»: задача появляется в свой день. Просрочено / Сегодня / Выполнено сегодня."""
+    from . import planner
+    boss = planner.can_manage(con, user)
+    today = date.today().isoformat()
+    who = "" if scope == "all" and boss else " AND assignee_id=?"
+    args = [] if who == "" else [user["id"]]
+    kinds = ",".join("?" * len(MANUAL_KINDS))
+    rows = lambda where, extra, order: [_task_out(con, r) for r in con.execute(
+        f"SELECT * FROM tasks WHERE kind IN ({kinds}) AND {where}{who} ORDER BY {order}", (*MANUAL_KINDS, *extra, *args))]
+    return {"columns": [
+        {"key": "overdue", "title": "Просрочено", "cards": rows("status='open' AND substr(due_at,1,10) < ?", [today], "due_at")},
+        {"key": "today", "title": "Сегодня", "cards": rows("status='open' AND substr(due_at,1,10) = ?", [today], "due_at")},
+        {"key": "done", "title": "Выполнено сегодня", "cards": rows("status='done' AND substr(done_at,1,10) = ?", [today], "done_at DESC")},
+    ], "scope": scope if boss else "mine", "can_manage": boss,
+        "later": con.execute(f"SELECT COUNT(*) FROM tasks WHERE kind IN ({kinds}) AND status='open' AND substr(due_at,1,10) > ?{who}",
+                             (*MANUAL_KINDS, today, *args)).fetchone()[0]}
 
 
 def for_student(con, sid: int) -> dict:

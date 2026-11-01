@@ -12,7 +12,7 @@ function taskRow(t) {
   return `<div class="task" data-task="${t.id}">
     <span class="task-ico" aria-hidden="true">${t.icon}</span>
     <div class="grow">
-      <div>${t.priority ? "🔥 " : ""}<b>${esc(t.title)}</b>${t.source === "erp" ? ` <span class="pill">из ERP</span>` : ""}
+      <div>${t.priority ? "🔥 " : ""}<b>${esc(t.title)}</b> ${kindPill(t)}${t.source === "erp" ? ` <span class="pill">из ERP</span>` : ""}
         ${t.created_by_id && t.created_by_id !== t.assignee_id && t.created_by ? ` <span class="pill blue">от ${esc(firstName(t.created_by))}</span>` : ""}
         ${t.recur_id ? ` <span class="pill" title="Повторяющееся дело">🔁</span>` : ""}</div>
       ${t.returned_note ? `<div class="small" style="color:var(--red)">↩ Вернули: ${esc(t.returned_note)}</div>` : ""}
@@ -82,6 +82,41 @@ function wireTasks(root) {
   });
 }
 
+const kindPill = (t) => t.manual ? `<span class="pill kp-man" title="Поставил сотрудник">ручная</span>` : `<span class="pill kp-auto" title="CRM поставила сама по цепочке событий">авто</span>`;
+
+/* Воронка «Ручные задачи»: задача появляется в свой день. Просрочено / Сегодня / Выполнено сегодня */
+S.manual = { scope: "mine" };
+async function renderManualBoard(page) {
+  const d = await api("GET", "/api/tasks/manual?scope=" + S.manual.scope);
+  S.taskById = S.taskById || {};
+  d.columns.forEach((c) => c.cards.forEach((t) => (S.taskById[t.id] = t)));
+  const card = (t, col) => `<article class="card mt-card ${col === "overdue" ? "red" : ""} ${col === "done" ? "done" : ""}" data-mt="${t.id}" data-col="${col}">
+    <div class="name">${esc(t.title)}</div>
+    ${t.student ? `<div class="meta">${esc(t.student.name)}${t.student.parent ? ` · ${esc(t.student.parent)}` : ""}</div>` : ""}
+    ${t.note ? `<div class="meta">${esc(t.note)}</div>` : ""}
+    <div class="meta">👤 ${esc(t.assignee || "")}${col === "done" ? ` · сделано ${esc((t.done_at || "").slice(11, 16))}${t.result ? `: ${esc(t.result)}` : ""}` : ` · ${col === "overdue" ? "⏰ " + dShort(t.due_at) + " " : ""}${(t.due_at || "").slice(11, 16) === "23:59" ? "в течение дня" : (t.due_at || "").slice(11, 16)}`}</div>
+    ${col !== "done" ? `<div class="mt-act"><button class="btn sm" data-mtdone="${t.id}">Выполнено</button></div>` : ""}
+  </article>`;
+  page.innerHTML = `<div class="page-head"><h2 class="grow">Ручные задачи</h2>
+      ${d.can_manage ? `<div class="seg"><button data-ms="mine" class="${d.scope === "mine" ? "active" : ""}">Мои</button><button data-ms="all" class="${d.scope === "all" ? "active" : ""}">Все сотрудники</button></div>` : ""}
+      <button class="btn primary" id="mt-add">+ Задача</button></div>
+    <div class="small muted" style="margin:-6px 0 12px">Задачи, которые поставили сотрудники. Каждая появляется здесь в свой день${d.later ? `. Запланировано на следующие дни: ${d.later} (видно в «Планере»)` : ""}. Нажмите на задачу, чтобы изменить или передать</div>
+    <div id="mt-addbox"></div>
+    <div class="board">${d.columns.map((c) => `<section class="col"><div class="col-head"><span>${c.title}</span><span class="cnt">${c.cards.length}</span></div>
+      <div class="cards">${c.cards.map((t) => card(t, c.key)).join("") || `<div class="small muted" style="padding:8px">${c.key === "today" ? "На сегодня ручных задач нет" : c.key === "overdue" ? "Просроченных нет 👍" : "Пока пусто"}</div>`}</div></section>`).join("")}</div>`;
+  page.querySelectorAll("[data-ms]").forEach((b) => (b.onclick = () => { S.manual.scope = b.dataset.ms; render(); }));
+  $("#mt-add").onclick = () => openTaskForm($("#mt-addbox"), render);
+  page.querySelectorAll("[data-mt]").forEach((el) => (el.onclick = (e) => {
+    if (e.target.closest("button") || el.dataset.col === "done") return;
+    if (["admin", "operator"].includes(S.user.role)) openTaskEdit(S.taskById[el.dataset.mt], render);
+  }));
+  page.querySelectorAll("[data-mtdone]").forEach((b) => (b.onclick = async () => {
+    const result = prompt("Итог (необязательно)", "");
+    if (result === null) return;
+    try { await api("POST", `/api/tasks/${b.dataset.mtdone}/done`, { result }); toast("Задача выполнена"); render(); } catch (e) { fail(e); }
+  }));
+}
+
 /* Правка задачи: что сделать, срок, исполнитель, заметка. Передать можно любому сотруднику, включая тренера */
 const TASK_ROLE = { admin: "руководитель", operator: "администратор", coach: "тренер" };
 function openTaskEdit(t, onDone, focus) {
@@ -132,7 +167,7 @@ function cardTasksBlock(d) {
   (T.open || []).concat(T.done || []).forEach((t) => { S.taskById = S.taskById || {}; S.taskById[t.id] = t; });
   const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   const row = (t, main) => `<div class="ct-row ${main ? "main" : ""} ${t.due_at < now ? "late" : ""}" data-ctask="${t.id}" role="button" tabindex="0" title="Нажмите, чтобы изменить или передать">
-    <span class="ct-ico">${t.icon || "✅"}</span><div class="grow"><b>${esc(t.title)}</b>
+    <span class="ct-ico">${t.icon || "✅"}</span><div class="grow"><b>${esc(t.title)}</b> ${kindPill(t)}
     <div class="small muted">${t.due_at < now ? "⏰ просрочено, " : ""}${dtWhen(t.due_at)}${t.assignee ? ` · ${esc(t.assignee)}` : ""}${t.note ? ` · ${esc(t.note)}` : ""}</div></div>
     <span class="ct-edit">✎</span></div>`;
   const last = (d.history || []).slice(0, 2);

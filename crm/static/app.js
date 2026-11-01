@@ -279,7 +279,7 @@ async function renderLogin(force = false) {
 
 /* ---------- каркас ---------- */
 const VIEWS = [
-  ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Ученики"], ["skips", "Пропуски"],
+  ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Ученики"], ["skips", "Пропуски"], ["manual", "Ручные задачи"],
   ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["docs", "Документы"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
@@ -293,6 +293,7 @@ const NAV_ICONS = {
   journal: '<rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 9l1.5 1.5L13 8M9 14.5l1.5 1.5L13 13.5M15 9.5h1M15 15h1"/>',
   coaches: '<path d="M8 4h8v4a4 4 0 0 1-8 0z"/><path d="M8 5H5v1.5A3 3 0 0 0 8 9.5M16 5h3v1.5a3 3 0 0 1-3 3M12 12v4M9 20h6M10 16h4v4h-4z"/>',
   dashboard: '<path d="M4 19V10M10 19V5M16 19v-7M21 19H3"/>',
+  manual: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/><path d="M16 15l1.5 1.5L20 14"/>',
   planner: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9l1.5 1.5L12 8M8 15l1.5 1.5L12 14M14 9.5h3M14 15.5h3"/>',
   spend: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2M7 3h10"/>',
   fiscal: '<path d="M6 3h12v18l-2-1.5L14 21l-2-1.5L10 21l-2-1.5L6 21z"/><path d="M9 8h6M9 11.5h6M9 15h3"/>',
@@ -310,7 +311,7 @@ const isCoach = () => S.user && S.user.role === "coach";
 const LEVELS = { own: 1, view: 2, full: 3 };
 const can = (sec, lvl = "own") => (LEVELS[((S.user && S.user.perms) || {})[sec]] || 0) >= LEVELS[lvl];
 const isOwner = () => can("settings", "full");
-const visibleViews = () => VIEWS.filter(([k]) => can(k) && (k !== "today" || !isOwner()))  // руководитель смотрит стол тренера через «Как видит»
+const visibleViews = () => VIEWS.filter(([k]) => can(k === "manual" ? "planner" : k) && (k !== "today" || !isOwner()))  // руководитель смотрит стол тренера через «Как видит»
   .map(([k, t]) => [k, k === "coaches" && !can("coaches", "view") ? "Мои результаты" : k === "members" && !can("members", "full") ? "Мои ученики" : t]);
 const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
 function isCoachShort() { return "Результаты"; }
@@ -318,7 +319,7 @@ const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></s
 
 /* Боковое меню: главное сверху, остальное по папкам. Открыта папка с текущим разделом и те, что сотрудник раскрыл сам */
 const NAV_TOP = ["today", "sales", "inbox", "planner"];
-const NAV_FOLDERS = [["Клиенты", ["members", "skips"]], ["Занятия", ["journal", "schedule", "coaches"]],
+const NAV_FOLDERS = [["Клиенты", ["members", "skips", "manual"]], ["Занятия", ["journal", "schedule", "coaches"]],
   ["Деньги", ["payments", "fiscal", "merch", "spend", "dashboard"]], ["Школа", ["team", "docs", "settings"]]];
 const navOpen = () => { try { return JSON.parse(localStorage.getItem("crm.nav_open") || "{}"); } catch (_) { return {}; } };
 function sideNav(views) {
@@ -523,6 +524,7 @@ async function renderView(page) {
     if (S.view === "payments") return await renderPayments(page);
     if (S.view === "merch") return await renderMerch(page);
     if (S.view === "planner") return await renderPlanner(page);
+    if (S.view === "manual") return await renderManualBoard(page);
     if (S.view === "spend") return await renderSpend(page);
     if (S.view === "fiscal") return await renderFiscal(page);
     if (S.view === "schedule") return await renderSchedule(page);

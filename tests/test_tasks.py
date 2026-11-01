@@ -106,6 +106,25 @@ def main():
     check(tuple(t) == ("Перезвонить маме", "2026-11-08T12:30", "после работы"), "Правка текста, срока и заметки")
     ft = tasks.for_student(con, sid)
     check(any(x["id"] == tid for x in ft["open"]) and ft["open"][0]["due_at"] <= ft["open"][-1]["due_at"], "В карточке открытые задачи, ближайшая первой")
+    print("Воронка «Ручные задачи»")
+    from datetime import date as _date, timedelta as _td
+    today = _date.today()
+    adm = {"id": con.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()[0], "name": "Юлия", "role": "admin"}
+    mk = lambda title, d, uid: tasks.add_task(con, "manual", sid, f"{d.isoformat()}T15:00", title=title, source="manual", assignee=uid)
+    t_old, t_now, t_next = mk("Вчерашняя", today - _td(days=1), varya), mk("Сегодняшняя", today, varya), mk("Завтрашняя", today + _td(days=1), varya)
+    b = tasks.manual_board(con, adm, "all")
+    cols = {c["key"]: [x["title"] for x in c["cards"]] for c in b["columns"]}
+    check(cols["overdue"] == ["Вчерашняя"] and cols["today"] == ["Сегодняшняя"] and "Завтрашняя" not in sum(cols.values(), []),
+          "Задача появляется в свой день: вчерашняя в «Просрочено», сегодняшняя в «Сегодня», завтрашней ещё нет")
+    check(b["later"] >= 1, "Счётчик запланированных на следующие дни")
+    check(all("Напомнить" not in x and "Как прошло" not in x for x in sum(cols.values(), [])), "Автоматические задачи сюда не попадают")
+    tasks.complete(con, t_now, {"name": "Варвара"}, "сделано")
+    b = tasks.manual_board(con, adm, "all")
+    check([x["title"] for x in b["columns"][2]["cards"]] == ["Сегодняшняя"], "Выполненная в «Выполнено сегодня»")
+    mine = tasks.manual_board(con, {"id": olga, "name": "Ольга", "role": "operator"}, "all")
+    check(not sum((c["cards"] for c in mine["columns"]), []), "Обычный сотрудник видит только свои ручные задачи")
+    check(tasks._task_out(con, con.execute("SELECT * FROM tasks WHERE id=?", (t_old,)).fetchone())["manual"] is True, "Метка «ручная»")
+
     # на сервере правка задач доступна только админам и операторам, тренерам нет
     from crm import server
     route = next(r for r in server.ROUTES if r[0] == "PATCH" and r[1].pattern.startswith("^/api/tasks/"))

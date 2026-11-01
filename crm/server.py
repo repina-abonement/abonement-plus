@@ -2027,6 +2027,12 @@ def task_rebook(con, h, user, body, q, tid):
     return pu.complete(con, int(tid), body.get("result") or "", body, user)
 
 
+@route("GET", "/api/tasks/manual", role="coach")
+def tasks_manual(con, h, user, body, q):
+    """Воронка «Ручные задачи»."""
+    return tasks.manual_board(con, user, q.get("scope", "mine"))
+
+
 @route("PATCH", "/api/tasks/{tid}", role="operator")
 def task_edit(con, h, user, body, q, tid):
     """Правка задачи: что сделать, срок, заметка, исполнитель. Тренерам нельзя (role=operator)."""
