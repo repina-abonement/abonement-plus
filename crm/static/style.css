@@ -1329,3 +1329,34 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .memo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
 .memo-card { display: flex; flex-direction: column; gap: 6px; }
 .memo-card img { width: 100%; border-radius: 10px; border: 1px solid var(--line); display: block; }
+
+/* рабочий стол: приветствие, воронка в карточке, свёрнутое одной карточкой (аудит 01.11) */
+.desk-hello { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 4px 0 14px; }
+.desk-hello h2 { font-family: var(--display); font-weight: 800; font-size: 24px; letter-spacing: -.01em; margin: 0 0 2px; }
+.desk-hello .dtiles { padding: 0; }
+.desk-funnel { margin-top: 16px; background: var(--surface); border-radius: 18px; padding: 16px 18px; box-shadow: var(--shadow); border: 1px solid var(--line); }
+.desk-funnel .board { margin-bottom: 0; }
+.now-more { margin-top: 8px; width: 100%; }
+.dw-folded { margin-top: 12px; background: var(--surface); border-radius: 18px; padding: 10px 8px; box-shadow: var(--shadow); border: 1px solid var(--line); }
+.dwf-title { padding: 2px 10px 6px; }
+.dw-folded .dwf { border: 0 !important; box-shadow: none !important; background: transparent !important; margin: 0 !important; border-radius: 12px; }
+.dw-folded .dwf + .dwf { border-top: 1px solid var(--line) !important; border-radius: 0; }
+.dw-folded .dwf > summary { display: flex; align-items: center; gap: 10px; padding: 10px; cursor: pointer; list-style: none; font-weight: 600; border-radius: 12px; }
+.dw-folded .dwf > summary::-webkit-details-marker { display: none; }
+.dw-folded .dwf > summary::after { display: none !important; }
+.dw-folded .dwf > summary:hover { background: var(--surface-2); }
+.dwf-ic { width: 30px; height: 30px; border-radius: 10px; background: var(--surface-2); display: grid; place-items: center; font-size: 16px; flex: none; }
+.dwf-chev { color: var(--ink-2); font-size: 20px; transition: transform .15s; }
+.dw-folded .dwf[open] .dwf-chev { transform: rotate(90deg); }
+.dw-folded .dwf > .dw { padding: 4px 4px 8px; }
+@media (max-width: 700px) { .desk-hello h2 { font-size: 21px; } .desk-funnel { padding: 14px 12px; border-radius: 16px; } }
+.dw-folded .dwf > summary > .grow { flex: 1 1 auto; }
+.desk-funnel .board { min-height: 0; height: auto; }
+.desk-funnel .col { min-height: 0; }
+.desk .now-list { max-height: none; }
+/* на телефоне: сначала «Горит», потом задачи, потом воронка */
+@media (max-width: 1179px) {
+  .desk { display: flex; flex-direction: column; }
+  .desk-main { display: contents; }
+  #dw-hot { order: 1; } .desk-side { order: 2; } .desk-funnel { order: 3; margin-top: 0; }
+}

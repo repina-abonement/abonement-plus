@@ -977,10 +977,14 @@ async function renderWorkdesk(page) {
   S.dwOpen = S.dwOpen || {};
   const dwShown = (k) => k === "tasks" || !!W[k].n || (k === "call" && who === "operator");
   const tiles = widgets.filter((k) => W[k].n).map((k) => `<button class="dtile ${W[k].red ? "red" : "yellow"}" data-jump="dw-${k}"><span>${W[k].icon}</span><b>${W[k].n}</b><small>${W[k].label}</small></button>`);
+  const hr = new Date().getHours();
+  const hello = hr < 5 ? "Доброй ночи" : hr < 12 ? "Доброе утро" : hr < 18 ? "Добрый день" : "Добрый вечер";
+  const firstName = (S.user.name || "").split(" ")[0];
+  const dateTxt = new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" }).replace(/^./, (c) => c.toUpperCase());
   const hot = `<section class="now ${u.length ? "" : "calm"}" id="dw-hot">
       <div class="now-head"><h3>${u.length ? (reds ? `🔥 Горит прямо сейчас: ${reds}` : "Ждут ответа") : "Всё обработано"}</h3>
         ${u.length ? `<span class="muted small">Красное сначала, потом сообщения и пробные</span>` : ""}</div>
-      ${u.length ? `<div class="now-list">${u.map((x, i) => `
+      ${u.length ? `<div class="now-list">${u.slice(0, S.hotAll ? u.length : 3).map((x, i) => `
         <div class="now-item ${x.level}">
           <span class="ref-card ${x.level}" aria-hidden="true"></span>
           <div class="grow"><b>${esc(x.title)}</b>${x.count ? ` <span class="nbadge static">${x.count}</span>` : ""}
@@ -990,22 +994,28 @@ async function renderWorkdesk(page) {
             <button class="btn sm ${x.level === "red" ? "primary" : ""}" data-u="${i}">${URG_ACTION[x.kind]}</button>
             ${x.kind === "missed_call" ? `<button class="btn sm" data-useen="${x.id}" title="Уже связались другим способом">Обработан</button>` : ""}
           </div>
-        </div>`).join("")}</div>` : `<div class="muted small">Пропущенных звонков, новых заявок и непрочитанных сообщений нет. Можно выдохнуть ⚽</div>`}
+        </div>`).join("")}</div>${u.length > 3 ? `<button class="btn sm ghost now-more" id="hot-more">${S.hotAll ? "Свернуть" : `Ещё ${u.length - 3}`}</button>` : ""}` : `<div class="muted small">Пропущенных звонков, новых заявок и непрочитанных сообщений нет. Можно выдохнуть ⚽</div>`}
     </section>`;
   page.innerHTML = `
     ${bar}
-    <div class="page-head"><h2 class="grow">Рабочий стол${S.viewAs ? `: ${esc(S.viewAs.name)}` : ""}</h2></div>
-    ${tiles.length ? `<div class="dtiles">${reds ? `<button class="dtile red" data-jump="dw-hot"><span>🔥</span><b>${reds}</b><small>Горит</small></button>` : ""}${tiles.join("")}</div>` : ""}
+    <div class="desk-hello">
+      <div class="grow"><h2>${S.viewAs ? `Рабочий стол: ${esc(S.viewAs.name)}` : `${hello}, ${esc(firstName)}`}</h2>
+        <div class="muted small">${esc(dateTxt)}${u.length || tiles.length ? "" : " · всё спокойно ⚽"}</div></div>
+      ${tiles.length || reds ? `<div class="dtiles">${reds ? `<button class="dtile red" data-jump="dw-hot"><span>🔥</span><b>${reds}</b><small>Горит</small></button>` : ""}${tiles.join("")}</div>` : ""}
+    </div>
     <div class="desk">
       <div class="desk-main">
         ${hot}
-        <div class="page-head" style="margin-top:18px"><h2 class="grow sub">Воронка продаж</h2></div>
-        ${boardHtml(d.board)}
+        <section class="desk-funnel">
+          <div class="now-head"><h3>Воронка продаж</h3></div>
+          ${boardHtml(d.board)}
+        </section>
       </div>
       <div class="desk-side">${widgets.filter(dwShown).map((k) => `<div class="dw" id="dw-${k}">${W[k].html}</div>`).join("")}
-        ${widgets.some((k) => !dwShown(k)) ? `<div class="dw-folded">${widgets.filter((k) => !dwShown(k)).map((k) => `<details class="dwf" data-dwk="${k}" ${S.dwOpen[k] ? "open" : ""}>
-          <summary><span>${W[k].icon}</span> ${W[k].label}</summary><div class="dw" id="dw-${k}">${W[k].html}</div></details>`).join("")}</div>` : ""}</div>
+        ${widgets.some((k) => !dwShown(k)) ? `<section class="dw-folded"><div class="dwf-title small muted">Ещё на столе: сейчас там пусто или не срочно</div>${widgets.filter((k) => !dwShown(k)).map((k) => `<details class="dwf" data-dwk="${k}" ${S.dwOpen[k] ? "open" : ""}>
+          <summary><span class="dwf-ic">${W[k].icon}</span><span class="grow">${W[k].label}</span><span class="dwf-chev">›</span></summary><div class="dw" id="dw-${k}">${W[k].html}</div></details>`).join("")}</section>` : ""}</div>
     </div>`;
+  const hm = $("#hot-more"); if (hm) hm.onclick = () => { S.hotAll = !S.hotAll; render(); };
   page.querySelectorAll(".dwf").forEach((x) => x.addEventListener("toggle", () => { S.dwOpen[x.dataset.dwk] = x.open; }));
   page.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => { const el = document.getElementById(b.dataset.jump); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }));
   if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
