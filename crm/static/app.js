@@ -61,7 +61,8 @@ function askRequired(need) {
       const text = askRequiredText(need.kind, miss, nm && !nm.includes(" "));
       const box = [...document.querySelectorAll("#chat-text, #cm-text")].find((x) => x.offsetParent);
       if (box) {
-        box.value = box.value.trim() ? box.value.trim() + "\n\n" + text : text;
+        // после выбора времени прошлый текст (варианты дат) уже ушёл родителю: заменяем, а не дописываем
+        box.value = S.pendingSlot || !box.value.trim() ? text : box.value.trim() + "\n\n" + text;
         box.rows = Math.min(8, box.value.split("\n").length + 1);
         done(false); box.focus(); box.scrollIntoView({ block: "center" });
         toast("Запрос вставлен в поле ответа: проверьте и нажмите «Отправить»");
@@ -88,6 +89,8 @@ function askRequiredText(kind, miss, onlySurname = false) {
   const ask = { child_name: onlySurname ? "фамилию ребёнка" : "имя и фамилию ребёнка", birth: "дату рождения ребёнка", parent_name: "как к вам можно обращаться",
     phone: "номер телефона для связи", email: "электронную почту: на неё придёт чек об оплате" };
   const list = (miss.length ? miss : ["child_name", "birth"]).map((k) => "• " + (ask[k] || k)).join("\n");
+  const sl = kind !== "sale" && S.pendingSlot;
+  if (sl) return `Отлично, ждём вас на пробное: ${sl.label}, ${sl.branch} ⚽\nЧтобы закрепить место, пришлите, пожалуйста:\n${list}\nСпасибо! 😊`;
   return kind === "sale"
     ? `Здравствуйте! Чтобы оформить абонемент, пришлите, пожалуйста:\n${list}\nСпасибо!`
     : `Здравствуйте! Чтобы записать ребёнка на пробное занятие, пришлите, пожалуйста:\n${list}\nСпасибо! Как только получим, сразу запишем 😊`;

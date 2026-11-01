@@ -590,7 +590,8 @@ function wireTrialOffer(c, textSel = "#chat-text") {
         ${leads.length > 1 ? `<div class="field"><label>Ребёнок</label><select id="to-kid">${leads.map((k) => `<option value="${k.id}">${esc(k.name)}</option>`).join("")}</select></div>` : ""}
         <div class="field" style="flex:0 0 110px"><label>Возраст, лет</label><input id="to-age" type="number" min="2" max="17" value="${kid && isFinite(ageOf(kid.birth)) ? ageOf(kid.birth) : ""}" placeholder="4"></div>
         <div class="field"><label>Филиал</label><select id="to-br"><option value="">Любой, где раньше</option>${S.meta.branches.map((b) => `<option value="${b.id}">${esc(b.name)}</option>`).join("")}</select></div>
-        <button class="btn sm primary" id="to-go" style="flex:0">Подобрать</button></div>
+        <button class="btn sm primary" id="to-go" style="flex:0">Подобрать</button>
+        <button class="btn sm" id="to-ask-age" style="flex:0" title="Возраст неизвестен: спросить у родителя">💬 Спросить возраст</button></div>
       <div id="to-res"></div></div>`;
     const go = async () => {
       const age = $("#to-age").value;
@@ -606,15 +607,26 @@ function wireTrialOffer(c, textSel = "#chat-text") {
             ${kidId ? `<button class="btn sm" data-to-book="${i}">Записать</button>` : ""}</div>`).join("")}`;
         $("#to-res").querySelectorAll("[data-to-book]").forEach((b) => (b.onclick = async () => {
           const x = r.slots[+b.dataset.toBook];
+          // шаг 3: если данных не хватает, запрос родителю будет уже с выбранным временем
+          const kidRow = leads.find((k) => k.id === kidId) || kid || {};
+          S.pendingSlot = { label: x.label, group: x.group, branch: x.branch, kid: (kidRow.name || "").split(" ")[0] };
           try {
             await api("PATCH", `/api/students/${kidId}`, { group_id: x.group_id, trial_at: `${x.date}T${x.time}` });
+            S.pendingSlot = null;
             toast(`Записан на пробное: ${x.label}`); panel.hidden = true;
             if (c.onBooked) c.onBooked(); else loadWarnBox(c.family_id, $("#warn-box"));
-          } catch (e) { fail(e); }
+          } catch (e) { S.pendingSlot = null; fail(e); }
         }));
       } catch (e) { fail(e); }
     };
     $("#to-go").onclick = go;
+    // шаг 1: возраст неизвестен, сначала спрашиваем его
+    $("#to-ask-age").onclick = () => {
+      const ta = $(textSel);
+      const text = "Здравствуйте! Подскажите, пожалуйста, сколько лет вашему чемпиону? Подберём группу по возрасту и ближайшие свободные тренировки ⚽";
+      if (ta) { ta.value = text; ta.focus(); toast("Вопрос вставлен в поле ответа: нажмите «Отправить»"); }
+      else navigator.clipboard.writeText(text).then(() => toast("Текст скопирован"), () => prompt("Скопируйте текст", text));
+    };
     if ($("#to-age").value) go();
   };
 }
