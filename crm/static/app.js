@@ -1851,7 +1851,7 @@ async function renderSearch(page) {
 const SET_TABS = [
   ["users", "👥", "Сотрудники", "Должности, телефоны, пароли"], ["prices", "💰", "Цены и правила", "Прайс, скидки, сборная ПРО, дни без занятий"],
   ["structure", "🏟", "Филиалы, группы и смены", "Расписание и лимиты"], ["resp", "🎯", "Ответственные по филиалам", "Кому задачи по пробным"],
-  ["comms", "💬", "Связь с клиентами", "Telegram, MAX, WhatsApp, Sipuni, заявки"], ["trials", "📋", "Задачи по пробным", "Автосообщения и сроки"],
+  ["comms", "💬", "Связь с клиентами", "Telegram, MAX, WhatsApp, Sipuni, заявки"], ["trials", "📝", "Скрипты", "Сообщения родителям и автосообщения"],
   ["tips", "💡", "Подсказки по этапам", "Что сказать на каждом этапе воронки"], ["chains", "🔁", "Автоцепочки сообщений", "Серии сообщений родителям"],
   ["erp", "📦", "Перенос из ERP", "Клиенты, абонементы, оплаты, история"],
   ["coachpay", "⏱", "Тренеры: приход и оплата", "Отметка прихода, ставки"],
@@ -1941,7 +1941,7 @@ async function renderSettings(page) {
     <div class="section" id="offers-settings" data-tab="offers"><h3>Оферты</h3><div class="muted small">Загружаю…</div></div>
     ${admin ? `<div class="section" id="source-settings" data-tab="sources"><h3>Рекламные каналы и источники</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="staff-settings" data-tab="coachpay"><h3>Тренеры: приход и оплата</h3><div class="muted small">Загружаю…</div></div>` : ""}
-    ${admin ? `<div class="section" id="task-settings" data-tab="trials"><h3>Задачи и автосообщения по пробным</h3><div class="muted small">Загружаю…</div></div>` : ""}
+    ${admin ? `<div class="section" id="task-settings" data-tab="trials"><h3>Скрипты</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" id="comms-settings" data-tab="comms"><h3>Связь с клиентами</h3><div class="muted small">Загружаю…</div></div>` : ""}
     ${admin ? `<div class="section" data-tab="test"><h3>Выдуманные клиенты для проверки</h3>
       <div class="small muted" style="margin-bottom:8px">Добавляют клиентов в настоящие группы: с абонементами, оплатами, посещениями, пропусками и лидами на разных этапах. Все помечены как выдуманные и удаляются одной кнопкой, настоящие клиенты не пострадают</div>

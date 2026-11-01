@@ -166,7 +166,7 @@ async function renderTaskSettings(box, users) {
   const staff = users.filter((u) => u.role !== "coach" && u.active);
   const yn = (k) => `<select data-t="${k}"><option value="1" ${v[k] === "1" ? "selected" : ""}>Отправлять</option><option value="0" ${v[k] !== "1" ? "selected" : ""}>Не отправлять</option></select>`;
   box.innerHTML = `
-    <h3>Задачи и автосообщения по пробным</h3>
+    <h3>Скрипты: сообщения родителям и автосообщения</h3>
     <div class="alert ${d.auto_live ? "" : "red"}" style="margin-bottom:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
       <div class="grow"><b>${d.auto_live ? "✅ Автосообщения клиентам включены" : "⛔ Автосообщения клиентам выключены"}</b>
         <div class="small">${d.auto_live ? "CRM сама пишет родителям: после записи на пробное, напоминания, после пробного, автоцепочки, автоответ бота" : "Клиентам автоматически ничего не уходит: ни напоминания, ни сообщения после записи, ни автоцепочки, ни автоответ бота. Сотрудники пишут сами"}</div></div>
