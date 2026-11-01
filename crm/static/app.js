@@ -478,7 +478,17 @@ async function renderView(page) {
     if (S.view === "search") return await renderSearch(page);
     if (S.view === "settings") return await renderSettings(page);
     if (S.view === "docs") return await renderDocs(page);
-  } catch (e) { if (e.message !== "Нужно войти") page.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
+  } catch (e) {
+    // часть файлов CRM не догрузилась (например, открыли страницу, пока сервер перезапускался): один раз перезагружаем сами
+    if (e instanceof ReferenceError) {
+      let again = false;
+      try { again = sessionStorage.getItem("crm.reloaded") === "1"; sessionStorage.setItem("crm.reloaded", "1"); } catch (_) {}
+      if (!again) { location.reload(); return; }
+      page.innerHTML = `<div class="error">CRM загрузилась не полностью. Обновите страницу: потяните её вниз или нажмите ⟳ в адресной строке</div>`;
+      return;
+    }
+    if (e.message !== "Нужно войти") page.innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  }
 }
 
 /* ---------- дашборд ---------- */
