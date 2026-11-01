@@ -1,7 +1,7 @@
 "use strict";
 /* Абонемент Плюс — чаты и звонки. Подключается после app.js и пользуется его функциями. */
 
-const CH = { telegram: "Telegram", max: "MAX", whatsapp: "WhatsApp", wazzup_telegram: "Telegram школы", wazzup_max: "MAX" };
+const CH = { telegram: "Telegram", max: "MAX", whatsapp: "WhatsApp", wazzup_telegram: "Telegram школы", wazzup_max: "MAX", tg_archive: "Telegram (до CRM)" };
 const chLabel = (c) => CH[c] || String(c || "").replace("wazzup_", "");
 const CALL_ST = { ringing: "звонит", talking: "разговор", answered: "принят", missed: "пропущен", busy: "занято", failed: "не дозвонились" };
 const secs = (n) => n == null ? "" : n < 60 ? `${n} сек` : `${Math.floor(n / 60)} мин ${n % 60 ? (n % 60) + " сек" : ""}`.trim();
@@ -188,7 +188,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   try { d = await api("GET", `/api/families/${familyId}/comms`); } catch (e) { box.innerHTML = `<h3>Связь с семьёй</h3><div class="error">${esc(e.message)}</div>`; return; }
   if (!$("#comms-box")) return;
   const st = d.status;
-  const targets = d.conversations.map((c) => ({ v: "c" + c.id, t: `${chLabel(c.channel)}${c.title ? " · " + c.title : ""}` }));
+  const targets = d.conversations.filter((c) => c.channel !== "tg_archive").map((c) => ({ v: "c" + c.id, t: `${chLabel(c.channel)}${c.title ? " · " + c.title : ""}` }));
   if (st.whatsapp) parents.filter((p) => p.phone && !d.conversations.some((c) => c.channel === "whatsapp" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
     .forEach((p) => targets.push({ v: "w" + p.id, t: `WhatsApp · ${p.name} (новый чат)` }));
   if (st.wazzup_telegram) parents.filter((p) => p.phone && !d.conversations.some((c) => c.channel === "wazzup_telegram" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))

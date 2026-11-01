@@ -2094,6 +2094,13 @@ def parent_relation(con, h, user, body, q, pid):
     return {"ok": True}
 
 
+@route("POST", "/api/import/telegram", role="admin")
+def import_telegram(con, h, user, body, q):
+    """Старая переписка из экспорта Telegram в карточки клиентов (только тех, кто есть в CRM)."""
+    from . import tgarchive
+    return tgarchive.import_(con, body, user)
+
+
 @route("GET", "/api/alerts", role="operator")
 def alerts_list(con, h, user, body, q):
     from . import pu
@@ -2505,7 +2512,7 @@ class Handler(BaseHTTPRequestHandler):
                     if method != "DELETE" and "application/json" not in (self.headers.get("Content-Type") or ""):
                         raise ApiError("Ожидается JSON", 415)
                     n = int(self.headers.get("Content-Length") or 0)
-                    if n > (21_000_000 if url.path.startswith("/api/offers") else 40_000_000 if url.path.startswith("/api/erp") else 8_000_000 if url.path.startswith("/api/memos") else 1_000_000):
+                    if n > (21_000_000 if url.path.startswith("/api/offers") else 40_000_000 if url.path.startswith("/api/erp") else 80_000_000 if url.path.startswith("/api/import/telegram") else 8_000_000 if url.path.startswith("/api/memos") else 1_000_000):
                         raise ApiError("Слишком большой запрос", 413)
                     if n:
                         body = json.loads(self.rfile.read(n) or b"{}")

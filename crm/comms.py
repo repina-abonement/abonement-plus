@@ -101,7 +101,8 @@ EDITABLE_KEYS = {"sipuni_user", "sipuni_secret", "tg_token", "tg_relay", "max_to
                  "yc_api_key", "yc_folder", "ai_enabled", "ai_mode", "ai_model", "ai_min_talk", "lead_notify"}
 DEFAULT_GREETING = ("Здравствуйте! Вы написали в нашу школу. Задайте вопрос здесь, администратор скоро ответит.\n"
                     "Чтобы мы сразу нашли вашу карточку, нажмите кнопку «Поделиться номером» ниже")
-CHANNEL_LABELS = {"telegram": "Telegram", "max": "MAX", "whatsapp": "WhatsApp", "wazzup_max": "MAX", "wazzup_telegram": "Telegram школы"}
+CHANNEL_LABELS = {"telegram": "Telegram", "max": "MAX", "whatsapp": "WhatsApp", "wazzup_max": "MAX", "wazzup_telegram": "Telegram школы",
+                  "tg_archive": "Telegram (до CRM)"}
 KIND_LABELS = {"image": "📷 Фото", "file": "📎 Файл", "audio": "🎤 Голосовое", "video": "🎬 Видео",
                "sticker": "Стикер", "contact": "👤 Контакт", "other": "Вложение"}
 
@@ -783,6 +784,8 @@ def send(con, cid: int, text: str, user: dict) -> dict:
         raise CommsError("Переписка не найдена")
     conv = dict(conv)
     name = user.get("name") or ""
+    if conv["channel"] == "tg_archive":
+        raise CommsError("Это архив переписки до CRM: ответьте в Telegram, MAX или WhatsApp")
     if conv["external_id"].startswith("demo-"):
         mid = add_message(con, cid, "out", text, user_name=name, status="demo", external_id="demo" + uuid.uuid4().hex)
         return {"id": mid, "demo": True}
@@ -1094,7 +1097,8 @@ def conversation(con, cid: int, mark_read: bool = True) -> dict:
         convs, items = [_conv_out(con, r)], [{"type": "msg", "channel": r["channel"], "conversation_id": cid,
                                               "channel_label": convs_label, **m} for m in msgs]
     return {"conversation": _conv_out(con, r), "messages": msgs, "history": items,
-            "targets": [{"id": c["id"], "label": c["channel_label"] + (" · " + c["title"] if c["title"] else "")} for c in convs]}
+            "targets": [{"id": c["id"], "label": c["channel_label"] + (" · " + c["title"] if c["title"] else "")} for c in convs
+                        if c["channel"] != "tg_archive"]}
 
 
 def _family_log(con, family_id, text: str, user: dict):

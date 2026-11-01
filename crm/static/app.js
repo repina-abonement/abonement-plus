@@ -128,6 +128,40 @@ async function renderOwnerTg(box) {
   };
 }
 
+/* Старая переписка из Telegram школы: файл экспорта Telegram Desktop (JSON). Браузер ужимает его до текста и шлёт в CRM */
+function renderTgImport(box) {
+  box.innerHTML = `<h3>💬 Старая переписка из Telegram</h3>
+    <div class="small muted" style="margin-bottom:8px">Переписка школьного Telegram до подключения к CRM. В карточки попадут только чаты с теми, кто есть в CRM: по номеру телефона из контактов Telegram. Фото и файлы не переносятся, только текст. Повторная загрузка ничего не задвоит</div>
+    <details style="margin-bottom:8px"><summary class="small"><b>Как сделать файл (Telegram на компьютере)</b></summary><ol class="small" style="padding-left:18px;line-height:1.6">
+      <li>Telegram → Настройки → Продвинутые настройки → «Экспорт данных Telegram»</li>
+      <li>Оставьте галочки «Список контактов» и «Личные чаты», остальное выключите (фото, видео, файлы не нужны)</li>
+      <li>Внизу «Формат»: «Машиночитаемый JSON» → «Экспортировать»</li>
+      <li>Когда закончится, нажмите «Показать мои данные»: в папке будет файл <b>result.json</b></li></ol></details>
+    <label class="btn primary">Выбрать result.json<input type="file" id="tg-file" accept=".json,application/json" hidden></label>
+    <div id="tg-res" class="small" style="margin-top:8px"></div>`;
+  $("#tg-file").onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const res = $("#tg-res");
+    res.textContent = `Читаю файл (${Math.round(f.size / 1e6)} МБ)…`;
+    try {
+      const raw = JSON.parse(await f.text());
+      const me = String((raw.personal_information || {}).user_id || "");
+      const txt = (t) => typeof t === "string" ? t : Array.isArray(t) ? t.map((x) => typeof x === "string" ? x : x.text || "").join("") : "";
+      const contacts = (((raw.contacts || {}).list) || []).map((c) => ({ name: [c.first_name, c.last_name].filter(Boolean).join(" "), phone: c.phone_number || "" }));
+      const chats = (((raw.chats || {}).list) || []).filter((c) => c.type === "personal_chat").map((c) => ({
+        id: c.id, name: c.name || "",
+        msgs: (c.messages || []).filter((m) => m.type === "message").map((m) => [m.id, m.date, String(m.from_id || "") === "user" + me, txt(m.text),
+          m.media_type || (m.photo ? "фото" : m.file ? "файл" : "")]),
+      }));
+      if (!chats.length) { res.innerHTML = `<span class="error">В файле нет личных чатов. Проверьте, что выбран формат «Машиночитаемый JSON» и галочка «Личные чаты»</span>`; return; }
+      res.textContent = `Загружаю ${chats.length} чатов в CRM…`;
+      const r = await api("POST", "/api/import/telegram", { contacts, chats });
+      res.innerHTML = `✅ Готово. Чатов в файле: ${r.chats}. Перенесено в карточки: <b>${r.clients}</b> (сообщений ${r.messages}).<br>
+        Не клиенты CRM (не перенесены): ${r.not_clients}. Без номера в контактах Telegram (не перенесены): ${r.no_phone}`;
+    } catch (err) { res.innerHTML = `<span class="error">${esc(err.message || "Не получилось прочитать файл")}</span>`; }
+  };
+}
+
 let toastTimer;
 function toast(msg, err = false) {
   const t = $("#toast");
@@ -1950,6 +1984,7 @@ async function renderSettings(page) {
     ${S.user.role === "admin" ? `<div class="section" id="tips-settings" data-tab="tips"></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" id="chains-settings" data-tab="chains"></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" id="erp-settings" data-tab="erp"></div>` : ""}
+    ${S.user.role === "admin" ? `<div class="section" id="tg-import" data-tab="erp"></div>` : ""}
     <div class="section" id="backup-settings" data-tab="backup"></div>
     <div class="section" id="resp-settings" data-tab="resp"></div>
     <div class="section" data-tab="users">
@@ -2043,6 +2078,7 @@ async function renderSettings(page) {
   if ($("#backup-settings")) renderBackup($("#backup-settings")).catch(() => { $("#backup-settings").remove(); $('[data-tile="backup"]')?.remove(); });
   else if ($("#offers-settings")) $("#offers-settings").remove();
   if ($("#erp-settings")) renderErp($("#erp-settings")).catch(fail);
+  if ($("#tg-import")) renderTgImport($("#tg-import"));
   if ($("#chains-settings")) renderChainsSettings($("#chains-settings")).catch(fail);
   if ($("#tips-settings")) renderTipsSettings($("#tips-settings")).catch(fail);
   if ($("#discount-settings")) renderDiscounts($("#discount-settings")).catch(() => $("#discount-settings").remove());
