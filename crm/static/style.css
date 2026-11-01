@@ -1372,3 +1372,9 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .oq-form { padding: 10px 12px; margin: 8px 0; border-radius: 12px; background: var(--surface-2); }
 .oq-form input { width: 100%; }
 #oq-open { margin: 8px 0; }
+
+/* Скрипты: место и чат родителей по филиалам, всегда открыто */
+.bk-places { margin: 4px 0 16px; padding: 14px 16px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line); }
+.bk-head { margin-bottom: 4px; }
+.bk-place { padding-top: 10px; border-top: 1px solid var(--line); }
+.bk-place:first-of-type { border-top: 0; }

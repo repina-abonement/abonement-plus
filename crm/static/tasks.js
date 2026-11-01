@@ -176,14 +176,16 @@ async function renderTaskSettings(box, users) {
     <div class="small muted" style="margin:-4px 0 12px">На этого сотрудника встают все задачи по пробным, и при переносе из ERP задачи со статусами: ${d.erp_statuses.map((x) => `«${esc(x)}»`).join(", ")}</div>
     <div class="field"><label>Сразу после записи на пробное (дата, время, место, что взять)</label>${yn("auto_booked")}</div>
     <div class="field"><label>Текст после записи. {date_time}: «Понедельник, 2 ноября, в 17:30», {place}: место филиала, {chat_line}: строка с чатом родителей</label><textarea data-t="msg_booked" rows="9">${esc(v.msg_booked)}</textarea></div>
-    <details class="bk-places" style="margin-bottom:12px"><summary><b>Место и чат родителей по филиалам</b></summary>
+    <div class="bk-places">
+      <div class="bk-head"><b>📍 Место и чат родителей по филиалам</b>
+        <div class="small muted">Это подставляется в сообщение «Записан на пробное»: где проходит занятие и ссылка на чат родителей филиала</div></div>
       ${Object.entries(d.booked_places).map(([id, p]) => `<div class="bk-place" data-bk="${id}" style="margin-top:10px">
         <div class="small"><b>${esc(p.name)}</b></div>
         <div class="field"><label>Где проходит и как найти</label><input data-bf="place" value="${esc(p.place)}"></div>
         <div class="row"><div class="field" style="flex:0 0 170px"><label>Район (в Солнцево…)</label><input data-bf="area" value="${esc(p.area)}"></div>
-          <div class="field"><label>Чат родителей в Telegram</label><input data-bf="tg" value="${esc(p.tg)}"></div>
+          <div class="field"><label>Чат родителей в Telegram</label><input data-bf="tg" value="${esc(p.tg)}" placeholder="https://t.me/..."></div>
           <div class="field"><label>Чат родителей в MAX</label><input data-bf="max" value="${esc(p.max)}" placeholder="Если пусто, в MAX строки с чатом не будет"></div></div>
-      </div>`).join("")}</details>
+      </div>`).join("")}</div>
     <div class="row">
       <div class="field"><label>Напоминание за день</label>${yn("auto_day_before")}</div>
       <div class="field" style="flex:0 0 120px"><label>Во сколько, ч</label><input data-t="day_before_hour" type="number" min="8" max="21" value="${esc(v.day_before_hour)}"></div>
