@@ -40,6 +40,9 @@ DEFAULT_TEMPLATES = {
     "msg_2h_before": ("Сегодня в {time} пробное занятие, ждём вас 🙂\n"
                       "Возьмите удобную спортивную форму, сменную обувь и воду. Адрес: {place}"),
     "msg_after": "Здравствуйте! Как прошло пробное занятие? Поделитесь, пожалуйста, впечатлениями, нам важно ваше мнение 🙂",
+    # Юлия, 01.11: пропущенный звонок, через 2 минуты клиенту вежливый вопрос (вариант 2, согласован)
+    "msg_missed": ("{hello} Это «Футболика» ⚽ Вы нам звонили, а мы не успели взять трубку. "
+                   "Напишите, пожалуйста, ваш вопрос, ответим в ближайшее время 🙂"),
     # Юлия, 01.11: сразу после записи на пробное уходит скрипт со всеми данными (дата, время, место, что взять)
     "msg_booked": ("Ваш Чемпион записан на пробное занятие в Футболике⚽️\n\n"
                    "🗓 {date_time}\n📍{place}\n\n"
@@ -51,7 +54,7 @@ DEFAULT_TEMPLATES = {
 # ссылка на чат с администратором (как в постах каналов); {admin} в текстах: в MAX ссылка MAX, иначе Telegram
 CONTACT_SETTINGS = {"admin_tg": "@footbolika_admin",
                     "admin_max": "https://max.ru/u/f9LHodD0cOLaVBGOxjxYFwTe2vGHnJQswhXNnS5iJbwXlmYEqrQRm4LKGTI"}
-AUTO_SETTINGS = {"auto_day_before": "1", "auto_2h_before": "1", "auto_after": "1", "day_before_hour": "11", "auto_booked": "1"}
+AUTO_SETTINGS = {"auto_day_before": "1", "auto_2h_before": "1", "auto_after": "1", "day_before_hour": "11", "auto_booked": "1", "auto_missed": "1"}
 
 # где проходит пробное (из скриптов Юлии); ссылки на чаты родителей вписываются в Настройках → Задачи и автосообщения
 # (в код их не кладём: репозиторий публичный, а по ссылке-приглашению можно зайти в чат родителей)
@@ -235,6 +238,58 @@ def send_booked(con, sid: int) -> dict:
     return {"ok": ok, "error": err}
 
 
+MISSED_WAIT_MIN = 2      # ждём, вдруг админ сразу перезвонит
+MISSED_HOURS = (9, 21)   # ночью не пишем: звонок после 21:00 получит сообщение в 9:00
+
+
+def missed_call_messages(con, now: datetime) -> int:
+    """Пропущенный звонок не обработан 2 минуты: клиенту вежливый вопрос в мессенджер (один раз в день на номер)."""
+    if not comms.auto_live(con) or setting(con, "auto_missed") != "1":
+        return 0
+    if not (MISSED_HOURS[0] <= now.hour < MISSED_HOURS[1]):
+        return 0
+    staff = {comms.normalize_phone(r[0] or "") for r in con.execute("SELECT phone FROM users")} if \
+        "phone" in {r[1] for r in con.execute("PRAGMA table_info(users)")} else set()
+    sent = 0
+    for k in con.execute("""SELECT * FROM calls WHERE direction='in' AND status IN ('missed','busy') AND seen=0
+                            AND started_at <= ? AND started_at >= ? ORDER BY started_at""",
+                         (_iso(now - timedelta(minutes=MISSED_WAIT_MIN)), _iso(now - timedelta(hours=14)))).fetchall():
+        p = k["phone_norm"] or comms.normalize_phone(k["phone"] or "")
+        if len(p) < 11 or p in staff:
+            continue
+        if con.execute("""SELECT 1 FROM calls WHERE phone_norm=? AND started_at > ? AND (status='answered' OR direction='out')""",
+                       (p, k["started_at"])).fetchone():
+            continue  # уже поговорили: клиент дозвонился или ему перезвонили
+        day = now.date().isoformat()
+        key = f"missed:{p}:{day}"  # раз в день на номер (таблица отметок из ownerbot)
+        if con.execute("SELECT 1 FROM owner_sent WHERE user_id=-1 AND key=?", (key,)).fetchone():
+            continue
+        par = con.execute("SELECT name, family_id FROM parents WHERE phone_norm=? ORDER BY id LIMIT 1", (p,)).fetchone()
+        first = (par["name"] or "").split()[0] if par and par["name"] else ""
+        hello = f"{first}, здравствуйте!" if first and not any(x in first.lower() for x in ("заявка", "клиент", "мама", "папа")) else "Здравствуйте!"
+        text = setting(con, "msg_missed").replace("{hello}", hello)
+        cid, ok, err, channel = None, True, "", ""
+        try:
+            cid = best_conversation(con, par["family_id"]) if par else None
+            if not cid and comms.status(con)["whatsapp"]:
+                cid = comms.start_whatsapp(con, p)
+            if not cid:
+                ok, err = False, "нет мессенджера для этого номера"
+            else:
+                channel = con.execute("SELECT channel FROM conversations WHERE id=?", (cid,)).fetchone()[0]
+                comms.send(con, cid, text, {"name": "Автосообщение"})
+        except comms.CommsError as e:
+            ok, err = False, str(e)
+        sid = con.execute("SELECT id FROM students WHERE family_id=? ORDER BY id LIMIT 1", (par["family_id"],)).fetchone() if par else None
+        con.execute("INSERT OR IGNORE INTO owner_sent(user_id, key, sent_at) VALUES (-1,?,?)", (key, _iso(now)))
+        if sid:
+            con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
+                        (sid[0], _iso(now), "Автосообщение", "message",
+                         "После пропущенного звонка ушло сообщение: «Вы нам звонили…»" if ok else f"После пропущенного звонка сообщение не ушло: {err}"))
+        sent += ok
+    return sent
+
+
 def send_auto(con, s: dict, kind: str, tpl: str) -> dict:
     """Отправить автосообщение один раз за пробное. Возвращает, что получилось."""
     if not comms.auto_live(con):  # автосообщения клиентам ещё не запущены руководителем
@@ -277,7 +332,8 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     pu.tick(con, now)
     try:
         if send:
-            ownerbot.tick(con, now)  # красное руководителю в Telegram, напоминания в «Службу заботы»
+            ownerbot.tick(con, now)
+            missed_call_messages(con, now)  # клиенту после пропущенного звонка (только после запуска автосообщений)  # красное руководителю в Telegram, напоминания в «Службу заботы»
     except Exception:  # noqa: BLE001 — уведомления не должны ломать проход
         pass
     from . import coachreport, schedule
