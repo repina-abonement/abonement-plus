@@ -1222,6 +1222,24 @@ function askRefusal(sid, done) {
   };
 }
 
+/* Ушёл: причина обязательна (разбор 01.11). Через 2 месяца CRM поставит задачу пригласить вернуться */
+function askLeftReason(sid, done) {
+  const rs = ["Дорого", "Неудобное расписание", "Далеко ездить", "Ребёнку не нравится", "Перешли в другую секцию", "Переезд", "Болезнь или травма", "Сезон, каникулы", "Другое"];
+  openDrawer(`<h2>Почему ушёл?</h2>
+    <form class="section" id="lf">
+      <div class="chips" style="flex-direction:column;align-items:stretch">${rs.map((r, i) => `<label class="check"><input type="radio" name="reason" value="${esc(r)}" ${i ? "" : "checked"}> ${esc(r)}</label>`).join("")}</div>
+      <div class="small muted" style="margin:8px 0">Через 2 месяца CRM поставит задачу пригласить вернуться. Кроме «Перешли в другую секцию» и «Переезд»</div>
+      <div class="field"><label>Комментарий</label><input name="comment" placeholder="Что сказал родитель"></div>
+      <button class="btn primary">Сохранить</button>
+    </form>`);
+  $("#lf").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    try { await api("POST", `/api/students/${sid}/move`, { funnel: "members", stage: "left", reason: f.reason, comment: f.comment }); toast("Сохранено: ушёл"); closeDrawer(); done(); }
+    catch (err) { fail(err); }
+  };
+}
+
 function openDrawer(html, size) {
   $("#drawer-body").innerHTML = html; $("#drawer").hidden = false; document.body.style.overflow = "hidden";
   const panel = $("#drawer .drawer-panel"); if (panel) panel.classList.toggle("wide", size === "wide");
@@ -1557,6 +1575,7 @@ async function openStudent(id) {
 
   $("#f-stage").onchange = async (e) => {
     if (s.funnel === "sales" && e.target.value === "refused") return askRefusal(id, reload);
+    if (s.funnel === "members" && e.target.value === "left") return askLeftReason(id, reload);
     try { await api("POST", `/api/students/${id}/move`, { funnel: s.funnel, stage: e.target.value }); reload(); } catch (err) { fail(err); }
   };
   if ($("#f-tariff")) $("#f-tariff").onchange = (e) => patch({ tariff: e.target.value });

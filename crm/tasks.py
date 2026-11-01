@@ -23,6 +23,8 @@ KINDS = {
     "plan": ("Задача", "📌"),
     "bday": ("День рождения сотрудника", "🎂"),
 }
+from .lifecycle import KINDS as _LIFE_KINDS  # noqa: E402
+KINDS.update(_LIFE_KINDS)
 # статусы задач в ERP Футболики → виды задач здесь. При переносе все они встают на ответственного за пробные
 ERP_STATUSES = {
     "Напоминание о пробном занятии": "trial_confirm",
@@ -358,8 +360,9 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     from . import planner, program
     planner.generate(con, now.date())
     program.apply_pending(con, now.date())
-    from . import pu, waitlist, ownerbot
+    from . import pu, waitlist, ownerbot, lifecycle
     pu.tick(con, now)
+    lifecycle.tick(con, now)  # задачи на всех этапах, где клиент может застрять
     try:
         if send:
             ownerbot.tick(con, now)

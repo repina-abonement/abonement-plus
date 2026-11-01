@@ -19,7 +19,6 @@ SALES_STAGES = [
     ("lead", "Новый лид"),
     ("no_answer", "Недозвон, отправили СМС"),
     ("trial_booked", "Записан на пробное"),
-    ("trial_reminder", "Напоминание о пробном"),
     ("on_trial", "Сейчас на пробном"),
     ("trial_done", "Пробное закончилось"),
     ("missed_trial", "Не дошёл до ПУ"),
@@ -436,6 +435,9 @@ def board(con, funnel: str) -> dict:
                 card["badge"] = f"{mins} мин после пробного"
             elif s["trial_at"] and stage in ("trial_booked", "trial_reminder", "on_trial"):
                 card["badge"] = "Пробное " + datetime.fromisoformat(s["trial_at"]).strftime("%d.%m %H:%M")
+                if con.execute("SELECT 1 FROM tasks WHERE student_id=? AND kind='trial_confirm' AND status='done' AND auto_key LIKE ?",
+                               (s["id"], f"%:{s['trial_at']}")).fetchone():
+                    card["badge"] += " · подтвердили ✓"  # вместо этапа «Напоминание о пробном»
             if s["family_id"] in missed:
                 card["color"] = "red"
                 card["missed_call"] = True
@@ -552,15 +554,17 @@ def move_card(con, sid: int, funnel: str, stage: str, user, reason: str = "", co
         if stage == "refused":
             return _refuse(con, s, (reason or "").strip(), (comment or "").strip(), user)
         if stage == "bought":
+            # 01.11: «Купил» засчитывается при первой оплате (lifecycle.on_payment); до неё задача «Принять оплату»
             con.execute("""UPDATE students SET funnel='members', stage='active', stage_changed_at=?, priority=0,
-                           converted_at=COALESCE(converted_at, ?), converted_by=COALESCE(converted_by, ?) WHERE id=?""",
-                        (now_iso(), now_iso(), (user or {}).get("id"), sid))  # кто продал: 200 ₽ администратору
+                           sale_by=COALESCE(sale_by, ?) WHERE id=?""", (now_iso(), (user or {}).get("id"), sid))
             if s["group_id"] and not enrollments_of(con, sid):
                 con.execute("INSERT INTO enrollments(student_id, group_id, weekdays, tariff, created_at) VALUES (?,?,?,?,?)",
                             (sid, s["group_id"], "", s["tariff"], now_iso()))
                 from . import capacity
                 capacity.ensure_roster(con, s["group_id"])
-            log(con, sid, "Купил абонемент, переведён в ученики", user, "stage")
+            log(con, sid, "Оформляет абонемент: переведён в ученики. Продажа засчитается при первой оплате", user, "stage")
+            from . import lifecycle
+            lifecycle.on_payment(con, sid)
             return
         contacted = 1 if stage in ("how_was", "refused") else s["contacted_after_trial"]
         con.execute("UPDATE students SET stage=?, stage_changed_at=?, contacted_after_trial=?, priority=0 WHERE id=?",
@@ -575,8 +579,17 @@ def move_card(con, sid: int, funnel: str, stage: str, user, reason: str = "", co
     elif funnel == "members":
         if stage not in ("left", "active"):
             raise ApiError("Этапы учеников ставятся сами по оплатам")
-        con.execute("UPDATE students SET stage=?, stage_changed_at=? WHERE id=?", (stage, now_iso(), sid))
-        log(con, sid, "Ушёл" if stage == "left" else "Вернулся", user, "stage")
+        why = ""
+        if stage == "left":  # 01.11: причина ухода обязательна, через 2 месяца задача пригласить вернуться
+            from .lifecycle import LEFT_REASONS
+            if (reason or "").strip() not in LEFT_REASONS:
+                raise ApiError("Выберите, почему ушёл", 422, {"need_left_reason": LEFT_REASONS})
+            if reason == "Другое" and not (comment or "").strip():
+                raise ApiError("Напишите причину")
+            why = reason + (f": {comment.strip()}" if (comment or "").strip() else "")
+        con.execute("UPDATE students SET stage=?, stage_changed_at=?, refusal_reason=? WHERE id=?",
+                    (stage, now_iso(), why if stage == "left" else "", sid))
+        log(con, sid, f"Ушёл: {why}" if stage == "left" else "Вернулся", user, "stage")
     else:
         raise ApiError("Неизвестная воронка")
 

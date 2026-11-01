@@ -85,6 +85,12 @@ def init(con):
 
 def reconcile(con, sid: int) -> None:
     """Раскладывает все платежи ученика по его абонементам, от старых к новым."""
+    _reconcile(con, sid)
+    from . import lifecycle
+    lifecycle.on_payment(con, sid)  # первая оплата: продажа засчитана
+
+
+def _reconcile(con, sid: int) -> None:
     pool = con.execute("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE student_id=? AND cancelled=0", (sid,)).fetchone()[0]
     for sub in con.execute("""SELECT id, price, status, paid_at FROM subscriptions WHERE student_id=? AND status != 'cancelled'
                               ORDER BY month, id""", (sid,)).fetchall():

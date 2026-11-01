@@ -1,0 +1,100 @@
+"""Цепочки задач по всем этапам (разбор 01.11). Запуск: python -m tests.test_lifecycle"""
+import os, sys, tempfile
+from datetime import datetime, timedelta, date
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from crm import db, lifecycle, money, schedule, services as sv, logic
+from crm import smart; smart.REQUIRE = False
+from tests.test_crm import check
+
+con = db.connect(os.path.join(tempfile.mkdtemp(), "l.sqlite3")); db.init_db(con)
+U = {"id": 1, "name": "Оля", "role": "operator"}
+b = schedule.save_branch(con, {"name": "ТЦ «Небо»"})
+g = schedule.save_group(con, {"name": "Небо", "branch_id": b, "weekdays": [0, 3], "time": "17:00", "age": "4–5"})
+n = [0]
+def kid(funnel="sales", stage=None, ago_days=0, **kw):
+    n[0] += 1
+    sid = sv.create_student(con, {"name": f"Ребёнок Номер{n[0]}", "parent_name": "Мама", "phone": f"+7 900 100-00-{n[0]:02d}",
+                                  "funnel": funnel, **({"group_id": g} if funnel == "members" else {})}, U)
+    if stage:
+        con.execute("UPDATE students SET stage=?, stage_changed_at=? WHERE id=?",
+                    (stage, (datetime.now() - timedelta(days=ago_days)).isoformat(timespec="minutes"), sid))
+    for k, v in kw.items():
+        con.execute(f"UPDATE students SET {k}=? WHERE id=?", (v, sid))
+    return sid
+open_kinds = lambda sid: [r[0] for r in con.execute("SELECT kind FROM tasks WHERE student_id=? AND status='open'", (sid,))]
+done = lambda sid, kind: con.execute("UPDATE tasks SET status='done', done_at=? WHERE student_id=? AND kind=? AND status='open'",
+                                     ((datetime.now() - timedelta(days=1)).isoformat(timespec="minutes"), sid, kind))
+now = datetime.now()
+
+print("1. Новый лид и недозвон")
+lead = kid()
+lifecycle.tick(con, now)
+check(open_kinds(lead) == ["call_lead"], "Новый лид: задача «Позвонить новому лиду»")
+sv.move_card(con, lead, "sales", "no_answer", U)
+lifecycle.tick(con, now)
+check(open_kinds(lead) == ["no_answer"], "Недозвон: звонок про лида снят, задача «позвонить ещё раз»")
+for _ in range(3):
+    done(lead, "no_answer"); lifecycle.tick(con, now)
+st = con.execute("SELECT stage FROM students WHERE id=?", (lead,)).fetchone()[0]
+check(st == "later" and "rebook" in open_kinds(lead), "После трёх недозвонов: «Пригласим позже» с задачей пригласить")
+
+print("2. «Как прошло» без решения")
+hw = kid(stage="how_was", ago_days=2)
+lifecycle.tick(con, now)
+check(open_kinds(hw) == ["close_sale"], "Больше суток без решения: «Дожать продажу»")
+
+print("3. «Купил» по оплате")
+lead2 = kid()
+con.execute("UPDATE students SET group_id=? WHERE id=?", (g, lead2))
+sv.move_card(con, lead2, "sales", "bought", U)
+lifecycle.tick(con, now)
+check(con.execute("SELECT converted_at FROM students WHERE id=?", (lead2,)).fetchone()[0] is None and "first_pay" in open_kinds(lead2),
+      "Перевели без оплаты: продажа не засчитана, задача «Принять оплату»")
+inv = sv.create_invoice(con, lead2, logic.month_of(date.today()), U)
+money.pay_subscription(con, inv["id"], "transfer", U)
+lifecycle.tick(con, now)
+cv = con.execute("SELECT converted_at, converted_by FROM students WHERE id=?", (lead2,)).fetchone()
+check(cv[0] and cv[1] == 1 and "first_pay" not in open_kinds(lead2), "Первая оплата: продажа засчитана тому, кто продал, задача снята")
+
+print("4. Отказ через 3 месяца")
+r1 = kid(stage="refused", ago_days=95, refusal_reason="Дорого")
+r2 = kid(stage="refused", ago_days=95, refusal_reason="Выбрали другую секцию")
+r3 = kid(stage="refused", ago_days=95, refusal_reason="Дорого", dnd=1)
+lifecycle.tick(con, now)
+check(open_kinds(r1) == ["reinvite"] and not open_kinds(r2) and not open_kinds(r3), "Пригласить снова, кроме другой секции и «не беспокоить»")
+
+print("5. Продление и долг")
+m = kid("members")
+lifecycle.tick(con, now.replace(day=20, hour=12))
+check("renew" in open_kinds(m), "С 20 числа: «Продлить абонемент»")
+lifecycle.tick(con, now.replace(day=27, hour=12))
+check("debt" in open_kinds(m), "После 25 числа без оплаты текущего месяца: «Долг: связаться»")
+
+print("6. Ушёл")
+try:
+    sv.move_card(con, m, "members", "left", U); ok = False
+except sv.ApiError:
+    ok = True
+check(ok, "Без причины ухода нельзя")
+sv.move_card(con, m, "members", "left", U, "Дорого")
+lifecycle.tick(con, now)
+check(not [k for k in open_kinds(m) if k in ("renew", "debt")], "Ушёл: задачи продления и долга сняты")
+con.execute("UPDATE students SET stage_changed_at=? WHERE id=?", ((now - timedelta(days=61)).isoformat(timespec="minutes"), m))
+lifecycle.tick(con, now)
+check("win_back" in open_kinds(m), "Через 2 месяца: «Пригласить вернуться»")
+
+print("7. Этап «Напоминание о пробном» убран")
+check("trial_reminder" not in dict(sv.SALES_STAGES), "Лишнего этапа нет в воронке")
+
+print("8. Отработка")
+m2 = kid("members")
+sv.move_card(con, m2, "skips", "offered", U)
+con.execute("UPDATE history SET ts=? WHERE student_id=? AND text LIKE 'Отработки: Предложили%'", ((now - timedelta(days=3)).isoformat(timespec="minutes"), m2))
+lifecycle.tick(con, now)
+check("makeup_check" in open_kinds(m2), "Предложили отработку и 2 дня тишины: «Уточнить отработку»")
+print("Старые клиенты из ERP задачами не заваливаем")
+old_lead = kid(stage="lead", ago_days=200)
+old_ref = kid(stage="refused", ago_days=400, refusal_reason="Дорого")
+lifecycle.tick(con, now)
+check(not open_kinds(old_lead) and not open_kinds(old_ref), "Лид полугодовой давности и отказ годичной: задач нет")
+print("ok")

@@ -29,6 +29,10 @@ def main():
     lead = sv.create_student(con, {"name": "Лид", "parent_name": "Папа", "phone": "+7 900 000-00-99"}, OP)
     sv.update_student(con, lead, {"group_id": g, "trial_at": "2026-11-24T18:00"}, OP)
     sv.move_card(con, lead, "sales", "bought", OP)
+    from crm import logic as _lg
+    check(con.execute("SELECT converted_at FROM students WHERE id=?", (lead,)).fetchone()[0] is None, "«Купил» без оплаты: продажа ещё не засчитана")
+    inv = sv.create_invoice(con, lead, _lg.month_of(date.today()), OP)
+    money.pay_subscription(con, inv["id"], "transfer", OP)  # 01.11: продажа засчитывается при первой оплате
 
     print("Тренер-промоутер")
     u = {"id": coach, "role": "coach", "is_promoter": 1}
