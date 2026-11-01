@@ -765,8 +765,15 @@ def update_student(con, sid: int, data: dict, user) -> None:
         if data.get("trial_at"):
             con.execute("UPDATE students SET trial_booked_at = COALESCE(trial_booked_at, ?), trial_booked_by = COALESCE(trial_booked_by, ?) WHERE id=?",
                         (now_iso(), (user or {}).get("id"), sid))  # кто записал: 200 ₽ администратору (mypay.py)
-        if data.get("trial_at") and s["stage"] in ("lead", "no_answer"):
-            con.execute("UPDATE students SET stage='trial_booked', stage_changed_at=? WHERE id=?", (now_iso(), sid))
+        # Юлия, 01.11: при записи на пробное (в будущем) статус меняется сразу, с любого этапа: у записанного не может быть
+        # «Отказ», «Не дошёл до ПУ», «Пригласим позже», «Купил», «Как прошло» и «не беспокоить»
+        if data.get("trial_at") and s["funnel"] == "sales" and str(data["trial_at"])[:10] >= today().isoformat() \
+                and s["stage"] not in ("trial_booked", "trial_reminder", "on_trial"):
+            con.execute("UPDATE students SET stage='trial_booked', stage_changed_at=?, refusal_reason='', dnd=0 WHERE id=?", (now_iso(), sid))
+            if s["stage"] in ("missed_trial", "later", "refused"):
+                log(con, sid, f"Записан на пробное: этап «{SALES_LABELS.get(s['stage'], s['stage'])}» снят", user, "stage")
+                from . import pu as _pu
+                _pu._close_family_task_if_empty(con, s["family_id"], "Записан на пробное")
     if ("trial_at" in changes or "group_id" in changes) and s["funnel"] == "sales":
         cur = get_student_row(con, sid)
         if cur["trial_at"] and cur["group_id"] and cur["trial_at"][:10] >= today().isoformat():
