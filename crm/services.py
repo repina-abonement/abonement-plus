@@ -774,6 +774,9 @@ def update_student(con, sid: int, data: dict, user) -> None:
             capacity.check_trial_group(con, cur["group_id"])
             capacity.ensure(con, cur["group_id"], cur["trial_at"][:10], "записать на пробное")
             con.execute("DELETE FROM trial_holds WHERE student_id=?", (sid,))  # записали: место больше не держим
+            if "trial_at" in changes:
+                from . import tasks as _tasks
+                _tasks.send_booked(con, sid)  # сразу скрипт родителю: дата, время, место, что взять
     names = {"name": "имя", "birth": "дата рождения", "group_id": "группа", "branch_id": "филиал", "tariff": "тариф",
              "trial_at": "пробное", "source": "источник", "source_id": "источник", "refusal_reason": "причина отказа"}
     if changes:

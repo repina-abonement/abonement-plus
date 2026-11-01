@@ -40,8 +40,26 @@ DEFAULT_TEMPLATES = {
     "msg_2h_before": ("Сегодня в {time} пробное занятие, ждём вас 🙂\n"
                       "Возьмите удобную спортивную форму, сменную обувь и воду. Адрес: {place}"),
     "msg_after": "Здравствуйте! Как прошло пробное занятие? Поделитесь, пожалуйста, впечатлениями, нам важно ваше мнение 🙂",
+    # Юлия, 01.11: сразу после записи на пробное уходит скрипт со всеми данными (дата, время, место, что взять)
+    "msg_booked": ("Ваш Чемпион записан на пробное занятие в Футболике⚽️\n\n"
+                   "🗓 {date_time}\n📍{place}\n\n"
+                   "👜Не забудьте взять с собой:\n-шорты, футболку, носки\n-чистую сменную спортивную обувь\n-бутылку с водой\n\n"
+                   "🎁Сразу после пробного занятия Вы можете приобрести абонемент со скидкой 20%\n\n"
+                   "{chat_line}"
+                   "☎️+7 991 615 09 60"),
 }
-AUTO_SETTINGS = {"auto_day_before": "1", "auto_2h_before": "1", "auto_after": "1", "day_before_hour": "11"}
+AUTO_SETTINGS = {"auto_day_before": "1", "auto_2h_before": "1", "auto_after": "1", "day_before_hour": "11", "auto_booked": "1"}
+
+# где проходит пробное (из скриптов Юлии); ссылки на чаты родителей вписываются в Настройках → Задачи и автосообщения
+# (в код их не кладём: репозиторий публичный, а по ссылке-приглашению можно зайти в чат родителей)
+BOOKED_DEFAULTS = [
+    (("небо",), {"place": 'ТРЦ "Небо", Авиаторов 3А, на третьем этаже около центрального лифта', "area": "в Солнцево",
+                 "tg": "", "max": ""}),
+    (("чобот", "запад"), {"place": 'СК "Западный", ул. Чоботовская 4с2, тренеры встретят на входе в спорткомплекс, будут в зелёных футболках',
+                          "area": "в Новопеределкино", "tg": "", "max": ""}),
+]
+WD_FULL = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+MON_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"]
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -153,6 +171,59 @@ def best_conversation(con, family_id: int) -> int | None:
             comms.link(con, cid, family_id)
             return cid
     return None
+
+
+def booked_places(con) -> dict:
+    """Место и чат родителей по каждому филиалу: сохранённое в Настройках, иначе из скриптов Юлии."""
+    try:
+        saved = json.loads(comms.get(con, "booked_places") or "{}")
+    except ValueError:
+        saved = {}
+    out = {}
+    for b in con.execute("SELECT id, name, address FROM branches WHERE active=1 ORDER BY name"):
+        base = next((v for keys, v in BOOKED_DEFAULTS if any(k in b["name"].lower() for k in keys)),
+                    {"place": b["name"] + (", " + b["address"] if b["address"] else ""), "area": "", "tg": "", "max": ""})
+        out[str(b["id"])] = {"name": b["name"]} | base | {k: v for k, v in (saved.get(str(b["id"])) or {}).items() if k in base}
+    return out
+
+
+def booked_text(con, s: dict, channel: str = "") -> str:
+    t = datetime.fromisoformat(s["trial_at"])
+    g = con.execute("SELECT branch_id FROM groups WHERE id=?", (s.get("group_id") or 0,)).fetchone()
+    pl = booked_places(con).get(str(g[0]) if g else "", {})
+    # в MAX ссылка на чат родителей в MAX, иначе на Telegram (Юлия, 01.11); нет ссылки: строки нет
+    link = pl.get("max") if channel.endswith("max") else pl.get("tg")
+    chat_line = f"ℹ️Группа для родителей футболистов филиала {pl.get('area', '')} - {link}\n\n".replace("  ", " ") if link else ""
+    dt = f"{WD_FULL[t.weekday()].capitalize()}, {t.day} {MON_GEN[t.month - 1]}, в {t.strftime('%H:%M')}"
+    return (setting(con, "msg_booked").replace("{date_time}", dt).replace("{place}", pl.get("place") or _place(con, s))
+            .replace("{chat_line}", chat_line).replace("{child}", (s["name"] or "").split()[0] if s.get("name") else ""))
+
+
+def send_booked(con, sid: int) -> dict:
+    """Сразу после записи на пробное: скрипт со всеми данными в мессенджер семьи (один раз на каждое время пробного)."""
+    s = dict(con.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone())
+    if setting(con, "auto_booked") != "1" or not s.get("trial_at") or s["funnel"] != "sales":
+        return {"skipped": True}
+    if con.execute("SELECT 1 FROM auto_messages WHERE student_id=? AND kind='booked' AND trial_at=?", (sid, s["trial_at"])).fetchone():
+        return {"skipped": True}
+    cid = best_conversation(con, s["family_id"])
+    ok, err, channel, text = True, "", "", ""
+    if not cid:
+        ok, err = False, "у семьи нет переписки в мессенджере"
+    else:
+        channel = con.execute("SELECT channel FROM conversations WHERE id=?", (cid,)).fetchone()[0]
+        text = booked_text(con, s, channel)
+        try:
+            comms.send(con, cid, text, {"name": "Автосообщение"})
+        except comms.CommsError as e:
+            ok, err = False, str(e)
+    con.execute("INSERT OR IGNORE INTO auto_messages(student_id, kind, trial_at, ts, ok, channel, error) VALUES (?,?,?,?,?,?,?)",
+                (sid, "booked", s["trial_at"], _iso(_now()), 1 if ok else 0, channel, err))
+    con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
+                (sid, _iso(_now()), "Автосообщение", "message",
+                 "Ушло сообщение о записи на пробное: дата, время, место, что взять" if ok else
+                 f"Не ушло сообщение о записи на пробное: {err}. Напишите родителю вручную"))
+    return {"ok": ok, "error": err}
 
 
 def send_auto(con, s: dict, kind: str, tpl: str) -> dict:
@@ -326,13 +397,16 @@ def settings_view(con) -> dict:
     vals[OWNER_KEY] = str(owner(con) or "")
     from . import trialoffer
     vals["msg_trial_offer"] = setting(con, "msg_trial_offer") or trialoffer.DEFAULT
-    return {"values": vals, "erp_statuses": list(ERP_STATUSES)}
+    return {"values": vals, "erp_statuses": list(ERP_STATUSES), "booked_places": booked_places(con)}
 
 
 def save_settings(con, data: dict):
     for k, v in data.items():
         if k in DEFAULT_TEMPLATES or k in AUTO_SETTINGS or k in (OWNER_KEY, "msg_trial_offer"):
             comms.put(con, k, str(v or "").strip())
+        elif k == "booked_places" and isinstance(v, dict):
+            comms.put(con, k, json.dumps({str(b): {f: str(x.get(f) or "").strip() for f in ("place", "area", "tg", "max")}
+                                          for b, x in v.items() if isinstance(x, dict)}, ensure_ascii=False))
 
 
 def preview(con, s_id: int) -> dict:
