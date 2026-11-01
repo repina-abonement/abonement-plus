@@ -3,8 +3,8 @@
 Каждый этап, на котором клиент может застрять, получает задачу администратору. Клиентам здесь ничего не пишется:
 только задачи сотрудникам. Задачи помечены source='life', их снимает своя уборка, когда этап сменился.
 
-1. Новый лид → «Позвонить новому лиду» за 15 рабочих минут. Недозвон → 3 попытки (через 2 часа, потом по утрам),
-   после третьей карточка уходит в «Пригласим позже» с задачей пригласить в окно набора.
+1. Новый лид → «Позвонить новому лиду» за 15 рабочих минут. Недозвон → на следующий день, через 3 дня, через неделю,
+   через месяц; дальше «Пригласим позже» с задачей пригласить в ближайший набор (август или январь).
 2. «Как прошло пробное» больше суток без решения → «Дожать продажу» (до 3 раз, третья: принять решение).
 3. «Купил» засчитывается при первой оплате (money.reconcile); до оплаты задача «Принять оплату за первый абонемент».
 4. Отказ (кроме «выбрали другую секцию» и «не беспокоить») → через 3 месяца «Мягко пригласить снова».
@@ -28,6 +28,8 @@ KINDS = {
     "makeup_check": ("Уточнить отработку", "🩹"),
     "revive": ("Оживить старый лид", "🌱"),
 }
+# Юлия, 01.11: недозвон: завтра, через 3 дня, через неделю, через месяц, дальше ближайший набор (август или январь)
+NO_ANSWER_STEPS = [(1, "на следующий день"), (3, "через 3 дня"), (7, "через неделю"), (30, "через месяц")]
 REVIVE_PER_DAY = 10  # старых лидов в день на «оживление»: вся база обрабатывается постепенно, без завала
 LEFT_REASONS = ["Дорого", "Неудобное расписание", "Далеко ездить", "Ребёнку не нравится", "Перешли в другую секцию",
                 "Переезд", "Болезнь или травма", "Сезон, каникулы", "Другое"]
@@ -79,21 +81,22 @@ def tick(con, now: datetime | None = None) -> int:
         if not _has_open(con, s["id"], s["family_id"]):
             start = max(_dt(s["stage_changed_at"]) or _dt(s["created_at"]) or now, now - timedelta(days=30))
             made += bool(_add(con, "call_lead", s["id"], pu.add_work(con, start, 15), f"call_lead:{s['id']}", group_id=s["group_id"]))
-    for s in _people(con, "s.funnel='sales' AND s.stage='no_answer' AND s.stage_changed_at >= ?", (fresh(14),)):
+    for s in _people(con, "s.funnel='sales' AND s.stage='no_answer' AND s.stage_changed_at >= ?", (fresh(60),)):  # лесенка до 41 дня
         if _has_open(con, s["id"], s["family_id"]):
             continue
         n, last = _done_count(con, s["id"], "no_answer", s["stage_changed_at"])
-        if n >= 3:  # три попытки: в «Пригласим позже», пригласить в окно набора
-            again = min(pu.next_day_start(con, now, 91), pu.window(now))
-            con.execute("UPDATE students SET stage='later', refusal_reason='Не дозвонились 3 раза', stage_changed_at=? WHERE id=?",
+        if n >= len(NO_ANSWER_STEPS):  # лесенка пройдена: в «Пригласим позже», пригласить в ближайший набор
+            again = pu.window(now)
+            con.execute("UPDATE students SET stage='later', refusal_reason='Не дозвонились', stage_changed_at=? WHERE id=?",
                         (_iso(now), s["id"]))
-            pu.ensure_task(con, s["id"], again, now, title="Пригласить на ПУ (раньше не дозвонились)")
-            sv.log(con, s["id"], f"Не дозвонились 3 раза: «Пригласим позже», пригласим {again:%d.%m.%Y}", None, "stage")
+            pu.ensure_task(con, s["id"], again, now, title="Пригласить на ПУ в набор (раньше не дозвонились)")
+            sv.log(con, s["id"], f"Не дозвонились {n + 1} раз: «Пригласим позже», пригласим в набор {again:%d.%m.%Y}", None, "stage")
             continue
-        base = _dt(s["stage_changed_at"]) or now
-        due = pu.add_work(con, base, 120) if n == 0 else pu.next_day_start(con, _dt(last) or now, 1)
+        base = _dt(last) if last else (_dt(s["stage_changed_at"]) or now)
+        days, label = NO_ANSWER_STEPS[n]
+        due = pu.next_day_start(con, base, days)
         made += bool(_add(con, "no_answer", s["id"], due, f"no_answer:{s['id']}:{(s['stage_changed_at'] or '')[:16]}:{n}",
-                          title=f"Недозвон: позвонить ещё раз (попытка {n + 2} из 4)", group_id=s["group_id"]))
+                          title=f"Недозвон: позвонить ещё раз ({label})", group_id=s["group_id"]))
     # 2. «Как прошло пробное» больше суток без решения
     for s in _people(con, "s.funnel='sales' AND s.stage='how_was' AND s.stage_changed_at <= ? AND s.stage_changed_at >= ?",
                      (_iso(now - timedelta(days=1)), fresh(10))):

@@ -33,10 +33,19 @@ check(open_kinds(lead) == ["call_lead"], "Новый лид: задача «По
 sv.move_card(con, lead, "sales", "no_answer", U)
 lifecycle.tick(con, now)
 check(open_kinds(lead) == ["no_answer"], "Недозвон: звонок про лида снят, задача «позвонить ещё раз»")
-for _ in range(3):
+gaps = []
+for _ in range(4):
+    t = con.execute("SELECT due_at FROM tasks WHERE student_id=? AND kind='no_answer' AND status='open'", (lead,)).fetchone()[0]
+    base = con.execute("SELECT COALESCE(MAX(done_at), (SELECT stage_changed_at FROM students WHERE id=?)) FROM tasks WHERE student_id=? AND kind='no_answer' AND status='done'", (lead, lead)).fetchone()[0]
+    gaps.append((datetime.fromisoformat(t[:10]) - datetime.fromisoformat(base[:10])).days)
     done(lead, "no_answer"); lifecycle.tick(con, now)
+check(gaps == [1, 3, 7, 30], f"Лесенка недозвона: завтра, через 3 дня, неделю, месяц ({gaps})")
+nl = kid(stage="no_answer", ago_days=35)
+lifecycle.tick(con, now)
+check("no_answer" in open_kinds(nl), "Недозвон месячной давности: цепочка продолжается (шаг «через месяц»)")
 st = con.execute("SELECT stage FROM students WHERE id=?", (lead,)).fetchone()[0]
-check(st == "later" and "rebook" in open_kinds(lead), "После трёх недозвонов: «Пригласим позже» с задачей пригласить")
+due = con.execute("SELECT due_at FROM tasks WHERE student_id=? AND kind='rebook' AND status='open'", (lead,)).fetchone()
+check(st == "later" and due and due[0][5:7] in ("01", "08"), "Дальше «Пригласим позже» с задачей на ближайший набор (январь или август)")
 
 print("2. «Как прошло» без решения")
 hw = kid(stage="how_was", ago_days=2)
