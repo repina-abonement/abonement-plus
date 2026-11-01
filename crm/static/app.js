@@ -1050,6 +1050,10 @@ async function renderWorkdesk(page) {
         <div class="muted small">${esc(dateTxt)}${u.length || tiles.length ? "" : " · всё спокойно ⚽"}</div></div>
       ${tiles.length || reds ? `<div class="dtiles">${reds ? `<button class="dtile red" data-jump="dw-hot"><span>🔥</span><b>${reds}</b><small>Горит</small></button>` : ""}${tiles.join("")}</div>` : ""}
     </div>
+    ${(d.reviews || []).map((r) => `<div class="rv-alert"><span class="rv-star">⭐</span>
+      <div class="grow"><b>Новый отзыв на ${esc(r.label)}</b><div class="small">${esc(r.subject)} · пришёл ${esc(dtShort(r.created_at))}</div></div>
+      <a class="btn sm" href="${esc(r.link)}" target="_blank" rel="noopener">Открыть отзывы</a>
+      <button class="btn sm primary" data-rvclose="${r.id}">Ответили ✓</button></div>`).join("")}
     <div class="desk">
       <div class="desk-main">
         ${hot}
@@ -1062,6 +1066,7 @@ async function renderWorkdesk(page) {
         ${widgets.some((k) => !dwShown(k)) ? `<section class="dw-folded"><div class="dwf-title small muted">Ещё на столе: сейчас там пусто или не срочно</div>${widgets.filter((k) => !dwShown(k)).map((k) => `<details class="dwf" data-dwk="${k}" ${S.dwOpen[k] ? "open" : ""}>
           <summary><span class="dwf-ic">${W[k].icon}</span><span class="grow">${W[k].label}</span><span class="dwf-chev">›</span></summary><div class="dw" id="dw-${k}">${W[k].html}</div></details>`).join("")}</section>` : ""}</div>
     </div>`;
+  page.querySelectorAll("[data-rvclose]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/reviews/${b.dataset.rvclose}/close`, {}); render(); } catch (e) { fail(e); } }));
   const hm = $("#hot-more"); if (hm) hm.onclick = () => { S.hotAll = !S.hotAll; render(); };
   page.querySelectorAll(".dwf").forEach((x) => x.addEventListener("toggle", () => { S.dwOpen[x.dataset.dwk] = x.open; }));
   page.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => { const el = document.getElementById(b.dataset.jump); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }));

@@ -818,6 +818,7 @@ def workdesk(con, h, user, body, q):
                                                                  (int(q["as_user"]) if q.get("as_user") and user["role"] == "admin" else user["id"],)).fetchone() or [""])[0]),
             "bills_due": expenses.bills_upcoming(con) if user["role"] == "admin" else [],
             "ads_alerts": expenses.ads_alerts(con) if user["role"] == "admin" else [],
+            "reviews": __import__("crm.reviews", fromlist=["open_list"]).open_list(con) if user["role"] == "admin" else [],
             "absences": schedule.absences(con),
             "shift_reports": __import__("crm.coachreport", fromlist=["desk"]).desk(con, user["role"] == "admin")
             if perms.can(user, "schedule", "full") else None,
@@ -2060,6 +2061,13 @@ def pu_report(con, h, user, body, q):
         "marks": pu.marks_report(con, a, min(b, _d.today()))}
 
 
+@route("POST", "/api/reviews/{rid}/close", role="admin")
+def review_close(con, h, user, body, q, rid):
+    from . import reviews
+    reviews.close(con, int(rid), user)
+    return {"ok": True}
+
+
 @route("GET", "/api/alerts", role="operator")
 def alerts_list(con, h, user, body, q):
     from . import pu
@@ -2295,7 +2303,7 @@ def int_log(con, h, user, body, q):
     return [dict(r) for r in con.execute("SELECT * FROM hook_log ORDER BY id DESC LIMIT 30")]
 
 
-HOOKS = {"sipuni", "telegram", "max", "wazzup", "lead"}
+HOOKS = {"sipuni", "telegram", "max", "wazzup", "lead", "review"}
 
 
 def handle_hook(h, method: str, source: str, token: str, url) -> None:
@@ -2336,6 +2344,9 @@ def handle_hook(h, method: str, source: str, token: str, url) -> None:
             comms.wz_hook(con, payload)
         elif source == "lead":
             result = comms.lead_hook(con, payload, sv.create_student)
+        elif source == "review":
+            from . import reviews
+            result = reviews.hook(con, payload)
         if source in ("sipuni", "lead", "max", "wazzup"):
             comms.log_hook(con, source, payload)
         con.execute("COMMIT")

@@ -200,7 +200,11 @@ def admin_view(con, base_url: str) -> dict:
         "hooks": {
             "sipuni": f"{base_url}/hooks/sipuni/{tok}",
             "lead": f"{base_url}/hooks/lead/{tok}",
+            "review": f"{base_url}/hooks/review/{tok}",
         },
+        "review_on": __import__("crm.reviews", fromlist=["ENABLED"]).ENABLED,
+        "review_script": __import__("crm.reviews", fromlist=["script"]).script(f"{base_url}/hooks/review/{tok}"),
+        "review_last": (con.execute("SELECT MAX(created_at) FROM review_alerts").fetchone() or [None])[0],
         "info": {
             "tg_bot": get(con, "tg_bot"), "tg_error": get(con, "tg_error"),
             "tg_business_enabled": get(con, "tg_business_enabled") == "1",

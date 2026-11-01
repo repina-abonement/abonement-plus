@@ -449,6 +449,17 @@ async function renderCommsSettings(box, users) {
       <button class="btn sm" data-connect="wazzup">Сохранить и подключить</button>
     </div>
 
+    ${d.review_on ? `<div class="int"><div class="int-head"><b>Отзывы с Яндекс Карт и 2ГИС</b>${ok(!!d.review_last, "ждём первый отзыв")}</div>
+      <div class="small muted" style="margin-bottom:6px">Скрипт Google в почте руководителя видит письмо «У вас новый отзыв» и ставит вам красную плашку на рабочий стол. В CRM уходит только площадка и тема письма, без текста отзыва</div>
+      <details><summary class="small"><b>Как подключить (5 минут)</b></summary><ol class="small" style="padding-left:18px;line-height:1.6">
+        <li>Откройте <b>script.google.com</b> под почтой, куда приходят письма об отзывах, и нажмите «Новый проект»</li>
+        <li>Сотрите всё в окне и вставьте текст скрипта (кнопка «Копировать скрипт» ниже)</li>
+        <li>Нажмите значок дискеты «Сохранить», затем «Выполнить» и разрешите доступ к почте</li>
+        <li>Слева нажмите будильник «Триггеры» → «Добавить триггер» → функция checkReviews, «По времени», «Каждые 5 минут» → «Сохранить»</li></ol></details>
+      <button class="btn sm" data-copy="${esc(d.review_script)}">Копировать скрипт</button>
+      <div class="small muted" style="margin-top:6px">Последний отзыв: ${d.review_last ? dtShort(d.review_last) : "ещё не было"}</div>
+    </div>` : ""}
+
     <div class="int"><div class="int-head"><b>Заявки с сайта</b>${ok(!!inf.lead_last, "ждём первую заявку")}</div>
       <div class="field"><label>Адрес для заявок: вставляется в форму сайта (webhook) или в скрипт Google</label><div class="copy"><input readonly value="${esc(d.hooks.lead)}"><button class="btn sm" data-copy="${esc(d.hooks.lead)}">Копировать</button></div></div>
       <div class="small muted">Последняя заявка: ${inf.lead_last ? dtShort(inf.lead_last) : "ещё не было"}</div>

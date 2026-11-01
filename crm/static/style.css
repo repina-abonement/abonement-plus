@@ -1378,3 +1378,8 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .bk-head { margin-bottom: 4px; }
 .bk-place { padding-top: 10px; border-top: 1px solid var(--line); }
 .bk-place:first-of-type { border-top: 0; }
+
+/* Новый отзыв на Яндекс Картах / 2ГИС: красная плашка руководителю */
+.rv-alert { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; padding: 14px 16px; border-radius: 16px;
+  background: var(--red-soft); border: 1px solid #f3b5ae; border-left: 6px solid var(--red); }
+.rv-star { font-size: 26px; }
