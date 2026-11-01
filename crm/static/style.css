@@ -1415,3 +1415,5 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 
 .rep-two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .rep-why { width: 100%; margin-top: 8px; }
+
+.erp-day { white-space: pre-wrap; background: var(--surface-2); padding: 10px 12px; border-radius: 10px; font-size: 13px; max-height: 360px; overflow: auto; margin: 8px 0; }

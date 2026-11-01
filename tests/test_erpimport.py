@@ -101,12 +101,67 @@ def main():
     except ei.ImportError_:
         ok = True
     check(ok, "Второй раз поверх не переносит")
+    daily(con, petya, masha, gosha, g1, g2)
     u = ei.undo(con, OWNER)
     check(con.execute("SELECT COUNT(*) FROM students").fetchone()[0] == 0 and con.execute("SELECT COUNT(*) FROM payments").fetchone()[0] == 0,
           f"Отмена убрала всё перенесённое ({u})")
     rules()
     print("OK")
 
+
+
+def daily(con, petya, masha, gosha, g1, g2):
+    """Ежедневное «Обновить из ERP»: ничего не удаляет, тренерские отметки остаются."""
+    con.execute("INSERT INTO attendance(student_id, group_id, date, status) VALUES (?,?,?, 'present')", (petya["id"], g1, "2026-11-02"))
+    con.execute("UPDATE students SET stage='trial_booked', funnel='sales' WHERE id=?", (gosha["id"],))  # админ в CRM переписал
+    con.execute("DELETE FROM erp_uploads")
+    try:
+        ei.update(con, OWNER, now=NOW)
+        ok = False
+    except ei.ImportError_:
+        ok = True
+    check(ok, "Без свежих файлов обновлять нечего")
+    clients = xlsx.build([("Клиенты", [
+        ["ID", "ФИО ребенка", "Дата рождения", "ФИО родителя", "Телефон", "Филиал", "Группа", "Статус", "Дата пробного"],
+        ["101", "Иванов Петя", "01.05.2019", "Иванова Анна", "89001112233", "Небо", "Пн/Чт 17:00", "Занимается", ""],
+        ["102", "Иванова Маша", "02.02.2017", "Иванова Анна", "89001112233", "Небо", "Сб 10:00", "Занимается", ""],
+        ["103", "Смирнов Гоша", "", "Смирнова Елена", "79005556677", "Небо", "Сб 10:00", "Записан на пробное", "15.10.2026 10:00"],
+        ["104", "Козлов Ваня", "", "Козлов Дима", "", "", "", "Ушёл", ""],
+        ["105", "Новиков Лёва", "03.03.2018", "Новикова Ира", "89007778899", "Небо", "Сб 10:00", "Записан на пробное", "07.11.2026 10:00"],
+    ])])
+    ei.upload(con, "Клиенты.xlsx", clients)
+    ei.upload(con, "абонементы.csv", ("Код клиента;Ученик;Месяц;Группа;Стоимость;Занятий;Статус\n"
+                                     "102;Иванова Маша;Октябрь 2026;Сб 10:00;5400;4;Оплачен\n"
+                                     "101;Иванов Петя;Ноябрь 2026;Пн/Чт 17:00;12400;8;Оплачен\n").encode())
+    ei.upload(con, "оплаты.csv", ("ID клиента,Плательщик,Дата оплаты,Сумма,Способ оплаты\n"
+                                 "101,Иванов Петя,2026-10-02,12400,СБП\n101,Иванов Петя,31.10.2026,12400,СБП\n").encode())
+    n0 = con.execute("SELECT COUNT(*) FROM students").fetchone()[0]
+    r = ei.update(con, OWNER, now=NOW)["stats"]
+    check(r["new"] == 1 and con.execute("SELECT COUNT(*) FROM students").fetchone()[0] == n0 + 1, f"Новый клиент из ERP добавлен ({r})")
+    leva = con.execute("SELECT * FROM students WHERE erp_id='105'").fetchone()
+    check(leva["stage"] == "trial_booked" and leva["trial_at"].startswith("2026-11-07"), "Новый лид записан на пробное с датой")
+    check(con.execute("SELECT stage FROM students WHERE id=?", (gosha["id"],)).fetchone()[0] == "trial_booked",
+          "Статус в ERP не менялся: этап, который поставили в CRM, не перетёрт")
+    check(con.execute("SELECT status FROM subscriptions WHERE student_id=? AND month='2026-10'", (masha["id"],)).fetchone()[0] == "paid",
+          "Абонемент Маши стал оплаченным")
+    check(con.execute("SELECT COUNT(*) FROM subscriptions WHERE student_id=? AND month='2026-11'", (petya["id"],)).fetchone()[0] == 1,
+          "Новый абонемент Пети на ноябрь добавлен")
+    check(con.execute("SELECT COUNT(*) FROM payments WHERE student_id=?", (petya["id"],)).fetchone()[0] == 3,
+          "Старая оплата не задвоилась, новая добавлена")
+    check(con.execute("SELECT 1 FROM attendance WHERE student_id=? AND date='2026-11-02'", (petya["id"],)).fetchone(),
+          "Отметка тренера в CRM осталась")
+    check(not ei.uploads(con) and con.execute("SELECT value FROM settings WHERE key='erp_last_update'").fetchone(),
+          "Файлы дня использованы, время обновления запомнено")
+    # статус в ERP сменился: этап обновляется
+    ei.upload(con, "Клиенты.xlsx", xlsx.build([("Клиенты", [
+        ["ID", "ФИО ребенка", "Телефон", "Филиал", "Группа", "Статус"],
+        ["104", "Козлов Ваня", "", "Небо", "Сб 10:00", "Отказ"]])]))
+    r = ei.update(con, OWNER, now=NOW)["stats"]
+    check(r["new"] == 0 and r["stage"] == 1, f"Повторное обновление не плодит дублей, сменившийся статус в ERP обновил этап ({r})")
+    # итоги дня для ERP: что отметил тренер
+    d = ei.day_for_erp(con, "2026-11-02")
+    rows = {x["name"]: x["mark"] for g in d["groups"] for x in g["rows"]}
+    check(rows.get("Иванов Петя") == "был", f"Итоги дня: отметка тренера попала в список для ERP ({d['groups']})")
 
 
 def rules():

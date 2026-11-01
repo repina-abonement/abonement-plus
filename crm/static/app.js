@@ -819,35 +819,7 @@ async function renderTipsSettings(box) {
   };
 }
 
-/* Настройки → Перенос из ERP: файлы, колонки, группы, пробный прогон, перенос, сверка, отмена */
-async function renderErp(box) {
-  const d = await api("GET", "/api/erp");
-  const done = d.last && !d.last.undone_at;
-  box.innerHTML = `<h3>Перенос из ERP</h3>
-    <div class="small muted" style="margin-bottom:10px">Выгрузите из ERP клиентов, абонементы, оплаты, посещения и задачи в Excel (.xlsx) или CSV и загрузите сюда. Файлы разбираются на нашем сервере, никуда больше не уходят. Можно загружать по одному или все сразу</div>
-    ${done ? `<div class="alert" style="background:var(--accent-soft,#e7f6ee);color:inherit">✅ Перенос сделан ${esc(d.last.started_at.replace("T", " "))}. Ниже сверка с файлами</div><div id="erp-verify" class="small muted">Сверяю…</div>
-      <button class="btn danger" id="erp-undo" style="margin-top:12px">Отменить перенос</button>` : `
-    <div class="erp-step"><b>1. Файлы</b>
-      <div class="row" style="gap:8px;align-items:center;margin-top:8px"><input type="file" id="erp-file" multiple accept=".xlsx,.csv,.txt" style="flex:1"></div>
-      <div id="erp-ups">${d.uploads.map((u) => erpUploadHtml(u, d.kinds)).join("") || `<div class="small muted" style="margin-top:6px">Файлов пока нет</div>`}</div></div>
-    <div class="erp-step"><b>2. Группы</b><div id="erp-groups" class="small muted">${d.uploads.length ? "Загружаю…" : "Появятся после загрузки файлов"}</div></div>
-    <div class="erp-step"><b>3. Пробный прогон</b><div class="small muted">Ничего не записывает: показывает, что будет перенесено, и все нестыковки</div>
-      <button class="btn" id="erp-plan" style="margin-top:8px" ${d.uploads.length ? "" : "disabled"}>Проверить</button><div id="erp-plan-out"></div></div>
-    <div class="erp-step"><b>4. Перенос</b><div class="small muted">Перед переносом CRM сделает резервную копию и удалит всех выдуманных клиентов. Сотрудники, группы, настройки и переписки останутся. Перенос можно отменить целиком</div>
-      <label class="check" style="margin-top:8px"><input type="checkbox" id="erp-rkn"> Изменения в Роскомнадзор поданы, политика обработки данных опубликована</label>
-      <button class="btn primary" id="erp-run" style="margin-top:8px" disabled>Перенести</button></div>`}`;
-  if (done) {
-    const v = await api("GET", "/api/erp/verify");
-    $("#erp-verify").innerHTML = `<table class="tbl" style="margin-top:6px"><thead><tr><th></th><th>В файлах ERP</th><th>В CRM</th><th></th></tr></thead><tbody>
-      ${v.rows.map((r) => `<tr><td>${esc(r.label)}</td><td>${r.erp.toLocaleString("ru-RU")}</td><td>${r.crm.toLocaleString("ru-RU")}</td><td>${r.ok ? "✅" : "⚠️"}</td></tr>`).join("")}
-      ${v.by_month.map((r) => `<tr><td class="muted">Оплаты за ${esc(monthLabel(r.month))}</td><td>${rub(r.erp)}</td><td>${rub(r.crm)}</td><td>${r.ok ? "✅" : "⚠️"}</td></tr>`).join("")}</tbody></table>
-      <div style="margin-top:10px"><b>Занимаются по группам</b>${v.groups.map((g) => `<div>${esc(g.branch)} · ${esc(g.name)}: ${g.kids}</div>`).join("")}</div>`;
-    $("#erp-undo").onclick = async () => {
-      if (!confirm("Отменить перенос? Все перенесённые клиенты, абонементы и оплаты будут удалены. Выдуманные клиенты не вернутся")) return;
-      try { await api("POST", "/api/erp/undo", {}); toast("Перенос отменён"); renderErp(box); } catch (e) { fail(e); }
-    };
-    return;
-  }
+function erpWireFiles(box, d) {
   $("#erp-file").onchange = async (e) => {
     for (const f of e.target.files) {
       const data = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(f); });
@@ -864,6 +836,72 @@ async function renderErp(box) {
     const ex = card.querySelector(`[data-ex="${sel.dataset.field}"]`); if (ex) ex.textContent = sel.value !== "" ? (u.preview[0] || [])[+sel.value] || "" : "";
   }));
   box.querySelectorAll("[data-udel]").forEach((b) => (b.onclick = async () => { if (!confirm("Убрать этот файл?")) return; await api("DELETE", `/api/erp/uploads/${b.dataset.udel}`).catch(fail); renderErp(box); }));
+}
+
+/* Настройки → Перенос из ERP: файлы, колонки, группы, пробный прогон, перенос, сверка, отмена */
+async function renderErp(box) {
+  const d = await api("GET", "/api/erp");
+  const done = d.last && !d.last.undone_at;
+  box.innerHTML = `<h3>Перенос из ERP</h3>
+    <div class="small muted" style="margin-bottom:10px">Выгрузите из ERP клиентов, абонементы, оплаты, посещения и задачи в Excel (.xlsx) или CSV и загрузите сюда. Файлы разбираются на нашем сервере, никуда больше не уходят. Можно загружать по одному или все сразу</div>
+    ${done ? `<div class="alert" style="background:var(--accent-soft,#e7f6ee);color:inherit">✅ Перенос сделан ${esc(d.last.started_at.replace("T", " "))}. Ниже сверка с файлами</div><div id="erp-verify" class="small muted">Сверяю…</div>
+      <div class="erp-step" style="margin-top:14px"><b>🔄 Обновить из ERP (каждый день, пока клиентов ведут в ERP)</b>
+        <div class="small muted">Выгрузите из ERP свежие файлы клиентов, абонементов и оплат и загрузите сюда, потом нажмите «Обновить». Новые клиенты добавятся, у старых обновятся этапы, пробные, группы и оплаты. Ничего не удаляется: отметки тренеров, отчёты и задачи в CRM остаются${d.last_update ? `. Последнее обновление: ${esc(d.last_update.at.replace("T", " "))}` : ""}</div>
+        <div class="row" style="gap:8px;align-items:center;margin-top:8px"><input type="file" id="erp-file" multiple accept=".xlsx,.csv,.txt" style="flex:1"></div>
+        <div id="erp-ups">${d.uploads.map((u) => erpUploadHtml(u, d.kinds)).join("")}</div>
+        <button class="btn primary" id="erp-update" style="margin-top:8px" ${d.uploads.length ? "" : "disabled"}>Обновить</button><div id="erp-upd-out" class="small"></div></div>
+      <div class="erp-step"><b>📋 Итоги дня для ERP</b>
+        <div class="small muted">Что тренеры отметили в CRM: кто был, кто не пришёл и почему, итоги пробных, оплаты на месте. Перенесите в ERP вечером</div>
+        <div class="row" style="gap:8px;align-items:center;margin-top:8px"><input type="date" id="erp-day-d" value="${S.meta.today}" style="flex:0 0 170px"><button class="btn" id="erp-day-go" style="flex:0">Показать</button></div>
+        <div id="erp-day-out"></div></div>
+      <details style="margin-top:12px"><summary class="small muted">Отменить перенос</summary><button class="btn danger" id="erp-undo" style="margin-top:8px">Отменить перенос</button></details>` : `
+    <div class="erp-step"><b>1. Файлы</b>
+      <div class="row" style="gap:8px;align-items:center;margin-top:8px"><input type="file" id="erp-file" multiple accept=".xlsx,.csv,.txt" style="flex:1"></div>
+      <div id="erp-ups">${d.uploads.map((u) => erpUploadHtml(u, d.kinds)).join("") || `<div class="small muted" style="margin-top:6px">Файлов пока нет</div>`}</div></div>
+    <div class="erp-step"><b>2. Группы</b><div id="erp-groups" class="small muted">${d.uploads.length ? "Загружаю…" : "Появятся после загрузки файлов"}</div></div>
+    <div class="erp-step"><b>3. Пробный прогон</b><div class="small muted">Ничего не записывает: показывает, что будет перенесено, и все нестыковки</div>
+      <button class="btn" id="erp-plan" style="margin-top:8px" ${d.uploads.length ? "" : "disabled"}>Проверить</button><div id="erp-plan-out"></div></div>
+    <div class="erp-step"><b>4. Перенос</b><div class="small muted">Перед переносом CRM сделает резервную копию и удалит всех выдуманных клиентов. Сотрудники, группы, настройки и переписки останутся. Перенос можно отменить целиком</div>
+      <label class="check" style="margin-top:8px"><input type="checkbox" id="erp-rkn"> Изменения в Роскомнадзор поданы, политика обработки данных опубликована</label>
+      <button class="btn primary" id="erp-run" style="margin-top:8px" disabled>Перенести</button></div>`}`;
+  if (done) {
+    erpWireFiles(box, d);
+    $("#erp-update").onclick = async () => {
+      const b = $("#erp-update"); b.disabled = true; b.textContent = "Обновляю…";
+      try {
+        const r = await api("POST", "/api/erp/update", {}), t = r.stats;
+        toast("Обновлено из ERP");
+        $("#erp-upd-out").innerHTML = `✅ Новых клиентов: ${t.new}, сменили этап: ${t.stage}, обновлено карточек: ${t.updated}, пробных: ${t.trials}, изменений в группах: ${t.groups}, абонементов: ${t.subs}, оплат: ${t.payments}`;
+        setTimeout(() => renderErp(box), 4000);
+      } catch (e) { fail(e); b.disabled = false; b.textContent = "Обновить"; }
+    };
+    $("#erp-day-go").onclick = async () => {
+      try {
+        const r = await api("GET", "/api/erp/day?date=" + $("#erp-day-d").value);
+        const txt = [`Итоги дня ${dShort(r.date)} для ERP`, ...r.groups.flatMap((g) => [``, `${g.branch} · ${g.group}`, ...g.rows.map((x) => `- ${x.name}${x.erp_id ? ` (ID ${x.erp_id})` : ""}: ${x.mark}`)]),
+          ...(r.pays.length ? [``, `Оплаты на месте:`, ...r.pays.map((p) => `- ${p.branch}: ${p.name}, ${p.amount} ₽, ${p.what || ""}`)] : [])].join("\n");
+        const task = `Перенеси в ERP Футболики (вкладка, где вы уже вошли) отметки посещений за ${dShort(r.date)} из списка ниже. Для каждой группы открой журнал за эту дату и проставь: «был», «не был» (с причиной, если указана), «отработка», итог пробного. Ищи ребёнка по ID ERP, если он указан, иначе по ФИО. Ничего другого в ERP не меняй и не удаляй. Если ребёнка или группы нет, пропусти и запиши в отчёт. В конце дай короткий отчёт: сколько отметок внесено и что не получилось (без телефонов).\n\n${txt}`;
+        $("#erp-day-out").innerHTML = r.groups.length ? `<pre class="erp-day">${esc(txt)}</pre>
+          <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn sm" id="erp-day-copy">Копировать итоги</button><button class="btn sm primary" id="erp-day-prompt">Копировать задание для агента в браузере</button></div>
+          <div class="small muted" style="margin-top:6px">Задание вставьте агенту в облачном браузере, где вы вошли в ERP. Это передача данных клиентов внешнему сервису: учтите в уведомлении в Роскомнадзор</div>`
+          : `<div class="small muted" style="margin-top:6px">За этот день отметок нет</div>`;
+        const cp = (t) => navigator.clipboard.writeText(t).then(() => toast("Скопировано"), () => window.prompt("Скопируйте", t));
+        if ($("#erp-day-copy")) { $("#erp-day-copy").onclick = () => cp(txt); $("#erp-day-prompt").onclick = () => cp(task); }
+      } catch (e) { fail(e); }
+    };
+    $("#erp-undo").onclick = async () => {
+      if (!confirm("Отменить перенос? Все перенесённые клиенты, абонементы и оплаты будут удалены. Выдуманные клиенты не вернутся")) return;
+      try { await api("POST", "/api/erp/undo", {}); toast("Перенос отменён"); renderErp(box); } catch (e) { fail(e); }
+    };
+    const v = await api("GET", "/api/erp/verify").catch(() => null);
+    if (!v) { $("#erp-verify").textContent = "Сверка не загрузилась"; return; }
+    $("#erp-verify").innerHTML = `<table class="tbl" style="margin-top:6px"><thead><tr><th></th><th>В файлах ERP</th><th>В CRM</th><th></th></tr></thead><tbody>
+      ${v.rows.map((r) => `<tr><td>${esc(r.label)}</td><td>${r.erp.toLocaleString("ru-RU")}</td><td>${r.crm.toLocaleString("ru-RU")}</td><td>${r.ok ? "✅" : "⚠️"}</td></tr>`).join("")}
+      ${v.by_month.map((r) => `<tr><td class="muted">Оплаты за ${esc(monthLabel(r.month))}</td><td>${rub(r.erp)}</td><td>${rub(r.crm)}</td><td>${r.ok ? "✅" : "⚠️"}</td></tr>`).join("")}</tbody></table>
+      <div style="margin-top:10px"><b>Занимаются по группам</b>${v.groups.map((g) => `<div>${esc(g.branch)} · ${esc(g.name)}: ${g.kids}</div>`).join("")}</div>`;
+    return;
+  }
+  erpWireFiles(box, d);
   if (d.uploads.length) {
     const g = await api("GET", "/api/erp/groups");
     $("#erp-groups").innerHTML = g.erp.length ? `<div class="small muted" style="margin:4px 0 6px">Какой нашей группе соответствует группа из ERP. CRM подобрала сама, проверьте</div>

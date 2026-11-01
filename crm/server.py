@@ -586,7 +586,9 @@ def memos_png(con, h, user, body, q):
 def erp_get(con, h, user, body, q):
     from . import erpimport
     last = con.execute("SELECT * FROM erp_batches ORDER BY id DESC LIMIT 1").fetchone()
-    return {"uploads": erpimport.uploads(con), "kinds": erpimport.KIND_LABELS, "last": dict(last) if last else None}
+    upd = con.execute("SELECT value FROM settings WHERE key='erp_last_update'").fetchone()
+    return {"uploads": erpimport.uploads(con), "kinds": erpimport.KIND_LABELS, "last": dict(last) if last else None,
+            "last_update": json.loads(upd[0]) if upd else None}
 
 
 @route("POST", "/api/erp/upload", role="admin")
@@ -654,6 +656,27 @@ def erp_run(con, h, user, body, q):
         return erpimport.run(con, user, True, path)
     except erpimport.ImportError_ as e:
         raise ApiError(str(e))
+
+
+@route("POST", "/api/erp/update", role="admin")
+def erp_update(con, h, user, body, q):
+    """Ежедневное обновление из ERP на переходный период: ничего не удаляет."""
+    from . import erpimport, backup
+    try:
+        backup.backup_once()
+    except Exception:  # noqa: BLE001 — копия желательна, но обновление без удаления можно делать и без неё
+        pass
+    try:
+        return erpimport.update(con, user)
+    except erpimport.ImportError_ as e:
+        raise ApiError(str(e))
+
+
+@route("GET", "/api/erp/day", role="admin")
+def erp_day(con, h, user, body, q):
+    """Итоги дня тренеров для переноса в ERP."""
+    from . import erpimport
+    return erpimport.day_for_erp(con, (q.get("date") or str(date.today()))[:10])
 
 
 @route("POST", "/api/erp/undo", role="admin")

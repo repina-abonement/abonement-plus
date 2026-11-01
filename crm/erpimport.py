@@ -55,8 +55,11 @@ CREATE INDEX IF NOT EXISTS idx_erp_rows ON erp_rows(batch_id, tbl);
 
 def init(con):
     con.executescript(SCHEMA)
-    if "erp_id" not in [c[1] for c in con.execute("PRAGMA table_info(students)")]:
+    cols = [c[1] for c in con.execute("PRAGMA table_info(students)")]
+    if "erp_id" not in cols:
         con.execute("ALTER TABLE students ADD COLUMN erp_id TEXT NOT NULL DEFAULT ''")
+    if "erp_status" not in cols:  # статус в ERP при последнем переносе/обновлении: этап меняем, только если он сменился в ERP
+        con.execute("ALTER TABLE students ADD COLUMN erp_status TEXT NOT NULL DEFAULT ''")
 
 
 class ImportError_(Exception):
@@ -838,6 +841,7 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
                           (fid, name, parse_date(rec.get("birth", "")) or "", gid, tariff, funnel, stage, stage_at, trial,
                            src, created, (rec.get("erp_id") or "").strip())).lastrowid
         _track(con, batch, "students", sid)
+        con.execute("UPDATE students SET erp_status=? WHERE id=?", ((rec.get("status") or "").strip(), sid))
         if src:
             try:
                 sid_src = _src.find_or_create(con, src) if hasattr(_src, "find_or_create") else None
@@ -967,6 +971,208 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
     con.execute("UPDATE erp_batches SET stats=? WHERE id=?", (json.dumps(st, ensure_ascii=False), batch))
     con.execute("INSERT INTO audit(ts, user_id, action, detail) VALUES (?,?,?,?)", (nowi, user.get("id"), "erp.import", json.dumps(st)))
     return {"batch": batch, "stats": st, "month": month_now}
+
+
+def update(con, user: dict, now: datetime | None = None) -> dict:
+    """Ежедневное «Обновить из ERP» на переходный период (Юлия, 01.11): админы ведут клиентов в ERP, тренеры работают в CRM.
+    Ничего не удаляет: новые клиенты добавляются, у старых обновляются этап (только если сменился статус в ERP),
+    пробное, группы, абонементы и оплаты. Отметки тренеров, отчёты, задачи, переписка в CRM не трогаются.
+    Посещения из ERP не берём: журнал теперь в CRM."""
+    now = now or datetime.now()
+    nowi = now.isoformat(timespec="minutes")
+    children, by_key = _children(con)
+    if not children:
+        raise ImportError_("Загрузите свежую выгрузку клиентов из ERP")
+    sub_recs = _records(con, "subs")
+    find_child = _child_finder(children, by_key, sub_recs)
+    cls = _classify(con, children, sub_recs, lambda r: (lambda c: _key(c) if c else None)(find_child(r)), now.date())
+    from . import services as sv
+    by_erp = {r["erp_id"]: r["id"] for r in con.execute("SELECT id, erp_id FROM students WHERE erp_id != '' AND archived=0")}
+    by_np = {}
+    for r in con.execute("""SELECT s.id, s.name, p.phone_norm FROM students s JOIN parents p ON p.family_id=s.family_id WHERE s.archived=0"""):
+        by_np.setdefault((_norm(r["name"]), (r["phone_norm"] or "")[-10:]), r["id"])
+    b = con.execute("SELECT id FROM erp_batches WHERE undone_at IS NULL ORDER BY id DESC LIMIT 1").fetchone()
+    batch = b[0] if b else None  # всё добавленное привязываем к переносу: «Отменить перенос» уберёт и это
+
+    def track(tbl, rid):
+        if batch and rid:
+            _track(con, batch, tbl, rid)
+        return rid
+    st = {"new": 0, "updated": 0, "stage": 0, "groups": 0, "subs": 0, "payments": 0, "trials": 0}
+    sid_by_key = {}
+    for rec in children:
+        k = _key(rec)
+        info = cls[k]
+        name = _split_name(rec)
+        ph = normalize_phone(rec.get("phone", ""))
+        sid = by_erp.get((rec.get("erp_id") or "").strip()) or by_np.get((_norm(name), ph[-10:]))
+        funnel, stage = info["funnel"], info["stage"]
+        trial = parse_date(rec.get("trial_at", "")) or info["trial"]
+        if trial and len(trial) == 10:
+            trial += "T18:00"
+        if funnel == "sales" and stage == "trial_booked" and trial and trial[:10] < now.date().isoformat():
+            stage = "missed_trial"
+        status = (rec.get("status") or "").strip()
+        if not sid:  # новый клиент: заводим так же, как при переносе
+            fam = None
+            if len(ph) >= 11:
+                r = con.execute("SELECT family_id FROM parents WHERE substr(phone_norm, -10)=? LIMIT 1", (ph[-10:],)).fetchone()
+                fam = r[0] if r else None
+            if not fam:
+                parent = " ".join((rec.get("parent_name") or "").split())
+                fam = track("families", con.execute("INSERT INTO families(name) VALUES (?)", (parent or name.split()[-1],)).lastrowid)
+                from .smart import guess_relation
+                track("parents", con.execute("INSERT INTO parents(family_id, name, phone, phone_norm, email, relation) VALUES (?,?,?,?,?,?)",
+                            (fam, parent or "Родитель", rec.get("phone", "").strip(), ph, (rec.get("email") or "").strip(),
+                             guess_relation(rec.get("relation") or "") or guess_relation(rec.get("parent_name") or ""))).lastrowid)
+            created = parse_date(rec.get("created", "")) or nowi
+            created = created + "T10:00" if len(created) == 10 else created
+            ev = parse_date(rec.get("status_at", "")) or (trial if trial and stage in ("trial_booked", "missed_trial", "how_was") else "") or created
+            ev = ev + "T10:00" if len(ev) == 10 else ev
+            gid = info["groups"][0] if info["groups"] else (_group_id(con, rec.get("branch", ""), rec.get("group", "")) if funnel == "members" else None)
+            tariff = "flex" if "гибк" in _norm(rec.get("tariff", "")) else "fixed"
+            sid = con.execute("""INSERT INTO students(family_id, name, birth, group_id, tariff, funnel, stage, stage_changed_at, trial_at,
+                                 source, created_at, erp_id, erp_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                              (fam, name, parse_date(rec.get("birth", "")) or "", gid, tariff, funnel, stage, min(ev, nowi), trial,
+                               (rec.get("source") or "").strip(), created, (rec.get("erp_id") or "").strip(), status)).lastrowid
+            track("students", sid)
+            sv.log(con, sid, f"Добавлен из ERP при обновлении, статус в ERP: «{status}»", {"name": "Обновление из ERP"}, "system")
+            st["new"] += 1
+        else:
+            cur = dict(con.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone())
+            sets, args = [], []
+            if status and status != (cur.get("erp_status") or "") and (funnel, stage) != (cur["funnel"], cur["stage"]):
+                sets += ["funnel=?", "stage=?", "stage_changed_at=?"]; args += [funnel, stage, nowi]
+                sv.log(con, sid, f"Обновлено из ERP: статус «{status}»", {"name": "Обновление из ERP"}, "stage")
+                st["stage"] += 1
+            if status != (cur.get("erp_status") or ""):
+                sets.append("erp_status=?"); args.append(status)
+            if trial and trial != (cur["trial_at"] or "") and funnel == "sales":
+                sets.append("trial_at=?"); args.append(trial)
+                g = _group_id(con, rec.get("branch", ""), rec.get("group", ""))
+                if g:
+                    sets.append("group_id=?"); args.append(g)
+                st["trials"] += 1
+            b = parse_date(rec.get("birth", ""))
+            if b and b != cur["birth"]:
+                sets.append("birth=?"); args.append(b)
+            if sets:
+                con.execute(f"UPDATE students SET {', '.join(sets)} WHERE id=?", (*args, sid))
+                st["updated"] += 1
+        # группы ученика: как в ERP (где куплен текущий или следующий месяц)
+        if funnel == "members" and info["groups"]:
+            have = {r[0]: r[1] for r in con.execute("SELECT group_id, active FROM enrollments WHERE student_id=?", (sid,))}
+            for g in info["groups"]:
+                if g not in have:
+                    track("enrollments", con.execute("INSERT INTO enrollments(student_id, group_id, tariff, active, created_at) VALUES (?,?,?,1,?)",
+                                (sid, g, con.execute("SELECT tariff FROM students WHERE id=?", (sid,)).fetchone()[0], nowi)).lastrowid)
+                    st["groups"] += 1
+                elif not have[g]:
+                    con.execute("UPDATE enrollments SET active=1 WHERE student_id=? AND group_id=?", (sid, g)); st["groups"] += 1
+            if stage != "left":
+                for g, a in have.items():
+                    if a and g not in info["groups"]:
+                        con.execute("UPDATE enrollments SET active=0 WHERE student_id=? AND group_id=?", (sid, g)); st["groups"] += 1
+            con.execute("UPDATE students SET group_id=? WHERE id=? AND (group_id IS NULL OR group_id NOT IN (%s))"
+                        % ",".join("?" * len(info["groups"])), (info["groups"][0], sid, *info["groups"]))
+        sid_by_key[k] = sid
+
+    def find_sid(rec):
+        c = find_child(rec)
+        return sid_by_key.get(_key(c)) if c else None
+    # абонементы: сумма по (ребёнок, группа, месяц), как при переносе, потом сверяем с CRM
+    agg = {}
+    for rec in sub_recs:
+        sid, ym = find_sid(rec), parse_month(rec.get("month", ""))
+        if not sid or not ym or sub_kind(rec.get("tariff", "")) in ("trial", "makeup"):
+            continue
+        gid = _group_id(con, "", rec.get("group", "")) or con.execute("SELECT group_id FROM students WHERE id=?", (sid,)).fetchone()[0]
+        if not gid:
+            continue
+        price, lessons = parse_money(rec.get("price", "")) or 0, sub_lessons(rec)
+        a = agg.setdefault((sid, gid, ym), {"price": 0, "lessons": 0, "paid": True, "flex": False})
+        a["price"] += price; a["lessons"] += lessons
+        a["paid"] = a["paid"] and sub_status(rec.get("status", ""), price) == "paid"
+        a["flex"] = a["flex"] or "гибк" in _norm(rec.get("tariff", ""))
+    for (sid, gid, ym), a in agg.items():
+        e = con.execute("SELECT id FROM enrollments WHERE student_id=? AND group_id=?", (sid, gid)).fetchone()
+        eid = e[0] if e else track("enrollments", con.execute("INSERT INTO enrollments(student_id, group_id, tariff, active, created_at) VALUES (?,?,?,0,?)",
+                                         (sid, gid, "flex" if a["flex"] else "fixed", nowi)).lastrowid)
+        status = "paid" if a["paid"] else "invoiced"
+        old = con.execute("SELECT id, price, status FROM subscriptions WHERE enrollment_id=? AND month=? AND status != 'cancelled'", (eid, ym)).fetchone()
+        if not old:
+            track("subscriptions", con.execute("""INSERT INTO subscriptions(student_id, enrollment_id, month, tariff, lessons, per_lesson, price, status, created_at, paid_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,?)""", (sid, eid, ym, "flex" if a["flex"] else "fixed", a["lessons"],
+                                                            (a["price"] // a["lessons"]) if a["lessons"] else a["price"], a["price"], status,
+                                                            nowi, nowi if status == "paid" else None)).lastrowid)
+            st["subs"] += 1
+        elif old["status"] != status and status == "paid":
+            con.execute("UPDATE subscriptions SET status='paid', paid_at=? WHERE id=?", (nowi, old["id"]))
+            st["subs"] += 1
+    for rec in _records(con, "payments"):
+        sid = find_sid(rec)
+        d, _ = pay_date(rec)
+        amt = parse_money(rec.get("amount", ""))
+        if not sid or not d or not amt:
+            continue
+        d = d if len(d) > 10 else d + "T12:00"
+        if con.execute("SELECT 1 FROM payments WHERE student_id=? AND amount=? AND substr(paid_at,1,10)=?", (sid, amt, d[:10])).fetchone():
+            continue
+        track("payments", con.execute("""INSERT INTO payments(student_id, amount, method, paid_at, comment, user_name, confirmed, confirmed_by, confirmed_at, created_at)
+                       VALUES (?,?,?,?,?,'ERP',1,'Обновление из ERP',?,?)""",
+                    (sid, amt, pay_method(rec.get("method", "")), d, ((rec.get("comment") or "").strip() + " (из ERP)").strip(), nowi, nowi)).lastrowid)
+        st["payments"] += 1
+    from . import tasks as _tasks
+    for rec in _records(con, "tasks"):
+        sid = find_sid(rec)
+        if sid and (rec.get("task") or "").strip():
+            due = parse_date(rec.get("due", "")) or nowi
+            track("tasks", _tasks.import_erp_task(con, rec["task"], sid, due + "T10:00" if len(due) == 10 else due, (rec.get("comment") or "").strip()))
+    con.execute("DELETE FROM erp_uploads")  # файлы дня использованы: завтра загружаем свежие
+    con.execute("INSERT INTO audit(ts, user_id, action, detail) VALUES (?,?,?,?)", (nowi, user.get("id"), "erp.update", json.dumps(st)))
+    con.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('erp_last_update', ?)", (json.dumps({"at": nowi, "stats": st}, ensure_ascii=False),))
+    return {"stats": st, "at": nowi}
+
+
+def day_for_erp(con, d: str) -> dict:
+    """«Итоги дня для ERP»: что тренеры отметили в CRM, чтобы перенести в ERP (вечером, вручную или агентом в браузере)."""
+    from . import services as sv
+    import json as _j
+    out = []
+    reasons = {}
+    for r in con.execute("SELECT data FROM coach_reports WHERE date=?", (d,)):
+        try:
+            data = _j.loads(r["data"] or "{}")
+        except ValueError:
+            continue
+        reasons.update(data.get("absent") or {})
+        for k, v in (data.get("trials") or {}).items():
+            reasons[f"t{k}"] = v
+    from .coachreport import ABSENT, TRIAL
+    for g in con.execute("""SELECT g.id, g.name, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id
+                            WHERE g.active=1 ORDER BY b.name, g.time, g.name""").fetchall():
+        j = sv.journal(con, g["id"], d)
+        if not j["has_lesson"]:
+            continue
+        rows = []
+        for x in j["rows"]:
+            erp = (con.execute("SELECT erp_id FROM students WHERE id=?", (x["id"],)).fetchone() or [""])[0]
+            if x.get("status") == "trial":
+                came = {1: "пришёл", 0: "не пришёл"}.get(x.get("trial_came"), "нет отметки")
+                rows.append({"name": x["name"], "erp_id": erp, "mark": f"пробное: {came}" + (f", {TRIAL.get(reasons.get('t' + str(x['id'])), '')}" if x.get("trial_came") == 1 else "")})
+            elif x.get("status") in ("present", "absent", "makeup"):
+                mark = {"present": "был", "absent": "не был", "makeup": "отработка"}[x["status"]]
+                why = ABSENT.get(reasons.get(str(x["id"]), ""), "") if x["status"] == "absent" else ""
+                rows.append({"name": x["name"], "erp_id": erp, "mark": mark + (f" ({why})" if why else "")})
+            elif x.get("status") is None and x.get("status") != "vacation":
+                rows.append({"name": x["name"], "erp_id": erp, "mark": "нет отметки"})
+        if rows:
+            out.append({"group": g["name"], "branch": g["branch"], "rows": rows})
+    pays = []
+    for r in con.execute("SELECT c.data, b.name AS branch FROM coach_reports c JOIN branches b ON b.id=c.branch_id WHERE c.date=?", (d,)):
+        for p in (_j.loads(r["data"] or "{}").get("pays") or []):
+            pays.append({"branch": r["branch"], **{k: p.get(k, "") for k in ("name", "amount", "method", "what")}})
+    return {"date": d, "groups": out, "pays": pays}
 
 
 def undo(con, user: dict) -> dict:
