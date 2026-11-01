@@ -254,8 +254,7 @@ async function renderInbox(page) {
     const d = await api("GET", `/api/inbox?filter=${I.filter}&q=${encodeURIComponent(I.q)}`);
     const list = $("#conv-list"); if (!list) return;
     list.innerHTML = d.conversations.length ? d.conversations.map((c) => `
-      <div class="list-row click" data-conv="${c.id}">
-        <span class="pill ch-${esc(c.channel)}">${esc(chLabel(c.channel))}</span>
+      <div class="list-row click conv-row ${c.unread ? "unread" : ""}" data-conv="${c.id}" title="${esc(chLabel(c.channel))}">
         <div class="grow"><b>${esc(c.title || c.username || c.phone || "Без имени")}</b>${c.family_name ? ` <span class="muted small">· семья ${esc(c.family_name)}</span>` : ` <span class="pill yellow">нет карточки</span>`}${c.demo ? ` <span class="pill">тест</span>` : ""}
           <div class="small muted ellipsis">${esc(c.last_text)}</div></div>
         <div class="right"><div class="small muted">${dtWhen(c.last_at)}</div>${c.unread ? `<span class="nbadge static">${c.unread}</span>` : ""}</div>

@@ -1360,3 +1360,8 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
   .desk-main { display: contents; }
   #dw-hot { order: 1; } .desk-side { order: 2; } .desk-funnel { order: 3; margin-top: 0; }
 }
+
+/* «Чаты»: мессенджер виден только внутри диалога; новые сообщения: красная полоса слева */
+.conv-row { position: relative; padding-left: 18px; }
+.conv-row.unread::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 5px; border-radius: 0 4px 4px 0; background: var(--red); }
+.conv-row.unread b { font-weight: 800; }
