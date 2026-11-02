@@ -378,7 +378,8 @@ def tg_connect(con, base_url: str) -> dict:
             "url": (f"{get(con, 'tg_relay').rstrip('/')}/hook/telegram/{get(con, 'hook_token')}" if get(con, "tg_relay")
                     else f"{base_url}/hooks/telegram/{get(con, 'hook_token')}"),
             "secret_token": get(con, "tg_secret"),
-            "allowed_updates": ["message", "edited_message", "business_connection", "business_message"],
+            "allowed_updates": ["message", "edited_message", "business_connection", "business_message",
+                                "channel_post", "my_chat_member"],
             "drop_pending_updates": False,
         })
     except CommsError as e:
@@ -408,6 +409,10 @@ def _tg_kind_media(m: dict) -> tuple[str, str]:
 def tg_hook(con, upd: dict, headers) -> None:
     if not hmac.compare_digest(headers.get("X-Telegram-Bot-Api-Secret-Token") or "", get(con, "tg_secret")):
         raise PermissionError("неверный секрет Telegram")
+    if "channel_post" in upd or "my_chat_member" in upd:  # каналы филиалов: бот добавлен или в канале вышел пост
+        from . import channels
+        channels.note_tg(con, (upd.get("channel_post") or upd.get("my_chat_member") or {}).get("chat") or {})
+        return
     if "business_connection" in upd:
         bc = upd["business_connection"]
         put(con, "tg_business_conn", bc.get("id", ""))

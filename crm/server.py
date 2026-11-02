@@ -1838,6 +1838,66 @@ def report_search(con, h, user, body, q):
     return {"items": coachreport.search_clients(con, q.get("q") or "")}
 
 
+# ---------------- посты в каналы филиалов ----------------
+
+@route("GET", "/api/channels", role="posts")
+def channels_get(con, h, user, body, q):
+    from . import channels, comms
+    channels.ensure_tg_hook(con, base_url(h))
+    if comms.status(con)["max"]:
+        try:
+            channels.refresh_max(con)
+        except comms.CommsError:
+            pass
+    return channels.overview(con) | {"targets": channels.targets(con), "history": channels.history(con)}
+
+
+@route("POST", "/api/channels/link", role="posts")
+def channels_link(con, h, user, body, q):
+    from . import channels
+    try:
+        channels.link(con, int(body.get("branch_id") or 0), str(body.get("kind") or ""), str(body.get("chat_id") or ""))
+    except channels.PostError as e:
+        raise ApiError(str(e))
+    return {"ok": True}
+
+
+@route("POST", "/api/posts", role="posts")
+def posts_create(con, h, user, body, q):
+    from . import channels
+    import base64
+    try:
+        data = dict(body)
+        if body.get("photo_data"):
+            try:
+                raw = base64.b64decode(str(body["photo_data"]).split(",", 1)[-1])
+            except ValueError:
+                raise channels.PostError("Не удалось прочитать фото")
+            data["photo"] = channels.save_photo(raw)
+        return channels.create(con, user, data, base_url(h))
+    except channels.PostError as e:
+        raise ApiError(str(e))
+
+
+@route("POST", "/api/posts/{pid}/cancel", role="posts")
+def posts_cancel(con, h, user, body, q, pid):
+    from . import channels
+    channels.cancel(con, int(pid))
+    return {"ok": True}
+
+
+@route("GET", "/api/post-photo", role="public")
+def post_photo(con, h, user, body, q):
+    """Фото поста для Telegram и MAX: по секретной ссылке, без входа."""
+    from . import channels
+    p = channels.photo_path(q.get("t") or "")
+    if not p or not os.path.exists(p):
+        raise ApiError("Фото нет", 404)
+    with open(p, "rb") as f:
+        raw = f.read()
+    return Raw(raw, "image/png" if raw[:4] == b"\x89PNG" else "image/jpeg")
+
+
 @route("GET", "/api/envelope", role="any")
 def envelope_get(con, h, user, body, q):
     from . import coachreport

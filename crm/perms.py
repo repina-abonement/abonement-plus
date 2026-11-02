@@ -28,6 +28,7 @@ SECTIONS: dict[str, dict[str, str]] = {
     "payments": {"owner": "full", "senior": "view"},
     "fiscal": {"owner": "full", "senior": "full"},
     "spend": {"owner": "full"},
+    "posts": {"owner": "full", "senior": "full"},  # посты в каналы филиалов
     "dashboard": {"owner": "full"},
     "docs": {"owner": "full", "lawyer": "full"},
     "staffdocs": {"owner": "full", "lawyer": "view", "coach": "own", "promoter": "own"},

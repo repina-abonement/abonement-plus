@@ -289,8 +289,9 @@ def init_db(con: sqlite3.Connection):
     ai.init(con)
     calldigest.init(con)
     tasks.init(con)
-    from . import lifecycle
+    from . import lifecycle, channels
     lifecycle.init(con)
+    channels.init(con)
     planner.init(con)
     expenses.init(con)
     fiscal.init(con)

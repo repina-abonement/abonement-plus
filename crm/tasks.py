@@ -382,7 +382,12 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
             paylinks.sync(con, now.date())
         except Exception:  # noqa: BLE001 — PayKeeper недоступен: попробуем в следующий раз
             pass
-    from . import chains
+    from . import chains, channels
+    if send:
+        try:
+            channels.tick(con)  # запланированные посты в каналы филиалов
+        except Exception:  # noqa: BLE001
+            pass
     chains.tick(con, now, send)  # автоцепочки сообщений (включаются в Настройках)
     st = {k: setting(con, k) for k in AUTO_SETTINGS}
     trial_min = int((con.execute("SELECT value FROM settings WHERE key='trial_minutes'").fetchone() or ["60"])[0])
