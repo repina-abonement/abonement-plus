@@ -2418,7 +2418,7 @@ async function renderStaffDocsAdmin(box) {
 async function renderBackup(box) {
   const d = await api("GET", "/api/backup");
   box.innerHTML = `<h3>Резервные копии</h3>
-    <div class="small">На сервере: каждую ночь, хранится ${d.local_count} ${d.local_count === 1 ? "копия" : "копий"}${d.last_local ? `, последняя ${dtWhen(d.last_local)}` : ""}</div>
+    <div class="small">На сервере: каждый час, хранится ${d.local_count} ${d.local_count === 1 ? "копия" : "копий"}${d.last_local ? `, последняя ${dtWhen(d.last_local)}` : ""}</div>
     <div class="small">${d.yadisk ? `На Яндекс Диске (зашифрованные): ${d.last_remote ? "последняя " + esc(d.last_remote) : "ещё не было"}` : `<b style="color:#b42318">Яндекс Диск не подключён: копии только на этом сервере</b>`}</div>
     <div class="small">Excel со всей базой: каждый час${d.excel_last ? `, последний ${esc(d.excel_last.replace("T", " "))}` : ", ещё не было"}${d.yadisk ? " (на Диске в папке Excel)" : ""}</div>
     ${d.last_error ? `<div class="alert" style="margin-top:6px">${esc(d.last_error)}</div>` : ""}

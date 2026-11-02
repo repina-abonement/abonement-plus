@@ -11,7 +11,7 @@ import os
 import re
 import secrets
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -96,11 +96,31 @@ def _start_session(con, h, u) -> None:
     h.extra_headers.append(("Set-Cookie", cookie))
 
 
+LOGIN_FAILS, LOGIN_LOCK_MIN = 5, 15
+
+
 @route("POST", "/api/login", role="public")
 def login(con, h, user, body, q):
-    u = con.execute("SELECT * FROM users WHERE login=? AND active=1", ((body.get("login") or "").strip(),)).fetchone()
+    """Вход по паролю. Защита от подбора: 5 неверных паролей к одному логину за 15 минут - логин закрыт на 15 минут,
+    руководителю уходит сообщение в Telegram (считаем по логину: через мост все приходят с одного адреса)."""
+    name = (body.get("login") or "").strip().lower()[:80]
+    con.execute("CREATE TABLE IF NOT EXISTS login_fails (login TEXT NOT NULL, ts TEXT NOT NULL)")
+    since = (datetime.now() - timedelta(minutes=LOGIN_LOCK_MIN)).isoformat(timespec="seconds")
+    con.execute("DELETE FROM login_fails WHERE ts < ?", ((datetime.now() - timedelta(days=1)).isoformat(timespec="seconds"),))
+    if con.execute("SELECT COUNT(*) FROM login_fails WHERE login=? AND ts >= ?", (name, since)).fetchone()[0] >= LOGIN_FAILS:
+        raise ApiError(f"Слишком много неверных попыток. Подождите {LOGIN_LOCK_MIN} минут или попросите руководителя сменить пароль", 429)
+    u = con.execute("SELECT * FROM users WHERE lower(login)=? AND active=1", (name,)).fetchone()
     if not u or not db.check_password(body.get("password") or "", u["pw_hash"]):
+        con.execute("INSERT INTO login_fails(login, ts) VALUES (?,?)", (name, datetime.now().isoformat(timespec="seconds")))
+        if con.execute("SELECT COUNT(*) FROM login_fails WHERE login=? AND ts >= ?", (name, since)).fetchone()[0] == LOGIN_FAILS:
+            try:
+                from . import ownerbot
+                ownerbot.alert(con, f"⚠️ 5 неверных паролей подряд для логина «{name}». Вход по нему закрыт на {LOGIN_LOCK_MIN} минут. "
+                                    "Если это не сотрудник ошибся, смените ему пароль")
+            except Exception:  # noqa: BLE001
+                pass
         raise ApiError("Неверный логин или пароль", 401)
+    con.execute("DELETE FROM login_fails WHERE login=?", (name,))
     _start_session(con, h, u)
     return {"ok": True, "user": {"name": u["name"], "role": u["role"]}}
 

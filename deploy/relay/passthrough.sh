@@ -39,6 +39,36 @@ server {
 }
 NGX
 ln -sf /etc/nginx/sites-available/crm-http /etc/nginx/sites-enabled/crm-http
+# сторож: CRM раз в минуту присылает «жива», при сбое руководителю в Telegram (deploy/relay/watch.py)
+mkdir -p /opt/crm-watch
+curl -fsSL https://raw.githubusercontent.com/repina-abonement/abonement-plus/main/deploy/relay/watch.py -o /opt/crm-watch/watch.py
+cat > /etc/systemd/system/crm-watch.service <<UNIT
+[Unit]
+Description=CRM watchdog
+After=network-online.target
+[Service]
+ExecStart=/usr/bin/python3 /opt/crm-watch/watch.py
+Restart=always
+RestartSec=10
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload && systemctl enable -q --now crm-watch && systemctl restart crm-watch
+if [ -f "$RELAY" ] && ! grep -q "location /watch/" "$RELAY"; then
+  sed -i "0,/location = \/ {/s//location \/watch\/ {\n    allow $CRM_IP; deny all;\n    proxy_pass http:\/\/127.0.0.1:8099;\n  }\n  location = \/ {/" "$RELAY"
+fi
+
+# переключение на резервный сервер CRM одной командой: crm-switch НОВЫЙ_IP
+cat > /usr/local/bin/crm-switch <<'SW'
+#!/bin/bash
+set -e
+NEW="$1"; [ -z "$NEW" ] && { echo "Использование: crm-switch IP_сервера_CRM"; exit 1; }
+sed -i -E "s/upstream crm \{ server [0-9.]+:443; \}/upstream crm { server $NEW:443; }/" /etc/nginx/stream.d/crm.conf
+sed -i -E "s#proxy_pass http://[0-9.]+;#proxy_pass http://$NEW;#" /etc/nginx/sites-available/crm-http
+nginx -t && systemctl reload nginx && echo "Готово: ab-plus.ru теперь ведёт на $NEW"
+SW
+chmod +x /usr/local/bin/crm-switch
+
 command -v ufw >/dev/null && ufw status | grep -q active && { ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; }
 
 if nginx -t; then

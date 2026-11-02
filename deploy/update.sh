@@ -9,7 +9,8 @@ if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
   git reset -q --hard origin/main
   # проверка перед перезапуском: если код не собирается, остаёмся на старой версии
   if python3 -m compileall -q crm >/dev/null; then
-    systemctl restart abonement-plus abonement-plus-backup
+    # резервный сервер (deploy/standby.sh): код обновляем, но CRM не запускаем, пока не включили crm-activate
+    [ -f /etc/abonement-plus.standby ] || systemctl restart abonement-plus abonement-plus-backup
     echo "Обновлено до $(git rev-parse --short HEAD)"
   else
     git reset -q --hard HEAD@{1}
@@ -27,6 +28,7 @@ fi
 # Домен может указывать на этот сервер или на мост в Нидерландах (deploy/relay/passthrough.sh пересылает зашифрованный
 # трафик сюда, чтобы CRM открывалась и с VPN): в обоих случаях подключаем домен здесь
 RELAY_IP=$(cat "$DIR/deploy/relay/relay_ip.txt" 2>/dev/null | tr -d '[:space:]')
+[ -f /etc/abonement-plus.standby ] && exit 0
 if [ -f "$DIR/deploy/domains.txt" ] && [ -f "$NGX" ]; then
   MYIP=$(curl -s -4 --max-time 5 https://ifconfig.me || true)
   while read -r D; do

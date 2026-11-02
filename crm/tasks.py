@@ -365,6 +365,7 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     lifecycle.tick(con, now)  # задачи на всех этапах, где клиент может застрять
     try:
         if send:
+            ownerbot.heartbeat(con)  # сторож на мосту: если сигнал пропал, руководителю в Telegram
             ownerbot.tick(con, now)
             missed_call_messages(con, now)  # клиенту после пропущенного звонка (только после запуска автосообщений)  # красное руководителю в Telegram, напоминания в «Службу заботы»
     except Exception:  # noqa: BLE001 — уведомления не должны ломать проход

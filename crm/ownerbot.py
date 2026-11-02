@@ -130,6 +130,38 @@ def collect(con, now: datetime) -> list[tuple[str, str]]:
 
 # ---------- отправка ----------
 
+def owner_chats(con) -> list[str]:
+    """Личные Telegram руководителей, подключённые к CRM («Красное в Telegram»)."""
+    return [c for (uid,) in con.execute("SELECT id FROM users WHERE role='admin' AND active=1").fetchall()
+            if (c := comms.get(con, f"owner_tg_{uid}"))]
+
+
+def heartbeat(con) -> bool:
+    """Сигнал «CRM жива» сторожу на мосту в Нидерландах (deploy/relay/watch.py) раз в минуту: если сигнал пропал,
+    сторож сам напишет руководителю в Telegram, даже когда сервер CRM лежит целиком."""
+    relay, tok = comms.get(con, "tg_relay"), comms.get(con, "tg_token")
+    chats = owner_chats(con)
+    if not relay or not tok or not chats:
+        return False
+    try:
+        comms.http("POST", relay.rstrip("/") + "/watch/beat", data={"token": tok, "chats": chats}, timeout=8)
+        return True
+    except comms.CommsError:
+        return False
+
+
+def alert(con, text: str) -> int:
+    """Срочное руководителю сразу, в любое время (например, подбор пароля)."""
+    n = 0
+    for chat in owner_chats(con):
+        try:
+            comms.tg_call(con, "sendMessage", {"chat_id": chat, "text": text})
+            n += 1
+        except comms.CommsError:
+            pass
+    return n
+
+
 def tick(con, now: datetime | None = None) -> int:
     now = now or datetime.now()
     if not comms.get(con, "tg_token"):
