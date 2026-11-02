@@ -25,6 +25,12 @@ NGX=/etc/nginx/sites-available/abonement-plus
 if [ -f "$NGX" ] && grep -q "client_max_body_size 2m;" "$NGX"; then
   sed -i "s/client_max_body_size 2m;/client_max_body_size 100m;/" "$NGX" && nginx -t -q 2>/dev/null && systemctl reload nginx
 fi
+# сжатие: страницы CRM (около 800 КБ скриптов и стилей) уходят в 4 раза меньше, на слабом мобильном интернете это заметно
+GZ=/etc/nginx/conf.d/crm-gzip.conf
+if [ ! -f "$GZ" ] && [ ! -f "$GZ.off" ] && [ -d /etc/nginx/conf.d ]; then
+  printf "gzip_vary on;\ngzip_proxied any;\ngzip_comp_level 5;\ngzip_min_length 1024;\ngzip_types text/css application/javascript text/javascript application/json image/svg+xml;\n" > "$GZ"
+  if nginx -t -q 2>/dev/null; then systemctl reload nginx; else rm -f "$GZ"; touch "$GZ.off"; fi
+fi
 # Домен может указывать на этот сервер или на мост в Нидерландах (deploy/relay/passthrough.sh пересылает зашифрованный
 # трафик сюда, чтобы CRM открывалась и с VPN): в обоих случаях подключаем домен здесь
 RELAY_IP=$(cat "$DIR/deploy/relay/relay_ip.txt" 2>/dev/null | tr -d '[:space:]')
