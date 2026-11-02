@@ -60,4 +60,18 @@ if [ -f "$DIR/deploy/domains.txt" ] && [ -f "$NGX" ]; then
       echo "Сертификат для$MISS не получился, следующая попытка через 30 минут" >&2
     fi
   fi
+  # http://ab-plus.ru → https://ab-plus.ru. certbot переадресует только первое имя, остальные получали «404 Not Found»
+  RED=/etc/nginx/sites-available/crm-https-redirect
+  EXTRA=$(echo "$NAMES" | awk '{$1=""; print}' | xargs)
+  if [ -n "$EXTRA" ] && [ -z "$MISS" ]; then
+    WANT="server {
+  listen 80;
+  server_name $EXTRA;
+  location / { return 301 https://\$host\$request_uri; }
+}"
+    if [ "$(cat "$RED" 2>/dev/null)" != "$WANT" ]; then
+      echo "$WANT" > "$RED" && ln -sf "$RED" /etc/nginx/sites-enabled/crm-https-redirect
+      if nginx -t -q 2>/dev/null; then systemctl reload nginx; else rm -f "$RED" /etc/nginx/sites-enabled/crm-https-redirect; fi
+    fi
+  fi
 fi
