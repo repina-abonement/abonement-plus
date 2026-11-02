@@ -2638,7 +2638,7 @@ class Handler(BaseHTTPRequestHandler):
                     if method != "DELETE" and "application/json" not in (self.headers.get("Content-Type") or ""):
                         raise ApiError("Ожидается JSON", 415)
                     n = int(self.headers.get("Content-Length") or 0)
-                    if n > (21_000_000 if url.path.startswith("/api/offers") else 40_000_000 if url.path.startswith("/api/erp") else 80_000_000 if url.path.startswith("/api/import/telegram") else 8_000_000 if url.path.startswith("/api/memos") else 1_000_000):
+                    if n > (21_000_000 if url.path.startswith("/api/offers") else 40_000_000 if url.path.startswith("/api/erp") else 80_000_000 if url.path.startswith("/api/import/telegram") else 8_000_000 if url.path.startswith("/api/memos") else 14_000_000 if url.path.startswith("/api/posts") else 1_000_000):
                         raise ApiError("Слишком большой запрос", 413)
                     if n:
                         body = json.loads(self.rfile.read(n) or b"{}")

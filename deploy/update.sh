@@ -20,6 +20,13 @@ fi
 # Свои домены CRM: перечислены в deploy/domains.txt (по одному в строке). Когда домен уже указывает на этот сервер,
 # добавляем его в nginx и получаем сертификат https. Проверка дешёвая, работает при каждом запуске таймера.
 NGX=/etc/nginx/sites-available/abonement-plus
+# большие файлы (выгрузки ERP, экспорт Telegram, картинки постов): первоначальная настройка пускала только 2 МБ
+if [ -f "$NGX" ] && grep -q "client_max_body_size 2m;" "$NGX"; then
+  sed -i "s/client_max_body_size 2m;/client_max_body_size 100m;/" "$NGX" && nginx -t -q 2>/dev/null && systemctl reload nginx
+fi
+# Домен может указывать на этот сервер или на мост в Нидерландах (deploy/relay/passthrough.sh пересылает зашифрованный
+# трафик сюда, чтобы CRM открывалась и с VPN): в обоих случаях подключаем домен здесь
+RELAY_IP=$(cat "$DIR/deploy/relay/relay_ip.txt" 2>/dev/null | tr -d '[:space:]')
 if [ -f "$DIR/deploy/domains.txt" ] && [ -f "$NGX" ]; then
   MYIP=$(curl -s -4 --max-time 5 https://ifconfig.me || true)
   while read -r D; do
@@ -28,7 +35,7 @@ if [ -f "$DIR/deploy/domains.txt" ] && [ -f "$NGX" ]; then
     case "$D" in \#*) continue ;; esac
     grep -q "server_name.*\b$D\b" "$NGX" && continue
     IP=$(getent ahostsv4 "$D" | awk 'NR==1{print $1}' || true)
-    if [ -n "$IP" ] && [ "$IP" = "$MYIP" ]; then
+    if [ -n "$IP" ] && { [ "$IP" = "$MYIP" ] || [ "$IP" = "$RELAY_IP" ]; }; then
       sed -i "0,/server_name /s/server_name \(.*\);/server_name \1 $D;/" "$NGX"
       if nginx -t -q 2>/dev/null; then
         systemctl reload nginx

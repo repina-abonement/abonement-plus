@@ -65,7 +65,7 @@ async function renderPosts(page) {
   if ($("#ps-at")) $("#ps-at").onchange = () => { P.when = $("#ps-at").value; };
   if ($("#ps-photo")) $("#ps-photo").onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;
-    try { keep(); P.photo = await repShrinkTo(f, 2048); renderPosts(page); } catch (err) { fail(err); }
+    try { keep(); P.photo = await repShrinkTo(f, 1600); renderPosts(page); } catch (err) { fail(err); }
   };
   if ($("#ps-photo-del")) $("#ps-photo-del").onclick = () => { keep(); P.photo = null; renderPosts(page); };
   if ($("#ps-send")) $("#ps-send").onclick = async (e) => {
@@ -98,7 +98,7 @@ function repShrinkTo(file, max) {  // картинку для поста ужи�
       const k = Math.min(1, max / Math.max(img.width, img.height));
       const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
       c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-      URL.revokeObjectURL(url); ok(c.toDataURL("image/jpeg", 0.9));
+      URL.revokeObjectURL(url); ok(c.toDataURL("image/jpeg", 0.88));
     };
     img.src = url;
   });
