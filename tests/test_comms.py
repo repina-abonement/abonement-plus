@@ -54,6 +54,8 @@ def main():
     __import__("crm.comms", fromlist=["put"]).put(con, "auto_live", "1")  # тест проверяет отправку: автосообщения включены
     db.seed_demo(con)
     comms.seed_demo(con)
+    con.execute("INSERT INTO settings(key, value) VALUES ('coach_gate_open', '2026-11-02T20:00')")  # CRM тренерам открыта
+    con.commit()
     con.close()
     srv = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()

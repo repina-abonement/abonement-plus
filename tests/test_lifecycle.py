@@ -104,7 +104,9 @@ check("makeup_check" in open_kinds(m2), "Предложили отработку
 print("Старые клиенты из ERP задачами не заваливаем")
 old_lead = kid(stage="lead", ago_days=200)
 old_ref = kid(stage="refused", ago_days=400, refusal_reason="Дорого")
+con.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('revive_per_day', '0')")  # «оживление» (днём) проверяем ниже отдельно
 lifecycle.tick(con, now)
+con.execute("DELETE FROM settings WHERE key='revive_per_day'")
 check(not open_kinds(old_lead) and not open_kinds(old_ref), "Лид полугодовой давности и отказ годичной: задач нет")
 print("Старую базу оживляем порциями: горячие первыми")
 con.execute("UPDATE tasks SET status='done' WHERE status='open'")

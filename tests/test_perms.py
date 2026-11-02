@@ -70,6 +70,16 @@ def main():
           "Тренер-промоутер: свой стол, рабочего стола администраторов нет")
     check(menu("babanov") == {"docs", "staffdocs", "team", "pay", "planner", "settings"}, "Юрист: документы, команда, своё")
 
+    print("Зал ожидания тренеров")
+    m = json.loads(S["lesha"]("GET", "/api/meta")[1])
+    check(m["locked"] and not m["tour_pending"] and m["groups"] == [], "До свистка тренер видит только табло")
+    check(S["lesha"]("GET", "/api/coach/today")[0] == 403 and S["lesha"]("GET", "/api/staff-docs")[0] == 200,
+          "До свистка сервер не отдаёт тренеру данные, но документы подписать можно")
+    check(S["babanov"]("GET", "/api/coach-gate")[0] == 200 and S["babanov"]("POST", "/api/coach-gate", {"open": True})[0] == 403,
+          "Юрист видит статус, но свисток только у руководителя")
+    check(S["owner"]("POST", "/api/coach-gate", {"open": True})[0] == 200 and not json.loads(S["lesha"]("GET", "/api/meta")[1])["locked"],
+          "После свистка CRM открывается тренеру")
+
     print("Сервер не пускает по прямой ссылке")
     rules = [  # (кто, запрос, ожидаемый ответ)
         ("olga", "GET /api/payments", 403), ("olga", "GET /api/fiscal", 403), ("olga", "GET /api/board/sales", 200),

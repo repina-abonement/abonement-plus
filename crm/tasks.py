@@ -365,6 +365,7 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     lifecycle.tick(con, now)  # задачи на всех этапах, где клиент может застрять
     try:
         if send:
+            ownerbot.heartbeat(con)  # сторож на мосту: если сигнал пропал, руководителю в Telegram
             ownerbot.tick(con, now)
             missed_call_messages(con, now)  # клиенту после пропущенного звонка (только после запуска автосообщений)  # красное руководителю в Telegram, напоминания в «Службу заботы»
     except Exception:  # noqa: BLE001 — уведомления не должны ломать проход
@@ -382,7 +383,12 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
             paylinks.sync(con, now.date())
         except Exception:  # noqa: BLE001 — PayKeeper недоступен: попробуем в следующий раз
             pass
-    from . import chains
+    from . import chains, channels
+    if send:
+        try:
+            channels.tick(con)  # запланированные посты в каналы филиалов
+        except Exception:  # noqa: BLE001
+            pass
     chains.tick(con, now, send)  # автоцепочки сообщений (включаются в Настройках)
     st = {k: setting(con, k) for k in AUTO_SETTINGS}
     trial_min = int((con.execute("SELECT value FROM settings WHERE key='trial_minutes'").fetchone() or ["60"])[0])

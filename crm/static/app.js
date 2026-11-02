@@ -280,7 +280,7 @@ async function renderLogin(force = false) {
 /* ---------- каркас ---------- */
 const VIEWS = [
   ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Ученики"], ["skips", "Пропуски"], ["manual", "Ручные задачи"],
-  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["docs", "Документы"], ["settings", "Настройки"],
+  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["posts", "Посты в каналы"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["docs", "Документы"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
   team: '<circle cx="12" cy="6" r="2.5"/><circle cx="5.5" cy="17.5" r="2.5"/><circle cx="18.5" cy="17.5" r="2.5"/><path d="M12 8.5v3.5M5.5 15v-3h13v3"/>',
@@ -301,6 +301,7 @@ const NAV_ICONS = {
   payments: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h3"/>',
   search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
   docs: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 11h5M10 14.5h5M10 18h3"/>',
+  posts: '<path d="M4 10v4l3 .5V9.5zM7 9.5l10-4.5v14l-10-4.5"/><path d="M9 15l1 4h2.5l-1-3.6M19 10.5a2.5 2.5 0 0 1 0 3"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>',
   more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
 };
@@ -321,7 +322,7 @@ const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></s
 /* Боковое меню: главное сверху, остальное по папкам. Открыта папка с текущим разделом и те, что сотрудник раскрыл сам */
 const NAV_TOP = ["today", "sales", "inbox", "planner"];
 const NAV_FOLDERS = [["Клиенты", ["members", "skips", "manual"]], ["Занятия", ["journal", "schedule", "coaches"]],
-  ["Деньги", ["payments", "fiscal", "merch", "spend", "dashboard"]], ["Школа", ["team", "docs", "settings"]]];
+  ["Деньги", ["payments", "fiscal", "merch", "spend", "dashboard"]], ["Школа", ["team", "posts", "docs", "settings"]]];
 const navOpen = () => { try { return JSON.parse(localStorage.getItem("crm.nav_open") || "{}"); } catch (_) { return {}; } };
 function sideNav(views) {
   const item = ([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}<span>${t}</span>${badge(k)}</button>`;
@@ -509,6 +510,7 @@ async function render() {
   if (!page) return;
   page.classList.remove("readonly");
   if (S.meta && S.meta.staff_docs_pending) return renderStaffDocs(page);
+  if (S.meta && S.meta.locked) return renderLobby(page);
   await renderView(page);
   if (["sales", "today"].includes(S.view) && !S.viewAs) festiveBanner(page);
   if (S.meta && S.meta.tour_pending && !S.tourOn) startTour();
@@ -537,6 +539,7 @@ async function renderView(page) {
     if (S.view === "journal") return await renderJournal(page);
     if (S.view === "meet") return await renderMeet(page);
     if (S.view === "team") return await renderTeam(page);
+    if (S.view === "posts") return await renderPosts(page);
     if (S.view === "search") return await renderSearch(page);
     if (S.view === "settings") return await renderSettings(page);
     if (S.view === "docs") return await renderDocs(page);
@@ -2270,6 +2273,15 @@ async function boot() {
     S.meta = await api("GET", "/api/meta");
     S.user = S.meta.user;
   } catch (e) { if (e.message !== "Нужно войти") renderLogin(); return; }
+  if (S.meta.locked) {  // тренер в зале ожидания: без меню, только документы и табло
+    app.innerHTML = `<main id="page" class="lobby-page"></main>`;
+    render();
+    setInterval(async () => {
+      if (document.hidden) return;
+      try { const m = await api("GET", "/api/meta"); if (!m.locked) location.reload(); } catch (_) {}
+    }, 30000);
+    return;
+  }
   S.view = visibleViews()[0][0];
   try { const v = localStorage.getItem("crm.view"); if (v && visibleViews().some(([k]) => k === v)) S.view = v; } catch (_) {}
   shell();
@@ -2396,13 +2408,68 @@ async function renderStaffDocs(page) {
   };
 }
 
+/* Зал ожидания тренера: вошёл, подписал документы, ждёт «свистка» руководителя. Экран сам откроет CRM, когда разрешат */
+function renderLobby(page) {
+  const first = esc(((S.user && S.user.name) || "").split(" ")[0] || "тренер");
+  const app_ = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  page.innerHTML = `<div class="lobby">
+    <div class="lb-board" aria-label="Табло">
+      <div class="lb-top">ФУТБОЛИКА · ПРЕДСЕЗОНКА</div>
+      <div class="lb-score">
+        <div class="lb-team"><b>${first}</b><span>хозяева</span></div>
+        <div class="lb-num">1<i>:</i>0</div>
+        <div class="lb-team"><b>Бумажки</b><span>гости</span></div>
+      </div>
+      <div class="lb-time"><span class="lb-dot"></span> ждём свисток</div>
+    </div>
+    <h2>Ты в составе, ${first}! ⚽</h2>
+    <p>Документы подписаны, первый гол твой. CRM для тренеров пока на предсезонных сборах: откроется по свистку Юлии.
+      Этот экран откроется сам, нажимать ничего не нужно.</p>
+    <div class="lb-steps">
+      <div class="lb-step done">✅ Вышел на поле: вход в CRM</div>
+      <div class="lb-step done">✅ Подписал документы</div>
+      <div class="lb-step ${app_ ? "done" : ""}">${app_ ? "✅ Значок CRM на экране телефона" : "📲 Поставь значок CRM на экран телефона (как, написано ниже)"}</div>
+      <div class="lb-step wait">⏳ Свисток на старт: ждём команду</div>
+    </div>
+    ${app_ ? "" : `<details class="section lb-how" open><summary><b>Как поставить значок</b></summary>
+      ${ios ? `<ol><li>Открой эту страницу в Safari.</li><li>Нажми «Поделиться» (квадрат со стрелкой вверх). Не видно? Сначала три точки справа от адреса.</li>
+        <li>Пролистай вниз, нажми «На экран «Домой»».</li><li>Нажми «Добавить».</li></ol>`
+      : `<ol><li>Открой эту страницу в Chrome.</li><li>Нажми три точки справа вверху.</li><li>Нажми «Установить приложение» или «Добавить на главный экран».</li><li>Нажми «Установить».</li></ol>`}
+      <div class="small muted">Потом открой CRM со значка и войди ещё раз.</div></details>`}
+    <div class="section lb-soon"><h3>Что будет в CRM после свистка</h3>
+      <div>👋 «Встречаю детей»: отметка, кто пришёл</div>
+      <div>📅 Свои группы и расписание</div>
+      <div>📝 Отчёт о смене за пару минут</div>
+      <div>💰 Своя зарплата на сегодня</div>
+      <div>📌 Задачи от администраторов</div></div>
+    <p class="small muted">Пока можно размяться и проверить, что свисток на месте 😉</p>
+    <button class="btn" id="lb-out">Выйти</button>
+  </div>`;
+  $("#lb-out").onclick = async () => { try { await api("POST", "/api/logout"); } catch (_) {} location.reload(); };
+}
+
 async function renderStaffDocsAdmin(box) {
   const d = await api("GET", "/api/staff-docs/overview");
-  box.innerHTML = `<h3>Документы сотрудников</h3><div class="small muted">NDA, правила работы с данными, согласие, журнал действий, электронная подпись. Каждый подписывает при первом входе</div>
+  let gate = null;
+  try { gate = await api("GET", "/api/coach-gate"); } catch (_) {}
+  const coaches = d.items.filter((u) => u.role === "coach");
+  box.innerHTML = `${gate ? `<div class="section lb-gate ${gate.open_at ? "open" : ""}">
+      <h3>${gate.open_at ? "🟢 CRM открыта тренерам" : "🏁 Тренеры ждут свистка"}</h3>
+      <div class="small muted">${gate.open_at ? `Открыта ${dtWhen(gate.open_at)}. Тренеры видят свои группы, отметки, отчёт о смене и зарплату`
+        : "Тренеры могут войти и подписать документы, но вместо CRM видят табло «ждём свисток». Откройте, когда будете готовы: экран у них откроется сам"}</div>
+      ${coaches.length ? `<div class="small" style="margin-top:6px">${coaches.map((u) => `${esc(u.name)}: ${u.last ? "✅ вошёл, документы подписаны" : "⬜ ещё не входил"}`).join("<br>")}</div>` : ""}
+      ${S.user.role === "admin" ? `<button class="btn ${gate.open_at ? "" : "primary"}" id="gate-btn" style="margin-top:10px">${gate.open_at ? "Закрыть снова (табло «ждём свисток»)" : "📣 Свисток! Открыть CRM тренерам"}</button>` : ""}
+    </div>` : ""}<h3>Документы сотрудников</h3><div class="small muted">NDA, правила работы с данными, согласие, журнал действий, электронная подпись. Каждый подписывает при первом входе</div>
     ${d.items.map((u) => `<div class="list-row"><div class="grow">${esc(u.name)}</div>
       ${u.pending ? `<span class="pill red">не подписал${u.last ? " новую редакцию" : ""}</span>` : `<span class="pill green">подписал ${dtWhen(u.last)}</span>`}
       ${u.tour ? `<span class="pill green" title="Обучение в CRM">обучение ${dtWhen(u.tour)}</span>` : `<span class="pill">обучение не пройдено</span>`}
       ${u.last ? `<button class="btn sm" data-sdlog="${u.id}">Лист подписания</button>` : ""}</div>`).join("") || `<div class="small muted">Сотрудников пока нет</div>`}`;
+  if ($("#gate-btn")) $("#gate-btn").onclick = async () => {
+    const open = !gate.open_at;
+    if (!confirm(open ? "Открыть CRM всем тренерам? У них сразу начнётся обучение, потом откроется работа" : "Закрыть CRM тренерам? Они снова увидят табло «ждём свисток»")) return;
+    try { await api("POST", "/api/coach-gate", { open }); toast(open ? "Свисток! CRM открыта тренерам ⚽" : "CRM для тренеров закрыта"); renderStaffDocsAdmin(box); } catch (e) { fail(e); }
+  };
   box.querySelectorAll("[data-sdlog]").forEach((b) => (b.onclick = async () => {
     const l = await api("GET", `/api/staff-docs/log/${b.dataset.sdlog}`);
     openDrawer(`<h2>Лист подписания</h2><div class="muted">${esc(l.name)}</div>
@@ -2416,7 +2483,7 @@ async function renderStaffDocsAdmin(box) {
 async function renderBackup(box) {
   const d = await api("GET", "/api/backup");
   box.innerHTML = `<h3>Резервные копии</h3>
-    <div class="small">На сервере: каждую ночь, хранится ${d.local_count} ${d.local_count === 1 ? "копия" : "копий"}${d.last_local ? `, последняя ${dtWhen(d.last_local)}` : ""}</div>
+    <div class="small">На сервере: каждый час, хранится ${d.local_count} ${d.local_count === 1 ? "копия" : "копий"}${d.last_local ? `, последняя ${dtWhen(d.last_local)}` : ""}</div>
     <div class="small">${d.yadisk ? `На Яндекс Диске (зашифрованные): ${d.last_remote ? "последняя " + esc(d.last_remote) : "ещё не было"}` : `<b style="color:#b42318">Яндекс Диск не подключён: копии только на этом сервере</b>`}</div>
     <div class="small">Excel со всей базой: каждый час${d.excel_last ? `, последний ${esc(d.excel_last.replace("T", " "))}` : ", ещё не было"}${d.yadisk ? " (на Диске в папке Excel)" : ""}</div>
     ${d.last_error ? `<div class="alert" style="margin-top:6px">${esc(d.last_error)}</div>` : ""}

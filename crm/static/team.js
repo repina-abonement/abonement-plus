@@ -25,9 +25,10 @@ async function renderTeam(page) {
 
     <section class="tm-sec"><div class="tm-h"><div><b>Оргструктура</b><small>кто кому подчиняется</small></div></div>
       <div class="tm-tree">
-        ${node(ids("owner")[0], "Руководитель", true)}
+        ${node(ids("owner")[0], "Владелец, руководитель", true)}
         <i class="tm-line"></i>
         <div class="tm-level">
+          ${ids("lawyers").length || ids("others").length ? `<div class="tm-col tm-side">${ids("lawyers").map((id) => node(id, "Юрист")).join("")}${ids("others").map((id) => node(id, sub(U[id], "Полный доступ"))).join("")}</div>` : ""}
           <div class="tm-col tm-main">
             ${ids("control").length ? `${node(ids("control")[0], "Старший администратор")}<i class="tm-line"></i>` : ""}
             <div class="tm-depts">
@@ -36,7 +37,6 @@ async function renderTeam(page) {
               ${dept("promoters", "Промоутеры", "#2c6fd1", "Промоутер")}
             </div>
           </div>
-          ${ids("lawyers").length ? `<div class="tm-col">${ids("lawyers").map((id) => node(id, "Юрист")).join("")}</div>` : ""}
         </div>
       </div>
     </section>

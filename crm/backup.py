@@ -1,8 +1,8 @@
 """Резервные копии базы.
 
-1. Каждую ночь (и по кнопке) копия базы на этом же сервере, последние 14 копий.
+1. Каждый час (и по кнопке) копия базы на этом же сервере: за последние 48 часов и по одной за день за 14 дней.
 2. Если подключён Яндекс Диск: копия сжимается, шифруется паролем (AES-256, openssl) и загружается
-   в папку приложения на Диске. На Диске хранятся последние 30 копий. Без пароля шифрования копию не открыть,
+   в папку приложения на Диске. На Диске: все за последние 48 часов и по одной за каждый день за 30 дней. Без пароля шифрования копию не открыть,
    поэтому пароль показывается админу в Настройках, его нужно сохранить отдельно от сервера.
 
 3. Фото (аватарки сотрудников, отчёты тренеров о смене): каждое новое фото один раз шифруется тем же паролем
@@ -62,9 +62,28 @@ def backup_once() -> str:
         src.backup(out)
     out.close()
     src.close()
-    for old in sorted(glob.glob(os.path.join(DIR, "crm-*.sqlite3")))[:-KEEP]:
-        os.remove(old)
+    names = [os.path.basename(x) for x in glob.glob(os.path.join(DIR, "crm-*.sqlite3"))]
+    keep = _copies_keep(names, datetime.now(), 48, KEEP)
+    for old in names:
+        if old not in keep:
+            os.remove(os.path.join(DIR, old))
     return dst
+
+
+def _copies_keep(names: list[str], now: datetime, fresh: int, days: int) -> set[str]:
+    """Копии делаются каждый час (Юлия, 02.11): последние fresh штук и последняя за каждый день за days дней."""
+    names = sorted(n for n in names if n.startswith("crm-"))
+    keep = set(names[-fresh:])
+    per_day = {}
+    for n in names:
+        per_day[n[4:14]] = n  # crm-YYYY-MM-DD_HHMM… → последняя за день
+    for day, n in per_day.items():
+        try:
+            if (now - datetime.strptime(day, "%Y-%m-%d")).days <= days:
+                keep.add(n)
+        except ValueError:
+            pass
+    return keep
 
 
 def _yd(con, method, path, token, **kw):
@@ -106,7 +125,8 @@ def upload(con, local: str) -> str:
     try:
         lst = _yd(con, "GET", "/resources?path=app:/&limit=200&sort=name", token)
         items = [x["name"] for x in (lst.get("_embedded") or {}).get("items", []) if x["name"].startswith("crm-")]
-        for old in sorted(items)[:-REMOTE_KEEP]:
+        keep = _copies_keep(items, datetime.now(), 48, REMOTE_KEEP)
+        for old in [x for x in items if x not in keep]:
             _yd(con, "DELETE", f"/resources?path={quote('app:/' + old)}&permanently=true", token)
     except Exception:  # noqa: BLE001 — уборка не критична
         pass
@@ -257,7 +277,7 @@ def status(con) -> dict:
 
 
 if __name__ == "__main__":
-    # раз в минуту смотрим: новый час → Excel; полная копия раз в сутки (ночью в 3 часа или если давно не было)
+    # раз в минуту смотрим: новый час → Excel и полная зашифрованная копия базы
     last_hour = None
     while True:
         if os.path.exists(DB_PATH):
@@ -274,7 +294,7 @@ if __name__ == "__main__":
                     con.commit()
                     last = _get(con, "backup_last_local")
                     age = (now - datetime.fromisoformat(last)).total_seconds() / 3600 if last else 99
-                    if age > 25 or (now.hour == 3 and age > 20):
+                    if age >= 0.9:  # полная зашифрованная копия каждый час (раньше раз в сутки)
                         try:
                             print("Копия:", run(con), flush=True)
                         except Exception as e:  # noqa: BLE001

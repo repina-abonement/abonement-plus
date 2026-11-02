@@ -11,7 +11,7 @@ import os
 import re
 import secrets
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -96,11 +96,31 @@ def _start_session(con, h, u) -> None:
     h.extra_headers.append(("Set-Cookie", cookie))
 
 
+LOGIN_FAILS, LOGIN_LOCK_MIN = 5, 15
+
+
 @route("POST", "/api/login", role="public")
 def login(con, h, user, body, q):
-    u = con.execute("SELECT * FROM users WHERE login=? AND active=1", ((body.get("login") or "").strip(),)).fetchone()
+    """Вход по паролю. Защита от подбора: 5 неверных паролей к одному логину за 15 минут - логин закрыт на 15 минут,
+    руководителю уходит сообщение в Telegram (считаем по логину: через мост все приходят с одного адреса)."""
+    name = (body.get("login") or "").strip().lower()[:80]
+    con.execute("CREATE TABLE IF NOT EXISTS login_fails (login TEXT NOT NULL, ts TEXT NOT NULL)")
+    since = (datetime.now() - timedelta(minutes=LOGIN_LOCK_MIN)).isoformat(timespec="seconds")
+    con.execute("DELETE FROM login_fails WHERE ts < ?", ((datetime.now() - timedelta(days=1)).isoformat(timespec="seconds"),))
+    if con.execute("SELECT COUNT(*) FROM login_fails WHERE login=? AND ts >= ?", (name, since)).fetchone()[0] >= LOGIN_FAILS:
+        raise ApiError(f"Слишком много неверных попыток. Подождите {LOGIN_LOCK_MIN} минут или попросите руководителя сменить пароль", 429)
+    u = con.execute("SELECT * FROM users WHERE lower(login)=? AND active=1", (name,)).fetchone()
     if not u or not db.check_password(body.get("password") or "", u["pw_hash"]):
+        con.execute("INSERT INTO login_fails(login, ts) VALUES (?,?)", (name, datetime.now().isoformat(timespec="seconds")))
+        if con.execute("SELECT COUNT(*) FROM login_fails WHERE login=? AND ts >= ?", (name, since)).fetchone()[0] == LOGIN_FAILS:
+            try:
+                from . import ownerbot
+                ownerbot.alert(con, f"⚠️ 5 неверных паролей подряд для логина «{name}». Вход по нему закрыт на {LOGIN_LOCK_MIN} минут. "
+                                    "Если это не сотрудник ошибся, смените ему пароль")
+            except Exception:  # noqa: BLE001
+                pass
         raise ApiError("Неверный логин или пароль", 401)
+    con.execute("DELETE FROM login_fails WHERE login=?", (name,))
     _start_session(con, h, u)
     return {"ok": True, "user": {"name": u["name"], "role": u["role"]}}
 
@@ -451,6 +471,34 @@ def coach_guard(con, user, group_id: int):
         raise ApiError("Это не ваша группа", 403)
 
 
+# Зал ожидания тренеров (Юлия, 02.11): тренеры ставят приложение, входят и подписывают документы, а сама CRM
+# открывается им только по команде руководителя («свисток»). Пока закрыто, сервер отдаёт тренеру лишь вход,
+# документы и своё табло; остальное отвечает 403, даже если открыть адрес вручную.
+GATE_FREE = re.compile(r"^/api/(meta|me|me/password|pin|pin/hello|pin/login|login|logout|staff-docs|staff-docs/accept|users/\d+/photo)/?$")
+
+
+def coach_gate_locked(con) -> bool:
+    r = con.execute("SELECT value FROM settings WHERE key='coach_gate_open'").fetchone()
+    return not (r and r[0])
+
+
+@route("GET", "/api/coach-gate", role="staffdocs:view")
+def coach_gate_get(con, h, user, body, q):
+    r = con.execute("SELECT value FROM settings WHERE key='coach_gate_open'").fetchone()
+    return {"open_at": r[0] if r and r[0] else None}
+
+
+@route("POST", "/api/coach-gate", role="admin")
+def coach_gate_set(con, h, user, body, q):
+    from . import staffdocs
+    if user["id"] != staffdocs.owner_id(con):
+        raise ApiError("Открыть CRM тренерам может только руководитель", 403)
+    val = datetime.now().isoformat(timespec="minutes") if body.get("open") else ""
+    con.execute("INSERT INTO settings(key, value) VALUES ('coach_gate_open', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (val,))
+    sv.audit(con, user, "coach_gate", "open" if val else "close")
+    return {"open_at": val or None}
+
+
 @route("GET", "/api/meta", role="all")
 def meta(con, h, user, body, q):
     user["sip_number"] = con.execute("SELECT sip_number FROM users WHERE id=?", (user["id"],)).fetchone()[0]
@@ -466,6 +514,9 @@ def meta(con, h, user, body, q):
     m["staff_docs_pending"] = staffdocs.pending(con, user)
     from . import tour
     m["tour_pending"] = tour.pending(con, user)
+    m["locked"] = user["role"] == "coach" and coach_gate_locked(con)
+    if m["locked"]:  # зал ожидания: только документы и табло, обучение пройдёт после открытия
+        m["tour_pending"], m["groups"] = False, []
     import json as _json
     m["staff"] = []
     for r in con.execute("SELECT id, name, role, photo_at, photo_sq, bio FROM users WHERE active=1 ORDER BY name"):
@@ -1838,6 +1889,66 @@ def report_search(con, h, user, body, q):
     return {"items": coachreport.search_clients(con, q.get("q") or "")}
 
 
+# ---------------- посты в каналы филиалов ----------------
+
+@route("GET", "/api/channels", role="posts")
+def channels_get(con, h, user, body, q):
+    from . import channels, comms
+    channels.ensure_tg_hook(con, base_url(h))
+    if comms.status(con)["max"]:
+        try:
+            channels.refresh_max(con)
+        except comms.CommsError:
+            pass
+    return channels.overview(con) | {"targets": channels.targets(con), "history": channels.history(con)}
+
+
+@route("POST", "/api/channels/link", role="posts")
+def channels_link(con, h, user, body, q):
+    from . import channels
+    try:
+        channels.link(con, int(body.get("branch_id") or 0), str(body.get("kind") or ""), str(body.get("chat_id") or ""))
+    except channels.PostError as e:
+        raise ApiError(str(e))
+    return {"ok": True}
+
+
+@route("POST", "/api/posts", role="posts")
+def posts_create(con, h, user, body, q):
+    from . import channels
+    import base64
+    try:
+        data = dict(body)
+        if body.get("photo_data"):
+            try:
+                raw = base64.b64decode(str(body["photo_data"]).split(",", 1)[-1])
+            except ValueError:
+                raise channels.PostError("Не удалось прочитать фото")
+            data["photo"] = channels.save_photo(raw)
+        return channels.create(con, user, data, base_url(h))
+    except channels.PostError as e:
+        raise ApiError(str(e))
+
+
+@route("POST", "/api/posts/{pid}/cancel", role="posts")
+def posts_cancel(con, h, user, body, q, pid):
+    from . import channels
+    channels.cancel(con, int(pid))
+    return {"ok": True}
+
+
+@route("GET", "/api/post-photo", role="public")
+def post_photo(con, h, user, body, q):
+    """Фото поста для Telegram и MAX: по секретной ссылке, без входа."""
+    from . import channels
+    p = channels.photo_path(q.get("t") or "")
+    if not p or not os.path.exists(p):
+        raise ApiError("Фото нет", 404)
+    with open(p, "rb") as f:
+        raw = f.read()
+    return Raw(raw, "image/png" if raw[:4] == b"\x89PNG" else "image/jpeg")
+
+
 @route("GET", "/api/envelope", role="any")
 def envelope_get(con, h, user, body, q):
     from . import coachreport
@@ -2578,7 +2689,7 @@ class Handler(BaseHTTPRequestHandler):
                     if method != "DELETE" and "application/json" not in (self.headers.get("Content-Type") or ""):
                         raise ApiError("Ожидается JSON", 415)
                     n = int(self.headers.get("Content-Length") or 0)
-                    if n > (21_000_000 if url.path.startswith("/api/offers") else 40_000_000 if url.path.startswith("/api/erp") else 80_000_000 if url.path.startswith("/api/import/telegram") else 8_000_000 if url.path.startswith("/api/memos") else 1_000_000):
+                    if n > (21_000_000 if url.path.startswith("/api/offers") else 40_000_000 if url.path.startswith("/api/erp") else 80_000_000 if url.path.startswith("/api/import/telegram") else 8_000_000 if url.path.startswith("/api/memos") else 14_000_000 if url.path.startswith("/api/posts") else 1_000_000):
                         raise ApiError("Слишком большой запрос", 413)
                     if n:
                         body = json.loads(self.rfile.read(n) or b"{}")
@@ -2589,6 +2700,8 @@ class Handler(BaseHTTPRequestHandler):
                         raise ApiError("Нужно войти", 401)
                     if not any(perms.allowed(user, x) for x in role.split("|")):
                         raise ApiError("Недостаточно прав", 403)
+                    if user["role"] == "coach" and not GATE_FREE.match(url.path) and coach_gate_locked(con):
+                        raise ApiError("CRM для тренеров откроется по свистку руководителя", 403)
                 con.execute("BEGIN" if method in ("GET", "HEAD") else "BEGIN IMMEDIATE")
                 try:
                     result = fn(con, self, user, body, q, **mt.groupdict())
