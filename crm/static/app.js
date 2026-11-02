@@ -2412,7 +2412,6 @@ async function renderStaffDocs(page) {
 function renderLobby(page) {
   const first = esc(((S.user && S.user.name) || "").split(" ")[0] || "тренер");
   const app_ = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
-  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
   page.innerHTML = `<div class="lobby">
     <div class="lb-board" aria-label="Табло">
       <div class="lb-top">ФУТБОЛИКА · ПРЕДСЕЗОНКА</div>
@@ -2429,20 +2428,9 @@ function renderLobby(page) {
     <div class="lb-steps">
       <div class="lb-step done">✅ Вышел на поле: вход в CRM</div>
       <div class="lb-step done">✅ Подписал документы</div>
-      <div class="lb-step ${app_ ? "done" : ""}">${app_ ? "✅ Значок CRM на экране телефона" : "📲 Поставь значок CRM на экран телефона (как, написано ниже)"}</div>
+      <div class="lb-step ${app_ ? "done" : ""}">${app_ ? "✅" : "⬜"} Значок CRM на экране телефона</div>
       <div class="lb-step wait">⏳ Свисток на старт: ждём команду</div>
     </div>
-    ${app_ ? "" : `<details class="section lb-how" open><summary><b>Как поставить значок</b></summary>
-      ${ios ? `<ol><li>Открой эту страницу в Safari.</li><li>Нажми «Поделиться» (квадрат со стрелкой вверх). Не видно? Сначала три точки справа от адреса.</li>
-        <li>Пролистай вниз, нажми «На экран «Домой»».</li><li>Нажми «Добавить».</li></ol>`
-      : `<ol><li>Открой эту страницу в Chrome.</li><li>Нажми три точки справа вверху.</li><li>Нажми «Установить приложение» или «Добавить на главный экран».</li><li>Нажми «Установить».</li></ol>`}
-      <div class="small muted">Потом открой CRM со значка и войди ещё раз.</div></details>`}
-    <div class="section lb-soon"><h3>Что будет в CRM после свистка</h3>
-      <div>👋 «Встречаю детей»: отметка, кто пришёл</div>
-      <div>📅 Свои группы и расписание</div>
-      <div>📝 Отчёт о смене за пару минут</div>
-      <div>💰 Своя зарплата на сегодня</div>
-      <div>📌 Задачи от администраторов</div></div>
     <p class="small muted">Пока можно размяться и проверить, что свисток на месте 😉</p>
     <button class="btn" id="lb-out">Выйти</button>
   </div>`;
