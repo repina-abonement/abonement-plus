@@ -405,11 +405,15 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
         if t.date() > now.date():
             made += bool(add_task(con, "trial_confirm", s["id"], min(day_before, t - timedelta(hours=3)),
                                   auto_key=f"trial_confirm:{key}"))
-        elif t.date() == now.date() and now < t and s["created_at"][:10] == now.date().isoformat():
-            made += bool(add_task(con, "trial_today", s["id"], now, auto_key=f"trial_today:{key}"))
+        elif t.date() == now.date() and now < t:
+            # как в ERP (Юлия, 03.11): в день пробного утром «Напоминание о сегодняшнем ПУ»; записали сегодня: сразу
+            morning = datetime.combine(t.date(), datetime.min.time()) + timedelta(hours=9)
+            made += bool(add_task(con, "trial_today", s["id"], morning if s["created_at"][:10] < now.date().isoformat() else now,
+                                  auto_key=f"trial_today:{key}"))
         # «не пришёл» и «нет отметки 2 часа» ведёт этап «Не дошёл до ПУ» (crm/pu.py)
-        if now >= end + timedelta(minutes=10) and s["trial_came"] == 1:
-            made += bool(add_task(con, "how_was", s["id"], end + timedelta(minutes=10), auto_key=f"how_was:{key}"))
+        if s["trial_came"] == 1:  # Юлия, 03.11: «Как прошло пробное» сразу после отметки тренера «пришёл»
+            marked = s.get("trial_marked_at") or _iso(now)
+            made += bool(add_task(con, "how_was", s["id"], marked[:16], auto_key=f"how_was:{key}"))
         # сообщения
         if send and st["auto_day_before"] == "1" and now >= day_before and now < t - timedelta(hours=3) and t.date() > now.date():
             sent += bool(send_auto(con, s, "day_before", "msg_day_before").get("ok"))
@@ -572,6 +576,8 @@ def _erp_col(t: dict) -> tuple[str, str]:
     for k, name in ERP_COLUMNS:
         if kind == k:
             return k, name
+    if kind == "rebook":  # этап «Не дошёл до ПУ»: нет отметки тренера или не пришли
+        return ("not_marked", "Клиент не отмечен на ПУ") if t.get("miss") == "no_mark" else ("no_show", "Не пришли на ПУ")
     if kind in THINK_KINDS or title.lower() == "думает":
         return "think", "Думает"
     if kind in MANUAL_KINDS:
@@ -598,6 +604,10 @@ def erp_board(con, day: str = "today") -> dict:
     cols: dict[str, dict] = {}
     for r in con.execute(f"{base} AND {c} ORDER BY t.due_at", (v,)):
         t = _task_out(con, r)
+        if t["kind"] == "rebook":
+            m = con.execute("""SELECT kind FROM trial_misses WHERE (student_id=? OR student_id IN (SELECT id FROM students WHERE family_id=?))
+                               ORDER BY id DESC LIMIT 1""", (t.get("student_id") or 0, t.get("family_id") or 0)).fetchone()
+            t["miss"] = m[0] if m else ""
         key, name = _erp_col(t)
         cols.setdefault(key, {"key": key, "title": name, "cards": []})["cards"].append(t)
     rank = lambda k: order.index(k) if k in order else (len(order) + (0 if k.startswith("erp:") else 1 if k == "manual" else 2))

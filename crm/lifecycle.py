@@ -102,11 +102,16 @@ def tick(con, now: datetime | None = None) -> int:
                      (_iso(now - timedelta(days=1)), fresh(10))):
         if _has_open(con, s["id"], s["family_id"]):
             continue
-        n, last = _done_count(con, s["id"], "close_sale", s["stage_changed_at"])
+        n1, l1 = _done_count(con, s["id"], "why_not_bought", s["stage_changed_at"])
+        n2, l2 = _done_count(con, s["id"], "close_sale", s["stage_changed_at"])
+        n, last = n1 + n2, max(filter(None, (l1, l2)), default=None)
         if n >= 3 or (last and _dt(last) and _dt(last) > now - timedelta(days=1)):
             continue
-        title = "Принять решение: продаём или отказ (3-я попытка)" if n == 2 else KINDS["close_sale"][0]
-        made += bool(_add(con, "close_sale", s["id"], now, f"close_sale:{s['id']}:{(s['stage_changed_at'] or '')[:16]}:{n}", title=title,
+        # как в ERP (Юлия, 03.11): сначала «Почему не купили», дальше раз в день «Думает», третья попытка: решение
+        kind = "why_not_bought" if n == 0 else "close_sale"
+        title = ("Принять решение: продаём или отказ (3-я попытка)" if n == 2 else
+                 "Почему не купили" if n == 0 else "Думает: связаться ещё раз")
+        made += bool(_add(con, kind, s["id"], now, f"close_sale:{s['id']}:{(s['stage_changed_at'] or '')[:16]}:{n}", title=title,
                           note="Пробное горячее 48 часов. Узнайте, что понравилось ребёнку, снимите возражение, предложите оплатить сегодня",
                           group_id=s["group_id"]))
     # 3. перевели в ученики, а первой оплаты нет
@@ -196,7 +201,7 @@ def cleanup(con, now: datetime):
                             FROM tasks t JOIN students s ON s.id=t.student_id WHERE t.status='open' AND t.source='life'""").fetchall():
         k = t["kind"]
         stale = (k == "call_lead" and t["stage"] != "lead") or (k == "no_answer" and t["stage"] != "no_answer") \
-            or (k == "close_sale" and t["stage"] != "how_was") or (k == "first_pay" and t["converted_at"]) \
+            or (k in ("close_sale", "why_not_bought") and t["stage"] != "how_was") or (k == "first_pay" and t["converted_at"]) \
             or (k == "reinvite" and t["stage"] != "refused") or (k == "win_back" and t["stage"] != "left") \
             or (k == "makeup_check" and t["skip_stage"] != "offered") or (k in ("renew", "debt") and t["stage"] == "left") \
             or (k == "revive" and (t["funnel"] != "sales" or t["stage"] in ("trial_booked", "on_trial", "trial_done")))
