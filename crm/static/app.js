@@ -857,6 +857,9 @@ async function renderErp(box) {
         <div class="small muted">Что тренеры отметили в CRM: кто был, кто не пришёл и почему, итоги пробных, оплаты на месте. Перенесите в ERP вечером</div>
         <div class="row" style="gap:8px;align-items:center;margin-top:8px"><input type="date" id="erp-day-d" value="${S.meta.today}" style="flex:0 0 170px"><button class="btn" id="erp-day-go" style="flex:0">Показать</button></div>
         <div id="erp-day-out"></div></div>
+      <div class="erp-step"><b>🏷 Статусы клиентов в ERP</b>
+        <div class="small muted">Какой статус был у клиентов в ERP при переносе и сколько клиентов в каждом. Статус ERP виден и в карточке клиента</div>
+        <div id="erp-st-out" class="small muted" style="margin-top:6px">Загружаю…</div></div>
       <details style="margin-top:12px"><summary class="small muted">Отменить перенос</summary><button class="btn danger" id="erp-undo" style="margin-top:8px">Отменить перенос</button></details>` : `
     <div class="erp-step"><b>1. Файлы</b>
       <div class="row" style="gap:8px;align-items:center;margin-top:8px"><input type="file" id="erp-file" multiple accept=".xlsx,.csv,.txt" style="flex:1"></div>
@@ -869,6 +872,11 @@ async function renderErp(box) {
       <button class="btn primary" id="erp-run" style="margin-top:8px" disabled>Перенести</button></div>`}`;
   if (done) {
     erpWireFiles(box, d);
+    api("GET", "/api/erp/statuses").then((r) => {
+      $("#erp-st-out").innerHTML = r.items.length ? `<table class="tbl"><thead><tr><th>Статус в ERP</th><th>Клиентов</th><th>Сейчас в CRM: ученики</th><th>лиды</th><th>ушли</th></tr></thead>
+        <tbody>${r.items.map((x) => `<tr><td>${esc(x.status)}</td><td><b>${x.n}</b></td><td>${x.members || 0}</td><td>${x.leads || 0}</td><td>${x.left_ || 0}</td></tr>`).join("")}</tbody></table>`
+        : "Статусов ERP у клиентов не найдено";
+    }).catch((e) => { $("#erp-st-out").textContent = e.message; });
     $("#erp-update").onclick = async () => {
       const b = $("#erp-update"); b.disabled = true; b.textContent = "Обновляю…";
       try {
@@ -1436,6 +1444,7 @@ async function openStudent(id) {
   const alerts = [
     s.priority ? `<span class="pill red">🔥 Заявка с сайта: обработать первой</span>` : "",
     d.family.note ? `<span class="pill yellow" title="Заметка для персонала">📝 ${esc(d.family.note)}</span>` : "",
+    s.erp_status ? `<span class="pill" title="Статус клиента в ERP при переносе">ERP: ${esc(s.erp_status)}</span>` : "",
     isMember && d.balance.debt ? `<span class="pill red">Долг ${rub(d.balance.debt)}</span>` : "",
     isMember && d.balance.upcoming ? `<span class="pill yellow">К оплате ${rub(d.balance.upcoming)}</span>` : "",
     isMember && d.balance.deposit ? `<span class="pill green">На балансе ${rub(d.balance.deposit)}</span>` : "",

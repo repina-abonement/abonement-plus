@@ -642,6 +642,15 @@ def erp_upload_del(con, h, user, body, q, uid):
     return {"ok": True}
 
 
+@route("GET", "/api/erp/statuses", role="admin")
+def erp_statuses(con, h, user, body, q):
+    """Все статусы клиентов из ERP (сохранены у каждого клиента при переносе) и сколько клиентов в каждом. Без имён."""
+    rows = con.execute("""SELECT erp_status AS status, COUNT(*) AS n,
+                          SUM(funnel='members' AND stage!='left') AS members, SUM(funnel='sales') AS leads, SUM(stage='left') AS left_
+                          FROM students WHERE COALESCE(erp_status,'') != '' AND archived=0 GROUP BY erp_status ORDER BY n DESC""").fetchall()
+    return {"items": [dict(r) for r in rows]}
+
+
 @route("GET", "/api/erp/groups", role="admin")
 def erp_groups_get(con, h, user, body, q):
     from . import erpimport
