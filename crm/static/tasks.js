@@ -189,14 +189,18 @@ function wireCardTasks(root, reload, sid) {
   const add = root.querySelector("[data-ctadd]");
   if (add) add.onclick = () => {
     const box = root.querySelector("[data-ctaddbox]");
-    if (box.innerHTML) { box.innerHTML = ""; return; }
+    const shut = () => { box.innerHTML = ""; add.textContent = "+ Задача"; };
+    if (box.innerHTML) return shut();
+    add.textContent = "✕ Закрыть";
     const staff = ((S.meta && S.meta.staff) || []).slice().sort((a, b) => (a.role === "coach") - (b.role === "coach") || a.name.localeCompare(b.name));
     const soon = new Date(Date.now() + 3600e3 - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
     box.innerHTML = `<div class="sub-form" style="margin-top:8px">
       <div class="field"><label>Что сделать</label><input data-ctt placeholder="Например: перезвонить после 18:00"></div>
       <div class="row"><div class="field"><label>Срок</label><input type="datetime-local" data-ctd value="${soon}"></div>
         <div class="field"><label>Исполнитель</label><select data-cta>${staff.map((u) => `<option value="${u.id}" ${u.id === S.user.id ? "selected" : ""}>${esc(u.name)} (${TASK_ROLE[u.role] || u.role})</option>`).join("")}</select></div></div>
-      <button class="btn primary sm" data-cts>Поставить задачу</button></div>`;
+      <div class="row" style="gap:8px"><button class="btn primary sm" data-cts style="flex:0 0 auto">Поставить задачу</button>
+        <button class="btn sm" data-ctx style="flex:0 0 auto">Отмена</button></div></div>`;
+    box.querySelector("[data-ctx]").onclick = shut;
     box.querySelector("[data-ctt]").focus();
     box.querySelector("[data-cts]").onclick = async () => {
       const title = box.querySelector("[data-ctt]").value.trim();
@@ -206,7 +210,12 @@ function wireCardTasks(root, reload, sid) {
     };
   };
   const h = root.querySelector("[data-cthist]");
-  if (h) h.onclick = () => { const el = document.querySelector(".history"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
+  // история лежит в свёрнутом блоке «🕘 История и комментарии»: раскрываем его и прокручиваем к нему
+  if (h) h.onclick = () => {
+    const body = document.querySelector("#drawer-body") || document;
+    if (body.querySelector('[data-fold="hist"]')) return openFold(body, "hist");
+    const el = body.querySelector('[data-sc="hist"]'); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 }
 
 const yearsWord = (n) => n % 10 === 1 && n % 100 !== 11 ? "год" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "года" : "лет";

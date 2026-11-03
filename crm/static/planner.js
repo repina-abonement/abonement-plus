@@ -23,9 +23,11 @@ async function openTaskForm(box, done, preset = {}) {
     <div data-twd hidden class="chips" style="margin:-2px 0 8px">${WD_SHORT.map((w, i) => `<button type="button" class="chip day" data-twdi="${i}">${w}</button>`).join("")}</div>
     <div class="field"><label>Подробности</label><textarea data-tn rows="2" placeholder="Необязательно"></textarea></div>
     <div class="row" style="align-items:center;flex-wrap:wrap"><label class="check grow"><input type="checkbox" data-tp> 🔥 Важно</label>
+      <button class="btn" data-tcancel style="flex:0">Отмена</button>
       <button class="btn primary" data-tsave style="flex:0">Поставить задачу</button></div>
     <div class="small muted">Без времени задача висит весь день. Повторяющиеся дела сами появляются на столе в нужные дни</div>
   </div>`;
+  box.querySelector("[data-tcancel]").onclick = () => { box.innerHTML = ""; };
   const rule = box.querySelector("[data-tr]");
   rule.onchange = () => { box.querySelector("[data-twd]").hidden = rule.value !== "weekly"; };
   box.querySelectorAll("[data-twdi]").forEach((b) => (b.onclick = () => b.classList.toggle("on")));
