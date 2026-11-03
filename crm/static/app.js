@@ -279,7 +279,7 @@ async function renderLogin(force = false) {
 
 /* ---------- каркас ---------- */
 const VIEWS = [
-  ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Ученики"], ["skips", "Пропуски"], ["manual", "Ручные задачи"],
+  ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Действующие клиенты"], ["skips", "Пропуски"], ["manual", "Ручные задачи"],
   ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["posts", "Посты в каналы"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["docs", "Документы"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
@@ -696,7 +696,7 @@ async function renderDashboard(page) {
 }
 
 /* ---------- воронки ---------- */
-const BOARD_TITLES = { sales: "Воронка продаж", members: "Ученики и продления", skips: "Пропуски и отработки" };
+const BOARD_TITLES = { sales: "Воронка продаж", members: "Действующие клиенты", skips: "Пропуски и отработки" };
 
 function boardHtml(data) {
   let hidden = 0, later = 0;
