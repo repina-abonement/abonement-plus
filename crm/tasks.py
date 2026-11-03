@@ -552,6 +552,58 @@ def manual_board(con, user: dict, scope: str = "mine") -> dict:
                              (*MANUAL_KINDS, today, *args)).fetchone()[0]}
 
 
+# «Задачи как в ERP» (Юлия, 03.11): общий список для всех администраторов, колонки по статусам ERP,
+# переключатели Просрочено / Сегодня / Завтра. Наши новые виды задач, которых в ERP не было, в колонке «Другое»,
+# ручные в «Ручных»: ни одна задача не теряется
+ERP_COLUMNS = [
+    ("trial_confirm", "Напоминание о пробном занятии"),
+    ("trial_today", "Напоминание о сегодняшнем ПУ"),
+    ("not_marked", "Клиент не отмечен на ПУ"),
+    ("how_was", "Как прошло пробное"),
+    ("no_show", "Не пришли на ПУ"),
+    ("why_not_bought", "Почему не купили"),
+    ("think", "Думает"),
+]
+THINK_KINDS = ("close_sale",)
+
+
+def _erp_col(t: dict) -> tuple[str, str]:
+    kind, title = t["kind"], (t.get("title") or "").strip()
+    for k, name in ERP_COLUMNS:
+        if kind == k:
+            return k, name
+    if kind in THINK_KINDS or title.lower() == "думает":
+        return "think", "Думает"
+    if kind in MANUAL_KINDS:
+        if t.get("source") == "erp" and title:  # статус ERP, которого нет в списке: своя колонка с тем же названием
+            for k, name in ERP_COLUMNS:
+                if title == name:
+                    return k, name
+            return "erp:" + title, title
+        return "manual", "Ручные"
+    return "other", "Другое"
+
+
+def erp_board(con, day: str = "today") -> dict:
+    today = date.today()
+    tomorrow = (today + timedelta(days=1)).isoformat()
+    t0 = today.isoformat()
+    base = """SELECT t.* FROM tasks t LEFT JOIN users u ON u.id=t.assignee_id
+              WHERE t.status='open' AND t.kind != 'bday' AND (u.id IS NULL OR u.role != 'coach')"""
+    cond = {"overdue": ("substr(t.due_at,1,10) < ?", t0), "today": ("substr(t.due_at,1,10) = ?", t0),
+            "tomorrow": ("substr(t.due_at,1,10) = ?", tomorrow)}
+    counts = {k: con.execute(f"SELECT COUNT(*) FROM ({base} AND {c})", (v,)).fetchone()[0] for k, (c, v) in cond.items()}
+    c, v = cond.get(day, cond["today"])
+    order = [k for k, _ in ERP_COLUMNS]
+    cols: dict[str, dict] = {}
+    for r in con.execute(f"{base} AND {c} ORDER BY t.due_at", (v,)):
+        t = _task_out(con, r)
+        key, name = _erp_col(t)
+        cols.setdefault(key, {"key": key, "title": name, "cards": []})["cards"].append(t)
+    rank = lambda k: order.index(k) if k in order else (len(order) + (0 if k.startswith("erp:") else 1 if k == "manual" else 2))
+    return {"day": day if day in cond else "today", "counts": counts, "columns": sorted(cols.values(), key=lambda x: rank(x["key"]))}
+
+
 def for_student(con, sid: int) -> dict:
     """Задачи для карточки: открытые (ближайшая первой) и несколько последних выполненных."""
     fam = (con.execute("SELECT family_id FROM students WHERE id=?", (sid,)).fetchone() or [None])[0]

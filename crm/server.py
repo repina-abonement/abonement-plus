@@ -2192,6 +2192,12 @@ def task_rebook(con, h, user, body, q, tid):
     return pu.complete(con, int(tid), body.get("result") or "", body, user)
 
 
+@route("GET", "/api/tasks/erp-board", role="operator")
+def tasks_erp_board(con, h, user, body, q):
+    """Задачи как в ERP: общий список администраторов по статусам, Просрочено / Сегодня / Завтра."""
+    return tasks.erp_board(con, q.get("day", "today"))
+
+
 @route("GET", "/api/tasks/manual", role="coach")
 def tasks_manual(con, h, user, body, q):
     """Воронка «Ручные задачи»."""
