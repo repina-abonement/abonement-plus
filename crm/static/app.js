@@ -1096,7 +1096,8 @@ async function renderWorkdesk(page) {
   if (S.user.role !== "admin") S.viewAs = null;
   const bar = await viewAsBar().catch(() => "");
   if (S.viewAs && S.viewAs.role === "coach") { await renderCoachToday(page, S.viewAs.id, bar); return wireViewAs(page); }
-  const [d, tasksHtml, schedHtml] = await Promise.all([api("GET", "/api/workdesk" + (S.viewAs ? "?as_user=" + S.viewAs.id : "")), tasksSection(), scheduleWidget().catch(() => "")]);
+  const [d, tasksHtml, schedHtml, erpHtml] = await Promise.all([api("GET", "/api/workdesk" + (S.viewAs ? "?as_user=" + S.viewAs.id : "")), tasksSection(), scheduleWidget().catch(() => ""),
+    can("sales") ? erpTasksSection() : Promise.resolve("")]);
   const wasOpen = page.querySelector(".sched-widget") ? page.querySelector(".sched-widget").open : null;
   const u = d.urgent, reds = u.filter((x) => x.level === "red").length;
   const scroll = page.querySelector(".board") ? page.querySelector(".board").scrollLeft : 0;
@@ -1158,6 +1159,7 @@ async function renderWorkdesk(page) {
       <div class="grow"><b>Новый отзыв на ${esc(r.label)}</b><div class="small">${esc(r.subject)} · пришёл ${esc(dtShort(r.created_at))}</div></div>
       <a class="btn sm" href="${esc(r.link)}" target="_blank" rel="noopener">Открыть отзывы</a>
       <button class="btn sm primary" data-rvclose="${r.id}">Ответили ✓</button></div>`).join("")}
+    ${erpHtml}
     <div class="desk">
       <div class="desk-main">
         ${hot}
@@ -1176,6 +1178,7 @@ async function renderWorkdesk(page) {
   page.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => { const el = document.getElementById(b.dataset.jump); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }));
   if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
   wireBoard(page, "sales", d.board);
+  wireErpTasks(page);
   wireTasks(page);
   wireViewAs(page);
   wireNeedsSubs(page, d);
