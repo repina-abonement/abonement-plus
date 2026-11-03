@@ -50,7 +50,7 @@ check(st == "later" and due and due[0][5:7] in ("01", "08"), "Дальше «П�
 print("2. «Как прошло» без решения")
 hw = kid(stage="how_was", ago_days=2)
 lifecycle.tick(con, now)
-check(open_kinds(hw) == ["close_sale"], "Больше суток без решения: «Дожать продажу»")
+check(open_kinds(hw) == ["why_not_bought"], "Больше суток без решения: «Почему не купили», как в ERP")
 
 print("3. «Купил» по оплате")
 lead2 = kid()
