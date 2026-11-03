@@ -33,6 +33,7 @@ TRIAL_REFUSALS = ["Дорого", "Неудобные дни или время",
                   "Думают, посоветуются", "Заболели или уезжают", "Другое"]
 REFUSAL_THINKING, REFUSAL_LATER = "Думают, посоветуются", "Заболели или уезжают"
 AUTO_SALES = {"on_trial", "trial_done", "missed_trial", "later"}
+RENEW_FROM_DAY = 20  # с этого числа ученик без оплаты следующего месяца попадает в «Нужно продлить»
 SALES_LABELS = dict(SALES_STAGES)
 
 
@@ -475,8 +476,9 @@ def board(con, funnel: str) -> dict:
         cols = [
             {"key": "unpaid_cur", "title": f"Не оплачен {logic.month_label(cur)}", "cards": []},
             {"key": "renew", "title": f"Нужно продлить на {logic.month_label(nxt)}", "cards": []},
-            {"key": "invoiced", "title": f"Счёт на {logic.month_label(nxt)} выставлен", "cards": []},
-            {"key": "paid_next", "title": f"Оплачен {logic.month_label(nxt)}", "cards": []},
+            {"key": "invoiced", "title": f"Счёт на {logic.month_label(nxt)} выставлен. Ждём", "cards": []},
+            # Юлия, 03.11: оплаченные не воронка, их видно только в списке действующих клиентов
+            {"key": "paid", "title": "Оплачено", "cards": [], "board": False},
             {"key": "left", "title": "Ушёл", "cards": []},
         ]
         by = {c["key"]: c for c in cols}
@@ -497,7 +499,9 @@ def board(con, funnel: str) -> dict:
                 if ens and len(gs) < len(ens):
                     card["badge"] = "Не оплачена группа " + ", ".join(gs)
             elif month_state(nxt) == "paid":
-                key = "paid_next"
+                key = "paid"
+            elif month_state(nxt) != "invoiced" and today().day < RENEW_FROM_DAY:
+                key = "paid"  # «Нужно продлить» показываем только с 20 числа (Юлия, 03.11)
             elif month_state(nxt) == "invoiced":
                 key = "invoiced"
                 card["color"] = "yellow" if late else None

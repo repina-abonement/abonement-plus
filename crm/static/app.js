@@ -741,7 +741,7 @@ async function renderBoard(page, funnel) {
 
 /* «Ученики»: список с поиском, фильтрами и группировкой по филиалам и группам */
 S.mf = (() => { try { return JSON.parse(localStorage.getItem("crm.mf") || "null") || {}; } catch (_) { return {}; } })();
-const M_STATUS = [["", "Все"], ["unpaid_cur", "Не оплатили"], ["renew", "Продлить"], ["invoiced", "Счёт выставлен"], ["paid_next", "Оплачено"], ["left", "Ушли"]];
+const M_STATUS = [["", "Все"], ["unpaid_cur", "Не оплатили"], ["renew", "Продлить"], ["invoiced", "Счёт выставлен. Ждём"], ["paid", "Оплачено"], ["left", "Ушли"]];
 function renderMembersList(page, data) {
   const cols = Object.fromEntries(data.columns.map((c) => [c.key, c.title]));
   const all = data.columns.flatMap((c) => c.cards);
@@ -757,7 +757,7 @@ function renderMembersList(page, data) {
   const base = all.filter((k) => inPlace(k) && hit(k));
   const cnt = (s) => base.filter((k) => (s ? k.status === s : k.status !== "left")).length;
   const rows = base.filter((k) => (f.status ? k.status === f.status : k.status !== "left"));
-  const pill = { unpaid_cur: "red", renew: "", invoiced: "", paid_next: "green", left: "" };
+  const pill = { unpaid_cur: "red", renew: "", invoiced: "", paid: "green", left: "" };
   const row = (k, g) => `<div class="m-row ${k.color === "red" ? "m-red" : k.color === "yellow" ? "m-yellow" : ""}" data-open="${k.id}" role="button" tabindex="0">
     <span class="m-name"><b>${esc(k.name)}</b></span>
     <span class="small muted m-parent">${esc(k.parent)}${k.phone ? ", " + esc(k.phone) : ""}</span>
