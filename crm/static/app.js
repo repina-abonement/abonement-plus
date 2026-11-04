@@ -1141,7 +1141,8 @@ async function renderWorkdesk(page) {
     wait: { html: waitlistBox(d.waitlist), icon: "⏳", label: "Лист ожидания" },
     sched: { html: schedHtml, icon: "📅", label: "Сегодня в филиалах" },
     bday: { html: birthdaysBox(d.birthdays), icon: "🎂", label: "Дни рождения" },
-    tasks: { html: tasksHtml, icon: "✅", label: "Мои задачи" },
+    // Юлия, 04.11: задачи по клиентам у администраторов общие, они в «📋 Задачи»; «Мои задачи» на столе не нужны
+    tasks: { html: erpHtml ? "" : tasksHtml, icon: "✅", label: "Задачи" },
     answers: { html: coachAnswersBox(d.coach_answers), icon: "💬", label: "Ответы тренеров", n: (d.coach_answers || []).length },
     reports: { html: shiftReportsBox(d.shift_reports), icon: "📝", label: "Отчёты о смене",
       n: d.shift_reports ? d.shift_reports.late.length + d.shift_reports.issues.length : 0, red: true },
