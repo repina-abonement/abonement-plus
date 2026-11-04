@@ -1964,21 +1964,68 @@ function groupNoBranch(x) {
   const w = (x.name || "").split(" ")[0];
   return w && (x.branch || "").includes(w) && x.name.length > w.length ? x.name.slice(w.length).trim() : x.name;
 }
+/* шапка журнала: День / Весь месяц, филиал, группа (Юлия, 04.11) */
+function journalHead(groups, branchId) {
+  const br = [...new Map(groups.map((x) => [x.branch_id, { id: x.branch_id, name: x.branch }])).values()];
+  const month = S.journal.mode === "month";
+  return `<div class="page-head"><h2 class="grow">Журнал посещений</h2>
+      <div class="seg"><button data-jmode="day" class="${month ? "" : "active"}">День</button><button data-jmode="month" class="${month ? "active" : ""}">Весь месяц</button></div></div>
+    <div class="row" style="max-width:720px;margin-bottom:14px">
+      ${br.length > 1 ? `<div class="field" style="flex:0 0 200px"><label>Филиал</label><select id="j-branch">${br.map((b) => `<option value="${b.id}" ${b.id === branchId ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : ""}
+      <div class="field"><label>Группа</label><select id="j-group">${groups.filter((x) => x.branch_id === branchId).map((x) => `<option value="${x.id}" ${x.id === S.journal.group ? "selected" : ""}>${esc(groupNoBranch(x))}</option>`).join("")}</select></div>`;
+}
+function wireJournalHead(page, groups) {
+  page.querySelector("#j-group").onchange = (e) => { step(() => { S.journal.group = +e.target.value; }); };
+  const br = page.querySelector("#j-branch");
+  if (br) br.onchange = (e) => { step(() => { const f = groups.find((x) => x.branch_id === +e.target.value && !x.is_makeup) || groups.find((x) => x.branch_id === +e.target.value); if (f) S.journal.group = f.id; }); };
+  page.querySelectorAll("[data-jmode]").forEach((b) => (b.onclick = () => step(() => { S.journal.mode = b.dataset.jmode; })));
+}
+
+/* весь месяц по группе: сколько детей в каждую дату + крупная плашка «на абонементе» */
+async function renderJournalMonth(page, groups) {
+  const g = groups.find((x) => x.id === S.journal.group);
+  const ym = S.journal.date.slice(0, 7);
+  const m = await api("GET", `/api/journal/month?group_id=${g.id}&month=${ym}`);
+  const today = S.meta.today;
+  const tile = (d) => {
+    const past = d.date <= today;
+    const wd = WD[(new Date(d.date + "T12:00").getDay() + 6) % 7];
+    if (d.closed) return `<div class="jm-day closed"><div class="jm-date">${dShort(d.date)} <span class="muted">${wd}</span></div><div class="muted small">Праздник, занятия нет</div></div>`;
+    const unmarked = past ? d.list - d.present - d.absent : 0;
+    return `<button class="jm-day ${d.date === today ? "today" : ""}" data-jmday="${d.date}">
+      <div class="jm-date">${dShort(d.date)} <span class="muted">${wd}</span></div>
+      <div class="jm-big">${past ? d.present + d.trials_came : d.list + d.trials}<span> ${past ? "были" : "ждём"}</span></div>
+      <div class="small muted">${[past ? `по списку ${d.list}` : "", past && d.absent ? `пропуск ${d.absent}` : "", d.vacation ? `отпуск ${d.vacation}` : "",
+        d.trials ? `пробных ${d.trials}` : "", d.makeups ? `отработка ${d.makeups}` : "", unmarked > 0 ? `<b class="red">не отмечено ${unmarked}</b>` : ""].filter(Boolean).join(" · ")}</div>
+    </button>`;
+  };
+  const sb = m.subs;
+  page.innerHTML = `${journalHead(groups, g.branch_id)}
+      <div class="field" style="flex:0 0 170px"><label>Месяц</label><input id="j-month" type="month" value="${ym}"></div>
+    </div>
+    <div class="jm-sub">
+      <div class="jm-sub-n">${sb.paid}</div>
+      <div><b>${plural(sb.paid, "ребёнок", "ребёнка", "детей")} на абонементе: ${MONTHS[+ym.slice(5) - 1]} оплачен</b>
+        <div class="small muted">${[sb.invoiced ? `счёт выставлен, ждём оплату: ${sb.invoiced}` : "", sb.single ? `разовые: ${sb.single}` : "", sb.none ? `без оплаты: ${sb.none}` : ""].filter(Boolean).join(" · ") || "Все в группе оплатили абонемент 👍"}. Всего в группе ${m.kids}</div></div>
+    </div>
+    ${m.days.length ? `<div class="jm-grid">${m.days.map(tile).join("")}</div>` : `<div class="muted">В этом месяце у группы нет занятий</div>`}`;
+  wireJournalHead(page, groups);
+  page.querySelector("#j-month").onchange = (e) => { if (e.target.value) step(() => { S.journal.date = e.target.value + "-01"; }); };
+  page.querySelectorAll("[data-jmday]").forEach((b) => (b.onclick = () => step(() => { S.journal.mode = "day"; S.journal.date = b.dataset.jmday; })));
+}
+
 async function renderJournal(page) {
   const groups = S.meta.groups;
   if (!groups.length) { page.innerHTML = `<h2>Журнал посещений</h2><p class="muted">За вами пока не закреплено ни одной группы. Попросите администратора.</p>`; return; }
   if (!S.journal.group || !groups.some((x) => x.id === S.journal.group)) S.journal.group = groups[0].id;
   if (!S.journal.date) S.journal.date = S.meta.today;
+  if (S.journal.mode === "month") return renderJournalMonth(page, groups);
   const j = await api("GET", `/api/journal?group_id=${S.journal.group}&date=${S.journal.date}`);
   const g = j.group;
   if (g.branch_id == null) g.branch_id = (groups.find((x) => x.id === g.id) || {}).branch_id;
-  const jBranches = [...new Map(groups.map((x) => [x.branch_id, { id: x.branch_id, name: x.branch }])).values()];
   const st = j.has_lesson && S.journal.date <= S.meta.today ? await api("GET", `/api/lessons/staff?group_id=${g.id}&date=${S.journal.date}`).catch(() => null) : null;
   page.innerHTML = `
-    <div class="page-head"><h2 class="grow">Журнал посещений</h2></div>
-    <div class="row" style="max-width:640px;margin-bottom:14px">
-      ${jBranches.length > 1 ? `<div class="field" style="flex:0 0 200px"><label>Филиал</label><select id="j-branch">${jBranches.map((b) => `<option value="${b.id}" ${b.id === g.branch_id ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : ""}
-      <div class="field"><label>Группа</label><select id="j-group">${groups.filter((x) => x.branch_id === g.branch_id).map((x) => `<option value="${x.id}" ${x.id === S.journal.group ? "selected" : ""}>${esc(groupNoBranch(x))}</option>`).join("")}</select></div>
+    ${journalHead(groups, g.branch_id)}
       <div class="field" style="flex:0 0 170px"><label>Дата</label><input id="j-date" type="date" value="${S.journal.date}"></div>
     </div>
     <div class="note">${esc(g.branch)} · ${g.weekdays.split(",").map((x) => WD[+x]).join(", ")} ${esc(g.time)} · ${esc(g.age)} лет${j.closed ? " · <b>праздник, занятия нет</b>" : j.has_lesson ? "" : " · <b>в этот день у группы нет занятия</b>"}</div>
@@ -1988,8 +2035,7 @@ async function renderJournal(page) {
     <div class="list">${j.rows.length ? j.rows.map((r) => g.is_makeup ? makeupRow(r) : journalRow(r)).join("") : `<div class="list-row muted">${g.is_makeup ? "На эту дату никто не записан на отработку" : "В группе пока нет учеников"}</div>`}</div>`;
   if (st) wireStaffPicker(page, "j", g.id, S.journal.date, render);
   if ($("#j-meet")) $("#j-meet").onclick = () => openMeet(g.id, S.journal.date);
-  $("#j-group").onchange = (e) => { step(() => { S.journal.group = +e.target.value; }); };
-  if ($("#j-branch")) $("#j-branch").onchange = (e) => { step(() => { const f = groups.find((x) => x.branch_id === +e.target.value && !x.is_makeup) || groups.find((x) => x.branch_id === +e.target.value); if (f) S.journal.group = f.id; }); };
+  wireJournalHead(page, groups);
   $("#j-date").onchange = (e) => { step(() => { S.journal.date = e.target.value; }); };
   page.classList.toggle("readonly", !can("journal", "full") && !isCoach());
   if (!isCoach()) page.querySelectorAll("[data-who]").forEach((el) => (el.onclick = () => openStudent(+el.dataset.who)));
