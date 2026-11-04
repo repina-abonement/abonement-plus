@@ -24,7 +24,7 @@ def main():
     dates = [d["date"] for d in m["days"]]
     check(dates[:3] == ["2026-11-02", "2026-11-05", "2026-11-09"] and len(dates) == 9, "Ноябрь Пн/Чт: 9 занятий")
     d2 = m["days"][0]
-    check(d2["list"] == 3 and d2["present"] == 1 and d2["absent"] == 1, "02.11: по списку 3, был 1, пропуск 1")
+    check(d2["list"] == 2 and d2["present"] == 1 and d2["absent"] == 1, "02.11: в журнале 2 (неоплативший без отметки не показан), был 1, пропуск 1")
     check(m["subs"] == {"paid": 1, "invoiced": 1, "single": 0, "none": 1} and m["kids"] == 3, "На абонементе 1, счёт 1, без оплаты 1")
     print("ok")
 

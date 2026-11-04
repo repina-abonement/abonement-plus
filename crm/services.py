@@ -851,7 +851,7 @@ def add_vacation(con, sid: int, start: str, end: str, note: str, user) -> None:
 
 # ---------- журнал ----------
 
-def journal(con, group_id: int, day: str) -> dict:
+def journal(con, group_id: int, day: str, paid_only: bool = False) -> dict:
     g = con.execute("SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.id=?",
                     (group_id,)).fetchone()
     if not g:
@@ -860,7 +860,7 @@ def journal(con, group_id: int, day: str) -> dict:
     from . import closures, schedule
     closed = closures.is_closed(con, group_id, d)
     has_lesson = d.weekday() in logic.parse_weekdays(schedule.on(con, g, d)["weekdays"]) and not closed  # с учётом версий расписания
-    rows = []
+    rows, hidden = [], []
     if g["is_makeup"]:
         for m in con.execute(
                 """SELECT m.id AS makeup_id, m.status, s.id, s.name, a.date AS absence_date,
@@ -880,10 +880,19 @@ def journal(con, group_id: int, day: str) -> dict:
             a = con.execute("SELECT status, resolved, warned, note FROM attendance WHERE student_id=? AND date=? AND group_id=?",
                             (s["id"], day, group_id)).fetchone()
             vac = logic.in_vacation(d, vacations_of(con, s["id"]))
-            unpaid = bool(g["program_id"]) and not con.execute(
-                "SELECT 1 FROM subscriptions WHERE student_id=? AND month=? AND status='paid' AND kind='month'",
-                (s["id"], day[:7])).fetchone()
-            rows.append({"id": s["id"], "name": s["name"], "birth": s["birth"] or "", "unpaid": unpaid, "status": "vacation" if vac else (a["status"] if a else None),
+            # в журнале только те, у кого оплачено фактически: абонемент на месяц или разовое (Юлия, 04.11).
+            # Уже отмеченных не прячем, чтобы не потерять отметку
+            paid_month = con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND month=? AND status='paid'
+                                        AND COALESCE(kind,'month')='month'""", (s["id"], day[:7])).fetchone()
+            paid_single = not paid_month and con.execute(
+                """SELECT 1 FROM subscriptions WHERE student_id=? AND kind='single' AND status='paid'
+                   AND (month=? OR substr(created_at,1,7)=?)""", (s["id"], day[:7], day[:7])).fetchone()
+            if paid_only and not paid_month and not paid_single and not a:
+                hidden.append({"id": s["id"], "name": s["name"]})
+                continue
+            unpaid = not paid_month and not paid_single
+            rows.append({"id": s["id"], "name": s["name"], "birth": s["birth"] or "", "unpaid": unpaid,
+                         "tag": "paid" if paid_month else "single" if paid_single else "unpaid", "status": "vacation" if vac else (a["status"] if a else None),
                          "resolved": a["resolved"] if a else None, "warned": bool(a and a["warned"]) and not vac,
                          "note": a["note"] if a else ""})
         # отработки в обычной группе (на место того, кто предупредил)
@@ -898,7 +907,7 @@ def journal(con, group_id: int, day: str) -> dict:
                                 AND substr(trial_at,1,10)=?""", (group_id, day)):
             came = con.execute("SELECT trial_came FROM students WHERE id=?", (s["id"],)).fetchone()[0]
             rows.append({"id": s["id"], "name": s["name"], "birth": s["birth"] or "", "status": "trial", "trial_at": s["trial_at"], "trial_came": came})
-    return {"group": dict(g), "date": day, "has_lesson": has_lesson, "closed": closed, "rows": rows}
+    return {"group": dict(g), "date": day, "has_lesson": has_lesson, "closed": closed, "rows": rows, "hidden_unpaid": hidden}
 
 
 def journal_month(con, group_id: int, ym: str) -> dict:
@@ -906,7 +915,7 @@ def journal_month(con, group_id: int, ym: str) -> dict:
     start, end = logic.month_bounds(ym)
     days, d = [], start
     while d <= end:
-        j = journal(con, group_id, d.isoformat())
+        j = journal(con, group_id, d.isoformat(), paid_only=True)
         if j["has_lesson"] or j["closed"]:
             rows = j["rows"]
             kids = [r for r in rows if r.get("status") not in ("trial", "makeup") and "makeup_id" not in r]

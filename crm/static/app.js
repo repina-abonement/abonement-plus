@@ -2051,7 +2051,9 @@ async function renderJournal(page) {
     ${j.has_lesson ? `<div class="row" style="gap:8px;margin:0 0 12px;flex-wrap:wrap"><button class="btn sm" id="j-copy" style="flex:0 0 auto">📋 Скопировать списки смены</button><button class="btn sm" id="j-print" style="flex:0 0 auto">🖨 Лист для печати</button><span class="small muted" style="align-self:center">все группы ${esc(g.branch)} на ${dShort(S.journal.date)}</span></div>` : ""}
     ${j.overdue_marks ? `<div class="alert">🔴 Тренировка закончилась ${j.overdue_marks.minutes} мин назад, не отмечено детей: ${j.overdue_marks.missing}</div>` : ""}
     ${st ? `<div class="panel" style="padding:12px 14px;margin-bottom:12px">${staffPicker(st, st.coaches, "j", S.journal.date === S.meta.today && new Date().toTimeString().slice(0, 5) < g.time)}</div>` : ""}
-    <div class="list">${j.rows.length ? j.rows.map((r) => g.is_makeup ? makeupRow(r) : journalRow(r, before)).join("") : `<div class="list-row muted">${g.is_makeup ? "На эту дату никто не записан на отработку" : "В группе пока нет учеников"}</div>`}</div>`;
+    <div class="list">${j.rows.length ? j.rows.map((r) => g.is_makeup ? makeupRow(r) : journalRow(r, before)).join("") : `<div class="list-row muted">${g.is_makeup ? "На эту дату никто не записан на отработку" : "В группе пока нет учеников"}</div>`}</div>
+    ${(j.hidden_unpaid || []).length ? `<details class="small muted" style="margin-top:10px"><summary>Не оплатили: ${j.hidden_unpaid.length}. В журнал не попадают</summary>
+      <div style="margin-top:6px">${j.hidden_unpaid.map((x) => `<span class="${isCoach() ? "" : "click"}" data-who="${x.id}" style="cursor:pointer">${esc(x.name)}</span>`).join(", ")}</div></details>` : ""}`;
   if (st) wireStaffPicker(page, "j", g.id, S.journal.date, render);
   if ($("#j-meet")) $("#j-meet").onclick = () => openMeet(g.id, S.journal.date);
   wireJournalDayHead(page);

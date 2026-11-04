@@ -396,7 +396,7 @@ def record_lesson_mark(con, group_id, day: str, now: datetime | None = None):
     if not group_id or not day:
         return
     try:
-        j = sv.journal(con, group_id, day)
+        j = sv.journal(con, group_id, day, paid_only=True)
     except Exception:  # noqa: BLE001
         return
     if j["has_lesson"] and j["rows"] and not _unmarked(j["rows"]):
@@ -414,7 +414,7 @@ def missing_marks(con, now: datetime | None = None, min_after: int = 30) -> list
             end = _lesson_end(con, g, d)
             if not end or now < end + timedelta(minutes=min_after) or closures.is_closed(con, g["id"], d):
                 continue
-            j = sv.journal(con, g["id"], d.isoformat())
+            j = sv.journal(con, g["id"], d.isoformat(), paid_only=True)
             n = _unmarked(j["rows"])
             if not n:
                 continue
@@ -593,7 +593,7 @@ def marks_report(con, d_from: date, d_to: date) -> dict:
             end = _lesson_end(con, g, d)
             if not end or end + timedelta(minutes=30) > now or closures.is_closed(con, g["id"], d):
                 continue
-            j = sv.journal(con, g["id"], d.isoformat())
+            j = sv.journal(con, g["id"], d.isoformat(), paid_only=True)
             if not j["rows"]:
                 continue
             coach = (con.execute("SELECT name FROM users WHERE id=?", (p["main"],)).fetchone() or ["—"])[0] if p["main"] else "—"

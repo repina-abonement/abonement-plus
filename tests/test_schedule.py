@@ -38,6 +38,7 @@ def main():
     sid = sv.create_student(con, {"name": "Миша", "parent_name": "Анна", "phone": "+7 900 123-45-67", "funnel": "members",
                                   "group_id": g, "birth": "2021-11-02",
                                   "source_id": sources.ensure_source(con, "Промоутер", "Промоутер Аня")}, OP)
+    con.execute("INSERT INTO subscriptions(student_id,month,tariff,lessons,per_lesson,price,status,created_at,kind) VALUES (?,'2026-11','fixed',8,1000,8000,'paid','2026-11-01','month')", (sid,))
     name, rows = schedule.group_export(con, g)
     check(rows[1][0] == "Миша" and rows[1][4] == "+7 900 123-45-67" and "Промоутер" in rows[1][10],
           "Выгрузка группы: имя, телефон родителя, источник")
@@ -55,6 +56,7 @@ def main():
     check(not ct["today"], "Во вторник у группы тренировки нет")
     sid2 = sv.create_student(con, {"name": "Катя", "parent_name": "Ира", "phone": "+7 900 222-33-44", "funnel": "members",
                                    "group_id": g, "birth": "2020-11-04"}, OP)
+    con.execute("INSERT INTO subscriptions(student_id,month,tariff,lessons,per_lesson,price,status,created_at,kind) VALUES (?,'2026-11','fixed',8,1000,8000,'paid','2026-11-01','month')", (sid2,))
     ct = coaches.coach_today(con, coach, date(2026, 11, 5))
     check(ct["today"][0]["birthdays"] and ct["today"][0]["birthdays"][0]["when"] == "yesterday",
           "В четверг тренер видит, что у Кати вчера был день рождения")
@@ -73,8 +75,8 @@ def main():
                             "group_id": g}, OP)
     ct = coaches.coach_today(con, coach, date(2026, 11, 9))
     c = ct["today"][0]["counts"]
-    check((c["paid"], c["unpaid"], c["trials"], c["total"]) == (1, 1, 1, 3),
-          "Тренер видит: придут 3, по абонементу 1, без оплаты 1, пробное 1")
+    check((c["paid"], c["unpaid"], c["trials"], c["total"]) == (1, 0, 1, 2),
+          "Тренер видит: придут 2, по абонементу 1, пробное 1; Лёва без оплаты в журнал не попадает")
     try:
         schedule.save_sub(con, {"group_id": g, "date": "2026-11-10", "coach_id": coach2}, OP)
         check(False, "Замену во вторник не поставить: тренировки нет")

@@ -309,7 +309,7 @@ def view(con, r: dict, s: dict) -> dict:
     data = json.loads(r["data"] or "{}")
     groups, absent, trials = [], [], []
     for g in s["groups"]:
-        j = sv.journal(con, g["id"], r["date"])
+        j = sv.journal(con, g["id"], r["date"], paid_only=True)
         rows = j["rows"]
         regular = [x for x in rows if x.get("status") not in ("trial",) and "makeup_id" not in x]
         came = sum(1 for x in rows if x.get("status") == "present" or x.get("trial_came") == 1

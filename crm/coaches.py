@@ -187,7 +187,7 @@ def _kid_tag(con, sid: int, month: str, status) -> str:
 
 def _lesson(con, g, day, today, sub=None, replaced=None) -> dict:
     from . import services as sv
-    j = sv.journal(con, g["id"], day)
+    j = sv.journal(con, g["id"], day, paid_only=True)
     rows = j["rows"]
     month = logic.month_of(today)
     kids, trials = [], []
@@ -263,7 +263,7 @@ def coach_today(con, coach_id: int, today=None) -> dict:
             s2 = schedule.sub_on(con, g["id"], d.isoformat(), "main")
             if s2 and s2["coach_id"] != coach_id:
                 continue
-            j = sv.journal(con, g["id"], d.isoformat())
+            j = sv.journal(con, g["id"], d.isoformat(), paid_only=True)
             left = sum(1 for r in j["rows"] if r.get("status") is None or (r.get("status") == "trial" and r.get("trial_came") is None))
             if left:
                 missing.append({"group_id": g["id"], "name": g["name"], "date": d.isoformat(), "left": left})
@@ -279,7 +279,7 @@ def coach_today(con, coach_id: int, today=None) -> dict:
             les["role"] = s["role"]
             out_today.append(les)
         elif s["role"] == "main":
-            j = sv.journal(con, g["id"], s["date"])
+            j = sv.journal(con, g["id"], s["date"], paid_only=True)
             left = sum(1 for r in j["rows"] if r.get("status") is None or (r.get("status") == "trial" and r.get("trial_came") is None))
             if left:
                 missing.append({"group_id": g["id"], "name": g["name"] + " (замена)", "date": s["date"], "left": left})

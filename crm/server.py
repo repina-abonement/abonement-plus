@@ -1746,11 +1746,7 @@ def makeup_status(con, h, user, body, q, mid):
 @route("GET", "/api/journal", role="journal")
 def journal(con, h, user, body, q):
     coach_guard(con, user, int(q.get("group_id") or 0))
-    j = sv.journal(con, int(q.get("group_id") or 0), q.get("date") or sv.today().isoformat())
-    # пометка у каждого: абонемент, разовое, не оплачен (Юлия, 04.11)
-    for r in j["rows"]:
-        if not j["group"]["is_makeup"] and r.get("status") not in ("trial", "makeup", "vacation") and not r.get("warned"):
-            r["tag"] = coaches._kid_tag(con, r["id"], j["date"][:7], r.get("status"))
+    j = sv.journal(con, int(q.get("group_id") or 0), q.get("date") or sv.today().isoformat(), paid_only=True)
     from . import pu
     from datetime import datetime as _dt
     if j["has_lesson"]:

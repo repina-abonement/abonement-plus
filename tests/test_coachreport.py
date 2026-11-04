@@ -29,6 +29,9 @@ def main():
     OP = {"id": varya, "name": "Варя", "role": "operator"}
     kids = [sv.create_student(con, {"name": f"Ребёнок {i}", "parent_name": "Мама", "phone": f"+7 900 100-00-0{i}", "funnel": "members",
                                     "group_id": g, "tariff": "fixed"}, OP) for i, g in enumerate((g1, g1, g2))]
+    for k in kids:  # в журнале только оплатившие (04.11)
+        con.execute("INSERT INTO subscriptions(student_id,month,tariff,lessons,per_lesson,price,status,created_at,kind) VALUES (?,?,'fixed',8,1000,8000,'paid',?,'month')",
+                    (k, today.isoformat()[:7], today.isoformat()))
     NIK = {"id": nik, "name": "Никита", "role": "coach"}
     ART = {"id": art, "name": "Артём", "role": "coach"}
 

@@ -31,7 +31,7 @@ def shift(con, branch_id: int, day: str, group_ids: list[int] | None = None) -> 
                             WHERE g.branch_id=? AND g.active=1""", (branch_id,)).fetchall():
         if group_ids is not None and g["id"] not in group_ids:
             continue
-        j = sv.journal(con, g["id"], day)
+        j = sv.journal(con, g["id"], day, paid_only=True)
         if not j["has_lesson"]:
             continue
         gv = schedule.on(con, g, d)
@@ -54,7 +54,7 @@ def shift(con, branch_id: int, day: str, group_ids: list[int] | None = None) -> 
             elif r.get("warned"):
                 tag, note = "warned", r.get("note") or ""
             else:
-                tag, note = coaches._kid_tag(con, r["id"], month, r.get("status")), ""
+                tag, note = r.get("tag") or coaches._kid_tag(con, r["id"], month, r.get("status")), ""
             kids.append({"name": r["name"], "age": age, "tag": tag, "label": TAGS.get(tag, tag), "note": note})
         order = {"paid": 0, "single": 1, "unpaid": 2, "makeup": 3, "trial": 4, "vacation": 5, "warned": 6}
         kids.sort(key=lambda k: (order.get(k["tag"], 9), k["name"]))
