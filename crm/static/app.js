@@ -1119,8 +1119,13 @@ async function renderWorkdesk(page) {
   if (S.user.role !== "admin") S.viewAs = null;
   const bar = await viewAsBar().catch(() => "");
   if (S.viewAs && S.viewAs.role === "coach") { await renderCoachToday(page, S.viewAs.id, bar); return wireViewAs(page); }
-  const [d, tasksHtml, schedHtml, erpHtml, skips] = await Promise.all([api("GET", "/api/workdesk" + (S.viewAs ? "?as_user=" + S.viewAs.id : "")), tasksSection(), scheduleWidget().catch(() => ""),
-    can("sales") ? erpTasksSection() : Promise.resolve(""), can("skips") ? api("GET", "/api/board/skips").catch(() => null) : Promise.resolve(null)]);
+  const [d, tasksHtml, schedHtml, erpHtml, skips, members] = await Promise.all([api("GET", "/api/workdesk" + (S.viewAs ? "?as_user=" + S.viewAs.id : "")), tasksSection(), scheduleWidget().catch(() => ""),
+    can("sales") ? erpTasksSection() : Promise.resolve(""), can("skips") ? api("GET", "/api/board/skips").catch(() => null) : Promise.resolve(null),
+    can("members", "full") ? api("GET", "/api/board/members").catch(() => null) : Promise.resolve(null)]);
+  // воронка «Продления» (Юлия, 04.11): разовые, не оплачен, продлить (с 20 числа), счёт выставлен, ушёл. Оплатившие не попадают
+  const since30 = addDays(S.meta.today, -30);
+  const renew = members ? { ...members, draggable: false, note: "", columns: members.columns.filter((c) => c.board !== false)
+    .map((c) => c.key === "left" ? { ...c, title: "Ушёл (за 30 дней)", cards: c.cards.filter((k) => (k.stage_changed_at || "") >= since30) } : c) } : null;
   const wasOpen = page.querySelector(".sched-widget") ? page.querySelector(".sched-widget").open : null;
   const u = d.urgent, reds = u.filter((x) => x.level === "red").length;
   const scroll = page.querySelector(".board") ? page.querySelector(".board").scrollLeft : 0;
@@ -1190,6 +1195,9 @@ async function renderWorkdesk(page) {
           <div class="now-head"><h3>Воронка продаж</h3></div>
           ${boardHtml(d.board)}
         </section>
+        ${renew ? `<section class="desk-funnel" id="dw-renew">
+          <div class="now-head"><h3>🔁 Продления</h3><span class="small muted">${renew.columns.reduce((a, c) => a + c.cards.length, 0) || "пусто"}</span></div>
+          ${boardHtml(renew)}</section>` : ""}
         ${skips ? `<section class="desk-funnel" id="dw-skips">
           <div class="now-head"><h3>🩹 Пропуски и отработки</h3><span class="small muted">${skips.columns.reduce((a, c) => a + c.cards.length, 0) || "пусто"}</span></div>
           ${skips.note ? `<div class="note">${esc(skips.note)}</div>` : ""}${boardHtml(skips)}</section>` : ""}
@@ -1205,6 +1213,7 @@ async function renderWorkdesk(page) {
   if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
   wireBoard(page.querySelector(".desk-funnel") || page, "sales", d.board);
   if (skips) wireBoard(page.querySelector("#dw-skips"), "skips", skips);
+  if (renew) wireBoard(page.querySelector("#dw-renew"), "members", renew);
   wireErpTasks(page);
   wireTasks(page);
   wireViewAs(page);
