@@ -1776,6 +1776,16 @@ def journal_shift(con, h, user, body, q):
     return shiftlist.day_all(con, day, bid or None, only)
 
 
+@route("GET", "/api/journal/month", role="journal")
+def journal_month(con, h, user, body, q):
+    gid = int(q.get("group_id") or 0)
+    coach_guard(con, user, gid)
+    ym = q.get("month") or sv.today().isoformat()[:7]
+    if not re.fullmatch(r"\d{4}-\d{2}", ym):
+        raise ApiError("Неверный месяц")
+    return sv.journal_month(con, gid, ym)
+
+
 @route("POST", "/api/journal/warn", role="journal")
 def journal_warn(con, h, user, body, q):
     """До начала тренировки: «предупредил, не придёт» прямо из журнала (Юлия, 04.11). Отменить: undo."""

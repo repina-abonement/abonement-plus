@@ -139,7 +139,7 @@ async function renderJournalDay(page, groups) {
 function journalDayHead() {
   const day = S.journal.mode === "dayall";
   return `<div class="page-head"><h2 class="grow">Журнал посещений</h2>
-    <div class="seg"><button data-jmode="group" class="${day ? "" : "active"}">Группа</button><button data-jmode="dayall" class="${day ? "active" : ""}">Все занятия дня</button></div></div>`;
+    <div class="seg"><button data-jmode="group" class="${!day && S.journal.mode !== "month" ? "active" : ""}">Группа</button><button data-jmode="month" class="${S.journal.mode === "month" ? "active" : ""}">Весь месяц</button><button data-jmode="dayall" class="${day ? "active" : ""}">Все занятия дня</button></div></div>`;
 }
 function wireJournalDayHead(page) {
   page.querySelectorAll("[data-jmode]").forEach((b) => (b.onclick = () => step(() => { S.journal.mode = b.dataset.jmode; })));

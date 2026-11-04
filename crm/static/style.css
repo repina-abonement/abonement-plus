@@ -1471,3 +1471,14 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .pill.jt-unpaid { background: var(--red-soft); color: var(--red); }
 .pill.jt-makeup { background: #efe6fb; color: #6b3fb5; }
 .pill.jt-trial { background: var(--yellow-soft); color: #8a6a00; }
+
+/* журнал за месяц (04.11) */
+.jm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.jm-day { text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; cursor: pointer; font: inherit; color: inherit; }
+.jm-day:hover { border-color: var(--accent); }
+.jm-day.today { border: 2px solid var(--accent); }
+.jm-day.closed { background: var(--surface-2); cursor: default; }
+.jm-date { font-weight: 700; }
+.jm-big { font-size: 28px; font-weight: 800; margin: 2px 0; }
+.jm-big span { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.jm-day .red { color: var(--red); }

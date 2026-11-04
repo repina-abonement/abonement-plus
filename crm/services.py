@@ -901,6 +901,43 @@ def journal(con, group_id: int, day: str) -> dict:
     return {"group": dict(g), "date": day, "has_lesson": has_lesson, "closed": closed, "rows": rows}
 
 
+def journal_month(con, group_id: int, ym: str) -> dict:
+    """Журнал группы за месяц (Юлия, 04.11): сколько детей в каждую дату и сколько в группе на обычном абонементе."""
+    start, end = logic.month_bounds(ym)
+    days, d = [], start
+    while d <= end:
+        j = journal(con, group_id, d.isoformat())
+        if j["has_lesson"] or j["closed"]:
+            rows = j["rows"]
+            kids = [r for r in rows if r.get("status") not in ("trial", "makeup") and "makeup_id" not in r]
+            come = [r for r in kids if r.get("status") != "vacation" and not r.get("warned")]
+            days.append({"date": d.isoformat(), "closed": j["closed"], "list": len(come),
+                         "present": sum(r.get("status") == "present" for r in kids),
+                         "absent": sum(r.get("status") == "absent" for r in kids),
+                         "vacation": sum(r.get("status") == "vacation" for r in kids),
+                         "trials": sum(r.get("status") == "trial" for r in rows),
+                         "trials_came": sum(r.get("status") == "trial" and r.get("trial_came") == 1 for r in rows),
+                         "makeups": sum(r.get("status") == "makeup" or ("makeup_id" in r and "mk_status" not in r) for r in rows)})
+        d += timedelta(days=1)
+    # кто в группе в этом месяце и на чём занимается
+    kids = con.execute("""SELECT DISTINCT s.id FROM enrollments e JOIN students s ON s.id=e.student_id
+                          WHERE e.group_id=? AND (e.active=1 OR e.end_date > ?) AND (e.start_date='' OR e.start_date <= ?)
+                            AND s.funnel='members' AND s.stage != 'left' AND s.archived=0""",
+                       (group_id, start.isoformat(), end.isoformat())).fetchall()
+    subs = {"paid": 0, "invoiced": 0, "single": 0, "none": 0}
+    for (sid,) in kids:
+        r = con.execute("""SELECT status FROM subscriptions WHERE student_id=? AND month=? AND COALESCE(kind,'month')='month'
+                           AND status!='cancelled' ORDER BY status='paid' DESC LIMIT 1""", (sid, ym)).fetchone()
+        if r:
+            subs["paid" if r[0] == "paid" else "invoiced"] += 1
+        elif con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND kind='single' AND status!='cancelled'
+                            AND substr(created_at,1,7)=?""", (sid, ym)).fetchone():
+            subs["single"] += 1
+        else:
+            subs["none"] += 1
+    return {"month": ym, "days": days, "kids": len(kids), "subs": subs}
+
+
 def clear_trial_mark(con, sid: int, user) -> None:
     """Снять ошибочную отметку «пришёл на пробное» (только «пришёл»: «не пришёл» запускает задачи, его меняют на «пришёл»)."""
     s = get_student_row(con, sid)

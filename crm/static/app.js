@@ -1969,12 +1969,57 @@ function groupNoBranch(x) {
   const w = (x.name || "").split(" ")[0];
   return w && (x.branch || "").includes(w) && x.name.length > w.length ? x.name.slice(w.length).trim() : x.name;
 }
+/* весь месяц по группе: сколько детей в каждую дату + крупная плашка «на абонементе» */
+async function renderJournalMonth(page, groups) {
+  const g = groups.find((x) => x.id === S.journal.group);
+  const ym = S.journal.date.slice(0, 7);
+  const m = await api("GET", `/api/journal/month?group_id=${g.id}&month=${ym}`);
+  const today = S.meta.today;
+  const tile = (d) => {
+    const past = d.date <= today;
+    const wd = WD[(new Date(d.date + "T12:00").getDay() + 6) % 7];
+    if (d.closed) return `<div class="jm-day closed"><div class="jm-date">${dShort(d.date)} <span class="muted">${wd}</span></div><div class="muted small">Праздник, занятия нет</div></div>`;
+    const unmarked = past ? d.list - d.present - d.absent : 0;
+    return `<button class="jm-day ${d.date === today ? "today" : ""}" data-jmday="${d.date}">
+      <div class="jm-date">${dShort(d.date)} <span class="muted">${wd}</span></div>
+      <div class="jm-big">${past ? d.present + d.trials_came : d.list + d.trials}<span> ${past ? "были" : "ждём"}</span></div>
+      <div class="small muted">${[past ? `по списку ${d.list}` : "", past && d.absent ? `пропуск ${d.absent}` : "", d.vacation ? `отпуск ${d.vacation}` : "",
+        d.trials ? `пробных ${d.trials}` : "", d.makeups ? `отработка ${d.makeups}` : "", unmarked > 0 ? `<b class="red">не отмечено ${unmarked}</b>` : ""].filter(Boolean).join(" · ")}</div>
+    </button>`;
+  };
+  const sb = m.subs;
+  page.innerHTML = `${journalDayHead()}
+    <div class="row" style="max-width:720px;margin-bottom:14px">
+      ${jBranchSel(groups, g.branch_id)}
+      <div class="field"><label>Группа</label><select id="j-group">${groups.filter((x) => x.branch_id === g.branch_id).map((x) => `<option value="${x.id}" ${x.id === S.journal.group ? "selected" : ""}>${esc(groupNoBranch(x))}</option>`).join("")}</select></div>
+      <div class="field" style="flex:0 0 170px"><label>Месяц</label><input id="j-month" type="month" value="${ym}"></div>
+    </div>
+    <div class="jm-sub">
+      <div class="jm-sub-n">${sb.paid}</div>
+      <div><b>${plural(sb.paid, "ребёнок", "ребёнка", "детей")} на абонементе: ${MONTHS[+ym.slice(5) - 1]} оплачен</b>
+        <div class="small muted">${[sb.invoiced ? `счёт выставлен, ждём оплату: ${sb.invoiced}` : "", sb.single ? `разовые: ${sb.single}` : "", sb.none ? `без оплаты: ${sb.none}` : ""].filter(Boolean).join(" · ") || "Все в группе оплатили абонемент 👍"}. Всего в группе ${m.kids}</div></div>
+    </div>
+    ${m.days.length ? `<div class="jm-grid">${m.days.map(tile).join("")}</div>` : `<div class="muted">В этом месяце у группы нет занятий</div>`}`;
+  wireJournalDayHead(page);
+  page.querySelector("#j-group").onchange = (e) => step(() => { S.journal.group = +e.target.value; });
+  const jb = page.querySelector("#j-branch");
+  if (jb) jb.onchange = (e) => step(() => { const f = groups.find((x) => x.branch_id === +e.target.value && !x.is_makeup) || groups.find((x) => x.branch_id === +e.target.value); if (f) S.journal.group = f.id; });
+  page.querySelector("#j-month").onchange = (e) => { if (e.target.value) step(() => { S.journal.date = e.target.value + "-01"; }); };
+  page.querySelectorAll("[data-jmday]").forEach((b) => (b.onclick = () => step(() => { S.journal.mode = "group"; S.journal.date = b.dataset.jmday; })));
+}
+
+function jBranchSel(groups, branchId) {
+  const br = [...new Map(groups.map((x) => [x.branch_id, { id: x.branch_id, name: x.branch }])).values()];
+  return br.length > 1 ? `<div class="field" style="flex:0 0 200px"><label>Филиал</label><select id="j-branch">${br.map((b) => `<option value="${b.id}" ${b.id === branchId ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : "";
+}
+
 async function renderJournal(page) {
   const groups = S.meta.groups;
   if (!groups.length) { page.innerHTML = `<h2>Журнал посещений</h2><p class="muted">За вами пока не закреплено ни одной группы. Попросите администратора.</p>`; return; }
   if (!S.journal.group || !groups.some((x) => x.id === S.journal.group)) S.journal.group = groups[0].id;
   if (!S.journal.date) S.journal.date = S.meta.today;
   if (S.journal.mode === "dayall") return renderJournalDay(page, groups);
+  if (S.journal.mode === "month") return renderJournalMonth(page, groups);
   const j = await api("GET", `/api/journal?group_id=${S.journal.group}&date=${S.journal.date}`);
   const g = j.group;
   if (g.branch_id == null) g.branch_id = (groups.find((x) => x.id === g.id) || {}).branch_id;
