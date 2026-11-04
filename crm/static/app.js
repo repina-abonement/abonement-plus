@@ -2033,10 +2033,27 @@ async function renderJournal(page) {
   if (!S.journal.date) S.journal.date = S.meta.today;
   if (S.journal.mode === "dayall") return renderJournalDay(page, groups);
   if (S.journal.mode === "month") return renderJournalMonth(page, groups);
+  // в списке только группы, у которых в выбранный день есть занятие (Юлия, 04.11)
+  const wdSel = (new Date(S.journal.date + "T12:00").getDay() + 6) % 7;
+  const dayGroups = groups.filter((x) => String(x.weekdays || "").split(",").map(Number).includes(wdSel));
+  if (!dayGroups.length) {
+    page.innerHTML = `${journalDayHead()}<div class="row" style="max-width:640px;margin-bottom:14px">
+      <div class="field" style="flex:0 0 170px"><label>Дата</label><input id="j-date" type="date" value="${S.journal.date}"></div></div>
+      <div class="muted">${dShort(S.journal.date)} занятий нет ни в одном филиале. Выберите другую дату</div>`;
+    wireJournalDayHead(page);
+    $("#j-date").onchange = (e) => { step(() => { S.journal.date = e.target.value; }); };
+    return;
+  }
+  if (!dayGroups.some((x) => x.id === S.journal.group)) {
+    const cur = groups.find((x) => x.id === S.journal.group) || {};
+    const pick = dayGroups.find((x) => x.branch_id === cur.branch_id && !x.is_makeup) || dayGroups.find((x) => x.branch_id === cur.branch_id)
+      || dayGroups.find((x) => !x.is_makeup) || dayGroups[0];
+    S.journal.group = pick.id;
+  }
   const j = await api("GET", `/api/journal?group_id=${S.journal.group}&date=${S.journal.date}`);
   const g = j.group;
   if (g.branch_id == null) g.branch_id = (groups.find((x) => x.id === g.id) || {}).branch_id;
-  const jBranches = [...new Map(groups.map((x) => [x.branch_id, { id: x.branch_id, name: x.branch }])).values()];
+  const jBranches = [...new Map(dayGroups.map((x) => [x.branch_id, { id: x.branch_id, name: x.branch }])).values()];
   // до начала тренировки вместо «Был / Пропуск» кнопка «Не придёт» (Юлия, 04.11)
   const before = j.has_lesson && (S.journal.date > S.meta.today || (S.journal.date === S.meta.today && new Date().toTimeString().slice(0, 5) < g.time));
   // нумерация: сначала те, кого ждём, потом предупредившие и отпуск; плашка «всего / ждём» (Юлия, 04.11)
@@ -2055,7 +2072,7 @@ async function renderJournal(page) {
     ${journalDayHead()}
     <div class="row" style="max-width:640px;margin-bottom:14px">
       ${jBranches.length > 1 ? `<div class="field" style="flex:0 0 200px"><label>Филиал</label><select id="j-branch">${jBranches.map((b) => `<option value="${b.id}" ${b.id === g.branch_id ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : ""}
-      <div class="field"><label>Группа</label><select id="j-group">${groups.filter((x) => x.branch_id === g.branch_id).map((x) => `<option value="${x.id}" ${x.id === S.journal.group ? "selected" : ""}>${esc(groupNoBranch(x))}</option>`).join("")}</select></div>
+      <div class="field"><label>Группа</label><select id="j-group">${dayGroups.filter((x) => x.branch_id === g.branch_id).map((x) => `<option value="${x.id}" ${x.id === S.journal.group ? "selected" : ""}>${esc(groupNoBranch(x))}</option>`).join("")}</select></div>
       <div class="field" style="flex:0 0 170px"><label>Дата</label><input id="j-date" type="date" value="${S.journal.date}"></div>
     </div>
     <div class="note">${esc(g.branch)} · ${g.weekdays.split(",").map((x) => WD[+x]).join(", ")} ${esc(g.time)} · ${esc(g.age)} лет${j.closed ? " · <b>праздник, занятия нет</b>" : j.has_lesson ? "" : " · <b>в этот день у группы нет занятия</b>"}</div>
@@ -2073,7 +2090,7 @@ async function renderJournal(page) {
   if ($("#j-copy")) $("#j-copy").onclick = () => shiftCopy(g.branch_id, S.journal.date);
   if ($("#j-print")) $("#j-print").onclick = () => shiftPrint(g.branch_id, S.journal.date);
   $("#j-group").onchange = (e) => { step(() => { S.journal.group = +e.target.value; }); };
-  if ($("#j-branch")) $("#j-branch").onchange = (e) => { step(() => { const f = groups.find((x) => x.branch_id === +e.target.value && !x.is_makeup) || groups.find((x) => x.branch_id === +e.target.value); if (f) S.journal.group = f.id; }); };
+  if ($("#j-branch")) $("#j-branch").onchange = (e) => { step(() => { const f = dayGroups.find((x) => x.branch_id === +e.target.value && !x.is_makeup) || dayGroups.find((x) => x.branch_id === +e.target.value); if (f) S.journal.group = f.id; }); };
   $("#j-date").onchange = (e) => { step(() => { S.journal.date = e.target.value; }); };
   page.classList.toggle("readonly", !can("journal", "full") && !isCoach());
   if (!isCoach()) page.querySelectorAll("[data-who]").forEach((el) => (el.onclick = () => openStudent(+el.dataset.who)));
