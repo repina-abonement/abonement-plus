@@ -475,6 +475,7 @@ def board(con, funnel: str) -> dict:
         deadline_day = int(st["renewal_deadline_day"])
         late = today().day > deadline_day
         cols = [
+            {"key": "single", "title": "Разовые занятия", "cards": []},
             {"key": "unpaid_cur", "title": f"Не оплачен {logic.month_label(cur)}", "cards": []},
             {"key": "renew", "title": f"Нужно продлить на {logic.month_label(nxt)}", "cards": []},
             {"key": "invoiced", "title": f"Счёт на {logic.month_label(nxt)} выставлен. Ждём", "cards": []},
@@ -491,8 +492,12 @@ def board(con, funnel: str) -> dict:
                 (s["id"],))}
             month_state = lambda m: ("paid" if ens and all(st_by.get((e, m)) == "paid" for e in ens) else
                                      "invoiced" if ens and all(st_by.get((e, m)) for e in ens) else None)
+            from . import singles as _sg
             if s["stage"] == "left":
                 key = "left"
+            elif _sg.is_single(con, s["id"], cur):
+                key = "single"  # разовые занятия: не должники (Юлия, 03.11)
+                card["badge"] = "Разовые занятия"
             elif month_state(cur) != "paid":
                 key = "unpaid_cur"
                 card["color"] = "red"
@@ -711,6 +716,8 @@ def student_detail(con, sid: int) -> dict:
         "pu": __import__("crm.pu", fromlist=["card_info"]).card_info(con, sid),
         "waitlist": __import__("crm.waitlist", fromlist=["for_student"]).for_student(con, sid),
         "nodeadline": __import__("crm.nodeadline", fromlist=["of_student"]).of_student(con, sid),
+        "singles": __import__("crm.singles", fromlist=["of_student"]).of_student(con, sid),
+        "single_now": __import__("crm.singles", fromlist=["is_single"]).is_single(con, sid),
         # раздел «Посещения» (Юлия, 04.11): отметки за 3 месяца, новые сверху
         "visits": _rows(con.execute("""SELECT a.date, a.status, a.warned, a.note, a.resolved, g.name AS group_name, b.name AS branch
                                         FROM attendance a JOIN groups g ON g.id=a.group_id JOIN branches b ON b.id=g.branch_id
@@ -925,6 +932,19 @@ def journal(con, group_id: int, day: str, paid_only: bool = False) -> dict:
                          "tag": "paid" if paid_month else "single" if paid_single else "unpaid", "status": "vacation" if vac else (a["status"] if a else None),
                          "resolved": a["resolved"] if a else None, "warned": bool(a and a["warned"]) and not vac,
                          "note": a["note"] if a else ""})
+        # разовые занятия на эту дату (Юлия, 03.11): в журнале с пометкой «разовое», отмечаются как все
+        from . import singles as _sg
+        have = {r["id"] for r in rows}
+        for v in _sg.rows_for_day(con, group_id, day):
+            if v["id"] in have:
+                continue
+            a = con.execute("SELECT status, resolved, warned, note FROM attendance WHERE student_id=? AND date=? AND group_id=?",
+                            (v["id"], day, group_id)).fetchone()
+            paid1 = con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND kind='single' AND status='paid'
+                                   AND (month=? OR substr(created_at,1,7)=?)""", (v["id"], day[:7], day[:7])).fetchone()
+            rows.append({"id": v["id"], "name": v["name"], "birth": v["birth"] or "", "tag": "single", "single_id": v["single_id"],
+                         "unpaid": not paid1, "status": a["status"] if a else None, "resolved": a["resolved"] if a else None,
+                         "warned": bool(a and a["warned"]), "note": a["note"] if a else ""})
         # отработки в обычной группе (на место того, кто предупредил)
         for m in con.execute(
                 """SELECT m.id AS makeup_id, m.status AS mk_status, s.id, s.name, a.date AS absence_date,

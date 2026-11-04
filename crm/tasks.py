@@ -20,6 +20,8 @@ KINDS = {
     "why_not_bought": ("Почему не купили", "🤔"),
     "rebook": ("Перезаписать на ПУ", "🔁"),
     "reinvite_pu": ("Пригласить на ПУ повторно", "🔄"),
+    "single_remind": ("Разовое завтра: подтвердить и отправить ссылку на оплату", "1️⃣"),
+    "single_next": ("Разовые: договориться о следующем занятии", "1️⃣"),
     "manual": ("Задача", "✅"),
     "plan": ("Задача", "📌"),
     "bday": ("День рождения сотрудника", "🎂"),
@@ -571,6 +573,7 @@ ERP_COLUMNS = [
     ("why_not_bought", "Почему не купили"),
     ("think", "Думает"),
     ("reinvite_pu", "Приглашение на ПУ повторно"),
+    ("single", "Разовые занятия"),
 ]
 THINK_KINDS = ("close_sale",)
 
@@ -589,6 +592,8 @@ def _erp_col(t: dict) -> tuple[str, str]:
             return k, name
     if kind == "rebook":  # этап «Не дошёл до ПУ»: нет отметки тренера или не пришли
         return ("not_marked", "Клиент не отмечен на ПУ") if t.get("miss") == "no_mark" else ("no_show", "Не пришли на ПУ")
+    if kind in ("single_remind", "single_next"):
+        return "single", "Разовые занятия"
     if kind in THINK_KINDS or title.lower() == "думает":
         return "think", "Думает"
     if kind in MANUAL_KINDS:

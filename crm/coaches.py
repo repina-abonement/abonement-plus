@@ -202,7 +202,8 @@ def _lesson(con, g, day, today, sub=None, replaced=None) -> dict:
             trials.append({"id": r["id"], "name": r["name"], "tag": "trial", "status": r.get("trial_came"),
                            "note": (r.get("trial_at") or "")[11:16]})
         else:
-            kids.append({"id": r["id"], "name": r["name"], "tag": _kid_tag(con, r["id"], month, r.get("status")), "status": r.get("status")})
+            kids.append({"id": r["id"], "name": r["name"], "tag": "vacation" if r.get("status") == "vacation" else (r.get("tag") or _kid_tag(con, r["id"], month, r.get("status"))),
+                         "status": r.get("status")})
     bdays = []
     for r in kids + trials:
         b = con.execute("SELECT birth FROM students WHERE id=?", (r["id"],)).fetchone()

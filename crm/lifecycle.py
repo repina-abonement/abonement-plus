@@ -172,9 +172,10 @@ def tick(con, now: datetime | None = None) -> int:
     cur = logic.month_of(now.date())
     nxt = logic.shift_month(cur, 1)
     seen = set()
+    from . import singles
     for s in _people(con, "s.funnel='members' AND s.stage!='left'"):
-        if s["family_id"] in seen:
-            continue
+        if s["family_id"] in seen or singles.is_single(con, s["id"], cur):
+            continue  # разовики не должники (Юлия, 03.11)
         if now.day >= 20 and sv.unpaid_groups(con, s["id"], nxt):
             seen.add(s["family_id"])
             made += bool(_add(con, "renew", s["id"], now.replace(hour=max(now.hour, 11), minute=0) if now.day == 20 else now,

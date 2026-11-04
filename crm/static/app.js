@@ -744,7 +744,7 @@ async function renderBoard(page, funnel) {
 
 /* «Ученики»: список с поиском, фильтрами и группировкой по филиалам и группам */
 S.mf = (() => { try { return JSON.parse(localStorage.getItem("crm.mf") || "null") || {}; } catch (_) { return {}; } })();
-const M_STATUS = [["", "Все"], ["unpaid_cur", "Не оплатили"], ["renew", "Продлить"], ["invoiced", "Счёт выставлен. Ждём"], ["paid", "Оплачено"], ["left", "Ушли"]];
+const M_STATUS = [["", "Все"], ["single", "Разовые"], ["unpaid_cur", "Не оплатили"], ["renew", "Продлить"], ["invoiced", "Счёт выставлен. Ждём"], ["paid", "Оплачено"], ["left", "Ушли"]];
 function renderMembersList(page, data) {
   const cols = Object.fromEntries(data.columns.map((c) => [c.key, c.title]));
   const all = data.columns.flatMap((c) => c.cards);
@@ -760,7 +760,7 @@ function renderMembersList(page, data) {
   const base = all.filter((k) => inPlace(k) && hit(k));
   const cnt = (s) => base.filter((k) => (s ? k.status === s : k.status !== "left")).length;
   const rows = base.filter((k) => (f.status ? k.status === f.status : k.status !== "left"));
-  const pill = { unpaid_cur: "red", renew: "", invoiced: "", paid: "green", left: "" };
+  const pill = { single: "", unpaid_cur: "red", renew: "", invoiced: "", paid: "green", left: "" };
   const row = (k, g) => `<div class="m-row ${k.color === "red" ? "m-red" : k.color === "yellow" ? "m-yellow" : ""}" data-open="${k.id}" role="button" tabindex="0">
     <span class="m-name"><b>${esc(k.name)}</b></span>
     <span class="small muted m-parent">${esc(k.parent)}${k.phone ? ", " + esc(k.phone) : ""}</span>
@@ -1502,7 +1502,7 @@ async function openStudent(id) {
   const alerts = [
     s.priority ? `<span class="pill red">🔥 Заявка с сайта: обработать первой</span>` : "",
     // статус клиента (Юлия, 04.11): «Лид», пока ни разу не был нашим клиентом
-    `<span class="pill ${s.funnel === "members" && s.stage !== "left" ? "green" : ""}" title="Статус клиента">${s.funnel === "members" && s.stage !== "left" ? "Клиент" : s.converted_at || (d.subscriptions || []).some((x) => x.status === "paid") ? "Бывший клиент" : "Лид"}</span>`,
+    `<span class="pill ${s.funnel === "members" && s.stage !== "left" ? "green" : ""}" title="Статус клиента">${d.single_now ? "Разовые занятия" : s.funnel === "members" && s.stage !== "left" ? "Клиент" : s.converted_at || (d.subscriptions || []).some((x) => x.status === "paid") ? "Бывший клиент" : "Лид"}</span>`,
     d.family.note ? `<span class="pill yellow" title="Заметка для персонала">📝 ${esc(d.family.note)}</span>` : "",
     s.erp_status ? `<span class="pill" title="Статус клиента в ERP при переносе">ERP: ${esc(s.erp_status)}</span>` : "",
     isMember && d.balance.debt ? `<span class="pill red">Долг ${rub(d.balance.debt)}</span>` : "",
@@ -1582,6 +1582,7 @@ async function openStudent(id) {
         <div class="field" style="flex:0 0 190px"><label>Тренировка</label><select id="cm-date"></select></div></div>
       <div id="cm-state" class="small muted" style="margin:4px 0 6px"></div>
       <div class="mark" id="cm-btns"></div></div>` : ""}
+    ${can("sales", "full") ? singlesBlock(d) : ""}
     ${visitsHtml(d.visits || [], d.cur_month)}
     <div id="warn-box" style="margin-top:10px"></div>
   </div>
@@ -1785,6 +1786,7 @@ async function openStudent(id) {
     }, "Свободные места на пробное (подходят по возрасту):", s.birth);
   }
   if ($("#cm-group")) wireCardMark(id, reload);
+  wireSingles(id, reload);
   if ($("#nd-in")) $("#nd-in").onclick = async () => {
     const note = window.prompt("Почему ждём акцию? (необязательно)", "");
     if (note === null) return;

@@ -953,6 +953,29 @@ def board_skips(con, h, user, body, q):
     return sv.board(con, "skips")
 
 
+@route("POST", "/api/students/{sid}/singles", role="operator")
+def singles_book(con, h, user, body, q, sid):
+    from . import singles
+    return {"id": singles.book(con, int(sid), int(body.get("group_id") or 0), body.get("date") or "", user, body.get("note") or "")}
+
+
+@route("POST", "/api/singles/{vid}/cancel", role="operator")
+def singles_cancel(con, h, user, body, q, vid):
+    from . import singles
+    singles.cancel(con, int(vid), user)
+    return {"ok": True}
+
+
+@route("POST", "/api/students/{sid}/singles/next", role="operator")
+def singles_next(con, h, user, body, q, sid):
+    """После задачи «Разовое завтра»: что дальше. Закрывает саму задачу, если передан task_id."""
+    from . import singles, tasks
+    r = singles.next_step(con, int(sid), body.get("how") or "", user, body.get("group_id"), body.get("date") or "")
+    if body.get("task_id"):
+        tasks.complete(con, int(body["task_id"]), user, body.get("result") or "")
+    return r
+
+
 @route("GET", "/api/nodeadline", role="operator")
 def nodeadline_board(con, h, user, body, q):
     from . import nodeadline

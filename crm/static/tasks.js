@@ -183,7 +183,11 @@ function cardTasksBlock(d) {
 }
 function wireCardTasks(root, reload, sid) {
   root.querySelectorAll("[data-ctask]").forEach((el) => {
-    const open = () => { if (["admin", "operator"].includes(S.user.role)) openTaskEdit(S.taskById[el.dataset.ctask], reload); };
+    const open = () => {
+      const t = S.taskById[el.dataset.ctask];
+      if (t && ["single_remind", "single_next"].includes(t.kind) && typeof singleTaskDialog === "function") return singleTaskDialog(t, reload);
+      if (["admin", "operator"].includes(S.user.role)) openTaskEdit(t, reload);
+    };
     el.onclick = open; el.onkeydown = (e) => { if (e.key === "Enter") open(); };
   });
   const add = root.querySelector("[data-ctadd]");
