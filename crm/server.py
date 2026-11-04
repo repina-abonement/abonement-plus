@@ -642,6 +642,39 @@ def erp_upload_del(con, h, user, body, q, uid):
     return {"ok": True}
 
 
+@route("GET", "/api/diag/conn", role="admin")
+def diag_conn(con, h, user, body, q):
+    """«🩺 Проверка соединений» (Юлия, 04.11): последние соединения из журнала nginx, с фильтром по IP. Только владелец."""
+    from . import staffdocs
+    if user["id"] != staffdocs.owner_id(con):
+        raise ApiError("Только для владельца", 403)
+    ip = re.sub(r"[^0-9a-fA-F.:]", "", q.get("ip", ""))[:45]
+
+    def tail(path, size=600_000):
+        try:
+            with open(path, "rb") as f:
+                f.seek(0, 2); n = f.tell(); f.seek(max(0, n - size))
+                lines = f.read().decode("utf-8", "replace").splitlines()
+                return lines[1:] if n > size else lines  # первая строка обрезана, только если читали не с начала
+        except OSError:
+            return None
+    acc, err = tail("/var/log/crm-diag/access.log"), tail("/var/log/crm-diag/error.log")
+    rows = []
+    for ln in acc or []:
+        m = re.match(r'(\S+) (\S+) (\S+) (\S+) (\d+) (\d+) (\S+) (\d+) (\d+) "([^"]*)" "([^"]*)"', ln)
+        if not m or (ip and m[2] != ip):
+            continue
+        rows.append({"at": m[1][:19].replace("T", " "), "ip": m[2], "tls": m[3], "key": m[4], "status": int(m[5]), "bytes": int(m[6]),
+                     "secs": m[7], "conn": m[8], "req": m[10][:120], "ua": m[11][:160]})
+    keys = ("SSL", "timed out", "handshak", "[error]", "[crit]", "[warn]", "reset")
+    errs = [ln[:300] for ln in (err or []) if (not ip or f"client: {ip}," in ln) and any(k in ln for k in keys)]
+    ips = {}
+    for r in rows if not ip else []:
+        ips[r["ip"]] = ips.get(r["ip"], 0) + 1
+    return {"enabled": acc is not None, "ip": ip, "rows": rows[-80:][::-1], "errors": errs[-40:][::-1],
+            "top_ips": sorted(ips.items(), key=lambda x: -x[1])[:15]}
+
+
 @route("GET", "/api/erp/statuses", role="admin")
 def erp_statuses(con, h, user, body, q):
     """Все статусы клиентов из ERP (сохранены у каждого клиента при переносе) и сколько клиентов в каждом. Без имён."""

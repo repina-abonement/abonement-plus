@@ -2010,7 +2010,8 @@ const SET_TABS = [
   ["coachpay", "⏱", "Тренеры: приход и оплата", "Отметка прихода, ставки"],
   ["sources", "📣", "Рекламные каналы", "Источники лидов"], ["offers", "📄", "Оферты", "Редакции и ссылки"],
   ["backup", "💾", "Резервные копии", "Яндекс Диск, копия сейчас"], ["archive", "🗄", "Архив", "Вернуть из архива"],
-  ["test", "🧪", "Тестовые клиенты", "Выдуманные клиенты для проверки"], ["profile", "👤", "Мой профиль", "Вид, код входа, пароль"],
+  ["test", "🧪", "Тестовые клиенты", "Выдуманные клиенты для проверки"], ["diag", "🩺", "Проверка соединений", "Почему у кого-то не открывается CRM"],
+  ["profile", "👤", "Мой профиль", "Вид, код входа, пароль"],
 ];
 
 function settingsTiles(page) {
@@ -2066,6 +2067,7 @@ async function renderSettings(page) {
     ${S.user.role === "admin" ? `<div class="section" id="erp-settings" data-tab="erp"></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" id="tg-import" data-tab="erp"></div>` : ""}
     <div class="section" id="backup-settings" data-tab="backup"></div>
+    ${isOwner() ? `<div class="section" id="diag-box" data-tab="diag"></div>` : ""}
     <div class="section" id="resp-settings" data-tab="resp"></div>
     <div class="section" data-tab="users">
       <h3>Сотрудники</h3>
@@ -2155,6 +2157,7 @@ async function renderSettings(page) {
   if ($("#memo-settings")) renderMemosSettings($("#memo-settings")).catch(fail);
   if ($("#program-settings")) renderProgramSettings($("#program-settings")).catch(fail);
   if ($("#resp-settings")) renderResponsibles($("#resp-settings")).catch(fail);
+  if ($("#diag-box")) renderDiag($("#diag-box"));
   if ($("#backup-settings")) renderBackup($("#backup-settings")).catch(() => { $("#backup-settings").remove(); $('[data-tile="backup"]')?.remove(); });
   else if ($("#offers-settings")) $("#offers-settings").remove();
   if ($("#erp-settings")) renderErp($("#erp-settings")).catch(fail);
@@ -2427,6 +2430,32 @@ async function renderStaffDocsAdmin(box) {
 }
 
 /* Настройки → Резервные копии */
+/* Настройки → «🩺 Проверка соединений» (только владелец): кто и как подключался к CRM, по журналу сервера */
+async function renderDiag(box, ip = "") {
+  box.innerHTML = `<h3>🩺 Проверка соединений</h3>
+    <div class="small muted">Попросите сотрудника открыть ab-plus.ru и прислать скриншот с сайта 2ip.ru (там его IP-адрес). Впишите IP сюда и нажмите «Показать». Видно, дошёл ли он до сервера и на каком шаге оборвалось</div>
+    <div class="row" style="gap:8px;margin-top:8px"><input id="dg-ip" placeholder="IP-адрес, например 95.24.1.2" value="${esc(ip)}">
+      <button class="btn primary" id="dg-go" style="flex:0 0 auto">Показать</button><button class="btn" id="dg-all" style="flex:0 0 auto">Все за последнее время</button></div>
+    <div id="dg-out" class="small muted" style="margin-top:10px">Загружаю…</div>`;
+  const run = async (v) => {
+    const out = $("#dg-out");
+    try {
+      const d = await api("GET", "/api/diag/conn?ip=" + encodeURIComponent(v || ""));
+      if (!d.enabled) { out.textContent = "Журнал ещё не включился на сервере: подождите 5-10 минут и откройте снова"; return; }
+      const verdict = v ? (d.rows.length ? `✅ Соединения с ${esc(v)} доходят до сервера: ${d.rows.length}` : d.errors.length ? `⚠️ С ${esc(v)} были попытки, но рукопожатие не завершилось (см. ниже)` : `❌ С ${esc(v)} ничего не дошло до сервера`) : "";
+      out.innerHTML = `${verdict ? `<p><b>${verdict}</b></p>` : ""}
+        ${!v && d.top_ips.length ? `<div>Чаще всего: ${d.top_ips.map(([a, n]) => `<button class="chip" data-dgip="${esc(a)}">${esc(a)} · ${n}</button>`).join(" ")}</div>` : ""}
+        ${d.rows.length ? `<table class="tbl" style="margin-top:8px"><thead><tr><th>Когда</th><th>IP</th><th>TLS</th><th>Ключ</th><th>Ответ</th><th>Байт</th><th>Сек</th><th>Что</th></tr></thead>
+          <tbody>${d.rows.map((r) => `<tr><td>${esc(r.at.slice(5))}</td><td>${esc(r.ip)}</td><td>${esc(r.tls)}</td><td>${esc(r.key)}</td><td>${r.status}</td><td>${r.bytes}</td><td>${esc(r.secs)}</td><td title="${esc(r.ua)}">${esc(r.req)}</td></tr>`).join("")}</tbody></table>` : ""}
+        ${d.errors.length ? `<h4 style="margin:12px 0 4px">Обрывы и ошибки</h4><pre class="small" style="white-space:pre-wrap">${d.errors.map(esc).join("\n")}</pre>` : ""}`;
+      out.querySelectorAll("[data-dgip]").forEach((b) => (b.onclick = () => renderDiag(box, b.dataset.dgip)));
+    } catch (e) { out.textContent = e.message; }
+  };
+  $("#dg-go").onclick = () => run($("#dg-ip").value.trim());
+  $("#dg-all").onclick = () => { $("#dg-ip").value = ""; run(""); };
+  run(ip);
+}
+
 async function renderBackup(box) {
   const d = await api("GET", "/api/backup");
   box.innerHTML = `<h3>Резервные копии</h3>

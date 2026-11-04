@@ -31,6 +31,27 @@ if [ ! -f "$GZ" ] && [ ! -f "$GZ.off" ] && [ -d /etc/nginx/conf.d ]; then
   printf "gzip_vary on;\ngzip_proxied any;\ngzip_comp_level 5;\ngzip_min_length 1024;\ngzip_types text/css application/javascript text/javascript application/json image/svg+xml;\n" > "$GZ"
   if nginx -t -q 2>/dev/null; then systemctl reload nginx; else rm -f "$GZ"; touch "$GZ.off"; fi
 fi
+# Проверка соединений (Юлия, 04.11: у части сотрудников CRM не открывается). Журнал: кто подключился, по какому TLS и ключу,
+# сколько отправлено, сколько длилось; ошибки рукопожатий. Без паролей и данных клиентов. Читает только владелец в CRM
+DIAG=/etc/nginx/conf.d/crm-diag.conf
+if [ ! -f "$DIAG.off" ] && [ -d /etc/nginx/conf.d ]; then
+  mkdir -p /var/log/crm-diag && chmod 755 /var/log/crm-diag
+  WANT_DIAG='log_format crmdiag '"'"'$time_iso8601 $remote_addr $ssl_protocol $ssl_curve $status $bytes_sent $request_time $connection $connection_requests "$request" "$http_user_agent"'"'"';
+access_log /var/log/crm-diag/access.log crmdiag;
+error_log /var/log/crm-diag/error.log info;'
+  if [ "$(cat "$DIAG" 2>/dev/null)" != "$WANT_DIAG" ]; then
+    echo "$WANT_DIAG" > "$DIAG"
+    if nginx -t -q 2>/dev/null; then systemctl reload nginx; else rm -f "$DIAG"; touch "$DIAG.off"; fi
+  fi
+  for f in /var/log/crm-diag/*.log; do  # журнал не больше 30 МБ
+    [ -f "$f" ] && chmod 644 "$f" && [ "$(stat -c %s "$f")" -gt 31457280 ] && tail -n 20000 "$f" > "$f.tmp" && cat "$f.tmp" > "$f" && rm -f "$f.tmp"
+  done
+fi
+# Автоподбор размера пакета: если большие пакеты где-то по дороге теряются, ядро само уменьшает их, а не ждёт вечно.
+# Стандартная безопасная настройка, у кого всё работает, ничего не меняется
+if [ "$(sysctl -n net.ipv4.tcp_mtu_probing 2>/dev/null)" != "1" ]; then
+  echo "net.ipv4.tcp_mtu_probing = 1" > /etc/sysctl.d/90-crm-mtu.conf && sysctl -q -p /etc/sysctl.d/90-crm-mtu.conf || true
+fi
 # Домен может указывать на этот сервер или на мост в Нидерландах (deploy/relay/passthrough.sh пересылает зашифрованный
 # трафик сюда, чтобы CRM открывалась и с VPN): в обоих случаях подключаем домен здесь
 RELAY_IP=$(cat "$DIR/deploy/relay/relay_ip.txt" 2>/dev/null | tr -d '[:space:]')
