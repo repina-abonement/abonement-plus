@@ -2009,8 +2009,8 @@ async function renderJournalMonth(page, groups) {
     </div>
     <div class="jm-sub">
       <div class="jm-sub-n">${sb.paid}</div>
-      <div><b>${plural(sb.paid, "ребёнок", "ребёнка", "детей")} на абонементе: ${MONTHS[+ym.slice(5) - 1]} оплачен</b>
-        <div class="small muted">${[sb.invoiced ? `счёт выставлен, ждём оплату: ${sb.invoiced}` : "", sb.single ? `разовые: ${sb.single}` : "", sb.none ? `без оплаты: ${sb.none}` : ""].filter(Boolean).join(" · ") || "Все в группе оплатили абонемент 👍"}. Всего в группе ${m.kids}</div></div>
+      <div><b>${plural(sb.paid, "ребёнок", "ребёнка", "детей")} на абонементе</b>
+        ${sb.single ? `<div><b>${sb.single} ${plural(sb.single, "разовик", "разовика", "разовиков")}</b></div>` : ""}</div>
     </div>
     ${m.days.length ? `<div class="jm-grid">${m.days.map(tile).join("")}</div>` : `<div class="muted">В этом месяце у группы нет занятий</div>`}`;
   wireJournalDayHead(page);
