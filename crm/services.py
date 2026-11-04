@@ -871,7 +871,7 @@ def journal(con, group_id: int, day: str) -> dict:
             rows.append(dict(m))
     else:
         # переведённые (transfer.py): в старой группе до даты перевода, в новой с неё
-        for s in con.execute("""SELECT s.id, s.name, e.weekdays FROM enrollments e JOIN students s ON s.id = e.student_id
+        for s in con.execute("""SELECT s.id, s.name, s.birth, e.weekdays FROM enrollments e JOIN students s ON s.id = e.student_id
                                 WHERE e.group_id=? AND (e.active=1 OR e.end_date > ?) AND (e.start_date = '' OR e.start_date <= ?)
                                   AND s.funnel='members' AND s.stage != 'left' AND s.archived=0
                                 ORDER BY s.name""", (group_id, day, day)).fetchall():
@@ -883,7 +883,7 @@ def journal(con, group_id: int, day: str) -> dict:
             unpaid = bool(g["program_id"]) and not con.execute(
                 "SELECT 1 FROM subscriptions WHERE student_id=? AND month=? AND status='paid' AND kind='month'",
                 (s["id"], day[:7])).fetchone()
-            rows.append({"id": s["id"], "name": s["name"], "unpaid": unpaid, "status": "vacation" if vac else (a["status"] if a else None),
+            rows.append({"id": s["id"], "name": s["name"], "birth": s["birth"] or "", "unpaid": unpaid, "status": "vacation" if vac else (a["status"] if a else None),
                          "resolved": a["resolved"] if a else None, "warned": bool(a and a["warned"]) and not vac,
                          "note": a["note"] if a else ""})
         # отработки в обычной группе (на место того, кто предупредил)
@@ -894,10 +894,10 @@ def journal(con, group_id: int, day: str) -> dict:
                    WHERE m.group_id=? AND m.date=? AND m.status != 'cancelled' ORDER BY s.name""", (group_id, day)):
             rows.append(dict(m) | {"status": "makeup"})
         # пробные на этот день
-        for s in con.execute("""SELECT id, name, trial_at FROM students WHERE funnel='sales' AND group_id=? AND archived=0
+        for s in con.execute("""SELECT id, name, birth, trial_at FROM students WHERE funnel='sales' AND group_id=? AND archived=0
                                 AND substr(trial_at,1,10)=?""", (group_id, day)):
             came = con.execute("SELECT trial_came FROM students WHERE id=?", (s["id"],)).fetchone()[0]
-            rows.append({"id": s["id"], "name": s["name"], "status": "trial", "trial_at": s["trial_at"], "trial_came": came})
+            rows.append({"id": s["id"], "name": s["name"], "birth": s["birth"] or "", "status": "trial", "trial_at": s["trial_at"], "trial_came": came})
     return {"group": dict(g), "date": day, "has_lesson": has_lesson, "closed": closed, "rows": rows}
 
 
