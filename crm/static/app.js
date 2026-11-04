@@ -279,7 +279,7 @@ async function renderLogin(force = false) {
 
 /* ---------- каркас ---------- */
 const VIEWS = [
-  ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Действующие клиенты"], ["skips", "Пропуски"], ["manual", "Ручные задачи"],
+  ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Действующие клиенты"],
   ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["posts", "Посты в каналы"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["docs", "Документы"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
@@ -321,7 +321,7 @@ const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></s
 
 /* Боковое меню: главное сверху, остальное по папкам. Открыта папка с текущим разделом и те, что сотрудник раскрыл сам */
 const NAV_TOP = ["today", "sales", "inbox", "planner"];
-const NAV_FOLDERS = [["Клиенты", ["members", "skips", "manual"]], ["Занятия", ["journal", "schedule", "coaches"]],
+const NAV_FOLDERS = [["Клиенты", ["members"]], ["Занятия", ["journal", "schedule", "coaches"]],
   ["Деньги", ["payments", "fiscal", "merch", "spend", "dashboard"]], ["Школа", ["team", "posts", "docs", "settings"]]];
 const navOpen = () => { try { return JSON.parse(localStorage.getItem("crm.nav_open") || "{}"); } catch (_) { return {}; } };
 function sideNav(views) {
@@ -526,7 +526,8 @@ async function renderView(page) {
     if (S.view === "payments") return await renderPayments(page);
     if (S.view === "merch") return await renderMerch(page);
     if (S.view === "planner") return await renderPlanner(page);
-    if (S.view === "manual") return await renderManualBoard(page);
+    // «Пропуски» и «Ручные задачи» теперь на рабочем столе, отдельных разделов нет (Юлия, 04.11)
+    if (["manual", "skips"].includes(S.view)) { S.view = "sales"; return render(); }
     if (S.view === "spend") return await renderSpend(page);
     if (S.view === "fiscal") return await renderFiscal(page);
     if (S.view === "schedule") return await renderSchedule(page);
@@ -1116,8 +1117,8 @@ async function renderWorkdesk(page) {
   if (S.user.role !== "admin") S.viewAs = null;
   const bar = await viewAsBar().catch(() => "");
   if (S.viewAs && S.viewAs.role === "coach") { await renderCoachToday(page, S.viewAs.id, bar); return wireViewAs(page); }
-  const [d, tasksHtml, schedHtml, erpHtml] = await Promise.all([api("GET", "/api/workdesk" + (S.viewAs ? "?as_user=" + S.viewAs.id : "")), tasksSection(), scheduleWidget().catch(() => ""),
-    can("sales") ? erpTasksSection() : Promise.resolve("")]);
+  const [d, tasksHtml, schedHtml, erpHtml, skips] = await Promise.all([api("GET", "/api/workdesk" + (S.viewAs ? "?as_user=" + S.viewAs.id : "")), tasksSection(), scheduleWidget().catch(() => ""),
+    can("sales") ? erpTasksSection() : Promise.resolve(""), can("skips") ? api("GET", "/api/board/skips").catch(() => null) : Promise.resolve(null)]);
   const wasOpen = page.querySelector(".sched-widget") ? page.querySelector(".sched-widget").open : null;
   const u = d.urgent, reds = u.filter((x) => x.level === "red").length;
   const scroll = page.querySelector(".board") ? page.querySelector(".board").scrollLeft : 0;
@@ -1187,6 +1188,9 @@ async function renderWorkdesk(page) {
           <div class="now-head"><h3>Воронка продаж</h3></div>
           ${boardHtml(d.board)}
         </section>
+        ${skips ? `<section class="desk-funnel" id="dw-skips">
+          <div class="now-head"><h3>🩹 Пропуски и отработки</h3><span class="small muted">${skips.columns.reduce((a, c) => a + c.cards.length, 0) || "пусто"}</span></div>
+          ${skips.note ? `<div class="note">${esc(skips.note)}</div>` : ""}${boardHtml(skips)}</section>` : ""}
       </div>
       <div class="desk-side">${widgets.filter(dwShown).map((k) => `<div class="dw" id="dw-${k}">${W[k].html}</div>`).join("")}
         ${widgets.some((k) => !dwShown(k)) ? `<section class="dw-folded"><div class="dwf-title small muted">Ещё на столе: сейчас там пусто или не срочно</div>${widgets.filter((k) => !dwShown(k)).map((k) => `<details class="dwf" data-dwk="${k}" ${S.dwOpen[k] ? "open" : ""}>
@@ -1197,7 +1201,8 @@ async function renderWorkdesk(page) {
   page.querySelectorAll(".dwf").forEach((x) => x.addEventListener("toggle", () => { S.dwOpen[x.dataset.dwk] = x.open; }));
   page.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => { const el = document.getElementById(b.dataset.jump); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }));
   if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
-  wireBoard(page, "sales", d.board);
+  wireBoard(page.querySelector(".desk-funnel") || page, "sales", d.board);
+  if (skips) wireBoard(page.querySelector("#dw-skips"), "skips", skips);
   wireErpTasks(page);
   wireTasks(page);
   wireViewAs(page);
