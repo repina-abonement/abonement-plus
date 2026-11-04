@@ -1482,3 +1482,4 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .jm-big { font-size: 28px; font-weight: 800; margin: 2px 0; }
 .jm-big span { font-size: 13px; font-weight: 600; color: var(--ink-2); }
 .jm-day .red { color: var(--red); }
+.cm-box { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; margin: 6px 0 12px; }

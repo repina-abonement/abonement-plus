@@ -1557,6 +1557,13 @@ async function openStudent(id) {
   ${isMember ? `
   <div class="section" data-sc="skips" data-title="🩹 Пропуски и отработки">
     <h3>Пропуски и отработки</h3>
+    ${can("journal", "full") && d.enrollments.some((e) => e.lesson_kind !== "ofp") ? `<div class="cm-box">
+      <div class="small"><b>Отметить на тренировке</b></div>
+      <div class="row" style="margin-top:6px;align-items:flex-end;flex-wrap:wrap">
+        <div class="field"><label>Группа</label><select id="cm-group">${d.enrollments.filter((e) => e.lesson_kind !== "ofp").map((e) => `<option value="${e.group_id}" data-wd="${esc(e.weekdays || e.group_weekdays)}">${esc(e.branch_name)} · ${esc(groupNoBranch({ name: e.group_name, branch: e.branch_name }))}</option>`).join("")}</select></div>
+        <div class="field" style="flex:0 0 190px"><label>Тренировка</label><select id="cm-date"></select></div></div>
+      <div id="cm-state" class="small muted" style="margin:4px 0 6px"></div>
+      <div class="mark" id="cm-btns"></div></div>` : ""}
     <div class="counters">
       <div class="counter"><b>${c.absent_cur}</b><span>пропущено в этом месяце</span></div>
       <div class="counter"><b>${c.absent_prev}</b><span>пропущено в прошлом</span></div>
@@ -1755,6 +1762,7 @@ async function openStudent(id) {
       patch({ group_id: x.group_id, trial_at: `${x.date}T${x.time || "18:00"}` });
     }, "Свободные места на пробное (подходят по возрасту):", s.birth);
   }
+  if ($("#cm-group")) wireCardMark(id);
   if ($("#mk-book")) $("#mk-book").onclick = async () => {
     try { await api("POST", `/api/students/${id}/makeups`, { group_id: +$("#mk-group").value, date: $("#mk-date").value }); toast("Записан на отработку"); reload(); } catch (e) { fail(e); }
   };
@@ -2114,6 +2122,43 @@ function makeupRow(r) {
       <button data-mk="${r.makeup_id}" data-st="done" class="${r.status === "done" ? "on-present" : ""}">Пришёл</button>
       <button data-mk="${r.makeup_id}" data-st="missed" class="${r.status === "missed" ? "on-absent" : ""}">Не пришёл</button>
     </div></div>`;
+}
+
+/* отметка посещения прямо из карточки (Юлия, 04.11): ближайшие тренировки группы ребёнка, «Был / Пропуск» или «Не придёт» */
+function wireCardMark(sid) {
+  const gSel = $("#cm-group"), dSel = $("#cm-date");
+  const fillDates = () => {
+    const wd = (gSel.selectedOptions[0].dataset.wd || "").split(",").filter((x) => x !== "").map(Number);
+    const t = new Date(S.meta.today + "T12:00"), out = [];
+    for (let i = -14; i <= 14; i++) { const x = new Date(t); x.setDate(t.getDate() + i); if (wd.includes((x.getDay() + 6) % 7)) out.push(isoDate(x)); }
+    const near = out.filter((x) => x <= S.meta.today).pop() || out[0];
+    dSel.innerHTML = out.map((x) => `<option value="${x}" ${x === near ? "selected" : ""}>${dShort(x)} ${WD[(new Date(x + "T12:00").getDay() + 6) % 7]}${x === S.meta.today ? " (сегодня)" : ""}</option>`).join("");
+  };
+  const show = async () => {
+    const gid = +gSel.value, day = dSel.value;
+    if (!day) { $("#cm-btns").innerHTML = ""; return; }
+    let r = null;
+    try { r = (await api("GET", `/api/journal?group_id=${gid}&date=${day}`)).rows.find((x) => x.id === sid); } catch (_) {}
+    const st = !r ? "нет в журнале на эту дату (не оплачено или не его день)" : r.warned ? "предупредил, не придёт" : r.status === "vacation" ? "в отпуске"
+      : r.status === "present" ? "был ✓" : r.status === "absent" ? "пропуск" : "пока не отмечен";
+    $("#cm-state").textContent = "Сейчас: " + st;
+    const future = day > S.meta.today;
+    $("#cm-btns").innerHTML = future
+      ? (r && r.warned ? `<button data-cm="unwarn">Отменить, придёт</button>` : `<button data-cm="warn">🙅 Не придёт</button>`)
+      : `<button data-cm="present" class="${r && r.status === "present" ? "on-present" : ""}">Был</button><button data-cm="absent" class="${r && r.status === "absent" ? "on-absent" : ""}">Пропуск</button>`;
+    $("#cm-btns").querySelectorAll("[data-cm]").forEach((b) => (b.onclick = async () => {
+      const a = b.dataset.cm;
+      try {
+        if (a === "warn") { const note = window.prompt("Что сказали родители? (необязательно)", ""); if (note === null) return; await api("POST", "/api/journal/warn", { student_id: sid, group_id: gid, date: day, note }); }
+        else if (a === "unwarn") await api("POST", "/api/journal/warn", { student_id: sid, group_id: gid, date: day, undo: true });
+        else await api("POST", "/api/attendance", { student_id: sid, group_id: gid, date: day, status: a });
+        toast("Отмечено"); show();
+      } catch (e) { fail(e); }
+    }));
+  };
+  gSel.onchange = () => { fillDates(); show(); };
+  dSel.onchange = show;
+  fillDates(); show();
 }
 
 /* ---------- поиск ---------- */
