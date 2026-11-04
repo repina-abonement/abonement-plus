@@ -19,6 +19,7 @@ KINDS = {
     "not_marked": ("Тренер не отметил клиента на пробном", "📝"),
     "why_not_bought": ("Почему не купили", "🤔"),
     "rebook": ("Перезаписать на ПУ", "🔁"),
+    "reinvite_pu": ("Пригласить на ПУ повторно", "🔄"),
     "manual": ("Задача", "✅"),
     "plan": ("Задача", "📌"),
     "bday": ("День рождения сотрудника", "🎂"),
@@ -442,7 +443,7 @@ def _task_out(con, r) -> dict:
     d["icon"] = KINDS.get(d["kind"], ("", "✅"))[1]
     d["manual"] = d["kind"] in MANUAL_KINDS
     if d["student_id"]:
-        s = con.execute("""SELECT s.id, s.name, s.trial_at, s.trial_came, s.stage, s.family_id, f.name AS family,
+        s = con.execute("""SELECT s.id, s.name, s.trial_at, s.trial_came, s.stage, s.funnel, s.converted_at, s.family_id, f.name AS family,
                            (SELECT p.phone FROM parents p WHERE p.family_id=s.family_id ORDER BY p.id LIMIT 1) AS phone,
                            (SELECT p.name FROM parents p WHERE p.family_id=s.family_id ORDER BY p.id LIMIT 1) AS parent
                            FROM students s JOIN families f ON f.id=s.family_id WHERE s.id=?""", (d["student_id"],)).fetchone()
@@ -560,6 +561,7 @@ def manual_board(con, user: dict, scope: str = "mine") -> dict:
 # переключатели Просрочено / Сегодня / Завтра. Наши новые виды задач, которых в ERP не было, в колонке «Другое»,
 # ручные в «Ручных»: ни одна задача не теряется
 ERP_COLUMNS = [
+    ("new_lead", "Новый лид"),
     ("trial_confirm", "Напоминание о пробном занятии"),
     ("trial_today", "Напоминание о сегодняшнем ПУ"),
     ("not_marked", "Клиент не отмечен на ПУ"),
@@ -567,12 +569,20 @@ ERP_COLUMNS = [
     ("no_show", "Не пришли на ПУ"),
     ("why_not_bought", "Почему не купили"),
     ("think", "Думает"),
+    ("reinvite_pu", "Приглашение на ПУ повторно"),
 ]
 THINK_KINDS = ("close_sale",)
 
 
+NEW_LEAD_KINDS = ("call_lead", "no_answer", "revive", "reinvite")
+
+
 def _erp_col(t: dict) -> tuple[str, str]:
     kind, title = t["kind"], (t.get("title") or "").strip()
+    st = t.get("student") or {}
+    # Юлия, 04.11: лид, который ни разу не был на пробном, это «Новый лид» (и задача, и колонка)
+    if kind in NEW_LEAD_KINDS and st.get("funnel") == "sales" and not st.get("trial_at") and st.get("stage") in ("lead", "no_answer", "later"):
+        return "new_lead", "Новый лид"
     for k, name in ERP_COLUMNS:
         if kind == k:
             return k, name

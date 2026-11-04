@@ -857,6 +857,9 @@ async function renderErp(box) {
         <div class="small muted">Что тренеры отметили в CRM: кто был, кто не пришёл и почему, итоги пробных, оплаты на месте. Перенесите в ERP вечером</div>
         <div class="row" style="gap:8px;align-items:center;margin-top:8px"><input type="date" id="erp-day-d" value="${S.meta.today}" style="flex:0 0 170px"><button class="btn" id="erp-day-go" style="flex:0">Показать</button></div>
         <div id="erp-day-out"></div></div>
+      <div class="erp-step" id="erp-ri" hidden><b>🔄 Были на пробном давно и не купили</b>
+        <div class="small muted">Пробное было больше недели назад, а клиент до сих пор на этапе «Как прошло пробное?». Их правильное место: «Приглашение на ПУ повторно». Дата приглашения берётся из их задачи, если она есть, иначе сегодня: админ перенесёт на нужную</div>
+        <button class="btn" id="erp-ri-go" style="margin-top:8px"></button></div>
       <div class="erp-step"><b>🏷 Статусы клиентов в ERP</b>
         <div class="small muted">Какой статус был у клиентов в ERP при переносе и сколько клиентов в каждом. Статус ERP виден и в карточке клиента</div>
         <div id="erp-st-out" class="small muted" style="margin-top:6px">Загружаю…</div></div>
@@ -872,6 +875,15 @@ async function renderErp(box) {
       <button class="btn primary" id="erp-run" style="margin-top:8px" disabled>Перенести</button></div>`}`;
   if (done) {
     erpWireFiles(box, d);
+    api("GET", "/api/erp/reinvite-old").then((r) => {
+      if (!r.n) return;
+      $("#erp-ri").hidden = false;
+      $("#erp-ri-go").textContent = `Перевести ${r.n} в «Приглашение на ПУ повторно»`;
+      $("#erp-ri-go").onclick = async () => {
+        if (!confirm(`Перевести ${r.n} клиентов в «Приглашение на ПУ повторно»?`)) return;
+        try { const x = await api("POST", "/api/erp/reinvite-old", {}); toast(`Переведено: ${x.n}`); renderErp(box); } catch (e) { fail(e); }
+      };
+    }).catch(() => {});
     api("GET", "/api/erp/statuses").then((r) => {
       $("#erp-st-out").innerHTML = r.items.length ? `<table class="tbl"><thead><tr><th>Статус в ERP</th><th>Клиентов</th><th>Сейчас в CRM: ученики</th><th>лиды</th><th>ушли</th></tr></thead>
         <tbody>${r.items.map((x) => `<tr><td>${esc(x.status)}</td><td><b>${x.n}</b></td><td>${x.members || 0}</td><td>${x.leads || 0}</td><td>${x.left_ || 0}</td></tr>`).join("")}</tbody></table>`
@@ -1250,6 +1262,7 @@ function enableDrag(page, funnel, columns) {
       if (!dragId) return;
       try {
         if (funnel === "sales" && stage === "refused") return askRefusal(dragId, render);
+        if (funnel === "sales" && stage === "reinvite_pu") return askReinvite(dragId, render);
         await api("POST", `/api/students/${dragId}/move`, { funnel, stage }); render();
       } catch (err) { fail(err); }
     });
@@ -1274,6 +1287,31 @@ function askRefusal(sid, done) {
       const r = await api("POST", `/api/students/${sid}/move`, { funnel: "sales", stage: "refused", reason: f.reason, comment: f.comment });
       toast(r.stage === "how_was" ? "Задача: перезвонить " + dShort(r.due.slice(0, 10)) : r.stage === "later" ? "Пригласим снова " + dShort(r.due.slice(0, 10)) : "Отказ сохранён");
       closeDrawer(); done();
+    } catch (err) { fail(err); }
+  };
+}
+
+/* «Приглашение на ПУ повторно» (Юлия, 04.11): был на пробном, не сложилось. Админ выбирает, когда пригласить снова */
+function askReinvite(sid, done) {
+  const plus = (n) => addDays(S.meta.today, n);
+  const y = +S.meta.today.slice(0, 4), aug = `${y}-08-01`, jan = `${y + 1}-01-05`, janNow = `${y}-01-05`;
+  const intake = [janNow, aug, jan, `${y + 1}-08-01`].find((d) => d > S.meta.today);
+  openDrawer(`<h2>🔄 Пригласить на пробное повторно</h2>
+    <div class="small muted">Ребёнок уже был на пробном, но не сложилось. Когда пригласить снова? В этот день в 11:00 у админов появится задача</div>
+    <form class="section" id="ri">
+      <div class="chips" style="margin-bottom:10px">${[[7, "Через неделю"], [14, "Через 2 недели"], [30, "Через месяц"]].map(([n, t]) => `<button type="button" class="chip" data-rid="${plus(n)}">${t}</button>`).join("")}
+        <button type="button" class="chip" data-rid="${intake}">Ближайший набор (${dShort(intake)})</button></div>
+      <div class="field"><label>Дата</label><input type="date" name="due" min="${S.meta.today}" value="${plus(14)}" required></div>
+      <div class="field"><label>Комментарий</label><input name="comment" placeholder="Почему не сложилось, что предложить"></div>
+      <button class="btn primary">Сохранить</button>
+    </form>`);
+  $("#ri").querySelectorAll("[data-rid]").forEach((b) => (b.onclick = () => { $("#ri").elements.due.value = b.dataset.rid; }));
+  $("#ri").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    try {
+      await api("POST", `/api/students/${sid}/move`, { funnel: "sales", stage: "reinvite_pu", due: f.due + "T11:00", comment: f.comment });
+      toast("Пригласим снова " + dShort(f.due)); closeDrawer(); done();
     } catch (err) { fail(err); }
   };
 }
@@ -1443,6 +1481,8 @@ async function openStudent(id) {
   const full = can("members", "full");
   const alerts = [
     s.priority ? `<span class="pill red">🔥 Заявка с сайта: обработать первой</span>` : "",
+    // статус клиента (Юлия, 04.11): «Лид», пока ни разу не был нашим клиентом
+    `<span class="pill ${s.funnel === "members" && s.stage !== "left" ? "green" : ""}" title="Статус клиента">${s.funnel === "members" && s.stage !== "left" ? "Клиент" : s.converted_at || (d.subscriptions || []).some((x) => x.status === "paid") ? "Бывший клиент" : "Лид"}</span>`,
     d.family.note ? `<span class="pill yellow" title="Заметка для персонала">📝 ${esc(d.family.note)}</span>` : "",
     s.erp_status ? `<span class="pill" title="Статус клиента в ERP при переносе">ERP: ${esc(s.erp_status)}</span>` : "",
     isMember && d.balance.debt ? `<span class="pill red">Долг ${rub(d.balance.debt)}</span>` : "",
@@ -1632,6 +1672,7 @@ async function openStudent(id) {
 
   $("#f-stage").onchange = async (e) => {
     if (s.funnel === "sales" && e.target.value === "refused") return askRefusal(id, reload);
+    if (s.funnel === "sales" && e.target.value === "reinvite_pu") return askReinvite(id, reload);
     if (s.funnel === "members" && e.target.value === "left") return askLeftReason(id, reload);
     try { await api("POST", `/api/students/${id}/move`, { funnel: s.funnel, stage: e.target.value }); reload(); } catch (err) { fail(err); }
   };
@@ -1918,6 +1959,11 @@ function openNewClient(preset = {}) {
 }
 
 /* ---------- журнал ---------- */
+/* в списке групп внутри филиала название филиала лишнее (Юлия, 04.11): «Небо Ср/Вс 16:45» → «Ср/Вс 16:45» */
+function groupNoBranch(x) {
+  const w = (x.name || "").split(" ")[0];
+  return w && (x.branch || "").includes(w) && x.name.length > w.length ? x.name.slice(w.length).trim() : x.name;
+}
 async function renderJournal(page) {
   const groups = S.meta.groups;
   if (!groups.length) { page.innerHTML = `<h2>Журнал посещений</h2><p class="muted">За вами пока не закреплено ни одной группы. Попросите администратора.</p>`; return; }
@@ -1925,21 +1971,25 @@ async function renderJournal(page) {
   if (!S.journal.date) S.journal.date = S.meta.today;
   const j = await api("GET", `/api/journal?group_id=${S.journal.group}&date=${S.journal.date}`);
   const g = j.group;
+  if (g.branch_id == null) g.branch_id = (groups.find((x) => x.id === g.id) || {}).branch_id;
+  const jBranches = [...new Map(groups.map((x) => [x.branch_id, { id: x.branch_id, name: x.branch }])).values()];
   const st = j.has_lesson && S.journal.date <= S.meta.today ? await api("GET", `/api/lessons/staff?group_id=${g.id}&date=${S.journal.date}`).catch(() => null) : null;
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Журнал посещений</h2></div>
     <div class="row" style="max-width:640px;margin-bottom:14px">
-      <div class="field"><label>Группа</label><select id="j-group">${groups.map((x) => `<option value="${x.id}" ${x.id === S.journal.group ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>
+      ${jBranches.length > 1 ? `<div class="field" style="flex:0 0 200px"><label>Филиал</label><select id="j-branch">${jBranches.map((b) => `<option value="${b.id}" ${b.id === g.branch_id ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : ""}
+      <div class="field"><label>Группа</label><select id="j-group">${groups.filter((x) => x.branch_id === g.branch_id).map((x) => `<option value="${x.id}" ${x.id === S.journal.group ? "selected" : ""}>${esc(groupNoBranch(x))}</option>`).join("")}</select></div>
       <div class="field" style="flex:0 0 170px"><label>Дата</label><input id="j-date" type="date" value="${S.journal.date}"></div>
     </div>
     <div class="note">${esc(g.branch)} · ${g.weekdays.split(",").map((x) => WD[+x]).join(", ")} ${esc(g.time)} · ${esc(g.age)} лет${j.closed ? " · <b>праздник, занятия нет</b>" : j.has_lesson ? "" : " · <b>в этот день у группы нет занятия</b>"}</div>
     ${j.has_lesson && !g.is_makeup && S.journal.date <= S.meta.today ? `<button class="btn primary meet-open ${j.overdue_marks ? "late" : ""}" id="j-meet">${meetLabel(S.journal.date, g.time, j.overdue_marks)}${lessonOver(S.journal.date, g.time) ? "" : ": отметить крупными кнопками"}</button>` : ""}
     ${j.overdue_marks ? `<div class="alert">🔴 Тренировка закончилась ${j.overdue_marks.minutes} мин назад, не отмечено детей: ${j.overdue_marks.missing}</div>` : ""}
-    ${st ? `<div class="panel" style="padding:12px 14px;margin-bottom:12px">${staffPicker(st, st.coaches, "j")}</div>` : ""}
+    ${st ? `<div class="panel" style="padding:12px 14px;margin-bottom:12px">${staffPicker(st, st.coaches, "j", S.journal.date === S.meta.today && new Date().toTimeString().slice(0, 5) < g.time)}</div>` : ""}
     <div class="list">${j.rows.length ? j.rows.map((r) => g.is_makeup ? makeupRow(r) : journalRow(r)).join("") : `<div class="list-row muted">${g.is_makeup ? "На эту дату никто не записан на отработку" : "В группе пока нет учеников"}</div>`}</div>`;
   if (st) wireStaffPicker(page, "j", g.id, S.journal.date, render);
   if ($("#j-meet")) $("#j-meet").onclick = () => openMeet(g.id, S.journal.date);
   $("#j-group").onchange = (e) => { step(() => { S.journal.group = +e.target.value; }); };
+  if ($("#j-branch")) $("#j-branch").onchange = (e) => { step(() => { const f = groups.find((x) => x.branch_id === +e.target.value && !x.is_makeup) || groups.find((x) => x.branch_id === +e.target.value); if (f) S.journal.group = f.id; }); };
   $("#j-date").onchange = (e) => { step(() => { S.journal.date = e.target.value; }); };
   page.classList.toggle("readonly", !can("journal", "full") && !isCoach());
   if (!isCoach()) page.querySelectorAll("[data-who]").forEach((el) => (el.onclick = () => openStudent(+el.dataset.who)));

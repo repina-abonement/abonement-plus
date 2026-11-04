@@ -11,7 +11,7 @@ import os
 import re
 import secrets
 import traceback
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -676,6 +676,31 @@ def diag_conn(con, h, user, body, q):
             "top_ips": sorted(ips.items(), key=lambda x: -x[1])[:15]}
 
 
+@route("GET", "/api/erp/reinvite-old", role="admin")
+def erp_reinvite_old_count(con, h, user, body, q):
+    """Сколько клиентов были на пробном больше недели назад, не купили и всё ещё висят на «Как прошло пробное?»."""
+    return {"n": len(_old_how_was(con))}
+
+
+@route("POST", "/api/erp/reinvite-old", role="admin")
+def erp_reinvite_old(con, h, user, body, q):
+    """Разом перевести их в «Приглашение на ПУ повторно». Дата: их открытая задача (как в ERP), иначе сегодня, админ перенесёт."""
+    n = 0
+    for s in _old_how_was(con):
+        t = con.execute("""SELECT due_at, note FROM tasks WHERE student_id=? AND status='open' ORDER BY due_at LIMIT 1""", (s["id"],)).fetchone()
+        due = t["due_at"] if t and t["due_at"][:10] >= date.today().isoformat() else f"{date.today().isoformat()}T11:00"
+        sv.reinvite_pu(con, s, due, (t["note"] if t else "") or "", user)
+        n += 1
+    sv.audit(con, user, "erp.reinvite_old", str(n))
+    return {"n": n}
+
+
+def _old_how_was(con):
+    week = (date.today() - timedelta(days=7)).isoformat()
+    return [dict(r) for r in con.execute("""SELECT * FROM students WHERE funnel='sales' AND stage='how_was' AND archived=0
+                                            AND trial_at IS NOT NULL AND substr(trial_at,1,10) < ?""", (week,))]
+
+
 @route("GET", "/api/erp/statuses", role="admin")
 def erp_statuses(con, h, user, body, q):
     """Все статусы клиентов из ERP (сохранены у каждого клиента при переносе) и сколько клиентов в каждом. Без имён."""
@@ -926,7 +951,8 @@ def board_skips(con, h, user, body, q):
 
 @route("POST", "/api/students/{sid}/move", role="operator")
 def move(con, h, user, body, q, sid):
-    r = sv.move_card(con, int(sid), body.get("funnel"), body.get("stage"), user, body.get("reason") or "", body.get("comment") or "")
+    r = sv.move_card(con, int(sid), body.get("funnel"), body.get("stage"), user, body.get("reason") or "", body.get("comment") or "",
+                     body.get("due") or "")
     return {"ok": True} | (r or {})
 
 

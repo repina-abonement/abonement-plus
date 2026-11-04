@@ -51,8 +51,23 @@ function wireErpTasks(page) {
   box.querySelectorAll("[data-etdone]").forEach((b) => (b.onclick = async () => {
     const t = S.taskById[b.dataset.etdone];
     if (t && t.kind === "rebook" && typeof openRebook === "function") return openRebook(t.id);
+    if (t && t.kind === "reinvite_pu") return reinviteDone(t);
     const result = window.prompt("Итог (необязательно): дозвонилась, подтвердили…", "");
     if (result === null) return;
     try { await api("POST", `/api/tasks/${t.id}/done`, { result }); toast("Задача выполнена"); render(); } catch (e) { fail(e); }
   }));
+}
+
+/* «Пригласить на ПУ повторно» выполнено: что получилось */
+function reinviteDone(t) {
+  const sid = t.student && t.student.id;
+  openDrawer(`<h2>🔄 Пригласили на пробное повторно</h2>
+    <div class="small muted">${esc((t.student && t.student.name) || "")}. Чем закончилось?</div>
+    <div class="section" style="display:grid;gap:8px">
+      <button class="btn primary" id="rd-book">📅 Записали на пробное</button>
+      <button class="btn" id="rd-later">🔄 Пока нет, пригласить ещё раз позже</button>
+      <button class="btn" id="rd-ref">✖ Отказ</button></div>`);
+  $("#rd-book").onclick = () => { closeDrawer(); if (sid) openStudent(sid); toast("Нажмите «Записать на пробное» в карточке"); };
+  $("#rd-later").onclick = () => askReinvite(sid, render);
+  $("#rd-ref").onclick = () => askRefusal(sid, render);
 }

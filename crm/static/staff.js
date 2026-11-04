@@ -34,11 +34,11 @@ function wireCheckin(page) {
 }
 
 /* кто вёл тренировку: блок для карточки на столе тренера и для журнала */
-function staffPicker(st, coaches, key) {
+function staffPicker(st, coaches, key, soon) {
   const opt = (sel) => coaches.map((c) => `<option value="${c.id}" ${c.id === sel ? "selected" : ""}>${esc(c.name)}</option>`).join("");
   // по расписанию CRM записывает сама; менять нужно только при замене (Юлия, 01.11)
   const head = st.set ? `<div class="small"><b>Кто вёл тренировку</b> <span class="pill green">записано</span></div>`
-    : `<summary class="small muted">👥 Вели по расписанию: ${esc(st.main || "")}${st.assistant ? ` и ${esc(st.assistant)}` : ""}. Было иначе? Изменить</summary>`;
+    : `<summary class="small muted">👥 ${soon ? "Ведут" : "Вели"} по расписанию: ${esc(st.main || "")}${st.assistant ? ` и ${esc(st.assistant)}` : ""}. ${soon ? "Будет" : "Было"} иначе? Изменить</summary>`;
   return `<${st.set ? "div" : "details"} class="staff-pick" data-sp="${key}">
     ${head}
     <div class="row" style="flex-wrap:wrap;align-items:flex-end;margin-top:6px">

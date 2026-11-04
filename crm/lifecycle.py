@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 
 KINDS = {
-    "call_lead": ("Позвонить новому лиду", "📞"),
+    "call_lead": ("Новый лид", "📞"),  # Юлия, 04.11: задача называется как этап
     "no_answer": ("Недозвон: позвонить ещё раз", "🔁"),
     "close_sale": ("Дожать продажу после пробного", "🎯"),
     "first_pay": ("Принять оплату за первый абонемент", "💳"),
@@ -201,7 +201,8 @@ def cleanup(con, now: datetime):
                             FROM tasks t JOIN students s ON s.id=t.student_id WHERE t.status='open' AND t.source='life'""").fetchall():
         k = t["kind"]
         stale = (k == "call_lead" and t["stage"] != "lead") or (k == "no_answer" and t["stage"] != "no_answer") \
-            or (k in ("close_sale", "why_not_bought") and t["stage"] != "how_was") or (k == "first_pay" and t["converted_at"]) \
+            or (k in ("close_sale", "why_not_bought") and t["stage"] != "how_was") \
+            or (k == "reinvite_pu" and t["stage"] != "reinvite_pu") or (k == "first_pay" and t["converted_at"]) \
             or (k == "reinvite" and t["stage"] != "refused") or (k == "win_back" and t["stage"] != "left") \
             or (k == "makeup_check" and t["skip_stage"] != "offered") or (k in ("renew", "debt") and t["stage"] == "left") \
             or (k == "revive" and (t["funnel"] != "sales" or t["stage"] in ("trial_booked", "on_trial", "trial_done")))

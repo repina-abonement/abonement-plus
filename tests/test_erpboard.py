@@ -34,6 +34,35 @@ def main():
     check(all(t["title"] != "Тренеру" for c in d["columns"] for t in c["cards"]), "Задачи тренеров в общий список админов не попадают")
     check([c["title"] for c in tasks.erp_board(con, "overdue")["columns"]] == ["Почему не купили"], "Просроченные отдельно")
     check([c["title"] for c in tasks.erp_board(con, "tomorrow")["columns"]] == ["Напоминание о сегодняшнем ПУ"], "Завтрашние отдельно")
+    # «Приглашение на ПУ повторно» (04.11): дата обязательна, задача в этот день, старые задачи по пробному закрываются
+    sid2 = sv.create_student(con, {"name": "Елисей Тестов", "parent_name": "Анастасия", "phone": "+7 900 100-00-02", "funnel": "sales"}, U)
+    con.execute("UPDATE students SET stage='how_was', trial_at=? WHERE id=?", (at(-60, "18:00"), sid2))
+    con.execute("INSERT INTO tasks(kind,title,student_id,due_at,source,created_at,note) VALUES ('why_not_bought','Почему не купили',?,?,?,?,?)",
+                (sid2, at(30, "10:00"), "erp", at(-2), "пригласить позже"))
+    from crm import server
+    check(len(server._old_how_was(con)) == 1, "Был на пробном давно и не купил: найден для перевода")
+    server.erp_reinvite_old(con, None, {"id": 1, "name": "Юлия"}, {}, {})
+    st = con.execute("SELECT stage FROM students WHERE id=?", (sid2,)).fetchone()[0]
+    rt = con.execute("SELECT due_at, note FROM tasks WHERE student_id=? AND kind='reinvite_pu' AND status='open'", (sid2,)).fetchone()
+    check(st == "reinvite_pu" and rt and rt[0][:10] == at(30)[:10] and rt[1] == "пригласить позже",
+          "Переведён в «Приглашение на ПУ повторно», дата и комментарий взяты из его задачи ERP")
+    check(not con.execute("SELECT 1 FROM tasks WHERE student_id=? AND kind='why_not_bought' AND status='open'", (sid2,)).fetchone(),
+          "Старая задача «Почему не купили» закрыта")
+    try:
+        sv.move_card(con, sid2, "sales", "reinvite_pu", U, due="")
+        check(False, "Без даты нельзя")
+    except sv.ApiError:
+        check(True, "Без даты перевести нельзя")
+    sv.move_card(con, sid2, "sales", "reinvite_pu", U, comment="через месяц", due=at(1, "11:00"))
+    check([c["title"] for c in tasks.erp_board(con, "tomorrow")["columns"]][-1] == "Приглашение на ПУ повторно",
+          "Задача на выбранный день в колонке «Приглашение на ПУ повторно»")
+    sid3 = sv.create_student(con, {"name": "Новенький Лидов", "parent_name": "Мама", "phone": "+7 900 100-00-03", "funnel": "sales"}, U)
+    con.execute("INSERT INTO tasks(kind,title,student_id,due_at,source,created_at) VALUES ('no_answer','Недозвон: позвонить ещё раз',?,?,?,?)",
+                (sid3, at(0, "15:00"), "life", at(-1)))
+    con.execute("UPDATE students SET stage='no_answer' WHERE id=?", (sid3,))
+    cols = {c["title"]: [t["student"]["name"] for t in c["cards"]] for c in tasks.erp_board(con, "today")["columns"]}
+    check("Новенький Лидов" in cols.get("Новый лид", []) and list(cols)[0] == "Новый лид",
+          "Лид без пробного: задача в колонке «Новый лид», первой слева")
     print("Все проверки задач как в ERP пройдены")
 
 

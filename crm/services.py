@@ -23,6 +23,7 @@ SALES_STAGES = [
     ("trial_done", "Пробное закончилось"),
     ("missed_trial", "Не дошёл до ПУ"),
     ("how_was", "Как прошло пробное?"),
+    ("reinvite_pu", "Приглашение на ПУ повторно"),  # Юлия, 04.11: был на пробном, не сложилось; дату следующего приглашения выбирает админ
     ("bought", "Купил абонемент"),
     ("refused", "Отказ"),
     ("later", "Пригласим позже"),
@@ -547,7 +548,28 @@ def board(con, funnel: str) -> dict:
     raise ApiError("Неизвестная воронка", 404)
 
 
-def move_card(con, sid: int, funnel: str, stage: str, user, reason: str = "", comment: str = "") -> dict | None:
+def reinvite_pu(con, s: dict, due: str, comment: str, user) -> dict:
+    """«Приглашение на ПУ повторно»: был на пробном, не сложилось. Админ сам выбирает, когда пригласить снова."""
+    from . import tasks
+    d = (due or "")[:10]
+    try:
+        day = date.fromisoformat(d)
+    except ValueError:
+        raise ApiError("Выберите дату, когда пригласить снова", 422, {"need_reinvite_date": True})
+    if day < today():
+        raise ApiError("Дата уже прошла, выберите сегодня или позже")
+    hm = (due or "")[11:16] or "11:00"
+    con.execute("""UPDATE tasks SET status='done', done_at=?, done_by=?, result='Перевели в «Приглашение на ПУ повторно»'
+                   WHERE student_id=? AND status='open' AND kind IN ('how_was','why_not_bought','close_sale','reinvite_pu','trial_confirm','trial_today','not_marked','no_show')""",
+                (now_iso(), (user or {}).get("name", ""), s["id"]))
+    con.execute("UPDATE students SET stage='reinvite_pu', stage_changed_at=?, contacted_after_trial=1, priority=0 WHERE id=?", (now_iso(), s["id"]))
+    tasks.add_task(con, "reinvite_pu", s["id"], f"{d}T{hm}", auto_key=f"life:reinvite_pu:{s['id']}:{d}", source="life",
+                   note=(comment or "").strip())
+    log(con, s["id"], f"Приглашение на ПУ повторно: пригласить {day.strftime('%d.%m.%Y')}" + (f". {comment.strip()}" if (comment or "").strip() else ""), user, "stage")
+    return {"stage": "reinvite_pu", "due": f"{d}T{hm}"}
+
+
+def move_card(con, sid: int, funnel: str, stage: str, user, reason: str = "", comment: str = "", due: str = "") -> dict | None:
     s = get_student_row(con, sid)
     if funnel == "sales" and stage in ("trial_booked", "trial_reminder"):
         from . import smart
@@ -557,6 +579,8 @@ def move_card(con, sid: int, funnel: str, stage: str, user, reason: str = "", co
             raise ApiError("В этот этап карточка попадает сама")
         if stage == "refused":
             return _refuse(con, s, (reason or "").strip(), (comment or "").strip(), user)
+        if stage == "reinvite_pu":
+            return reinvite_pu(con, s, due, comment, user)
         if stage == "bought":
             # 01.11: «Купил» засчитывается при первой оплате (lifecycle.on_payment); до неё задача «Принять оплату»
             con.execute("""UPDATE students SET funnel='members', stage='active', stage_changed_at=?, priority=0,
