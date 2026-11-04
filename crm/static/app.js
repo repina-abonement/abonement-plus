@@ -2029,7 +2029,8 @@ function jBranchSel(groups, branchId) {
 async function renderJournal(page) {
   const groups = S.meta.groups;
   if (!groups.length) { page.innerHTML = `<h2>Журнал посещений</h2><p class="muted">За вами пока не закреплено ни одной группы. Попросите администратора.</p>`; return; }
-  if (!S.journal.group || !groups.some((x) => x.id === S.journal.group)) S.journal.group = groups[0].id;
+  if (S.journal.group && !groups.some((x) => x.id === S.journal.group)) S.journal.group = null;
+  if (S.journal.mode === "month" && !S.journal.group) S.journal.group = (groups.find((x) => x.branch_id === S.journal.branch) || groups[0]).id;
   if (!S.journal.date) S.journal.date = S.meta.today;
   if (S.journal.mode === "dayall") return renderJournalDay(page, groups);
   if (S.journal.mode === "month") return renderJournalMonth(page, groups);
@@ -2044,11 +2045,24 @@ async function renderJournal(page) {
     $("#j-date").onchange = (e) => { step(() => { S.journal.date = e.target.value; }); };
     return;
   }
+  // у выбранной группы в этот день занятия нет или группа не выбрана: ничего не открываем, просим выбрать (Юлия, 04.11)
   if (!dayGroups.some((x) => x.id === S.journal.group)) {
-    const cur = groups.find((x) => x.id === S.journal.group) || {};
-    const pick = dayGroups.find((x) => x.branch_id === cur.branch_id && !x.is_makeup) || dayGroups.find((x) => x.branch_id === cur.branch_id)
-      || dayGroups.find((x) => !x.is_makeup) || dayGroups[0];
-    S.journal.group = pick.id;
+    const was = groups.find((x) => x.id === S.journal.group);
+    if (was) S.journal.branch = was.branch_id;
+    S.journal.group = null;
+    const brs = [...new Map(dayGroups.map((x) => [x.branch_id, { id: x.branch_id, name: x.branch }])).values()];
+    const bid = brs.some((b) => b.id === S.journal.branch) ? S.journal.branch : brs[0].id;
+    const inBr = dayGroups.filter((x) => x.branch_id === bid);
+    page.innerHTML = `${journalDayHead()}<div class="row" style="max-width:640px;margin-bottom:14px">
+      ${brs.length > 1 ? `<div class="field" style="flex:0 0 200px"><label>Филиал</label><select id="j-branch">${brs.map((b) => `<option value="${b.id}" ${b.id === bid ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : ""}
+      <div class="field"><label>Группа</label><select id="j-group"><option value="">Выберите группу</option>${inBr.map((x) => `<option value="${x.id}">${esc(groupNoBranch(x))}</option>`).join("")}</select></div>
+      <div class="field" style="flex:0 0 170px"><label>Дата</label><input id="j-date" type="date" value="${S.journal.date}"></div></div>
+      <div class="muted">${was ? `У группы ${esc(groupNoBranch(was))} ${dShort(S.journal.date)} занятия нет. ` : ""}Выберите группу</div>`;
+    wireJournalDayHead(page);
+    $("#j-group").onchange = (e) => { if (e.target.value) step(() => { S.journal.group = +e.target.value; }); };
+    if ($("#j-branch")) $("#j-branch").onchange = (e) => step(() => { S.journal.branch = +e.target.value; });
+    $("#j-date").onchange = (e) => { step(() => { S.journal.date = e.target.value; }); };
+    return;
   }
   const j = await api("GET", `/api/journal?group_id=${S.journal.group}&date=${S.journal.date}`);
   const g = j.group;
@@ -2090,7 +2104,7 @@ async function renderJournal(page) {
   if ($("#j-copy")) $("#j-copy").onclick = () => shiftCopy(g.branch_id, S.journal.date);
   if ($("#j-print")) $("#j-print").onclick = () => shiftPrint(g.branch_id, S.journal.date);
   $("#j-group").onchange = (e) => { step(() => { S.journal.group = +e.target.value; }); };
-  if ($("#j-branch")) $("#j-branch").onchange = (e) => { step(() => { const f = dayGroups.find((x) => x.branch_id === +e.target.value && !x.is_makeup) || dayGroups.find((x) => x.branch_id === +e.target.value); if (f) S.journal.group = f.id; }); };
+  if ($("#j-branch")) $("#j-branch").onchange = (e) => { step(() => { S.journal.branch = +e.target.value; S.journal.group = null; }); };
   $("#j-date").onchange = (e) => { step(() => { S.journal.date = e.target.value; }); };
   page.classList.toggle("readonly", !can("journal", "full") && !isCoach());
   if (!isCoach()) page.querySelectorAll("[data-who]").forEach((el) => (el.onclick = () => openStudent(+el.dataset.who)));
