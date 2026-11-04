@@ -64,8 +64,8 @@ function shiftPrintBranch(d) {
       </tbody></table>
       ${away.length ? `<div class="away">Не придут: ${away.map((k) => esc(k.name) + (k.tag === "vacation" ? " (отпуск)" : k.note ? ` (${esc(k.note)})` : "")).join(", ")}</div>` : ""}</section>`;
   }).join("");
-  return `<div class="branch"><header><h1>${esc(d.branch)}</h1><div style="font-size:16px;font-weight:700">${dShort(d.date)}, ${shiftWd(d.date)}</div></header>
-${trials}${groups}</div>`;
+  return `<div class="sheet"><div class="fit"><header><h1>${esc(d.branch)}</h1><div style="font-size:15px;font-weight:700">${dShort(d.date)}, ${shiftWd(d.date)}</div></header>
+${trials}<div class="cols">${groups}</div></div></div>`;
 }
 
 function shiftPrintPage(title, body) {
@@ -73,36 +73,52 @@ function shiftPrintPage(title, body) {
 <style>
 @font-face { font-family: "Nunito"; src: url("/fonts/nunito-cyrillic.woff2") format("woff2"); font-weight: 200 1000; unicode-range: U+0400-045F, U+2116; }
 @font-face { font-family: "Nunito"; src: url("/fonts/nunito-latin.woff2") format("woff2"); font-weight: 200 1000; unicode-range: U+0000-00FF, U+2000-206F; }
-@page { size: A4; margin: 12mm; }
+@page { size: A4; margin: 0; }
 * { box-sizing: border-box; }
-body { font-family: "Nunito", Arial, sans-serif; color: #14211b; margin: 0; padding: 16px; font-size: 13px; }
-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 3px solid #1d8a57; padding-bottom: 8px; margin-bottom: 14px; }
-h1 { font-size: 22px; margin: 0; }
-h2 { font-size: 16px; margin: 0 0 6px; }
-.mut { color: #5d6a62; font-weight: 400; } .sm { font-size: 11px; }
-.trials { background: #fdf3d3; border: 1px solid #f2bf1d; border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; }
-.grp { border: 1px solid #d5ddd6; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; break-inside: avoid; }
-.gh { display: flex; justify-content: space-between; align-items: baseline; font-size: 15px; font-weight: 700; margin-bottom: 6px; }
-.tm { background: #1d8a57; color: #fff; border-radius: 6px; padding: 1px 7px; margin-right: 4px; }
+html, body { margin: 0; }
+body { font-family: "Nunito", Arial, sans-serif; color: #14211b; font-size: 11.5px; background: #e9ece8; padding: 12px 0; }
+/* один филиал = один лист A4 (Юлия, 04.11): поля 10 мм, группы в две колонки, если не влезает, лист чуть уменьшается */
+.sheet { width: 210mm; height: 297mm; padding: 10mm; margin: 0 auto 12px; background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,.15); overflow: hidden; }
+.fit { transform-origin: top left; }
+header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2.5px solid #1d8a57; padding-bottom: 5px; margin-bottom: 8px; }
+h1 { font-size: 19px; margin: 0; }
+h2 { font-size: 13px; margin: 0 0 4px; }
+.mut { color: #5d6a62; font-weight: 400; } .sm { font-size: 10px; }
+.trials { background: #fdf3d3; border: 1px solid #f2bf1d; border-radius: 8px; padding: 6px 9px; margin-bottom: 8px; }
+.cols { column-count: 2; column-gap: 5mm; }
+.grp { border: 1px solid #d5ddd6; border-radius: 8px; padding: 6px 8px; margin-bottom: 5mm; break-inside: avoid; display: inline-block; width: 100%; }
+.gh { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font-size: 12.5px; font-weight: 700; margin-bottom: 3px; }
+.gh .mut { font-size: 10.5px; text-align: right; }
+.tm { background: #1d8a57; color: #fff; border-radius: 5px; padding: 0 6px; margin-right: 3px; }
 table { width: 100%; border-collapse: collapse; }
-th { text-align: left; font-size: 11px; color: #5d6a62; font-weight: 600; border-bottom: 1px solid #d5ddd6; padding: 3px 6px; }
-td { padding: 5px 6px; border-bottom: 1px solid #eef1ec; vertical-align: top; }
+th { text-align: left; font-size: 9.5px; color: #5d6a62; font-weight: 600; border-bottom: 1px solid #d5ddd6; padding: 2px 4px; }
+td { padding: 3px 4px; border-bottom: 1px solid #eef1ec; vertical-align: top; }
 tr:last-child td { border-bottom: 0; }
-.n { width: 26px; color: #5d6a62; text-align: right; }
-.mk { width: 40px; text-align: center; }
-.box { display: inline-block; width: 15px; height: 15px; border: 1.5px solid #14211b; border-radius: 3px; }
-.tag { font-size: 11px; font-weight: 700; border-radius: 99px; padding: 1px 8px; white-space: nowrap; border: 1px solid #d5ddd6; }
+.n { width: 18px; color: #5d6a62; text-align: right; }
+.mk { width: 26px; text-align: center; }
+.box { display: inline-block; width: 12px; height: 12px; border: 1.3px solid #14211b; border-radius: 2px; }
+.tag { font-size: 9.5px; font-weight: 700; border-radius: 99px; padding: 0 6px; white-space: nowrap; border: 1px solid #d5ddd6; }
 .t-paid { background: #e2f3ea; border-color: #9fd3b6; } .t-single { background: #e6eefc; border-color: #a9c0ef; }
 .t-unpaid { background: #fde6e6; border-color: #f0a9ab; } .t-makeup { background: #efe6fb; border-color: #c6aef0; }
 .t-trial { background: #fdf3d3; border-color: #f2bf1d; }
-.away { margin-top: 6px; font-size: 12px; color: #5d6a62; }
-.noprint { margin-bottom: 12px; }
-.noprint button { font: inherit; font-weight: 700; background: #1d8a57; color: #fff; border: 0; border-radius: 10px; padding: 8px 16px; cursor: pointer; }
-.branch + .branch { break-before: page; margin-top: 24px; }
-@media print { .noprint { display: none; } body { padding: 0; } }
+.away { margin-top: 4px; font-size: 10px; color: #5d6a62; }
+.noprint { text-align: center; margin-bottom: 12px; }
+.noprint button { font: inherit; font-size: 14px; font-weight: 700; background: #1d8a57; color: #fff; border: 0; border-radius: 10px; padding: 8px 18px; cursor: pointer; }
+@media print { body { background: #fff; padding: 0; } .noprint { display: none; } .sheet { margin: 0; box-shadow: none; break-after: page; } .sheet:last-child { break-after: auto; } }
 </style></head><body>
 <div class="noprint"><button onclick="window.print()">🖨 Печать</button></div>
 ${body}
+<script>
+function fitSheets() {
+  document.querySelectorAll(".sheet").forEach(function (sh) {
+    var f = sh.querySelector(".fit"); f.style.transform = ""; f.style.width = "";
+    var w = sh.clientWidth - parseFloat(getComputedStyle(sh).paddingLeft) * 2, h = sh.clientHeight - parseFloat(getComputedStyle(sh).paddingTop) * 2;
+    var k = Math.min(1, h / f.scrollHeight);
+    if (k < 1) { f.style.width = (w / k) + "px"; k = Math.min(1, h / f.scrollHeight); f.style.width = (w / k) + "px"; f.style.transform = "scale(" + k + ")"; }
+  });
+}
+(document.fonts ? document.fonts.ready : Promise.resolve()).then(fitSheets);
+</script>
 </body></html>`;
 }
 
