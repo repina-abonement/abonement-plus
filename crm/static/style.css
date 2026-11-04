@@ -1483,3 +1483,6 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .jm-big span { font-size: 13px; font-weight: 600; color: var(--ink-2); }
 .jm-day .red { color: var(--red); }
 .cm-box { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; margin: 6px 0 12px; }
+.et-col.et-unpaid { background: var(--red-soft); }
+.et-col.et-unpaid .et-head span:first-child { color: var(--red); font-weight: 800; }
+.et-col.et-unpaid .et-card { border-left: 4px solid var(--red); }

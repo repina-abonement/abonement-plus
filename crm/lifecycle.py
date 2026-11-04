@@ -27,6 +27,7 @@ KINDS = {
     "win_back": ("Пригласить вернуться", "🤝"),
     "makeup_check": ("Уточнить отработку", "🩹"),
     "revive": ("Оживить старый лид", "🌱"),
+    "unpaid_visit": ("Был на занятии без оплаты", "🔴"),  # Юлия, 04.11: отметили «был», а месяц не оплачен
 }
 # Юлия, 01.11: недозвон: завтра, через 3 дня, через неделю, через месяц, дальше ближайший набор (август или январь)
 NO_ANSWER_STEPS = [(1, "на следующий день"), (3, "через 3 дня"), (7, "через неделю"), (30, "через месяц")]
@@ -206,6 +207,9 @@ def cleanup(con, now: datetime):
             or (k == "reinvite" and t["stage"] != "refused") or (k == "win_back" and t["stage"] != "left") \
             or (k == "makeup_check" and t["skip_stage"] != "offered") or (k in ("renew", "debt") and t["stage"] == "left") \
             or (k == "revive" and (t["funnel"] != "sales" or t["stage"] in ("trial_booked", "on_trial", "trial_done")))
+        if k == "unpaid_visit":
+            from . import services as sv
+            stale = t["stage"] == "left" or sv.paid_for_month(con, t["sid"], t["auto_key"].rsplit(":", 1)[-1])
         if k in ("renew", "debt") and not stale:
             from . import services as sv
             ym = t["auto_key"].rsplit(":", 1)[-1]
@@ -242,3 +246,20 @@ def init(con):
         con.execute("INSERT INTO settings(key, value) VALUES ('stage_dates_fixed_0111', '1')")
     # 7. лишний этап «Напоминание о пробном»: его дублирует задача, карточки возвращаем в «Записан на пробное»
     con.execute("UPDATE students SET stage='trial_booked' WHERE funnel='sales' AND stage='trial_reminder'")
+
+
+def on_unpaid_visit(con, sid: int, group_id: int, day: str):
+    """Ребёнка отметили «был», а за месяц не оплачено: красная задача администраторам (Юлия, 04.11). Снимается после оплаты."""
+    from . import services as sv
+    s = con.execute("SELECT funnel FROM students WHERE id=?", (sid,)).fetchone()
+    if not s or s["funnel"] != "members" or sv.paid_for_month(con, sid, day[:7]):
+        return
+    g = (con.execute("SELECT name FROM groups WHERE id=?", (group_id,)).fetchone() or [""])[0]
+    key = f"unpaid_visit:{sid}:{day[:7]}"
+    note = f"{day[8:10]}.{day[5:7]} {g}"
+    old = con.execute("SELECT id, note FROM tasks WHERE auto_key=? AND status='open'", ("life:" + key,)).fetchone()
+    if old:  # уже есть: добавим дату, чтобы было видно все занятия без оплаты
+        if note not in (old["note"] or ""):
+            con.execute("UPDATE tasks SET note=? WHERE id=?", (((old["note"] or "") + ", " + note).strip(", "), old["id"]))
+        return
+    _add(con, "unpaid_visit", sid, _iso(datetime.now()), key, note=note, group_id=group_id)

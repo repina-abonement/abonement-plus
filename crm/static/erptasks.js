@@ -33,7 +33,7 @@ async function erpTasksSection() {
       <div class="seg et-tabs">${tabs.map(([k, l]) => `<button data-etday="${k}" class="${d.day === k ? "active" : ""} ${k === "overdue" && d.counts.overdue ? "et-red" : ""}">${l} <b>${d.counts[k]}</b></button>`).join("")}</div>
       <button class="btn sm" id="et-add" style="margin-left:auto">+ Ручная задача</button></div>
     <div id="et-addbox"></div>
-    ${d.columns.length ? `<div class="et-board">${d.columns.map((c) => `<section class="et-col ${c.key === "other" ? "et-other" : ""}">
+    ${d.columns.length ? `<div class="et-board">${d.columns.map((c) => `<section class="et-col ${c.key === "other" ? "et-other" : ""} ${c.key === "unpaid_visit" ? "et-unpaid" : ""}">
         <div class="et-head"><span>${esc(c.title)}</span><span class="cnt">${c.cards.length}</span></div>
         <div class="et-cards">${c.cards.map((t) => card(t, c.key)).join("")}</div></section>`).join("")}</div>`
       : `<div class="muted small" style="padding:6px 2px">${empty}</div>`}

@@ -696,6 +696,11 @@ def student_detail(con, sid: int) -> dict:
         "program": _program_out(con, sid),
         "pu": __import__("crm.pu", fromlist=["card_info"]).card_info(con, sid),
         "waitlist": __import__("crm.waitlist", fromlist=["for_student"]).for_student(con, sid),
+        # раздел «Посещения» (Юлия, 04.11): отметки за 3 месяца, новые сверху
+        "visits": _rows(con.execute("""SELECT a.date, a.status, a.warned, a.note, a.resolved, g.name AS group_name, b.name AS branch
+                                        FROM attendance a JOIN groups g ON g.id=a.group_id JOIN branches b ON b.id=g.branch_id
+                                        WHERE a.student_id=? AND a.date >= ? ORDER BY a.date DESC LIMIT 60""",
+                                     (sid, (today() - timedelta(days=92)).isoformat()))),
     }
     from . import smart
     out["lead_score"] = smart.lead_score(con, s)
@@ -851,6 +856,13 @@ def add_vacation(con, sid: int, start: str, end: str, note: str, user) -> None:
 
 # ---------- журнал ----------
 
+def paid_for_month(con, sid: int, ym: str) -> bool:
+    """Оплачено фактически: абонемент на месяц или разовое в этом месяце."""
+    return bool(con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND status='paid' AND (
+                                 (month=? AND COALESCE(kind,'month')='month') OR (kind='single' AND (month=? OR substr(created_at,1,7)=?)))""",
+                            (sid, ym, ym, ym)).fetchone())
+
+
 def journal(con, group_id: int, day: str, paid_only: bool = False) -> dict:
     g = con.execute("SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.id=?",
                     (group_id,)).fetchone()
@@ -998,6 +1010,9 @@ def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -
     con.execute("UPDATE attendance SET marked_at=? WHERE student_id=? AND date=? AND group_id=?", (now_iso(), sid, day, group_id))
     from . import pu
     pu.record_lesson_mark(con, group_id, day)
+    if status == "present":
+        from . import lifecycle
+        lifecycle.on_unpaid_visit(con, sid, group_id, day)
     if status == "absent":
         if s["skip_stage"] == "refused":
             con.execute("UPDATE students SET skip_stage='none' WHERE id=?", (sid,))

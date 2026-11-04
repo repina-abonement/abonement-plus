@@ -1370,7 +1370,7 @@ function layoutStudentCard(body, isMember) {
   left.appendChild($("#comms-box"));
   const order = isMember ? ["subs", "balance"] : ["stage", "pu", "abon"];
   order.forEach((k) => take(k) && right.appendChild(take(k)));
-  const folds = isMember ? ["abon", "skips", "family", "stage", "vac", "hist"] : ["subs", "family", "balance", "hist"];
+  const folds = isMember ? ["abon", "visits", "skips", "family", "stage", "vac", "hist"] : ["subs", "family", "balance", "hist"];
   folds.forEach((k) => {
     const sec = take(k); if (!sec) return;
     const det = document.createElement("details"); det.className = "sc-fold"; det.dataset.fold = k;
@@ -1555,8 +1555,8 @@ async function openStudent(id) {
   <div class="section" id="comms-box"><h3>Связь с семьёй</h3><div class="muted small">Загружаю переписку…</div></div>
 
   ${isMember ? `
-  <div class="section" data-sc="skips" data-title="🩹 Пропуски и отработки">
-    <h3>Пропуски и отработки</h3>
+  <div class="section" data-sc="visits" data-title="📅 Посещения">
+    <h3>Посещения</h3>
     ${can("journal", "full") && d.enrollments.some((e) => e.lesson_kind !== "ofp") ? `<div class="cm-box">
       <div class="small"><b>Отметить на тренировке</b></div>
       <div class="row" style="margin-top:6px;align-items:flex-end;flex-wrap:wrap">
@@ -1564,6 +1564,11 @@ async function openStudent(id) {
         <div class="field" style="flex:0 0 190px"><label>Тренировка</label><select id="cm-date"></select></div></div>
       <div id="cm-state" class="small muted" style="margin:4px 0 6px"></div>
       <div class="mark" id="cm-btns"></div></div>` : ""}
+    ${visitsHtml(d.visits || [], d.cur_month)}
+    <div id="warn-box" style="margin-top:10px"></div>
+  </div>
+  <div class="section" data-sc="skips" data-title="🩹 Пропуски и отработки">
+    <h3>Пропуски и отработки</h3>
     <div class="counters">
       <div class="counter"><b>${c.absent_cur}</b><span>пропущено в этом месяце</span></div>
       <div class="counter"><b>${c.absent_prev}</b><span>пропущено в прошлом</span></div>
@@ -1572,7 +1577,6 @@ async function openStudent(id) {
     </div>
     ${c.available_ids.length ? `<div class="small" style="margin-top:8px"><b>Неотработанные пропуски:</b> ${c.available_ids.map((a) => dShort(a.date)).join(", ")}
       <div class="muted">На «Гибком» пропуски переносим и без справки: не больше 3 и только при оплате следующего месяца</div></div>` : ""}
-    <div id="warn-box" style="margin-top:10px"></div>
     ${c.booked ? `<div class="small muted" style="margin-top:8px">Записан на отработку: ${c.booked}</div>` : ""}
     ${c.credited ? `<div class="small muted" style="margin-top:4px">Ушло в перерасчёт: ${c.credited}</div>` : ""}
     ${c.available ? `
@@ -1762,7 +1766,7 @@ async function openStudent(id) {
       patch({ group_id: x.group_id, trial_at: `${x.date}T${x.time || "18:00"}` });
     }, "Свободные места на пробное (подходят по возрасту):", s.birth);
   }
-  if ($("#cm-group")) wireCardMark(id);
+  if ($("#cm-group")) wireCardMark(id, reload);
   if ($("#mk-book")) $("#mk-book").onclick = async () => {
     try { await api("POST", `/api/students/${id}/makeups`, { group_id: +$("#mk-group").value, date: $("#mk-date").value }); toast("Записан на отработку"); reload(); } catch (e) { fail(e); }
   };
@@ -2124,8 +2128,18 @@ function makeupRow(r) {
     </div></div>`;
 }
 
+/* история посещений в карточке: за этот месяц коротко цифрами, ниже список дат */
+function visitsHtml(v, cur) {
+  if (!v.length) return `<div class="small muted" style="margin-top:8px">Отметок за последние 3 месяца нет</div>`;
+  const m = v.filter((x) => x.date.slice(0, 7) === cur);
+  const st = (x) => x.warned ? ["предупредил, не пришёл", "yellow"] : x.status === "present" ? ["был", "green"] : ["пропуск", "red"];
+  return `<div class="small" style="margin:10px 0 6px">В этом месяце: был <b>${m.filter((x) => x.status === "present").length}</b>, пропусков <b>${m.filter((x) => x.status === "absent").length}</b></div>
+    <ul class="history visits">${v.map((x) => `<li><b>${dShort(x.date)}</b> ${WD[(new Date(x.date + "T12:00").getDay() + 6) % 7]} · ${esc(groupNoBranch({ name: x.group_name, branch: x.branch }))}
+      <span class="pill ${st(x)[1]}">${st(x)[0]}</span>${x.resolved ? ` <span class="pill">${x.resolved === "credit" ? "в перерасчёте" : "отработан"}</span>` : ""}${x.note ? ` <span class="small muted">${esc(x.note)}</span>` : ""}</li>`).join("")}</ul>`;
+}
+
 /* отметка посещения прямо из карточки (Юлия, 04.11): ближайшие тренировки группы ребёнка, «Был / Пропуск» или «Не придёт» */
-function wireCardMark(sid) {
+function wireCardMark(sid, reload) {
   const gSel = $("#cm-group"), dSel = $("#cm-date");
   const fillDates = () => {
     const wd = (gSel.selectedOptions[0].dataset.wd || "").split(",").filter((x) => x !== "").map(Number);
@@ -2152,7 +2166,7 @@ function wireCardMark(sid) {
         if (a === "warn") { const note = window.prompt("Что сказали родители? (необязательно)", ""); if (note === null) return; await api("POST", "/api/journal/warn", { student_id: sid, group_id: gid, date: day, note }); }
         else if (a === "unwarn") await api("POST", "/api/journal/warn", { student_id: sid, group_id: gid, date: day, undo: true });
         else await api("POST", "/api/attendance", { student_id: sid, group_id: gid, date: day, status: a });
-        toast("Отмечено"); show();
+        toast("Отмечено"); if (reload) reload(); else show();
       } catch (e) { fail(e); }
     }));
   };
