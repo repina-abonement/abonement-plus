@@ -1973,6 +1973,8 @@ async function renderJournal(page) {
   const g = j.group;
   if (g.branch_id == null) g.branch_id = (groups.find((x) => x.id === g.id) || {}).branch_id;
   const jBranches = [...new Map(groups.map((x) => [x.branch_id, { id: x.branch_id, name: x.branch }])).values()];
+  // до начала тренировки вместо «Был / Пропуск» кнопка «Не придёт» (Юлия, 04.11)
+  const before = j.has_lesson && (S.journal.date > S.meta.today || (S.journal.date === S.meta.today && new Date().toTimeString().slice(0, 5) < g.time));
   const st = j.has_lesson && S.journal.date <= S.meta.today ? await api("GET", `/api/lessons/staff?group_id=${g.id}&date=${S.journal.date}`).catch(() => null) : null;
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Журнал посещений</h2></div>
@@ -1985,7 +1987,7 @@ async function renderJournal(page) {
     ${j.has_lesson && !g.is_makeup && S.journal.date <= S.meta.today ? `<button class="btn primary meet-open ${j.overdue_marks ? "late" : ""}" id="j-meet">${meetLabel(S.journal.date, g.time, j.overdue_marks)}${lessonOver(S.journal.date, g.time) ? "" : ": отметить крупными кнопками"}</button>` : ""}
     ${j.overdue_marks ? `<div class="alert">🔴 Тренировка закончилась ${j.overdue_marks.minutes} мин назад, не отмечено детей: ${j.overdue_marks.missing}</div>` : ""}
     ${st ? `<div class="panel" style="padding:12px 14px;margin-bottom:12px">${staffPicker(st, st.coaches, "j", S.journal.date === S.meta.today && new Date().toTimeString().slice(0, 5) < g.time)}</div>` : ""}
-    <div class="list">${j.rows.length ? j.rows.map((r) => g.is_makeup ? makeupRow(r) : journalRow(r)).join("") : `<div class="list-row muted">${g.is_makeup ? "На эту дату никто не записан на отработку" : "В группе пока нет учеников"}</div>`}</div>`;
+    <div class="list">${j.rows.length ? j.rows.map((r) => g.is_makeup ? makeupRow(r) : journalRow(r, before)).join("") : `<div class="list-row muted">${g.is_makeup ? "На эту дату никто не записан на отработку" : "В группе пока нет учеников"}</div>`}</div>`;
   if (st) wireStaffPicker(page, "j", g.id, S.journal.date, render);
   if ($("#j-meet")) $("#j-meet").onclick = () => openMeet(g.id, S.journal.date);
   $("#j-group").onchange = (e) => { step(() => { S.journal.group = +e.target.value; }); };
@@ -1996,6 +1998,14 @@ async function renderJournal(page) {
   page.querySelectorAll("[data-att]").forEach((b) => (b.onclick = async () => {
     try { await api("POST", "/api/attendance", { student_id: +b.dataset.sid, group_id: S.journal.group, date: S.journal.date, status: b.dataset.att }); render(); } catch (e) { fail(e); }
   }));
+  page.querySelectorAll("[data-warn]").forEach((b) => (b.onclick = async () => {
+    const note = window.prompt("Что сказали родители? (необязательно): заболел, уехали…", "");
+    if (note === null) return;
+    try { await api("POST", "/api/journal/warn", { student_id: +b.dataset.warn, group_id: S.journal.group, date: S.journal.date, note }); toast("Отмечено: не придёт. Место свободно для отработки"); render(); } catch (e) { fail(e); }
+  }));
+  page.querySelectorAll("[data-unwarn]").forEach((b) => (b.onclick = async () => {
+    try { await api("POST", "/api/journal/warn", { student_id: +b.dataset.unwarn, group_id: S.journal.group, date: S.journal.date, undo: true }); toast("Ждём на тренировке"); render(); } catch (e) { fail(e); }
+  }));
   page.querySelectorAll("[data-mk]").forEach((b) => (b.onclick = async () => {
     try { await api("POST", `/api/makeups/${b.dataset.mk}/status`, { status: b.dataset.st }); render(); } catch (e) { fail(e); }
   }));
@@ -2004,16 +2014,21 @@ async function renderJournal(page) {
   }));
 }
 
-function journalRow(r) {
+/* возраст рядом с именем (Юлия, 04.11) */
+const jAge = (r) => r.birth ? ` <span class="small muted">· ${ageText(r.birth)}</span>` : "";
+
+function journalRow(r, before) {
   if (r.status === "makeup") return makeupRow({ ...r, status: r.mk_status, home_group: "отработка" + (r.home_group ? ", из группы " + r.home_group : "") });
-  if (r.warned) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${esc(r.name)} <span class="pill yellow">предупредил, не придёт</span>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ""}</div>
-    <div class="mark"><button data-att="present" data-sid="${r.id}">Всё-таки был</button></div></div>`;
-  if (r.status === "vacation") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${esc(r.name)}</div><span class="pill yellow">Отпуск</span></div>`;
-  if (r.status === "trial") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${esc(r.name)} <span class="pill green">пробное ${r.trial_at.slice(11, 16)}</span></div>
+  if (r.warned) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${esc(r.name)}${jAge(r)} <span class="pill yellow">предупредил, не придёт</span>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ""}</div>
+    <div class="mark">${before ? `<button data-unwarn="${r.id}">Отменить, придёт</button>` : `<button data-att="present" data-sid="${r.id}">Всё-таки был</button>`}</div></div>`;
+  if (r.status === "vacation") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${esc(r.name)}${jAge(r)}</div><span class="pill yellow">Отпуск</span></div>`;
+  if (r.status === "trial") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${esc(r.name)}${jAge(r)} <span class="pill green">пробное ${r.trial_at.slice(11, 16)}</span></div>
     <div class="mark"><button data-trial="1" data-sid="${r.id}" class="${r.trial_came === 1 ? "on-present" : ""}">Пришёл</button><button data-trial="0" data-sid="${r.id}" class="${r.trial_came === 0 ? "on-absent" : ""}">Не пришёл</button></div></div>`;
   const unpaidPill = r.unpaid ? ` <span class="pill unpaid-flag">не оплачен, не допускать</span>` : "";
   const locked = r.resolved ? `<span class="pill">${r.resolved === "credit" ? "в перерасчёте" : "отработан"}</span>` : "";
-  return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${esc(r.name)} ${locked}${unpaidPill}</div>
+  if (before) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${esc(r.name)}${jAge(r)} ${unpaidPill}</div>
+    <div class="mark"><button data-warn="${r.id}" title="Родители заранее сказали, что не придёт">🙅 Не придёт</button></div></div>`;
+  return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${esc(r.name)}${jAge(r)} ${locked}${unpaidPill}</div>
     <div class="mark">
       <button data-att="present" data-sid="${r.id}" class="${r.status === "present" ? "on-present" : ""}">Был</button>
       <button data-att="absent" data-sid="${r.id}" class="${r.status === "absent" ? "on-absent" : ""}">Пропуск</button>

@@ -1754,6 +1754,21 @@ def journal(con, h, user, body, q):
     return j
 
 
+@route("POST", "/api/journal/warn", role="journal")
+def journal_warn(con, h, user, body, q):
+    """До начала тренировки: «предупредил, не придёт» прямо из журнала (Юлия, 04.11). Отменить: undo."""
+    from . import capacity
+    gid = int(body.get("group_id") or 0)
+    coach_guard(con, user, gid)
+    if not perms.allowed(user, "operator"):
+        journal_write(user)
+    if body.get("undo"):
+        capacity.unwarn(con, int(body.get("student_id") or 0), body.get("date") or "", gid, user)
+        return {"ok": True}
+    capacity.warn(con, int(body.get("student_id") or 0), body.get("date") or "", gid, body.get("note") or "", user)
+    return {"ok": True}
+
+
 @route("POST", "/api/attendance", role="journal")
 def attendance(con, h, user, body, q):
     journal_write(user)
