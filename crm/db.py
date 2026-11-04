@@ -302,7 +302,8 @@ def init_db(con: sqlite3.Connection):
     transfer.init(con)
     pin.init(con)
     profiles.init(con)
-    from . import perms, pricing
+    from . import perms, pricing, nodeadline
+    nodeadline.init(con)
     perms.init(con)
     pricing.init(con)
     from . import mypay, coachreport

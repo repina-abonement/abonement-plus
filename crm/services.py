@@ -615,9 +615,20 @@ def move_card(con, sid: int, funnel: str, stage: str, user, reason: str = "", co
             if reason == "Другое" and not (comment or "").strip():
                 raise ApiError("Напишите причину")
             why = reason + (f": {comment.strip()}" if (comment or "").strip() else "")
+        if stage == "left":
+            from .lifecycle import LEFT_DUE_BY_ADMIN
+            if reason in LEFT_DUE_BY_ADMIN:  # болезнь, сезон: админ уточняет и сам выбирает дату (Юлия, 03.11)
+                try:
+                    if date.fromisoformat((due or "")[:10]) < today():
+                        raise ApiError("Дата уже прошла")
+                except ValueError:
+                    raise ApiError("Выберите дату, когда пригласить вернуться", 422, {"need_left_due": True})
         con.execute("UPDATE students SET stage=?, stage_changed_at=?, refusal_reason=? WHERE id=?",
                     (stage, now_iso(), why if stage == "left" else "", sid))
         log(con, sid, f"Ушёл: {why}" if stage == "left" else "Вернулся", user, "stage")
+        if stage == "left":
+            from . import lifecycle
+            return lifecycle.on_left(con, sid, reason, comment or "", due or "", user)
     else:
         raise ApiError("Неизвестная воронка")
 
@@ -649,6 +660,9 @@ def _refuse(con, s: dict, reason: str, comment: str, user) -> dict:
     con.execute("UPDATE students SET stage='refused', refusal_reason=?, stage_changed_at=?, contacted_after_trial=1, priority=0 WHERE id=?",
                 (text, now_iso(), sid))
     log(con, sid, f"Отказ: {text}", user, "stage")
+    if reason == "Дорого":  # Юлия, 04.11: дорого, значит ждём акцию, без сроков
+        from . import nodeadline
+        nodeadline.add(con, sid, "promo", "Отказ после пробного: дорого" + (f". {comment}" if comment else ""), user)
     return {"stage": "refused"}
 
 
@@ -696,6 +710,7 @@ def student_detail(con, sid: int) -> dict:
         "program": _program_out(con, sid),
         "pu": __import__("crm.pu", fromlist=["card_info"]).card_info(con, sid),
         "waitlist": __import__("crm.waitlist", fromlist=["for_student"]).for_student(con, sid),
+        "nodeadline": __import__("crm.nodeadline", fromlist=["of_student"]).of_student(con, sid),
         # раздел «Посещения» (Юлия, 04.11): отметки за 3 месяца, новые сверху
         "visits": _rows(con.execute("""SELECT a.date, a.status, a.warned, a.note, a.resolved, g.name AS group_name, b.name AS branch
                                         FROM attendance a JOIN groups g ON g.id=a.group_id JOIN branches b ON b.id=g.branch_id
@@ -814,6 +829,9 @@ def update_student(con, sid: int, data: dict, user) -> None:
                         (now_iso(), (user or {}).get("id"), sid))  # кто записал: 200 ₽ администратору (mypay.py)
         # Юлия, 01.11: при записи на пробное (в будущем) статус меняется сразу, с любого этапа: у записанного не может быть
         # «Отказ», «Не дошёл до ПУ», «Пригласим позже», «Купил», «Как прошло» и «не беспокоить»
+        if data.get("trial_at") and str(data["trial_at"])[:10] >= today().isoformat():
+            from . import nodeadline
+            nodeadline.auto_exit(con, sid, "записан на пробное")
         if data.get("trial_at") and s["funnel"] == "sales" and str(data["trial_at"])[:10] >= today().isoformat() \
                 and s["stage"] not in ("trial_booked", "trial_reminder", "on_trial"):
             con.execute("UPDATE students SET stage='trial_booked', stage_changed_at=?, refusal_reason='', dnd=0 WHERE id=?", (now_iso(), sid))

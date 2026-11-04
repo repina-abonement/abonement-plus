@@ -1486,3 +1486,5 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .et-col.et-unpaid { background: var(--red-soft); }
 .et-col.et-unpaid .et-head span:first-child { color: var(--red); font-weight: 800; }
 .et-col.et-unpaid .et-card { border-left: 4px solid var(--red); }
+.nd-funnel { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px; margin-bottom: 14px; box-shadow: var(--shadow); }
+.nd-in { background: var(--yellow-soft); border-radius: 12px; padding: 8px 12px; margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }

@@ -279,7 +279,7 @@ async function renderLogin(force = false) {
 
 /* ---------- каркас ---------- */
 const VIEWS = [
-  ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Действующие клиенты"],
+  ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Действующие клиенты"], ["nodeadline", "Без дедлайнов"],
   ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["posts", "Посты в каналы"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["docs", "Документы"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
@@ -288,6 +288,7 @@ const NAV_ICONS = {
   today: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   schedule: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4M8 14h3M13 14h3M8 17h3"/>',
   inbox: '<path d="M4 6h16v10H8l-4 3z"/><path d="M8 10h8M8 13h5"/>',
+  nodeadline: '<circle cx="12" cy="12" r="8"/><path d="M10 9v6M14 9v6"/>',
   members: '<circle cx="9" cy="8" r="3"/><path d="M3.5 19c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5"/><circle cx="17" cy="9" r="2.3"/><path d="M16 14.6c2.2.2 3.7 1.6 4.4 4.4"/>',
   skips: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4M10 14l4 4M14 14l-4 4"/>',
   journal: '<rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 9l1.5 1.5L13 8M9 14.5l1.5 1.5L13 13.5M15 9.5h1M15 15h1"/>',
@@ -312,7 +313,7 @@ const isCoach = () => S.user && S.user.role === "coach";
 const LEVELS = { own: 1, view: 2, full: 3 };
 const can = (sec, lvl = "own") => (LEVELS[((S.user && S.user.perms) || {})[sec]] || 0) >= LEVELS[lvl];
 const isOwner = () => can("settings", "full");
-const visibleViews = () => VIEWS.filter(([k]) => can(k === "manual" ? "planner" : k) && (k !== "today" || !isOwner())
+const visibleViews = () => VIEWS.filter(([k]) => can(k === "manual" ? "planner" : k === "nodeadline" ? "sales" : k) && (k !== "today" || !isOwner())
   && (k !== "manual" || S.user.role !== "coach"))  // тренеру задачи приходят на «Сегодня» и в отчёт, отдельная вкладка не нужна  // руководитель смотрит стол тренера через «Как видит»
   .map(([k, t]) => [k, k === "coaches" && !can("coaches", "view") ? "Мои результаты" : k === "members" && !can("members", "full") ? "Мои ученики" : t]);
 const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
@@ -321,7 +322,7 @@ const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></s
 
 /* Боковое меню: главное сверху, остальное по папкам. Открыта папка с текущим разделом и те, что сотрудник раскрыл сам */
 const NAV_TOP = ["today", "sales", "inbox", "planner"];
-const NAV_FOLDERS = [["Клиенты", ["members"]], ["Занятия", ["journal", "schedule", "coaches"]],
+const NAV_FOLDERS = [["Клиенты", ["members", "nodeadline"]], ["Занятия", ["journal", "schedule", "coaches"]],
   ["Деньги", ["payments", "fiscal", "merch", "spend", "dashboard"]], ["Школа", ["team", "posts", "docs", "settings"]]];
 const navOpen = () => { try { return JSON.parse(localStorage.getItem("crm.nav_open") || "{}"); } catch (_) { return {}; } };
 function sideNav(views) {
@@ -533,6 +534,7 @@ async function renderView(page) {
     if (S.view === "schedule") return await renderSchedule(page);
     if (S.view === "members" && !can("members", "full")) return await renderCoachKids(page);
     if (["members", "skips"].includes(S.view)) return await renderBoard(page, S.view);
+    if (S.view === "nodeadline") return await renderNoDeadline(page);
     if (S.view === "dashboard") return await renderDashboard(page);
     if (S.view === "inbox") return await renderInbox(page);
     if (S.view === "coaches") return await renderCoaches(page);
@@ -1321,21 +1323,33 @@ function askReinvite(sid, done) {
   };
 }
 
-/* Ушёл: причина обязательна (разбор 01.11). Через 2 месяца CRM поставит задачу пригласить вернуться */
+/* Ушёл: причина обязательна. Что дальше, зависит от причины (Юлия, 03.11) */
 function askLeftReason(sid, done) {
-  const rs = ["Дорого", "Неудобное расписание", "Далеко ездить", "Ребёнку не нравится", "Перешли в другую секцию", "Переезд", "Болезнь или травма", "Сезон, каникулы", "Другое"];
+  const y = +S.meta.today.slice(0, 4);
+  const intake = [`${y}-01-05`, `${y}-08-01`, `${y + 1}-01-05`, `${y + 1}-08-01`].find((d) => d > S.meta.today);
+  const rs = [["Дорого", "В воронку «Ждут акцию»: позвоним, когда будет акция"], ["Неудобное расписание", "Пригласить вернуться через 2 недели"],
+    ["Далеко ездить", `Пригласить в ближайший набор, ${dShort(intake)}`], ["Ребёнку не нравится", `Пригласить в ближайший набор, ${dShort(intake)}`],
+    ["Перешли в другую секцию", `Пригласить в ближайший набор, ${dShort(intake)}`], ["Переезд", "Карточка уйдёт в архив, звонить не будем"],
+    ["Болезнь или травма", "Уточните, когда пригласить, и выберите дату"], ["Сезон, каникулы", "Уточните, когда пригласить, и выберите дату"],
+    ["Другое", "Пригласить вернуться через 2 месяца"]];
   openDrawer(`<h2>Почему ушёл?</h2>
     <form class="section" id="lf">
-      <div class="chips" style="flex-direction:column;align-items:stretch">${rs.map((r, i) => `<label class="check"><input type="radio" name="reason" value="${esc(r)}" ${i ? "" : "checked"}> ${esc(r)}</label>`).join("")}</div>
-      <div class="small muted" style="margin:8px 0">Через 2 месяца CRM поставит задачу пригласить вернуться. Кроме «Перешли в другую секцию» и «Переезд»</div>
+      <div class="chips" style="flex-direction:column;align-items:stretch">${rs.map(([r, h], i) => `<label class="check"><input type="radio" name="reason" value="${esc(r)}" ${i ? "" : "checked"}> ${esc(r)}<span class="small muted" style="margin-left:6px">${esc(h)}</span></label>`).join("")}</div>
+      <div class="field" id="lf-due" hidden style="margin-top:8px"><label>Когда пригласить вернуться</label><input type="date" name="due" min="${S.meta.today}"></div>
       <div class="field"><label>Комментарий</label><input name="comment" placeholder="Что сказал родитель"></div>
       <button class="btn primary">Сохранить</button>
     </form>`);
+  const admin = ["Болезнь или травма", "Сезон, каникулы"];
+  const sync = () => { const r = $("#lf").reason.value, on = admin.includes(r); $("#lf-due").hidden = !on; $("#lf").due.required = on; };
+  $("#lf").querySelectorAll("[name=reason]").forEach((x) => (x.onchange = sync)); sync();
   $("#lf").onsubmit = async (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
-    try { await api("POST", `/api/students/${sid}/move`, { funnel: "members", stage: "left", reason: f.reason, comment: f.comment }); toast("Сохранено: ушёл"); closeDrawer(); done(); }
-    catch (err) { fail(err); }
+    try {
+      const r = await api("POST", `/api/students/${sid}/move`, { funnel: "members", stage: "left", reason: f.reason, comment: f.comment, due: f.due ? f.due + "T11:00" : "" });
+      toast(r && r.plan === "promo" ? "Ушёл. В воронке «Ждут акцию»" : r && r.plan === "archive" ? "Ушёл. Карточка в архиве" : r && r.due ? `Ушёл. Пригласить вернуться ${dShort(r.due)}` : "Сохранено: ушёл");
+      closeDrawer(); done();
+    } catch (err) { fail(err); }
   };
 }
 
@@ -1531,6 +1545,9 @@ async function openStudent(id) {
   <div class="sc-grid" data-tab="feed"><div class="sc-left"></div><div class="sc-right"><div id="sell-box"></div></div></div>
 
   <div class="section" data-sc="stage">
+    ${(d.nodeadline || []).length ? d.nodeadline.map((n) => `<div class="nd-in">⏸ В воронке без дедлайнов <b>«${esc(n.title)}»</b> с ${dShort(n.added_at)}${n.note ? `<div class="small muted">${esc(n.note)}</div>` : ""}
+      <button class="btn sm" id="nd-out" type="button">Убрать из воронки</button></div>`).join("")
+      : `<button class="btn sm" id="nd-in" type="button" style="margin-bottom:10px" title="Без задач по сроку: позвоним, когда появится акция">⏸ В «Ждут акцию»</button>`}
     <div class="row">
       <div class="field"><label>Этап</label><select id="f-stage">${stageOpts.map(([k, t]) => `<option value="${k}" ${k === s.stage ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
       ${!isMember ? `<div class="field"><label>Тариф</label><select id="f-tariff"><option value="fixed" ${s.tariff === "fixed" ? "selected" : ""}>Негибкий</option><option value="flex" ${s.tariff === "flex" ? "selected" : ""}>Гибкий</option></select></div>` : ""}
@@ -1768,6 +1785,14 @@ async function openStudent(id) {
     }, "Свободные места на пробное (подходят по возрасту):", s.birth);
   }
   if ($("#cm-group")) wireCardMark(id, reload);
+  if ($("#nd-in")) $("#nd-in").onclick = async () => {
+    const note = window.prompt("Почему ждём акцию? (необязательно)", "");
+    if (note === null) return;
+    try { await api("POST", "/api/nodeadline/add", { student_id: id, funnel: "promo", note }); toast("В воронке «Ждут акцию»"); reload(); } catch (e) { fail(e); }
+  };
+  if ($("#nd-out")) $("#nd-out").onclick = async () => {
+    try { await api("POST", "/api/nodeadline/remove", { student_id: id, why: "вручную" }); toast("Убран из воронки"); reload(); } catch (e) { fail(e); }
+  };
   if ($("#mk-book")) $("#mk-book").onclick = async () => {
     try { await api("POST", `/api/students/${id}/makeups`, { group_id: +$("#mk-group").value, date: $("#mk-date").value }); toast("Записан на отработку"); reload(); } catch (e) { fail(e); }
   };

@@ -953,6 +953,34 @@ def board_skips(con, h, user, body, q):
     return sv.board(con, "skips")
 
 
+@route("GET", "/api/nodeadline", role="operator")
+def nodeadline_board(con, h, user, body, q):
+    from . import nodeadline
+    return nodeadline.board(con)
+
+
+@route("POST", "/api/nodeadline/add", role="operator")
+def nodeadline_add(con, h, user, body, q):
+    from . import nodeadline
+    nodeadline.add(con, int(body.get("student_id") or 0), body.get("funnel") or "promo", body.get("note") or "", user)
+    return {"ok": True}
+
+
+@route("POST", "/api/nodeadline/remove", role="operator")
+def nodeadline_remove(con, h, user, body, q):
+    from . import nodeadline
+    nodeadline.remove(con, int(body.get("student_id") or 0), (body.get("why") or "вручную").strip()[:200], user)
+    return {"ok": True}
+
+
+@route("POST", "/api/nodeadline/tasks", role="operator")
+def nodeadline_tasks(con, h, user, body, q):
+    """Появилась акция: задача всем в воронке одной кнопкой."""
+    from . import nodeadline
+    return {"made": nodeadline.make_tasks(con, body.get("funnel") or "promo", body.get("title") or "", body.get("due") or "",
+                                          body.get("note") or "", user)}
+
+
 @route("POST", "/api/students/{sid}/move", role="operator")
 def move(con, h, user, body, q, sid):
     r = sv.move_card(con, int(sid), body.get("funnel"), body.get("stage"), user, body.get("reason") or "", body.get("comment") or "",

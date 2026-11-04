@@ -88,6 +88,9 @@ def reconcile(con, sid: int) -> None:
     _reconcile(con, sid)
     from . import lifecycle
     lifecycle.on_payment(con, sid)  # первая оплата: продажа засчитана
+    if con.execute("SELECT 1 FROM subscriptions WHERE student_id=? AND status='paid' AND paid_at >= date('now', '-1 day')", (sid,)).fetchone():
+        from . import nodeadline
+        nodeadline.auto_exit(con, sid, "оплатил")
 
 
 def _reconcile(con, sid: int) -> None:

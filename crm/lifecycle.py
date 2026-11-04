@@ -34,7 +34,46 @@ NO_ANSWER_STEPS = [(1, "на следующий день"), (3, "через 3 д
 REVIVE_PER_DAY = 10  # старых лидов в день на «оживление»: вся база обрабатывается постепенно, без завала
 LEFT_REASONS = ["Дорого", "Неудобное расписание", "Далеко ездить", "Ребёнку не нравится", "Перешли в другую секцию",
                 "Переезд", "Болезнь или травма", "Сезон, каникулы", "Другое"]
-NO_COMEBACK = ("Выбрали другую секцию", "Перешли в другую секцию", "Переезд")
+NO_COMEBACK = ("Выбрали другую секцию", "Переезд")
+# «Ушёл»: когда пригласить вернуться, по причине (Юлия, 03.11). intake: ближайший набор (1 августа или 5 января)
+LEFT_PLAN = {"Дорого": "promo", "Неудобное расписание": 14, "Далеко ездить": "intake", "Ребёнку не нравится": "intake",
+             "Перешли в другую секцию": "intake", "Переезд": "archive", "Болезнь или травма": "admin", "Сезон, каникулы": "admin",
+             "Другое": 60}
+LEFT_DUE_BY_ADMIN = [k for k, v in LEFT_PLAN.items() if v == "admin"]
+
+
+def next_intake(d: date) -> date:
+    """Ближайший набор: 1 августа или 5 января, что раньше и ещё не прошло."""
+    cands = [date(d.year, 1, 5), date(d.year, 8, 1), date(d.year + 1, 1, 5), date(d.year + 1, 8, 1)]
+    return min(x for x in cands if x > d)
+
+
+def on_left(con, sid: int, reason: str, comment: str, due: str, user) -> dict:
+    """Ушёл: задача «Пригласить вернуться» по сроку из LEFT_PLAN, «Дорого» в «Ждут акцию», «Переезд» в архив."""
+    from . import pu, services as sv
+    s = con.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone()
+    plan = LEFT_PLAN.get(reason, 60)
+    today = sv.today()
+    note = f"Ушёл: {reason}" + (f". {comment}" if comment else "")
+    key = f"win_back:{sid}:{(s['stage_changed_at'] or '')[:10]}"
+    if plan == "promo":
+        from . import nodeadline
+        nodeadline.add(con, sid, "promo", note, user)
+        return {"plan": "promo"}
+    if plan == "archive":
+        from . import schedule
+        schedule.set_student_archived(con, sid, True, user or {})
+        sv.log(con, sid, f"В архив: переезд" + (f". {comment}" if comment else ""), user, "stage")
+        return {"plan": "archive"}
+    if plan == "intake":
+        when = next_intake(today)
+    elif plan == "admin":
+        when = date.fromisoformat(due[:10])
+    else:
+        when = today + timedelta(days=int(plan))
+    _add(con, "win_back", sid, f"{when.isoformat()}T11:00", key, note=note, group_id=s["group_id"])
+    sv.log(con, sid, f"Пригласить вернуться {when:%d.%m.%Y}", user, "stage")
+    return {"plan": "task", "due": when.isoformat()}
 
 
 def _iso(d: datetime) -> str:
@@ -148,8 +187,10 @@ def tick(con, now: datetime | None = None) -> int:
     # 6. ушёл: через 2 месяца пригласить вернуться
     for s in _people(con, "s.funnel='members' AND s.stage='left' AND s.stage_changed_at <= ? AND s.stage_changed_at >= ?",
                      (_iso(now - timedelta(days=60)), fresh(90))):
-        if any(x in (s["refusal_reason"] or "") for x in NO_COMEBACK) or _has_open(con, s["id"], s["family_id"]):
-            continue
+        if any(x in (s["refusal_reason"] or "") for x in NO_COMEBACK) or _has_open(con, s["id"], s["family_id"]) \
+                or (s["refusal_reason"] or "").startswith("Дорого") \
+                or con.execute("SELECT 1 FROM tasks WHERE auto_key LIKE ?", (f"life:win_back:{s['id']}:%",)).fetchone():
+            continue  # с 04.11 срок ставится сразу при уходе (on_left); здесь только старые уходы
         made += bool(_add(con, "win_back", s["id"], now, f"win_back:{s['id']}:{(s['stage_changed_at'] or '')[:10]}",
                           note=f"Ушёл: {s['refusal_reason'] or 'без причины'}", group_id=s["group_id"]))
     # 8. предложили отработку и 2 дня без записи
