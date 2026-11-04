@@ -2131,7 +2131,15 @@ async function renderJournal(page) {
 const J_TAGS = { paid: ["абонемент", "jt-paid"], single: ["разовое", "jt-single"], unpaid: ["не оплачен", "jt-unpaid"] };
 const jTag = (r) => { const t = J_TAGS[r.tag]; return t && !(r.tag === "unpaid" && r.unpaid) ? `<span class="pill ${t[1]}">${t[0]}</span>` : ""; };
 const jNum = (r) => r.n ? `<span class="jn">${r.n}.</span>` : "";
-const jAge = (r) => r.birth ? ` <span class="small muted">· ${ageText(r.birth)}</span>` : "";
+/* возраст с месяцами: «3 года 5 мес.» (Юлия, 04.11) */
+function ageYM(birth, on) {
+  const b = new Date(birth + "T12:00"), n = new Date((on || S.meta.today) + "T12:00");
+  if (!isFinite(b)) return "";
+  const months = (n.getFullYear() - b.getFullYear()) * 12 + n.getMonth() - b.getMonth() - (n.getDate() < b.getDate() ? 1 : 0);
+  const y = Math.floor(months / 12), m = months % 12;
+  return `${y} ${plural(y, "год", "года", "лет")}${m ? ` ${m} мес.` : ""}`;
+}
+const jAge = (r) => r.birth ? ` <span class="small muted">· ${ageYM(r.birth, S.journal.date)}</span>` : "";
 
 function journalRow(r, before) {
   if (r.status === "makeup") return makeupRow({ ...r, status: r.mk_status, home_group: "отработка" + (r.home_group ? ", из группы " + r.home_group : "") });

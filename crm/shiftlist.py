@@ -10,13 +10,15 @@ TAGS = {"paid": "абонемент", "single": "разовое", "unpaid": "н�
 
 
 def years(birth: str, on: date) -> str:
+    """Возраст с месяцами (Юлия, 04.11): «3 года 5 мес.»."""
     try:
         b = date.fromisoformat((birth or "")[:10])
     except ValueError:
         return ""
-    y = on.year - b.year - ((on.month, on.day) < (b.month, b.day))
+    months = (on.year - b.year) * 12 + on.month - b.month - (on.day < b.day)
+    y, m = months // 12, months % 12
     word = "год" if y % 10 == 1 and y % 100 != 11 else "года" if y % 10 in (2, 3, 4) and y % 100 not in (12, 13, 14) else "лет"
-    return f"{y} {word}"
+    return f"{y} {word}" + (f" {m} мес." if m else "")
 
 
 def shift(con, branch_id: int, day: str, group_ids: list[int] | None = None) -> dict:
