@@ -2451,8 +2451,11 @@ async function renderDiag(box, ip = "") {
       out.querySelectorAll("[data-dgip]").forEach((b) => (b.onclick = () => renderDiag(box, b.dataset.dgip)));
     } catch (e) { out.textContent = e.message; }
   };
-  $("#dg-go").onclick = () => run($("#dg-ip").value.trim());
-  $("#dg-all").onclick = () => { $("#dg-ip").value = ""; run(""); };
+  // зелёной подсвечена та кнопка, чей результат сейчас на экране
+  const mark = (all) => { $("#dg-all").classList.toggle("primary", all); $("#dg-go").classList.toggle("primary", !all); };
+  $("#dg-go").onclick = () => { mark(false); run($("#dg-ip").value.trim()); };
+  $("#dg-all").onclick = () => { mark(true); $("#dg-ip").value = ""; run(""); };
+  mark(!ip);
   run(ip);
 }
 
