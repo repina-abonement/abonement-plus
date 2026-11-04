@@ -58,7 +58,7 @@ DEFAULT_TEMPLATES = {
 # ссылка на чат с администратором (как в постах каналов); {admin} в текстах: в MAX ссылка MAX, иначе Telegram
 CONTACT_SETTINGS = {"admin_tg": "@footbolika_admin",
                     "admin_max": "https://max.ru/u/f9LHodD0cOLaVBGOxjxYFwTe2vGHnJQswhXNnS5iJbwXlmYEqrQRm4LKGTI"}
-AUTO_SETTINGS = {"auto_day_before": "1", "auto_2h_before": "1", "auto_after": "1", "day_before_hour": "11", "auto_booked": "1", "auto_missed": "1"}
+AUTO_SETTINGS = {"auto_lesson": "1", "lesson_hours_before": "3", "auto_day_before": "1", "auto_2h_before": "1", "auto_after": "1", "day_before_hour": "11", "auto_booked": "1", "auto_missed": "1"}
 
 # где проходит пробное (из скриптов Юлии); ссылки на чаты родителей вписываются в Настройках → Задачи и автосообщения
 # (в код их не кладём: репозиторий публичный, а по ссылке-приглашению можно зайти в чат родителей)
@@ -393,6 +393,11 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
         except Exception:  # noqa: BLE001
             pass
     chains.tick(con, now, send)  # автоцепочки сообщений (включаются в Настройках)
+    from . import reminders
+    try:
+        reminders.tick(con, now, send)  # напоминание перед каждым занятием: абонемент, разовые, отработки (04.11)
+    except Exception:  # noqa: BLE001 — напоминания не должны ломать проход
+        pass
     st = {k: setting(con, k) for k in AUTO_SETTINGS}
     trial_min = int((con.execute("SELECT value FROM settings WHERE key='trial_minutes'").fetchone() or ["60"])[0])
     made = sent = 0
@@ -659,12 +664,14 @@ def settings_view(con) -> dict:
     vals[OWNER_KEY] = str(owner(con) or "")
     from . import trialoffer
     vals["msg_trial_offer"] = setting(con, "msg_trial_offer") or trialoffer.DEFAULT
+    from . import reminders
+    vals["msg_lesson"] = setting(con, "msg_lesson") or reminders.DEFAULT_TEXT
     return {"values": vals, "erp_statuses": list(ERP_STATUSES), "booked_places": booked_places(con), "auto_live": comms.auto_live(con)}
 
 
 def save_settings(con, data: dict):
     for k, v in data.items():
-        if k in DEFAULT_TEMPLATES or k in AUTO_SETTINGS or k in CONTACT_SETTINGS or k in (OWNER_KEY, "msg_trial_offer"):
+        if k in DEFAULT_TEMPLATES or k in AUTO_SETTINGS or k in CONTACT_SETTINGS or k in (OWNER_KEY, "msg_trial_offer", "msg_lesson"):
             comms.put(con, k, str(v or "").strip())
         elif k == "booked_places" and isinstance(v, dict):
             comms.put(con, k, json.dumps({str(b): {f: str(x.get(f) or "").strip() for f in ("place", "area", "tg", "max")}

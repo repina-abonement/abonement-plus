@@ -335,6 +335,12 @@ async function renderTaskSettings(box, users) {
         <div class="field"><label>В MAX</label><input data-t="admin_max" value="${esc(v.admin_max)}" placeholder="https://max.ru/u/..."></div></div></div>
     <div class="field"><label>Пропущенный звонок: через 2 минуты, если не перезвонили, клиенту в мессенджер (9:00-21:00, раз в день на номер)</label>${yn("auto_missed")}</div>
     <div class="field"><label>Текст после пропущенного звонка. {hello}: «Анна, здравствуйте!» или «Здравствуйте!»</label><textarea data-t="msg_missed" rows="3">${esc(v.msg_missed)}</textarea></div>
+    <div class="bk-places" style="margin-bottom:12px">
+      <div class="bk-head"><b>⚽ Напоминание перед каждым занятием</b>
+        <div class="small muted">Тем, кто ходит по абонементу, на разовые и отработки. У пробных своя цепочка (ниже). Одно сообщение на семью. Не пишем предупредившим, что не придут, в отпуске и не оплатившим</div></div>
+      <div class="row" style="margin-top:8px"><div class="field"><label>Напоминание перед занятием</label>${yn("auto_lesson")}</div>
+        <div class="field" style="flex:0 0 160px"><label>За сколько часов</label><input data-t="lesson_hours_before" type="number" min="1" max="12" value="${esc(v.lesson_hours_before)}"></div></div>
+      <div class="field"><label>Текст. {parent}: «, Анна» (имя родителя), {date}, {time}, {place}: место филиала</label><textarea data-t="msg_lesson" rows="9">${esc(v.msg_lesson || "")}</textarea></div></div>
     <div class="field"><label>Сразу после записи на пробное (дата, время, место, что взять)</label>${yn("auto_booked")}</div>
     <div class="field"><label>Текст после записи. {date_time}: «Понедельник, 2 ноября, в 17:30», {place}: место филиала, {chat_line}: строка с чатом родителей</label><textarea data-t="msg_booked" rows="9">${esc(v.msg_booked)}</textarea></div>
     <div class="bk-places">
