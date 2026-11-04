@@ -513,7 +513,8 @@ def staff_docs_accept(con, h, user, body, q):
 @route("GET", "/api/stage-tips", role="operator")
 def stage_tips_get(con, h, user, body, q):
     from . import smart
-    return {"tips": smart.tips(con), "labels": {k: sv.SALES_LABELS[k] for k in smart.TIP_STAGES}}
+    # этапа «Напоминание о пробном» больше нет (01.11): показываем подсказки только для существующих этапов
+    return {"tips": smart.tips(con), "labels": {k: sv.SALES_LABELS[k] for k in smart.TIP_STAGES if k in sv.SALES_LABELS}}
 
 
 @route("PUT", "/api/stage-tips", role="admin")
