@@ -1368,9 +1368,10 @@ function layoutStudentCard(body, isMember) {
   const grid = body.querySelector(".sc-grid"), left = grid.querySelector(".sc-left"), right = grid.querySelector(".sc-right");
   const take = (k) => body.querySelector(`[data-sc="${k}"]`);
   left.appendChild($("#comms-box"));
+  if (take("visits")) left.appendChild(take("visits"));  // Юлия, 04.11: посещения на виду, под перепиской
   const order = isMember ? ["subs", "balance"] : ["stage", "pu", "abon"];
   order.forEach((k) => take(k) && right.appendChild(take(k)));
-  const folds = isMember ? ["abon", "visits", "skips", "family", "stage", "vac", "hist"] : ["subs", "family", "balance", "hist"];
+  const folds = isMember ? ["abon", "skips", "family", "stage", "vac", "hist"] : ["subs", "family", "balance", "hist"];
   folds.forEach((k) => {
     const sec = take(k); if (!sec) return;
     const det = document.createElement("details"); det.className = "sc-fold"; det.dataset.fold = k;
