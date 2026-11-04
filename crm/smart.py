@@ -131,7 +131,7 @@ def next_step(con, s: dict, detail: dict | None = None, ref: datetime | None = N
     if task:
         from .tasks import KINDS
         title = task["title"] or KINDS.get(task["kind"], ("Задача",))[0]
-        return {"text": f"Задача на сейчас: {title}", "action": "task"}
+        return {"text": title, "action": "task"}
     if s["funnel"] == "sales":
         st = s["stage"]
         if st == "lead":
