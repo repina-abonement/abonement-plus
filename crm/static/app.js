@@ -280,7 +280,7 @@ async function renderLogin(force = false) {
 /* ---------- каркас ---------- */
 const VIEWS = [
   ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Действующие клиенты"], ["nodeadline", "Без дедлайнов"],
-  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["posts", "Посты в каналы"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Все клиенты"], ["docs", "Документы"], ["settings", "Настройки"],
+  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["posts", "Посты в каналы"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Клиенты и лиды"], ["docs", "Документы"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
   team: '<circle cx="12" cy="6" r="2.5"/><circle cx="5.5" cy="17.5" r="2.5"/><circle cx="18.5" cy="17.5" r="2.5"/><path d="M12 8.5v3.5M5.5 15v-3h13v3"/>',
@@ -322,7 +322,7 @@ const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></s
 
 /* Боковое меню: главное сверху, остальное по папкам. Открыта папка с текущим разделом и те, что сотрудник раскрыл сам */
 const NAV_TOP = ["today", "sales", "inbox", "planner"];
-const NAV_FOLDERS = [["Клиенты", ["members", "nodeadline"]], ["Занятия", ["journal", "schedule", "coaches"]],
+const NAV_FOLDERS = [["Клиенты", ["search", "members", "nodeadline"]], ["Занятия", ["journal", "schedule", "coaches"]],
   ["Деньги", ["payments", "fiscal", "merch", "spend", "dashboard"]], ["Школа", ["team", "posts", "docs", "settings"]]];
 const navOpen = () => { try { return JSON.parse(localStorage.getItem("crm.nav_open") || "{}"); } catch (_) { return {}; } };
 function sideNav(views) {
@@ -2252,24 +2252,33 @@ function wireCardMark(sid, reload) {
 }
 
 /* ---------- поиск ---------- */
+/* «Клиенты и лиды» (Юлия, 04.11): один раздел. Лид: ни одной покупки. У клиентов фильтр по статусам карточки и ERP */
+S.pf = S.pf || { kind: "all", status: "", erp: "" };
 async function renderSearch(page) {
+  const f = S.pf;
+  const d = await api("GET", `/api/people?kind=${f.kind}&status=${encodeURIComponent(f.status)}&erp=${encodeURIComponent(f.erp)}&q=${encodeURIComponent(S.search)}${S.searchArch ? "&archived=1" : ""}`);
+  const kinds = [["all", "Все", d.counts.leads + d.counts.clients], ["leads", "Лиды", d.counts.leads], ["clients", "Клиенты", d.counts.clients]];
+  const sts = f.kind === "leads" ? d.statuses.leads : f.kind === "clients" ? d.statuses.clients : [];
+  const pillCls = { active: "green", single: "", unpaid: "red", left: "", promo: "yellow" };
   page.innerHTML = `
-    <div class="page-head"><h2 class="grow">Все клиенты</h2>
+    <div class="page-head"><h2 class="grow">Клиенты и лиды</h2>
       <input class="search" id="q" placeholder="Имя, фамилия или телефон" value="${esc(S.search)}">
       <button class="btn sm ${S.searchArch ? "primary" : ""}" id="q-arch">Архив</button></div>
-    <div id="results" class="list"></div>`;
-  const load = async () => {
-    const rows = await api("GET", "/api/students?q=" + encodeURIComponent(S.search) + (S.searchArch ? "&archived=1" : ""));
-    $("#results").innerHTML = rows.length ? rows.map((r) => `
+    <div class="seg" style="margin-bottom:10px">${kinds.map(([k, t, n]) => `<button data-pk="${k}" class="${f.kind === k ? "active" : ""}">${t} <b>${n}</b></button>`).join("")}</div>
+    ${sts.length ? `<div class="chips" style="margin-bottom:10px"><button class="chip ${f.status ? "" : "on"}" data-ps="">Все статусы</button>${sts.filter(([k]) => d.counts[k] || f.status === k).map(([k, t]) => `<button class="chip ${f.status === k ? "on" : ""}" data-ps="${k}">${esc(t)} <span class="muted">${d.counts[k] || 0}</span></button>`).join("")}</div>` : ""}
+    ${d.erp.length ? `<div class="row" style="max-width:420px;margin-bottom:10px"><div class="field"><label>Статус в ERP</label><select id="p-erp"><option value="">Любой</option>${d.erp.map(([e, n]) => `<option value="${esc(e)}" ${f.erp === e ? "selected" : ""}>${esc(e)} (${n})</option>`).join("")}</select></div></div>` : ""}
+    <div class="small muted" style="margin-bottom:6px">Найдено: ${d.total}${d.total > d.limit ? `, показаны первые ${d.limit}. Уточните поиск или фильтр` : ""}</div>
+    <div id="results" class="list">${d.rows.length ? d.rows.map((r) => `
       <div class="list-row click" data-who="${r.id}"><div class="grow"><b>${esc(r.name)}</b>
-        <div class="small muted">${esc([r.parent, r.phone, r.group].filter(Boolean).join(" · "))}</div></div>
-        <span class="pill ${r.funnel === "members" ? "green" : ""}">${r.funnel === "members" ? "ученик" : "лид"}</span></div>`).join("")
-      : `<div class="list-row muted">Никого не нашли</div>`;
-    $("#results").querySelectorAll("[data-who]").forEach((el) => (el.onclick = () => openStudent(+el.dataset.who)));
-  };
-  let t; $("#q").oninput = (e) => { S.search = e.target.value; clearTimeout(t); t = setTimeout(load, 250); };
+        <div class="small muted">${esc([r.parent, r.phone, r.group].filter(Boolean).join(" · "))}${r.erp_status ? ` · ERP: ${esc(r.erp_status)}` : ""}</div></div>
+        <span class="pill ${r.status.startsWith("lead:") ? "" : pillCls[r.status] || ""}">${r.status.startsWith("lead:") ? "Лид: " : ""}${esc(r.status_label)}</span></div>`).join("")
+      : `<div class="list-row muted">Никого не нашли</div>`}</div>`;
+  page.querySelectorAll("[data-who]").forEach((el) => (el.onclick = () => openStudent(+el.dataset.who)));
+  page.querySelectorAll("[data-pk]").forEach((b) => (b.onclick = () => { f.kind = b.dataset.pk; f.status = ""; render(); }));
+  page.querySelectorAll("[data-ps]").forEach((b) => (b.onclick = () => { f.status = b.dataset.ps; render(); }));
+  if ($("#p-erp")) $("#p-erp").onchange = (e) => { f.erp = e.target.value; render(); };
+  let t; $("#q").oninput = (e) => { S.search = e.target.value; clearTimeout(t); t = setTimeout(async () => { await render(); const q = $("#q"); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }, 350); };
   $("#q-arch").onclick = () => { S.searchArch = !S.searchArch; render(); };
-  load();
 }
 
 /* ---------- настройки ---------- */

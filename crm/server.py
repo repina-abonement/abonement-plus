@@ -1016,6 +1016,13 @@ def students(con, h, user, body, q):
     return sv.search_students(con, q.get("q", ""), q.get("archived") == "1")
 
 
+@route("GET", "/api/people", role="operator")
+def people_list(con, h, user, body, q):
+    """«Клиенты и лиды»: лиды без единой покупки, клиенты с фильтром по статусам карточки и ERP."""
+    from . import people
+    return people.listing(con, q.get("kind") or "all", q.get("status") or "", q.get("erp") or "", q.get("q") or "", q.get("archived") == "1")
+
+
 @route("GET", "/api/check-phone", role="operator")
 def check_phone(con, h, user, body, q):
     return sv.find_families_by_phone(con, q.get("phone", ""))
