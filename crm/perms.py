@@ -20,7 +20,7 @@ SECTIONS: dict[str, dict[str, str]] = {
     "members": DESK | {"coach": "own"},  # тренер: дети своих групп и телефоны родителей, без правок
     "today": {"owner": "full", "coach": "own"},
     "planner": {"owner": "full", "senior": "full", "operator": "own", "coach": "own", "promoter": "own", "lawyer": "own"},
-    "journal": {"owner": "full", "senior": "full", "operator": "view", "coach": "own"},
+    "journal": {"owner": "full", "senior": "full", "operator": "view", "coach": "own", "journal": "full"},  # journal: отметка «отмечает журнал»
     "schedule": {"owner": "full", "senior": "full", "operator": "view", "coach": "view", "promoter": "view"},
     "coaches": {"owner": "full", "senior": "view", "coach": "own"},
     "team": {"owner": "full", "senior": "view", "operator": "view", "coach": "view", "promoter": "view", "lawyer": "view"},
@@ -56,6 +56,8 @@ def roles_of(user: dict) -> set[str]:
         out.add(base)
     if user.get("is_promoter"):
         out.add("promoter")
+    if user.get("is_journal"):
+        out.add("journal")
     return out
 
 
@@ -116,6 +118,8 @@ def archive_test_staff(con) -> int:
 def init(con) -> None:
     """Отметки старшего администратора и промоутера. При первом запуске переносим тех, кто уже работает."""
     cols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
+    if "is_journal" not in cols:  # «отмечает журнал»: администратор филиала отмечает детей и тренеров (Юлия, 04.11)
+        con.execute("ALTER TABLE users ADD COLUMN is_journal INTEGER NOT NULL DEFAULT 0")
     if "is_senior" in cols:
         return
     con.execute("ALTER TABLE users ADD COLUMN is_senior INTEGER NOT NULL DEFAULT 0")

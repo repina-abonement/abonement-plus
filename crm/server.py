@@ -76,7 +76,7 @@ def current_user(con, handler) -> dict | None:
     tok = c.get("crm_session")
     if not tok:
         return None
-    r = con.execute("""SELECT u.id, u.login, u.name, u.role, u.is_senior, u.is_promoter, s.created_at FROM sessions s
+    r = con.execute("""SELECT u.id, u.login, u.name, u.role, u.is_senior, u.is_promoter, u.is_journal, s.created_at FROM sessions s
                        JOIN users u ON u.id=s.user_id WHERE s.token=? AND u.active=1""", (tok.value,)).fetchone()
     if not r:
         return None
@@ -192,7 +192,7 @@ def change_password(con, h, user, body, q):
 def users_list(con, h, user, body, q):
     ucols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
     ph = "phone" if "phone" in ucols else "'' AS phone"
-    out = [dict(r) for r in con.execute(f"""SELECT id, login, name, role, is_senior, is_promoter, active, sip_number, tg_username, {ph}, photo_at
+    out = [dict(r) for r in con.execute(f"""SELECT id, login, name, role, is_senior, is_promoter, is_journal, active, sip_number, tg_username, {ph}, photo_at
                                             FROM users ORDER BY id""")]
     return [u | {"title": perms.title(u)} for u in out]
 
@@ -286,6 +286,10 @@ def users_patch(con, h, user, body, q, uid):
             raise ApiError("Нельзя снять с себя должность руководителя")
         set_post(con, int(uid), body.get("post"), body.get("is_promoter"))
         sv.audit(con, user, "user.post", f"{uid}:{body.get('post')}:{body.get('is_promoter')}")
+    if "is_journal" in body:
+        con.execute("UPDATE users SET is_journal=? WHERE id=?", (1 if body["is_journal"] else 0, int(uid)))
+        con.execute("DELETE FROM sessions WHERE user_id=?", (int(uid),))  # права меняются сразу: войдёт заново
+        sv.audit(con, user, "user.journal", f"{uid}:{body['is_journal']}")
     if "active" in body:
         if int(uid) == user["id"] and not body["active"]:
             raise ApiError("Нельзя отправить в архив самого себя")
@@ -1743,6 +1747,10 @@ def makeup_status(con, h, user, body, q, mid):
 def journal(con, h, user, body, q):
     coach_guard(con, user, int(q.get("group_id") or 0))
     j = sv.journal(con, int(q.get("group_id") or 0), q.get("date") or sv.today().isoformat())
+    # пометка у каждого: абонемент, разовое, не оплачен (Юлия, 04.11)
+    for r in j["rows"]:
+        if not j["group"]["is_makeup"] and r.get("status") not in ("trial", "makeup", "vacation") and not r.get("warned"):
+            r["tag"] = coaches._kid_tag(con, r["id"], j["date"][:7], r.get("status"))
     from . import pu
     from datetime import datetime as _dt
     if j["has_lesson"]:
@@ -1752,6 +1760,20 @@ def journal(con, h, user, body, q):
         if end and n and _dt.now() >= end + __import__("datetime").timedelta(minutes=30):
             j["overdue_marks"] = {"missing": n, "minutes": int((_dt.now() - end).total_seconds() // 60)}
     return j
+
+
+@route("GET", "/api/journal/shift", role="journal")
+def journal_shift(con, h, user, body, q):
+    """Списки детей на всю смену в филиале: скопировать или распечатать (Юлия, 04.11). Тренеру только его группы."""
+    from . import shiftlist
+    bid = int(q.get("branch_id") or 0)
+    day = q.get("date") or sv.today().isoformat()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise ApiError("Неверная дата")
+    only = None
+    if user["role"] == "coach":
+        only = [r[0] for r in con.execute("SELECT id FROM groups") if schedule.coach_may(con, user["id"], r[0])]
+    return shiftlist.day_all(con, day, bid or None, only)
 
 
 @route("POST", "/api/journal/warn", role="journal")

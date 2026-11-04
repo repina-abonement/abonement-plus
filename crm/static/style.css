@@ -1461,3 +1461,13 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .et-col { flex-basis: 214px; }
 .et-card[data-etopen] { cursor: pointer; } .et-card[data-etopen]:hover { border-color: var(--accent); }
 .et-phone { white-space: nowrap; }
+
+/* журнал: плашка «ждём», нумерация и пометки (04.11) */
+.jm-sub { display: flex; align-items: center; gap: 16px; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 16px; padding: 14px 20px; margin-bottom: 14px; max-width: 720px; }
+.jm-sub-n { font-size: 44px; font-weight: 800; color: var(--accent); line-height: 1; }
+.jn { display: inline-block; min-width: 26px; color: var(--ink-2); font-weight: 700; }
+.pill.jt-paid { background: var(--accent-soft); color: var(--accent); }
+.pill.jt-single { background: #e6eefc; color: #2f5bb7; }
+.pill.jt-unpaid { background: var(--red-soft); color: var(--red); }
+.pill.jt-makeup { background: #efe6fb; color: #6b3fb5; }
+.pill.jt-trial { background: var(--yellow-soft); color: #8a6a00; }

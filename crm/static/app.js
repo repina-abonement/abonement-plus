@@ -1969,15 +1969,27 @@ async function renderJournal(page) {
   if (!groups.length) { page.innerHTML = `<h2>Журнал посещений</h2><p class="muted">За вами пока не закреплено ни одной группы. Попросите администратора.</p>`; return; }
   if (!S.journal.group || !groups.some((x) => x.id === S.journal.group)) S.journal.group = groups[0].id;
   if (!S.journal.date) S.journal.date = S.meta.today;
+  if (S.journal.mode === "dayall") return renderJournalDay(page, groups);
   const j = await api("GET", `/api/journal?group_id=${S.journal.group}&date=${S.journal.date}`);
   const g = j.group;
   if (g.branch_id == null) g.branch_id = (groups.find((x) => x.id === g.id) || {}).branch_id;
   const jBranches = [...new Map(groups.map((x) => [x.branch_id, { id: x.branch_id, name: x.branch }])).values()];
   // до начала тренировки вместо «Был / Пропуск» кнопка «Не придёт» (Юлия, 04.11)
   const before = j.has_lesson && (S.journal.date > S.meta.today || (S.journal.date === S.meta.today && new Date().toTimeString().slice(0, 5) < g.time));
+  // нумерация: сначала те, кого ждём, потом предупредившие и отпуск; плашка «всего / ждём» (Юлия, 04.11)
+  const away = (r) => r.warned || r.status === "vacation";
+  j.rows.sort((a, b) => away(a) - away(b));
+  j.rows.forEach((r, i) => (r.n = i + 1));
+  const jTotal = j.rows.length, jAway = j.rows.filter(away).length;
+  const jCnt = (f) => j.rows.filter(f).length;
+  const jSum = j.has_lesson && jTotal ? `<div class="jm-sub" style="max-width:none">
+      <div class="jm-sub-n">${jTotal - jAway}</div>
+      <div><b>ждём на тренировке</b> из ${jTotal} по списку${jAway ? `: ${jAway} ${plural(jAway, "предупредил", "предупредили", "предупредили")} или в отпуске` : ""}
+        <div class="small muted">${[[jCnt((r) => r.tag === "paid" && !away(r)), "абонемент"], [jCnt((r) => r.tag === "single" && !away(r)), "разовое"], [jCnt((r) => r.tag === "unpaid" && !away(r)), "не оплачен"],
+          [jCnt((r) => r.status === "trial"), "ПУ"], [jCnt((r) => r.status === "makeup" || r.makeup_id), "отработка"]].filter(([n]) => n).map(([n, t]) => `${t}: ${n}`).join(" · ")}</div></div></div>` : "";
   const st = j.has_lesson && S.journal.date <= S.meta.today ? await api("GET", `/api/lessons/staff?group_id=${g.id}&date=${S.journal.date}`).catch(() => null) : null;
   page.innerHTML = `
-    <div class="page-head"><h2 class="grow">Журнал посещений</h2></div>
+    ${journalDayHead()}
     <div class="row" style="max-width:640px;margin-bottom:14px">
       ${jBranches.length > 1 ? `<div class="field" style="flex:0 0 200px"><label>Филиал</label><select id="j-branch">${jBranches.map((b) => `<option value="${b.id}" ${b.id === g.branch_id ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : ""}
       <div class="field"><label>Группа</label><select id="j-group">${groups.filter((x) => x.branch_id === g.branch_id).map((x) => `<option value="${x.id}" ${x.id === S.journal.group ? "selected" : ""}>${esc(groupNoBranch(x))}</option>`).join("")}</select></div>
@@ -1985,11 +1997,16 @@ async function renderJournal(page) {
     </div>
     <div class="note">${esc(g.branch)} · ${g.weekdays.split(",").map((x) => WD[+x]).join(", ")} ${esc(g.time)} · ${esc(g.age)} лет${j.closed ? " · <b>праздник, занятия нет</b>" : j.has_lesson ? "" : " · <b>в этот день у группы нет занятия</b>"}</div>
     ${j.has_lesson && !g.is_makeup && S.journal.date <= S.meta.today ? `<button class="btn primary meet-open ${j.overdue_marks ? "late" : ""}" id="j-meet">${meetLabel(S.journal.date, g.time, j.overdue_marks)}${lessonOver(S.journal.date, g.time) ? "" : ": отметить крупными кнопками"}</button>` : ""}
+    ${jSum}
+    ${j.has_lesson ? `<div class="row" style="gap:8px;margin:0 0 12px;flex-wrap:wrap"><button class="btn sm" id="j-copy" style="flex:0 0 auto">📋 Скопировать списки смены</button><button class="btn sm" id="j-print" style="flex:0 0 auto">🖨 Лист для печати</button><span class="small muted" style="align-self:center">все группы ${esc(g.branch)} на ${dShort(S.journal.date)}</span></div>` : ""}
     ${j.overdue_marks ? `<div class="alert">🔴 Тренировка закончилась ${j.overdue_marks.minutes} мин назад, не отмечено детей: ${j.overdue_marks.missing}</div>` : ""}
     ${st ? `<div class="panel" style="padding:12px 14px;margin-bottom:12px">${staffPicker(st, st.coaches, "j", S.journal.date === S.meta.today && new Date().toTimeString().slice(0, 5) < g.time)}</div>` : ""}
     <div class="list">${j.rows.length ? j.rows.map((r) => g.is_makeup ? makeupRow(r) : journalRow(r, before)).join("") : `<div class="list-row muted">${g.is_makeup ? "На эту дату никто не записан на отработку" : "В группе пока нет учеников"}</div>`}</div>`;
   if (st) wireStaffPicker(page, "j", g.id, S.journal.date, render);
   if ($("#j-meet")) $("#j-meet").onclick = () => openMeet(g.id, S.journal.date);
+  wireJournalDayHead(page);
+  if ($("#j-copy")) $("#j-copy").onclick = () => shiftCopy(g.branch_id, S.journal.date);
+  if ($("#j-print")) $("#j-print").onclick = () => shiftPrint(g.branch_id, S.journal.date);
   $("#j-group").onchange = (e) => { step(() => { S.journal.group = +e.target.value; }); };
   if ($("#j-branch")) $("#j-branch").onchange = (e) => { step(() => { const f = groups.find((x) => x.branch_id === +e.target.value && !x.is_makeup) || groups.find((x) => x.branch_id === +e.target.value); if (f) S.journal.group = f.id; }); };
   $("#j-date").onchange = (e) => { step(() => { S.journal.date = e.target.value; }); };
@@ -2015,20 +2032,23 @@ async function renderJournal(page) {
 }
 
 /* возраст рядом с именем (Юлия, 04.11) */
+const J_TAGS = { paid: ["абонемент", "jt-paid"], single: ["разовое", "jt-single"], unpaid: ["не оплачен", "jt-unpaid"] };
+const jTag = (r) => { const t = J_TAGS[r.tag]; return t && !(r.tag === "unpaid" && r.unpaid) ? `<span class="pill ${t[1]}">${t[0]}</span>` : ""; };
+const jNum = (r) => r.n ? `<span class="jn">${r.n}.</span>` : "";
 const jAge = (r) => r.birth ? ` <span class="small muted">· ${ageText(r.birth)}</span>` : "";
 
 function journalRow(r, before) {
   if (r.status === "makeup") return makeupRow({ ...r, status: r.mk_status, home_group: "отработка" + (r.home_group ? ", из группы " + r.home_group : "") });
-  if (r.warned) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${esc(r.name)}${jAge(r)} <span class="pill yellow">предупредил, не придёт</span>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ""}</div>
+  if (r.warned) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(r.name)}${jAge(r)} <span class="pill yellow">предупредил, не придёт</span>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ""}</div>
     <div class="mark">${before ? `<button data-unwarn="${r.id}">Отменить, придёт</button>` : `<button data-att="present" data-sid="${r.id}">Всё-таки был</button>`}</div></div>`;
-  if (r.status === "vacation") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${esc(r.name)}${jAge(r)}</div><span class="pill yellow">Отпуск</span></div>`;
-  if (r.status === "trial") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${esc(r.name)}${jAge(r)} <span class="pill green">пробное ${r.trial_at.slice(11, 16)}</span></div>
+  if (r.status === "vacation") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(r.name)}${jAge(r)}</div><span class="pill yellow">Отпуск</span></div>`;
+  if (r.status === "trial") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(r.name)}${jAge(r)} <span class="pill jt-trial">ПУ ${r.trial_at.slice(11, 16)}</span></div>
     <div class="mark"><button data-trial="1" data-sid="${r.id}" class="${r.trial_came === 1 ? "on-present" : ""}">Пришёл</button><button data-trial="0" data-sid="${r.id}" class="${r.trial_came === 0 ? "on-absent" : ""}">Не пришёл</button></div></div>`;
   const unpaidPill = r.unpaid ? ` <span class="pill unpaid-flag">не оплачен, не допускать</span>` : "";
   const locked = r.resolved ? `<span class="pill">${r.resolved === "credit" ? "в перерасчёте" : "отработан"}</span>` : "";
-  if (before) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${esc(r.name)}${jAge(r)} ${unpaidPill}</div>
+  if (before) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(r.name)}${jAge(r)} ${jTag(r)} ${unpaidPill}</div>
     <div class="mark"><button data-warn="${r.id}" title="Родители заранее сказали, что не придёт">🙅 Не придёт</button></div></div>`;
-  return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${esc(r.name)}${jAge(r)} ${locked}${unpaidPill}</div>
+  return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(r.name)}${jAge(r)} ${jTag(r)} ${locked}${unpaidPill}</div>
     <div class="mark">
       <button data-att="present" data-sid="${r.id}" class="${r.status === "present" ? "on-present" : ""}">Был</button>
       <button data-att="absent" data-sid="${r.id}" class="${r.status === "absent" ? "on-absent" : ""}">Пропуск</button>
@@ -2036,7 +2056,7 @@ function journalRow(r, before) {
 }
 
 function makeupRow(r) {
-  return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${esc(r.name)}
+  return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(r.name)}${jAge(r)} <span class="pill jt-makeup">отработка</span>
       <div class="small muted">${esc(r.home_group || "")} · за пропуск ${dShort(r.absence_date)}</div></div>
     <div class="mark">
       <button data-mk="${r.makeup_id}" data-st="done" class="${r.status === "done" ? "on-present" : ""}">Пришёл</button>
@@ -2142,6 +2162,7 @@ async function renderSettings(page) {
         ${u.role === "coach" ? "" : `<input data-sip="${u.id}" value="${esc(u.sip_number || "")}" placeholder="вн. номер" title="Внутренний номер Sipuni: на него придёт звонок из карточки" inputmode="numeric" style="flex:0 0 96px;padding:5px 8px">`}
         <select data-upost="${u.id}" title="Должность: от неё зависят разделы и права" style="flex:0 0 auto;width:auto;padding:5px 8px" ${u.id === S.user.id ? "disabled" : ""}>${POSTS.map(([k, t]) => `<option value="${k}" ${postOf(u) === k ? "selected" : ""}>${t}</option>`).join("")}</select>
         <label class="check small" title="Промоутер: права промоутера добавляются к должности" style="flex:0 0 auto"><input type="checkbox" data-uprom="${u.id}" ${u.is_promoter ? "checked" : ""}> промоутер</label>
+        ${["operator"].includes(u.role) ? `<label class="check small" title="Отмечает в журнале детей и тренеров, как тренер (например, администратор филиала)" style="flex:0 0 auto"><input type="checkbox" data-ujour="${u.id}" ${u.is_journal ? "checked" : ""}> журнал</label>` : ""}
         ${u.id !== S.user.id ? `<button class="icon-btn" data-ucopy="${u.id}" data-login="${esc(u.login)}" data-name="${esc(u.name)}" title="Скопировать вход: новый пароль и сообщение с логином">📋</button><button class="icon-btn" data-upw="${u.id}" title="Задать новый пароль">🔑</button><button class="icon-btn" data-uarch="${u.id}" title="В архив">🗄</button>` : ""}</div>`).join("")}</div>
       <div class="small muted" style="margin:-4px 0 10px">Внутренний номер Sipuni нужен, чтобы звонить клиенту прямо из карточки</div>
       <form id="nu">
@@ -2272,6 +2293,9 @@ async function renderSettings(page) {
     const t = POSTS.find(([k]) => k === sel.value)[1];
     if (!confirm(`Сделать должность «${t}»? Разделы и права поменяются сразу, сотруднику нужно будет войти заново`)) { render(); return; }
     try { await api("PATCH", `/api/users/${sel.dataset.upost}`, { post: sel.value }); toast("Должность изменена"); } catch (err) { fail(err); render(); }
+  }));
+  page.querySelectorAll("[data-ujour]").forEach((c) => (c.onchange = async () => {
+    try { await api("PATCH", `/api/users/${c.dataset.ujour}`, { is_journal: c.checked }); toast(c.checked ? "Теперь отмечает детей и тренеров в журнале" : "Журнал снова только для просмотра"); } catch (err) { fail(err); }
   }));
   page.querySelectorAll("[data-uprom]").forEach((c) => (c.onchange = async () => {
     try { await api("PATCH", `/api/users/${c.dataset.uprom}`, { is_promoter: c.checked }); toast(c.checked ? "Отмечен промоутером" : "Больше не промоутер"); } catch (err) { fail(err); }
