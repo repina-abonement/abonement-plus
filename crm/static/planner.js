@@ -69,11 +69,29 @@ async function renderPlanner(page) {
     body = p.mine.length ? groupByDay(p.mine).map(([day, list]) => `<div class="task-group ${day === "Просрочено" ? "late" : ""}"><h4>${day} · ${list.length}</h4>${list.map(taskRow).join("")}</div>`).join("")
       : `<div class="muted">Дел нет. Добавьте первое кнопкой «+ Задача»</div>`;
   } else if (C.tab === "given") {
-    body = p.given.length ? p.given.map((t) => `<div class="task ${t.status !== "open" ? "done" : ""}"><span class="task-ico">${t.status === "done" ? "✅" : t.due_at.slice(0, 10) < p.today ? "🔴" : "⏳"}</span>
+    const givenRow = (t) => `<div class="task ${t.status !== "open" ? "done" : ""}"><span class="task-ico">${t.status === "done" ? "✅" : t.due_at.slice(0, 10) < p.today ? "🔴" : "⏳"}</span>
       <div class="grow"><b>${esc(t.title)}</b> <span class="small muted">→ ${esc(t.assignee)}, ${dtWhen(t.due_at)}</span>
         ${t.status === "done" ? `<div class="small">Сделано ${dtWhen(t.done_at)}${t.result ? `: ${esc(t.result)}` : ""}</div>` : ""}</div>
       ${t.status === "done" && p.can_manage ? `<button class="btn sm" data-tret="${t.id}">Вернуть</button>` : ""}
-      ${t.status === "open" ? `<button class="btn sm" data-tcancel="${t.id}">✕</button>` : ""}</div>`).join("") : `<div class="muted">Вы пока никому не ставили задачи</div>`;
+      ${t.status === "open" ? `<button class="btn sm" data-tcancel="${t.id}">✕</button>` : ""}</div>`;
+    const series = new Map();
+    const oneOff = [];
+    for (const task of p.given) {
+      if (!task.recur_id) {
+        oneOff.push(task);
+        continue;
+      }
+      if (!series.has(task.recur_id)) series.set(task.recur_id, []);
+      series.get(task.recur_id).push(task);
+    }
+    body = oneOff.map(givenRow).join("");
+    if (series.size) {
+      body += `<section class="task-group"><h4>Повторяющиеся задачи · ${series.size}</h4>
+        ${[...series.values()].map((items) => `<details class="panel">
+          <summary><b>${esc(items[0].title)}</b> <span class="small muted">→ ${esc(items[0].assignee)} · дат: ${items.length}</span></summary>
+          ${items.map(givenRow).join("")}</details>`).join("")}</section>`;
+    }
+    if (!body) body = '<div class="muted">Вы пока никому не ставили задачи</div>';
   } else if (C.tab === "recurring") {
     body = p.recurring.length ? `<div class="list">${p.recurring.map((r) => `<div class="list-row"><div class="grow">🔁 <b>${esc(r.title)}</b>
       <div class="small muted">${esc(r.assignee)} · ${r.rule_label}${r.rule === "weekly" ? ": " + r.weekdays.split(",").map((x) => WD_SHORT[+x]).join(", ") : r.rule === "monthly" ? `, ${r.monthday} числа` : r.rule === "yearly" ? `, ${r.yearday.slice(3)}.${r.yearday.slice(0, 2)}` : ""}${r.time ? ` в ${r.time}` : ""}</div></div>
@@ -123,7 +141,7 @@ function pcard(t) {
   const time = t.due_at.slice(11, 16) === "23:59" ? "" : t.due_at.slice(11, 16);
   return `<article class="pcard ${done ? "done" : ""} ${t.priority ? "hot" : ""}" draggable="${done ? "false" : "true"}" data-pc="${t.id}">
     <label class="pcheck"><input type="checkbox" aria-label="Задача выполнена" data-pdone="${t.id}" ${done ? "checked" : ""}></label>
-    <div class="grow"><div class="small muted">#${t.id}</div><div class="ptitle">${t.priority ? "🔥 " : ""}${esc(t.title)}</div>
+    <div class="grow"><div class="ptitle">${t.priority ? "🔥 " : ""}${esc(t.title)}</div>
       <div class="pmeta">${time ? `<span>🕒 ${time}</span>` : ""}${t.recur_id ? `<span>🔁</span>` : ""}${t.student ? `<span>${esc(t.student.name)}</span>` : ""}
         ${t.created_by_id && t.created_by_id !== t.assignee_id && t.created_by ? `<span>от ${esc(firstName(t.created_by))}</span>` : ""}
         ${t.returned_note ? `<span style="color:var(--red)">↩ ${esc(t.returned_note)}</span>` : ""}</div>
