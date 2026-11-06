@@ -59,7 +59,7 @@ function wireTasks(root) {
     if (!confirm("Убрать задачу?")) return;
     try { await api("POST", `/api/planner/tasks/${b.dataset.tcancel}/cancel`, {}); render(); } catch (e) { fail(e); }
   }));
-  root.querySelectorAll(".task").forEach((row) => {
+  root.querySelectorAll(".task[data-task]").forEach((row) => {
     const id = row.dataset.task;
     if (row.querySelector("[data-done]")) row.querySelector("[data-done]").onclick = () => { const f = row.querySelector(".task-done"); f.hidden = !f.hidden; if (!f.hidden) f.querySelector("input").focus(); };
     const finish = async () => {
