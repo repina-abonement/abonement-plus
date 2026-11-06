@@ -64,6 +64,19 @@ def can_manage(con, user: dict) -> bool:
     return user["role"] == "admin" or bool(user.get("is_senior")) or user["id"] == controller(con)
 
 
+def can_view_plan(con, user: dict, uid: int) -> bool:
+    if uid == user["id"] or user["role"] == "admin":
+        return True
+    return bool(user.get("is_senior") and con.execute(
+        "SELECT 1 FROM users WHERE id=? AND role!='admin'", (uid,)).fetchone())
+
+
+def visible_staff(con, user: dict) -> list[dict]:
+    return [dict(row) for row in con.execute(
+        "SELECT id, name, role, birth FROM users WHERE active=1 ORDER BY role, name")
+        if can_view_plan(con, user, row["id"])]
+
+
 def _due(d: str, t: str) -> str:
     try:
         date.fromisoformat(d)
@@ -80,7 +93,7 @@ def add(con, user: dict, data: dict) -> int:
     if not title:
         raise PlanError("Напишите, что нужно сделать")
     who = int(data.get("assignee_id") or user["id"])
-    if who != user["id"] and not can_manage(con, user):
+    if not can_view_plan(con, user, who):
         raise PlanError("Ставить задачи другим может администратор или контролёр")
     if not con.execute("SELECT 1 FROM users WHERE id=? AND active=1", (who,)).fetchone():
         raise PlanError("Сотрудник не найден")
@@ -185,7 +198,7 @@ def week(con, user: dict, start: str, who: int | None = None, *, rolling: bool =
     d0 = date.fromisoformat(start)
     if not rolling:
         d0 -= timedelta(days=d0.weekday())
-    uid = who if who and can_manage(con, user) else user["id"]
+    uid = who if who and can_view_plan(con, user, who) else user["id"]
     today = date.today()
     for i in range(7):  # повторы на эту неделю (не дальше двух месяцев вперёд)
         d = d0 + timedelta(days=i)
@@ -203,8 +216,8 @@ def week(con, user: dict, start: str, who: int | None = None, *, rolling: bool =
         (uid, min(today.isoformat(), d0.isoformat())))]
     name = (con.execute("SELECT name FROM users WHERE id=?", (uid,)).fetchone() or [""])[0]
     return {"start": d0.isoformat(), "days": days, "overdue": overdue, "user_id": uid, "user_name": name,
-            "can_manage": can_manage(con, user),
-            "staff": [dict(r) for r in con.execute("SELECT id, name FROM users WHERE active=1 ORDER BY role, name")] if can_manage(con, user) else []}
+            "can_manage": user["role"] == "admin" or bool(user.get("is_senior")),
+            "staff": visible_staff(con, user)}
 
 
 def _materialize(con, d: date):
@@ -222,7 +235,7 @@ def move(con, tid: int, user: dict, new_date: str):
     t = con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
     if not t:
         raise PlanError("Задача не найдена")
-    if not (can_manage(con, user) or user["id"] in (t["assignee_id"], t["created_by_id"])):
+    if not can_view_plan(con, user, t["assignee_id"]):
         raise PlanError("Переносить можно свои задачи")
     try:
         date.fromisoformat(new_date)
@@ -235,7 +248,7 @@ def move(con, tid: int, user: dict, new_date: str):
 
 def reopen(con, tid: int, user: dict):
     t = con.execute("SELECT assignee_id FROM tasks WHERE id=?", (tid,)).fetchone()
-    if not t or not (can_manage(con, user) or t["assignee_id"] == user["id"]):
+    if not t or not can_view_plan(con, user, t["assignee_id"]):
         raise PlanError("Нет доступа")
     con.execute("UPDATE tasks SET status='open', done_at=NULL WHERE id=?", (tid,))
 
@@ -244,7 +257,9 @@ def cancel(con, tid: int, user: dict):
     t = con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
     if not t:
         raise PlanError("Задача не найдена")
-    if not (can_manage(con, user) or t["created_by_id"] == user["id"]):
+    if not can_view_plan(con, user, t["assignee_id"]) or not (
+        can_manage(con, user) or t["created_by_id"] == user["id"]
+    ):
         raise PlanError("Убрать задачу может тот, кто её поставил")
     con.execute("UPDATE tasks SET status='cancelled', done_at=?, done_by=? WHERE id=?",
                 (_now().isoformat(timespec="minutes"), user.get("name", ""), tid))
@@ -254,9 +269,9 @@ def return_task(con, tid: int, user: dict, note: str):
     """Контролёр возвращает задачу: снова открыта, на сегодня, с комментарием."""
     if not can_manage(con, user):
         raise PlanError("Возвращать задачи может контролёр или администратор")
-    t = con.execute("SELECT due_at FROM tasks WHERE id=?", (tid,)).fetchone()
-    if not t:
-        raise PlanError("Задача не найдена")
+    t = con.execute("SELECT due_at, assignee_id FROM tasks WHERE id=?", (tid,)).fetchone()
+    if not t or not can_view_plan(con, user, t["assignee_id"]):
+        raise PlanError("Нет доступа")
     con.execute("UPDATE tasks SET status='open', done_at=NULL, returned_note=?, due_at=? WHERE id=?",
                 ((note or "Вернули на доработку").strip()[:300], f"{date.today().isoformat()}T{t['due_at'][11:16]}", tid))
 
@@ -265,7 +280,7 @@ def stop_recurring(con, rid: int, user: dict):
     r = con.execute("SELECT created_by_id, assignee_id FROM recurring WHERE id=?", (rid,)).fetchone()
     if not r:
         raise PlanError("Повтор не найден")
-    if not (can_manage(con, user) or user["id"] in (r["created_by_id"], r["assignee_id"])):
+    if not can_view_plan(con, user, r["assignee_id"]):
         raise PlanError("Нет доступа")
     con.execute("UPDATE recurring SET active=0 WHERE id=?", (rid,))
     con.execute("UPDATE tasks SET status='cancelled' WHERE recur_id=? AND status='open' AND due_at>?",
@@ -285,25 +300,25 @@ def view(con, user: dict) -> dict:
         "SELECT * FROM tasks WHERE status='open' AND assignee_id=? ORDER BY due_at", (user["id"],))]
     given = [_out(con, r) for r in con.execute(
         """SELECT * FROM tasks WHERE created_by_id=? AND assignee_id!=? AND (status='open' OR done_at>=?)
-           ORDER BY status='open' DESC, due_at""", (user["id"], user["id"], (date.today() - timedelta(days=7)).isoformat()))]
-    rec_where = "" if can_manage(con, user) else "AND (r.assignee_id=? OR r.created_by_id=?)"
-    rec_args = [] if can_manage(con, user) else [user["id"], user["id"]]
+           ORDER BY status='open' DESC, due_at""", (user["id"], user["id"], (date.today() - timedelta(days=7)).isoformat()))
+        if can_view_plan(con, user, r["assignee_id"])]
     recurring = [dict(r) | {"rule_label": RULES[r["rule"]]} for r in con.execute(
-        f"""SELECT r.*, u.name AS assignee FROM recurring r JOIN users u ON u.id=r.assignee_id
-            WHERE r.active=1 {rec_where} ORDER BY u.name, r.title""", rec_args)]
-    out = {"mine": mine, "given": given, "recurring": recurring, "today": today, "can_manage": can_manage(con, user),
+        """SELECT r.*, u.name AS assignee FROM recurring r JOIN users u ON u.id=r.assignee_id
+            WHERE r.active=1 ORDER BY u.name, r.title""") if can_view_plan(con, user, r["assignee_id"])]
+    out = {"mine": mine, "given": given, "recurring": recurring, "today": today,
+           "can_manage": user["role"] == "admin" or bool(user.get("is_senior")),
            "controller": controller(con), "rules": RULES,
-           "staff": [dict(r) for r in con.execute("SELECT id, name, role, birth FROM users WHERE active=1 ORDER BY role, name")]}
+           "staff": visible_staff(con, user)}
     if out["can_manage"]:
-        out["team"] = team(con)
+        out["team"] = team(con, user)
     return out
 
 
-def team(con) -> list[dict]:
+def team(con, user: dict) -> list[dict]:
     """Для контролёра: у кого что открыто, просрочено и сделано сегодня."""
     today = date.today().isoformat()
     out = []
-    for u in con.execute("SELECT id, name, role FROM users WHERE active=1 ORDER BY role, name").fetchall():
+    for u in visible_staff(con, user):
         rows = [_out(con, r) for r in con.execute(
             """SELECT * FROM tasks WHERE assignee_id=? AND status='open' AND due_at<=? ORDER BY due_at""",
             (u["id"], f"{today}T23:59"))]
