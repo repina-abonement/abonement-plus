@@ -1,7 +1,7 @@
 "use strict";
 /* Абонемент Плюс — планер: свои дела, поручения, повторы, дни рождения сотрудников, контроль команды. */
 
-S.planner = { tab: "week", start: null, user: null };
+S.planner = { tab: "week", start: null, user: null, status: "all" };
 const WD_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
 /* форма новой задачи: кому, когда, повтор */
@@ -117,13 +117,13 @@ async function renderPlanner(page) {
 
 
 /* ---------- неделя колонками, как в Weeek ---------- */
-const WD_HEAD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
-function pcard(t, d) {
+const PL_DAY = new Intl.DateTimeFormat("ru-RU", { weekday: "long", day: "numeric", month: "long" });
+function pcard(t) {
   const done = t.status === "done";
   const time = t.due_at.slice(11, 16) === "23:59" ? "" : t.due_at.slice(11, 16);
   return `<article class="pcard ${done ? "done" : ""} ${t.priority ? "hot" : ""}" draggable="${done ? "false" : "true"}" data-pc="${t.id}">
-    <label class="pcheck"><input type="checkbox" data-pdone="${t.id}" ${done ? "checked" : ""}></label>
-    <div class="grow"><div class="ptitle">${t.priority ? "🔥 " : ""}${esc(t.title)}</div>
+    <label class="pcheck"><input type="checkbox" aria-label="Задача выполнена" data-pdone="${t.id}" ${done ? "checked" : ""}></label>
+    <div class="grow"><div class="small muted">#${t.id}</div><div class="ptitle">${t.priority ? "🔥 " : ""}${esc(t.title)}</div>
       <div class="pmeta">${time ? `<span>🕒 ${time}</span>` : ""}${t.recur_id ? `<span>🔁</span>` : ""}${t.student ? `<span>${esc(t.student.name)}</span>` : ""}
         ${t.created_by_id && t.created_by_id !== t.assignee_id && t.created_by ? `<span>от ${esc(firstName(t.created_by))}</span>` : ""}
         ${t.returned_note ? `<span style="color:var(--red)">↩ ${esc(t.returned_note)}</span>` : ""}</div>
@@ -135,25 +135,46 @@ function pcard(t, d) {
 async function renderWeek(box) {
   const C = S.planner;
   if (!C.start) C.start = S.meta.today;
-  const w = await api("GET", `/api/planner/week?start=${C.start}${C.user ? "&user=" + C.user : ""}`);
+  const w = await api("GET", `/api/planner/week?rolling=1&start=${C.start}${C.user ? "&user=" + C.user : ""}`);
   const end = addDays(w.start, 6), today = S.meta.today;
+  const visible = (t) => C.status === "all" || t.status === C.status;
+  const overdue = w.overdue.filter(visible);
+  const days = w.days.map((day) => ({ ...day, tasks: day.tasks.filter(visible) }));
+  const groups = (tasks) => {
+    if (!tasks.length) return '<div class="empty">Свободно</div>';
+    const recurring = tasks.filter((task) => task.recur_id);
+    if (!recurring.length) return tasks.map(pcard).join("");
+    const other = tasks.filter((task) => !task.recur_id);
+    return [[recurring, "Повторяемые"], [other, "Прочие"]]
+      .filter(([items]) => items.length)
+      .map(([items, title]) => `<div class="small muted">${title}</div>${items.map(pcard).join("")}`)
+      .join("");
+  };
   box.innerHTML = `<div class="week-nav">
       <button class="btn sm" data-wk="-7">‹</button>
       <b>${dShort(w.start)} – ${dShort(end)}</b>
       <button class="btn sm" data-wk="7">›</button>
       <button class="btn sm" data-wk="0">Эта неделя</button>
+      <label>С даты <input type="date" id="wk-start" value="${w.start}"></label>
+      <label>Статус <select id="wk-status"><option value="all">Все задачи</option><option value="open">Открытые</option><option value="done">Выполненные</option></select></label>
       ${w.can_manage ? `<select id="wk-user">${w.staff.map((u) => `<option value="${u.id}" ${u.id === w.user_id ? "selected" : ""}>${esc(u.name)}${u.id === S.user.id ? " (я)" : ""}</option>`).join("")}</select>` : ""}
     </div>
-    ${w.overdue.length ? `<section class="col overdue-col"><div class="col-head"><h3>Просрочено: перетащите на нужный день</h3><span class="count">${w.overdue.length}</span></div>
-      <div class="col-body ov-body">${w.overdue.map((t) => pcard(t)).join("")}</div></section>` : ""}
-    <div class="board week-board">${w.days.map((d, i) => `<section class="col ${d.date === today ? "is-today" : ""} ${d.date < today ? "past" : ""}" data-day="${d.date}">
-      <div class="col-head"><h3>${WD_HEAD[i]} <span class="muted">${dShort(d.date)}</span>${d.date === today ? " · сегодня" : ""}</h3><span class="count">${d.tasks.filter((t) => t.status === "open").length}</span></div>
-      <div class="col-body">${d.tasks.map((t) => pcard(t, d.date)).join("") || `<div class="empty">Свободно</div>`}</div>
-      <input class="pquick" data-pq="${d.date}" placeholder="+ Добавить задачу">
+    ${overdue.length ? `<section class="col overdue-col"><div class="col-head"><h3>Просрочено: перетащите на нужный день</h3><span class="count">${overdue.length}</span></div>
+      <div class="col-body ov-body">${overdue.map(pcard).join("")}</div></section>` : ""}
+    <div class="board week-board">${days.map((d) => `<section class="col ${d.date === today ? "is-today" : ""} ${d.date < today ? "past" : ""}" data-day="${d.date}">
+      <div class="col-head"><h3>${PL_DAY.format(new Date(d.date + "T00:00"))}</h3><span class="count">${d.tasks.length}</span></div>
+      <button type="button" class="btn sm pquick" data-pq="${d.date}">+ Добавить задачу</button>
+      <div class="col-body">${groups(d.tasks)}</div>
     </section>`).join("")}</div>
     <input type="date" id="pmove-date" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px">`;
   box.querySelectorAll("[data-wk]").forEach((b) => (b.onclick = () => { C.start = +b.dataset.wk ? addDays(w.start, +b.dataset.wk) : S.meta.today; renderWeek(box); }));
   if ($("#wk-user")) $("#wk-user").onchange = (e) => { C.user = +e.target.value; renderWeek(box); };
+  box.querySelector("#wk-start").onchange = (e) => {
+    if (e.target.value) { C.start = e.target.value; renderWeek(box); }
+  };
+  const status = box.querySelector("#wk-status");
+  status.value = C.status;
+  status.onchange = () => { C.status = status.value; renderWeek(box); };
   const reload = () => renderWeek(box);
   const tc = box.querySelector(".week-board .is-today");  // на телефоне сразу показываем сегодня
   if (tc && window.innerWidth < 1100) box.querySelector(".week-board").scrollLeft = tc.offsetLeft - 12;
@@ -166,9 +187,13 @@ async function renderWeek(box) {
     } catch (e) { fail(e); cb.checked = !cb.checked; }
   }));
   // быстрое добавление в колонку дня
-  box.querySelectorAll("[data-pq]").forEach((inp) => (inp.onkeydown = async (e) => {
-    if (e.key !== "Enter" || !inp.value.trim()) return;
-    try { await api("POST", "/api/planner/tasks", { title: inp.value.trim(), date: inp.dataset.pq, assignee_id: w.user_id }); reload(); } catch (err) { fail(err); }
+  box.querySelectorAll("[data-pq]").forEach((button) => (button.onclick = () => {
+    const form = $("#pl-form");
+    form.innerHTML = "";
+    openTaskForm(form, () => {
+      if (C.status === "done") C.status = "all";
+      reload();
+    }, { date: button.dataset.pq, assignee_id: w.user_id });
   }));
   // перенос: перетаскиванием (компьютер) или кнопкой 📅 (телефон)
   let dragId = null;
