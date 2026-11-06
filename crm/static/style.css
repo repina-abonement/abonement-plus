@@ -579,7 +579,7 @@ h2.sub { font-size: 17px; }
 .deal { padding: 8px 0; border-top: 1px solid var(--line); }
 .back-btn { border: 0; background: none; color: var(--accent); font-weight: 600; font-size: 15px; padding: 4px 0 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; } .back-btn:hover { text-decoration: underline; }
 .week-board .col { flex: 0 0 236px; display: flex; flex-direction: column; }
-.week-board .col.is-today { outline: 2px solid var(--accent); background: var(--accent-soft); }
+.week-board .col.is-today { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
 .week-board .col.past { opacity: .75; }
 .week-board .col-body { min-height: 80px; }
 .week-board .empty { font-size: 12.5px; color: var(--ink-2); padding: 6px 4px; }
@@ -605,6 +605,7 @@ h2.sub { font-size: 17px; }
   .week-board .col { flex: 1 1 0; min-width: 0; }
 }
 .week-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.week-nav > label { display: flex; flex-direction: column; gap: 4px; }
 .week-nav select { width: auto; max-width: 240px; margin-left: auto; }
 .ptitle { word-break: normal; overflow-wrap: break-word; hyphens: auto; }
 @media (min-width: 1100px) {
