@@ -1433,7 +1433,8 @@ def planner_add(con, h, user, body, q):
 @route("GET", "/api/planner/week", role="planner")
 def planner_week(con, h, user, body, q):
     from datetime import date as _d
-    return px(planner.week, con, user, q.get("start") or _d.today().isoformat(), int(q["user"]) if q.get("user") else None)
+    return px(planner.week, con, user, q.get("start") or _d.today().isoformat(),
+              int(q["user"]) if q.get("user") else None, rolling=q.get("rolling") == "1")
 
 
 @route("POST", "/api/planner/tasks/{tid}/move", role="planner")

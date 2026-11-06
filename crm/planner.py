@@ -180,10 +180,11 @@ def generate(con, today: date | None = None) -> int:
     return made
 
 
-def week(con, user: dict, start: str, who: int | None = None) -> dict:
+def week(con, user: dict, start: str, who: int | None = None, *, rolling: bool = False) -> dict:
     """Неделя колонками (как в Weeek): задачи по дням, повторы разложены на всю неделю."""
     d0 = date.fromisoformat(start)
-    d0 = d0 - timedelta(days=d0.weekday())  # с понедельника
+    if not rolling:
+        d0 -= timedelta(days=d0.weekday())
     uid = who if who and can_manage(con, user) else user["id"]
     today = date.today()
     for i in range(7):  # повторы на эту неделю (не дальше двух месяцев вперёд)
