@@ -41,33 +41,16 @@ async function openTaskForm(box, done, preset = {}) {
   };
 }
 
-function plannerDay(iso) {
-  const d = iso.slice(0, 10), t = S.meta.today;
-  if (d < t) return "Просрочено";
-  if (d === t) return "Сегодня";
-  if (d === addDays(t, 1)) return "Завтра";
-  return `${dShort(d)}, ${["вс", "пн", "вт", "ср", "чт", "пт", "сб"][new Date(d + "T00:00").getDay()]}`;
-}
-
-function groupByDay(list) {
-  const m = new Map();
-  list.forEach((t) => { const k = plannerDay(t.due_at); if (!m.has(k)) m.set(k, []); m.get(k).push(t); });
-  return [...m.entries()];
-}
-
 async function renderPlanner(page) {
   const p = await api("GET", "/api/planner");
   const C = S.planner;
   S.tasks.canManage = p.can_manage;
-  const tabs = [["week", "Неделя"], ["mine", `Списком · ${p.mine.length}`], ["given", "Я поручила"], ["recurring", "Повторы"]];
+  const tabs = [["week", "Неделя"], ["given", "Я поручила"], ["recurring", "Повторы"]];
   if (p.can_manage) tabs.push(["team", "Команда"], ["bdays", "Дни рождения"]);
-  if (!tabs.some(([k]) => k === C.tab)) C.tab = "mine";
+  if (!tabs.some(([k]) => k === C.tab)) C.tab = "week";
   let body = "";
   if (C.tab === "week") {
     body = `<div id="pl-week"></div>`;
-  } else if (C.tab === "mine") {
-    body = p.mine.length ? groupByDay(p.mine).map(([day, list]) => `<div class="task-group ${day === "Просрочено" ? "late" : ""}"><h4>${day} · ${list.length}</h4>${list.map(taskRow).join("")}</div>`).join("")
-      : `<div class="muted">Дел нет. Добавьте первое кнопкой «+ Задача»</div>`;
   } else if (C.tab === "given") {
     const givenRow = (t) => `<div class="task ${t.status !== "open" ? "done" : ""}"><span class="task-ico">${t.status === "done" ? "✅" : t.due_at.slice(0, 10) < p.today ? "🔴" : "⏳"}</span>
       <div class="grow"><b>${esc(t.title)}</b> <span class="small muted">→ ${esc(t.assignee)}, ${dtWhen(t.due_at)}</span>
