@@ -340,8 +340,8 @@ function groupForm(gid, branchId, d, coaches, done) {
         <div class="field"><label>Возраст</label><input name="age" value="${esc(g.age || "")}" placeholder="4–5"></div>
         <div class="field"><label>Мест</label><input name="capacity" type="number" min="0" max="200" value="${g.capacity ?? 12}"></div></div>
       <div id="g-dt"></div>
-      ${gid ? `<div class="field"><label>Новые дни и время действуют с</label><input type="date" name="valid_from" min="${S.meta.today}">
-        <div class="small muted">Пусто: меняем сразу. С датой (например, с 1 декабря): до неё всё по-старому, проданные абонементы сами переедут на новые даты</div></div>
+      ${gid ? `<div class="field"><label>Новые дни и время действуют с</label><input type="date" name="valid_from">
+        <div class="small muted">Пусто: меняем сразу. Можно выбрать прошедшую дату. До выбранной даты действует прежнее расписание. Проданные абонементы пересчитываются с месяца изменения.</div></div>
         ${(g.versions || []).map((v) => `<div class="alert" style="margin-bottom:8px">С ${dShort(v.valid_from)}: ${v.weekdays.split(",").map((x) => WD[+x]).join(", ")}${v.time ? " " + esc(v.time) : ""}
           <button type="button" class="btn sm" data-vcancel="${v.valid_from}" style="margin-left:6px">Отменить</button></div>`).join("")}` : ""}
       <div class="row"><div class="field"><label>Тренер</label><select name="coach_id"><option value="">— без тренера —</option>${coaches.map((u) => `<option value="${u.id}" ${u.id === g.coach_id ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select></div>
