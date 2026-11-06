@@ -604,8 +604,10 @@ h2.sub { font-size: 17px; }
   .week-board { overflow-x: visible; }
   .week-board .col { flex: 1 1 0; min-width: 0; }
 }
-.week-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.week-nav { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
 .week-nav > label { display: flex; flex-direction: column; gap: 4px; }
+.week-nav > button, .week-nav > select, .week-nav > label > :is(input, select) { height: 48px; }
+.week-nav > b { display: flex; align-items: center; min-height: 48px; }
 .week-nav select { width: auto; max-width: 240px; margin-left: auto; }
 .ptitle { word-break: normal; overflow-wrap: break-word; hyphens: auto; }
 @media (min-width: 1100px) {
