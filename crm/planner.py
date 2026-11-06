@@ -208,11 +208,12 @@ def week(con, user: dict, start: str, who: int | None = None, *, rolling: bool =
     for i in range(7):
         d = (d0 + timedelta(days=i)).isoformat()
         rows = [_out(con, r) for r in con.execute(
-            """SELECT * FROM tasks WHERE assignee_id=? AND substr(due_at,1,10)=? AND status IN ('open','done')
+            """SELECT * FROM tasks WHERE kind IN ('plan','bday') AND assignee_id=? AND substr(due_at,1,10)=? AND status IN ('open','done')
                ORDER BY status='done', priority DESC, due_at""", (uid, d))]
         days.append({"date": d, "tasks": rows})
     overdue = [_out(con, r) for r in con.execute(
-        "SELECT * FROM tasks WHERE assignee_id=? AND status='open' AND substr(due_at,1,10)<? ORDER BY due_at",
+        """SELECT * FROM tasks WHERE kind IN ('plan','bday') AND assignee_id=? AND status='open'
+           AND substr(due_at,1,10)<? ORDER BY due_at""",
         (uid, min(today.isoformat(), d0.isoformat())))]
     name = (con.execute("SELECT name FROM users WHERE id=?", (uid,)).fetchone() or [""])[0]
     return {"start": d0.isoformat(), "days": days, "overdue": overdue, "user_id": uid, "user_name": name,
@@ -297,9 +298,9 @@ def view(con, user: dict) -> dict:
     generate(con)
     today = date.today().isoformat()
     mine = [_out(con, r) for r in con.execute(
-        "SELECT * FROM tasks WHERE status='open' AND assignee_id=? ORDER BY due_at", (user["id"],))]
+        "SELECT * FROM tasks WHERE kind IN ('plan','bday') AND status='open' AND assignee_id=? ORDER BY due_at", (user["id"],))]
     given = [_out(con, r) for r in con.execute(
-        """SELECT * FROM tasks WHERE created_by_id=? AND assignee_id!=? AND (status='open' OR done_at>=?)
+        """SELECT * FROM tasks WHERE kind IN ('plan','bday') AND created_by_id=? AND assignee_id!=? AND (status='open' OR done_at>=?)
            ORDER BY status='open' DESC, due_at""", (user["id"], user["id"], (date.today() - timedelta(days=7)).isoformat()))
         if can_view_plan(con, user, r["assignee_id"])]
     recurring = [dict(r) | {"rule_label": RULES[r["rule"]]} for r in con.execute(
@@ -320,9 +321,9 @@ def team(con, user: dict) -> list[dict]:
     out = []
     for u in visible_staff(con, user):
         rows = [_out(con, r) for r in con.execute(
-            """SELECT * FROM tasks WHERE assignee_id=? AND status='open' AND due_at<=? ORDER BY due_at""",
+            """SELECT * FROM tasks WHERE kind IN ('plan','bday') AND assignee_id=? AND status='open' AND due_at<=? ORDER BY due_at""",
             (u["id"], f"{today}T23:59"))]
-        done = con.execute("SELECT COUNT(*) FROM tasks WHERE assignee_id=? AND status='done' AND done_at>=?",
+        done = con.execute("SELECT COUNT(*) FROM tasks WHERE kind IN ('plan','bday') AND assignee_id=? AND status='done' AND done_at>=?",
                            (u["id"], today)).fetchone()[0]
         if not rows and not done:
             continue
