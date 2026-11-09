@@ -781,6 +781,58 @@ def _wz_send_raw(con, cid, conv: dict, text: str) -> str:
 
 # ---------------- отправка из CRM ----------------
 
+STICKERS = {
+    "smile": "1f60a", "thanks": "1f64f", "yes": "1f44d",
+    "heart": "2764", "party": "1f389", "football": "26bd",
+}
+
+
+def send_sticker(con, cid: int, sticker: str, user: dict) -> dict:
+    """Graphic stickers travel as images; providers do not guarantee native stickers."""
+    if sticker not in STICKERS:
+        raise CommsError("Стикер не найден")
+    row = con.execute("SELECT * FROM conversations WHERE id=?", (cid,)).fetchone()
+    if not row:
+        raise CommsError("Переписка не найдена")
+    conv = dict(row)
+    url = "https://raw.githubusercontent.com/jdecked/twemoji/v15.1.0/assets/72x72/" + STICKERS[sticker] + ".png"
+    name = user.get("name") or ""
+    if conv["channel"] == "tg_archive":
+        raise CommsError("В архив нельзя отправить стикер")
+    demo = conv["external_id"].startswith("demo-")
+    try:
+        if demo:
+            ext = "demo" + uuid.uuid4().hex
+        elif conv["channel"] == "telegram":
+            payload = {"chat_id": int(conv["external_id"]), "photo": url}
+            meta = json.loads(conv["meta"] or "{}")
+            if meta.get("biz"):
+                payload["business_connection_id"] = meta["biz"]
+            ext = str(tg_call(con, "sendPhoto", payload).get("message_id"))
+        elif conv["channel"] == "max":
+            js = max_call(con, "POST", "messages", query={"chat_id": conv["external_id"]},
+                          data={"attachments": [{"type": "image", "payload": {"url": url}}]})
+            ext = (((js or {}).get("message") or {}).get("body") or {}).get("mid") or ("x" + uuid.uuid4().hex)
+        elif conv["channel"] == "whatsapp" or conv["channel"].startswith("wazzup_"):
+            meta = json.loads(conv["meta"] or "{}")
+            payload = {"channelId": meta.get("channelId") or get(con, "wazzup_channel"),
+                       "chatType": meta.get("chatType") or "whatsapp", "contentUri": url,
+                       "crmMessageId": uuid.uuid4().hex}
+            if conv["external_id"].startswith("phone:"):
+                payload["phone"] = conv["external_id"][6:]
+            else:
+                payload["chatId"] = conv["external_id"]
+            ext = (wz_call(con, "POST", "message", payload) or {}).get("messageId") or payload["crmMessageId"]
+        else:
+            raise CommsError("Этот канал не поддерживает стикеры")
+    except CommsError as e:
+        add_message(con, cid, "out", kind="image", media=url, user_name=name, status="error", error=str(e))
+        raise
+    mid = add_message(con, cid, "out", kind="image", media=url, user_name=name,
+                      status="demo" if demo else "sent", external_id=ext)
+    return {"id": mid, "demo": demo}
+
+
 def send(con, cid: int, text: str, user: dict) -> dict:
     text = (text or "").strip()
     if not text:

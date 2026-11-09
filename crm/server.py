@@ -2235,6 +2235,8 @@ def conv_get(con, h, user, body, q, cid):
 
 @route("POST", "/api/conversations/{cid}/send", role="operator")
 def conv_send(con, h, user, body, q, cid):
+    if body.get("sticker"):
+        return cx(comms.send_sticker, con, int(cid), body["sticker"], user)
     return cx(comms.send, con, int(cid), body.get("text") or "", user)
 
 

@@ -228,6 +228,14 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   box.querySelectorAll("[data-dial]").forEach((b) => (b.onclick = () => dial(b.dataset.dial)));
   box.querySelectorAll("[data-oqchat]").forEach((b) => (b.onclick = () => openChat(+b.dataset.oqchat)));
   if (kid && kid.funnel === "sales") wireTrialOffer({ students: [kid], family_id: familyId, onBooked: kid.onBooked }, "#cm-text");
+  wireMessagePicker("#cm-text", async (sticker) => {
+    const draft = $("#cm-text").value;
+    const to = $("#cm-to").value;
+    if (to[0] !== "c") throw new Error("Сначала отправьте текст, чтобы создать диалог");
+    await api("POST", `/api/conversations/${to.slice(1)}/send`, { sticker });
+    await loadFamilyComms(familyId, parents, studentId, kid);
+    if ($("#cm-text")) $("#cm-text").value = draft;
+  });
   const send = $("#cm-send");
   if (send) send.onclick = async () => {
     const text = $("#cm-text").value.trim(), to = $("#cm-to").value;
@@ -369,6 +377,11 @@ async function openChat(cid, keepScroll = false) {
     };
   }
   wireOpenQuestion(cid, c);
+  wireMessagePicker("#chat-text", async (sticker) => {
+    const to = $("#chat-to") ? +$("#chat-to").value : cid;
+    await api("POST", `/api/conversations/${to}/send`, { sticker });
+    await openChat(cid);
+  });
   const sendBtn = $("#chat-send");
   sendBtn.onclick = async () => {
     const text = $("#chat-text").value.trim(); if (!text) return;
@@ -682,4 +695,24 @@ function wireTrialOffer(c, textSel = "#chat-text") {
     };
     if ($("#to-age").value) go();
   };
+}
+
+/* One picker shared by the inbox and the client card. */
+function wireMessagePicker(selector, sendSticker) {
+  const input = $(selector); if (!input) return;
+  const panel = document.createElement("details");
+  panel.className = "message-picker";
+  const stickers = [["smile", "😊", "Улыбка"], ["thanks", "🙏", "Спасибо"], ["yes", "👍", "Отлично"], ["heart", "❤", "Сердце"], ["party", "🎉", "Поздравляем"], ["football", "⚽", "Футбол"]];
+  panel.innerHTML = `<summary>😊 Смайлики и стикеры</summary><div class="chips" data-emojis>${["😊", "😀", "😄", "😉", "😍", "🥰", "😘", "😎", "🤔", "😢", "😭", "😂", "👍", "👏", "🙏", "❤️", "🎉", "⚽", "✅", "🔥", "💪"].map(x => `<button type="button" class="btn sm" data-emoji="${esc(x)}">${x}</button>`).join("")}</div><div class="small muted">Стикеры отправляются картинками, без анимации.</div><div class="chips">${stickers.map(([id, emoji, label]) => `<button type="button" class="btn" data-sticker="${id}" title="Отправить: ${label}">${emoji} ${label}</button>`).join("")}</div>`;
+  input.closest(".row").before(panel);
+  panel.querySelectorAll("[data-emoji]").forEach(b => {
+    b.onmousedown = e => e.preventDefault();
+    b.onclick = () => { input.setRangeText(b.dataset.emoji, input.selectionStart, input.selectionEnd, "end"); input.focus(); input.dispatchEvent(new Event("input", { bubbles: true })); };
+  });
+  panel.querySelectorAll("[data-sticker]").forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try { await sendSticker(b.dataset.sticker); panel.open = false; }
+    catch (e) { fail(e); }
+    finally { b.disabled = false; }
+  });
 }

@@ -52,9 +52,8 @@ async function renderPlanner(page) {
   if (C.tab === "week") {
     body = `<div id="pl-week"></div>`;
   } else if (C.tab === "given") {
-    const givenRow = (t) => `<div class="task ${t.status !== "open" ? "done" : ""}"><span class="task-ico">${t.status === "done" ? "✅" : t.due_at.slice(0, 10) < p.today ? "🔴" : "⏳"}</span>
-      <div class="grow"><b>${esc(t.title)}</b> <span class="small muted">→ ${esc(t.assignee)}, ${dtWhen(t.due_at)}</span>
-        ${t.status === "done" ? `<div class="small">Сделано ${dtWhen(t.done_at)}${t.result ? `: ${esc(t.result)}` : ""}</div>` : ""}</div>
+    const givenRow = (t) => `<div class="task ${t.status !== "open" ? "done" : ""}" data-plan-detail="${t.id}" role="button" tabindex="0"><span class="task-ico">${t.status === "done" ? "✅" : t.due_at.slice(0, 10) < p.today ? "🔴" : "⏳"}</span>
+      <div class="grow"><b>${esc(t.title)}</b></div>
       ${t.status === "done" && p.can_manage ? `<button class="btn sm" data-tret="${t.id}">Вернуть</button>` : ""}
       ${t.status === "open" ? `<button class="btn sm" data-tcancel="${t.id}">✕</button>` : ""}</div>`;
     const series = new Map();
@@ -99,6 +98,11 @@ async function renderPlanner(page) {
   $("#pl-add").onclick = () => openTaskForm($("#pl-form"), render, C.tab === "week" && C.user ? { assignee_id: C.user } : {});
   if (C.tab === "week") await renderWeek($("#pl-week"));
   wireTasks(page);
+  page.querySelectorAll("[data-plan-detail]").forEach(el => {
+    const open = e => { if (!e.target.closest("button, input, label")) showPlannerTask(p.given.find(t => t.id === +el.dataset.planDetail)); };
+    el.onclick = open;
+    el.onkeydown = e => { if (e.target === el && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(e); } };
+  });
   page.querySelectorAll("[data-tret]").forEach((b) => (b.onclick = async () => {
     const note = prompt("Что не так? Сотрудник увидит этот комментарий");
     if (note === null) return;
@@ -121,14 +125,10 @@ async function renderPlanner(page) {
 const PL_DAY = new Intl.DateTimeFormat("ru-RU", { weekday: "long", day: "numeric", month: "long" });
 function pcard(t) {
   const done = t.status === "done";
-  const time = t.due_at.slice(11, 16) === "23:59" ? "" : t.due_at.slice(11, 16);
-  return `<article class="pcard ${done ? "done" : ""} ${t.priority ? "hot" : ""}" draggable="${done ? "false" : "true"}" data-pc="${t.id}">
+  return `<article class="pcard ${done ? "done" : ""} ${t.priority ? "hot" : ""}" draggable="${done ? "false" : "true"}" data-pc="${t.id}" role="button" tabindex="0" aria-label="${esc(t.title)}">
     <label class="pcheck"><input type="checkbox" aria-label="Задача выполнена" data-pdone="${t.id}" ${done ? "checked" : ""}></label>
     <div class="grow"><div class="ptitle">${t.priority ? "🔥 " : ""}${esc(t.title)}</div>
-      <div class="pmeta">${time ? `<span>🕒 ${time}</span>` : ""}${t.recur_id ? `<span>🔁</span>` : ""}${t.student ? `<span>${esc(t.student.name)}</span>` : ""}
-        ${t.created_by_id && t.created_by_id !== t.assignee_id && t.created_by ? `<span>от ${esc(firstName(t.created_by))}</span>` : ""}
-        ${t.returned_note ? `<span style="color:var(--red)">↩ ${esc(t.returned_note)}</span>` : ""}</div>
-      ${t.note ? `<div class="pnote">${esc(t.note)}</div>` : ""}</div>
+    </div>
     ${done ? "" : `<button class="pmove" data-pmove="${t.id}" title="Перенести на другой день">📅</button>`}
   </article>`;
 }
@@ -177,6 +177,16 @@ async function renderWeek(box) {
   status.value = C.status;
   status.onchange = () => { C.status = status.value; renderWeek(box); };
   const reload = () => renderWeek(box);
+  const allTasks = [...(w.overdue || []), ...w.days.flatMap(d => d.tasks)];
+  box.querySelectorAll("[data-pc]").forEach(el => {
+    const open = e => {
+      if (e.target.closest("button, input, label")) return;
+      const t = allTasks.find(t => t.id === +el.dataset.pc); if (!t) return;
+      showPlannerTask(t);
+    };
+    el.onclick = open;
+    el.onkeydown = e => { if (e.target === el && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(e); } };
+  });
   const tc = box.querySelector(".week-board .is-today");  // на телефоне сразу показываем сегодня
   if (tc && window.innerWidth < 1100) box.querySelector(".week-board").scrollLeft = tc.offsetLeft - 12;
   // галочка «сделано»
@@ -217,4 +227,9 @@ async function renderWeek(box) {
     picker.onchange = async () => { try { await api("POST", `/api/planner/tasks/${b.dataset.pmove}/move`, { date: picker.value }); toast("Перенесено"); reload(); } catch (e) { fail(e); } };
     try { picker.showPicker(); } catch (_) { const d = prompt("На какую дату? ГГГГ-ММ-ДД", addDays(S.meta.today, 1)); if (d) { picker.value = d; picker.onchange(); } }
   }));
+}
+
+function showPlannerTask(t) {
+  if (!t) return;
+  openDrawer(`<h2>${esc(t.title)}</h2><div class="small muted">${esc(dtWhen(t.due_at))} · ${esc(t.assignee || "")}</div><h3>Описание</h3><div style="white-space:pre-wrap">${esc(t.note || "Описание не добавлено")}</div><h3>Комментарии</h3>${t.returned_note ? `<p style="white-space:pre-wrap"><b>Возврат на доработку:</b> ${esc(t.returned_note)}</p>` : ""}${t.result ? `<p style="white-space:pre-wrap"><b>Результат:</b> ${esc(t.result)}</p>` : ""}${!t.returned_note && !t.result ? `<p class="muted">Комментариев пока нет</p>` : ""}`);
 }

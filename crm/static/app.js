@@ -1535,7 +1535,7 @@ async function openStudent(id) {
     ${d.siblings.length ? `<div class="chips sc-kids"><span class="chip on">${esc(s.name.split(" ")[0])}</span>${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}</div>` : ""}
     <div class="sc-meta">${isMember ? (regular.length ? regular.map((e) => `<span class="pill">${esc(e.group_name)}</span>`).join(" ") : `<span class="muted small">Группа не выбрана</span>`)
       : `${s.trial_at ? `<span class="pill">Пробное ${dtShort(s.trial_at)}</span>` : ""}`}</div>
-    <div class="sc-parents">${d.parents.map((p) => `<span class="sc-parent"><b>${esc(p.name)}</b> <button class="rel-chip ${p.relation ? "" : "empty"}" data-rel="${p.id}" title="Кем приходится ребёнку">${p.relation ? esc(p.relation) : "кем приходится?"}</button>${p.phone ? ` <a href="tel:${esc(p.phone)}">${esc(p.phone)}</a> <button class="icon-btn" data-dial="${esc(p.phone)}" title="Позвонить через Sipuni">📞</button>` : ""}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}${p.email ? ` <span class="small muted">✉ ${esc(p.email)}</span>` : ""}</span>`).join("")}</div>
+    <div class="sc-parents">${d.parents.map((p) => `<span class="sc-parent"><b>${esc(p.name)}</b> <button class="rel-chip ${p.relation ? "" : "empty"}" data-rel="${p.id}" title="Кем приходится ребёнку">${p.relation ? esc(p.relation) : "кем приходится?"}</button>${p.phone ? ` <button class="linkish" data-copy-phone="${esc(p.phone)}" title="Скопировать номер">${esc(p.phone)}</button> <button class="icon-btn" data-dial="${esc(p.phone)}" title="Позвонить через Sipuni">📞</button>` : ""}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}${p.email ? ` <span class="small muted">✉ ${esc(p.email)}</span>` : ""}</span>`).join("")}</div>
     ${alerts ? `<div class="chips sc-alerts">${alerts}</div>` : ""}
     ${d.next_step ? `<div class="next-step"><span><b>Задача:</b> ${esc(d.next_step.text)}</span><button class="btn sm primary" id="ns-go">${NEXT_GO[d.next_step.action] || "Сделать"}</button></div>` : ""}
     ${!isMember && d.stage_tip ? `<details class="stage-tip" ${S.tipsOpen === false ? "" : "open"}><summary>💡 Подсказка на этапе «${esc(d.stage_label)}»</summary>
@@ -1574,7 +1574,7 @@ async function openStudent(id) {
     <h3>Семья ${esc(d.family.name)}</h3>
     <div class="field"><label>Заметка для персонала (видна в шапке карточки)</label><textarea id="fam-note" rows="2" placeholder="Например: аллергия, звонить только маме">${esc(d.family.note || "")}</textarea></div>
     ${consentHtml(d.family)}
-    <dl class="kv">${d.parents.map((p) => `<dt>${esc(p.name)}</dt><dd><a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}</dd>`).join("")}</dl>
+    <dl class="kv">${d.parents.map((p) => `<dt>${esc(p.name)}</dt><dd><button class="linkish" data-copy-phone="${esc(p.phone)}" title="Скопировать номер">${esc(p.phone)}</button>${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}</dd>`).join("")}</dl>
     ${d.siblings.length ? `<div style="margin-top:10px" class="chips">${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}</div>` : ""}
     <button class="btn sm" style="margin-top:10px" id="add-sibling">+ Брат или сестра</button>
   </div>
@@ -2773,3 +2773,28 @@ async function renderBackup(box) {
     try { const r = await api("POST", "/api/backup", { run: true }); toast(r.result.error ? "Копия на сервере есть, на Диск не ушла" : r.result.remote ? "Копия сохранена и отправлена на Яндекс Диск" : "Копия сохранена на сервере"); renderBackup(box); } catch (err) { fail(err); }
   };
 }
+
+function normalizedCopyPhone(phone) {
+  let digits = String(phone).replace(/\D/g, "");
+  if (digits.length === 10) digits = "7" + digits;
+  if (digits.length === 11 && digits[0] === "8") digits = "7" + digits.slice(1);
+  if (!/^7\d{10}$/.test(digits)) throw new Error("Проверьте номер телефона");
+  return "+" + digits;
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-copy-phone]");
+  if (!b) return;
+  e.preventDefault();
+  try {
+    const text = normalizedCopyPhone(b.dataset.copyPhone);
+    try { await navigator.clipboard.writeText(text); }
+    catch (_) {
+      const input = document.createElement("textarea"); input.value = text;
+      input.style.position = "fixed"; input.style.opacity = "0";
+      document.body.appendChild(input); input.select();
+      const ok = document.execCommand("copy"); input.remove();
+      if (!ok) throw new Error("Не удалось скопировать номер");
+    }
+    toast("Номер скопирован");
+  } catch (error) { fail(error); }
+});
