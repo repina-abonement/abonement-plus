@@ -215,6 +215,11 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     .forEach((p) => targets.push({ v: "w" + p.id, t: `WhatsApp · ${p.name} (новый чат)` }));
   if (st.wazzup_telegram) parents.filter((p) => p.phone && !d.conversations.some((c) => c.channel === "wazzup_telegram" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
     .forEach((p) => targets.push({ v: "t" + p.id, t: `Telegram от школы · ${p.name} (новый чат)` }));
+  if (st.wazzup_max) parents.filter(p => p.phone && !d.conversations.some(c => c.channel === "wazzup_max" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
+    .forEach(p => targets.push({v:"m" + p.id,t:`MAX · ${p.name} (новый чат)`}));
+  S.familySendTargets = S.familySendTargets || {};
+  const targetKey = `${S.user.id}:${familyId}`;
+  const selectedTarget = targets.some(x => x.v === S.familySendTargets[targetKey]) ? S.familySendTargets[targetKey] : (targets.length === 1 ? targets[0].v : "");
   const oq = d.conversations.filter((c) => c.open_q);
   box.innerHTML = `
     <h3>Связь с семьёй</h3>
@@ -226,9 +231,10 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     ${kid && kid.funnel === "sales" ? `<div class="to-bar" style="margin-top:10px"><button class="btn sm" id="to-open">📅 Предложить дни для пробного</button><button class="btn sm" id="to-book">✅ Записать на пробное</button></div><div id="to-panel" hidden></div>` : ""}
     ${targets.length ? `
       <div class="composer">
-        ${targets.length > 1 ? `<select id="cm-to">${targets.map((x) => `<option value="${x.v}">${esc(x.t)}</option>`).join("")}</select>` : `<div class="small muted">Ответ уйдёт: ${esc(targets[0].t)}</div><input type="hidden" id="cm-to" value="${targets[0].v}">`}
+        ${targets.length > 1 ? `<select id="cm-to" aria-label="Мессенджер для отправки"><option value="">Выберите мессенджер для отправки</option>${targets.map((x) => `<option value="${x.v}" ${x.v === selectedTarget ? "selected" : ""}>${esc(x.t)}</option>`).join("")}</select>` : `<div class="small muted">Ответ уйдёт: ${esc(targets[0].t)}</div><input type="hidden" id="cm-to" value="${targets[0].v}">`}
         <div class="row"><textarea id="cm-text" rows="2" placeholder="Сообщение родителю…"></textarea><button class="btn primary" id="cm-send" style="flex:0">Отправить</button></div>
       </div>` : `<div class="small muted">Написать отсюда можно, когда родитель напишет школе в Telegram или MAX${st.whatsapp || st.wazzup_telegram ? "" : ". Первыми написать можно после подключения Wazzup"}</div>`}`;
+  const toSelect = $("#cm-to"); if (toSelect) toSelect.onchange = () => { S.familySendTargets[targetKey] = toSelect.value; };
   const feed = $("#feed"); if (feed) feed.scrollTop = feed.scrollHeight;
   // карточка открыта: новые сообщения подтягиваем сами каждые 10 секунд (раньше были видны только после повторного открытия)
   const lastKey = (items) => items.length ? items[items.length - 1].type + items[items.length - 1].id + ":" + items.length : "";
@@ -253,6 +259,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   wireMessagePicker("#cm-text", async (sticker) => {
     const draft = $("#cm-text").value;
     const to = $("#cm-to").value;
+    if (!to) throw new Error("Выберите мессенджер для отправки");
     if (to[0] !== "c") throw new Error("Сначала отправьте текст, чтобы создать диалог");
     await api("POST", `/api/conversations/${to.slice(1)}/send`, { sticker });
     await loadFamilyComms(familyId, parents, studentId, kid);
@@ -262,10 +269,11 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   if (send) send.onclick = async () => {
     const text = $("#cm-text").value.trim(), to = $("#cm-to").value;
     if (!text) return;
+    if (!to) return toast("Выберите мессенджер для отправки");
     send.disabled = true;
     try {
       if (to[0] === "c") await api("POST", `/api/conversations/${to.slice(1)}/send`, { text });
-      else await api("POST", `/api/families/${familyId}/whatsapp`, { parent_id: +to.slice(1), text, channel: to[0] === "t" ? "telegram" : "whatsapp" });
+      else await api("POST", `/api/families/${familyId}/whatsapp`, { parent_id: +to.slice(1), text, channel: to[0] === "m" ? "max" : to[0] === "t" ? "telegram" : "whatsapp" });
       loadFamilyComms(familyId, parents, studentId, kid);
     } catch (e) { fail(e); send.disabled = false; }
   };
@@ -373,6 +381,7 @@ async function openChat(cid, keepScroll = false) {
         <div class="to-bar"><button class="btn sm" id="to-open">📅 Предложить ближайшие ПУ</button></div>
         <div id="to-panel" hidden></div>
         ${(d.targets || []).length > 1 ? `<select id="chat-to" style="margin-bottom:6px">${d.targets.map((x) => `<option value="${x.id}" ${x.id === cid ? "selected" : ""}>Ответ уйдёт: ${esc(x.label)}</option>`).join("")}</select>` : ""}
+        <div class="reply-channel" id="chat-channel-label" aria-live="polite">Отправка: ${esc(c.channel_label || chLabel(c.channel))}</div>
         <div class="row"><textarea id="chat-text" rows="2" placeholder="Ответ…">${esc(draft)}</textarea><button class="btn primary" id="chat-send" style="flex:0">Отправить</button></div>
         ${c.channel === "telegram" && !c.meta.biz ? `<div class="small muted">Ответ уйдёт от бота школы</div>` : ""}
       </div>
@@ -402,6 +411,11 @@ async function openChat(cid, keepScroll = false) {
     };
   }
   wireOpenQuestion(cid, c);
+  const chatTo = $("#chat-to");
+  if (chatTo) chatTo.onchange = () => {
+    const selected = (d.targets || []).find(x => x.id === +chatTo.value);
+    $("#chat-channel-label").textContent = "Отправка: " + (selected ? selected.label : "выберите мессенджер");
+  };
   wireMessagePicker("#chat-text", async (sticker) => {
     const to = $("#chat-to") ? +$("#chat-to").value : cid;
     await api("POST", `/api/conversations/${to}/send`, { sticker });
@@ -485,7 +499,8 @@ async function renderCommsSettings(box, users) {
     </div>
 
     <div class="int"><div class="int-head"><b>WhatsApp, MAX и Telegram через Wazzup</b>${ok(st.whatsapp || st.wazzup_telegram || st.wazzup_max)}</div>
-      <div class="small muted" style="margin-bottom:6px">Подключает рабочие аккаунты школы. Сообщения родителей в WhatsApp и MAX приходят в «Чаты», ответ уходит из CRM. В WhatsApp можно написать родителю первыми по номеру из карточки</div>
+      <div class="chips small" style="margin-bottom:8px"><span>WhatsApp: ${ok(st.whatsapp)}</span><span>Telegram: ${ok(st.wazzup_telegram)}</span><span>MAX: ${ok(st.wazzup_max)}</span></div>
+      <div class="small muted" style="margin-bottom:6px">Подключает рабочие аккаунты школы. Сообщения родителей в WhatsApp и MAX приходят в «Чаты», ответ уходит из CRM. В WhatsApp, Telegram и MAX можно написать родителю первыми по номеру из карточки</div>
       <div class="field"><label>API-ключ Wazzup</label><input data-k="wazzup_key" value="${esc(v.wazzup_key)}"></div>
       ${inf.wazzup_channels.length ? `<div class="small">Каналы: ${inf.wazzup_channels.map((c) => esc(`${c.transport} ${c.name} (${c.state})`)).join(", ")}</div>` : ""}
       ${inf.wazzup_error ? `<div class="error">${esc(inf.wazzup_error)}</div>` : ""}

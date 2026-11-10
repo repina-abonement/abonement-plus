@@ -231,7 +231,9 @@ async function renderWeek(box) {
 
 async function showPlannerTask(t) {
   if (!t) return;
-  openDrawer(`<h2>${esc(t.title)}</h2><div class="small muted">${esc(dtWhen(t.due_at))} · ${esc(t.assignee || "")}</div><h3>Описание</h3><div style="white-space:pre-wrap">${esc(t.note || "Описание не добавлено")}</div><h3>Комментарии</h3>${t.returned_note ? `<p style="white-space:pre-wrap"><b>Возврат на доработку:</b> ${esc(t.returned_note)}</p>` : ""}${t.result ? `<p style="white-space:pre-wrap"><b>Результат:</b> ${esc(t.result)}</p>` : ""}${!t.returned_note && !t.result ? `<p class="muted">Комментариев пока нет</p>` : ""}<div data-task-settings="${t.id}"></div>`);
+  openDrawer(`<h2>${esc(t.title)}</h2><div class="small muted">${esc(dtWhen(t.due_at))} · ${esc(t.assignee || "")}</div><div class="row" style="align-items:center;justify-content:space-between;gap:10px;margin-top:14px"><h3>Описание</h3>${t.note ? `<button type="button" class="btn sm" data-copy-task-description>Скопировать описание</button>` : ""}</div><div class="task-copyable" style="white-space:pre-wrap">${esc(t.note || "Описание не добавлено")}</div><h3>Комментарии</h3>${t.returned_note ? `<p style="white-space:pre-wrap"><b>Возврат на доработку:</b> ${esc(t.returned_note)}</p>` : ""}${t.result ? `<p style="white-space:pre-wrap"><b>Результат:</b> ${esc(t.result)}</p>` : ""}${!t.returned_note && !t.result ? `<p class="muted">Комментариев пока нет</p>` : ""}<div data-task-settings="${t.id}"></div>`);
+  const copy = $("[data-copy-task-description]");
+  if (copy) copy.onclick = () => copyTaskDescription(t.note);
   loadPlannerTaskSettings(t.id);
 }
 
@@ -294,4 +296,23 @@ async function loadPlannerTaskSettings(id) {
     } catch (err) { if (host.isConnected) host.querySelector("[data-edit-error]").textContent = err.message; }
     finally { button.disabled = false; }
   };
+}
+
+
+async function copyTaskDescription(text) {
+  try {
+    try { await navigator.clipboard.writeText(text); }
+    catch (_) {
+      const previous = document.activeElement;
+      const input = document.createElement("textarea");
+      input.value = text; input.readOnly = true;
+      input.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0";
+      document.body.appendChild(input);
+      let copied;
+      try { input.focus({preventScroll:true}); input.select(); input.setSelectionRange(0,input.value.length); copied = document.execCommand("copy"); }
+      finally { input.remove(); if (previous) previous.focus({preventScroll:true}); }
+      if (!copied) { prompt("Скопируйте описание задачи", text); return; }
+    }
+    toast("Описание скопировано");
+  } catch (err) { fail(err); }
 }

@@ -1530,3 +1530,7 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .nav-res .nav-recent-head button { width: auto; padding: 3px; font-size: 12px; color: var(--accent); }
 
 .msg-sticker { width: 96px; height: 96px; object-fit: contain; }
+
+.no-copy .drawer-panel .task-copyable { -webkit-user-select: text; user-select: text; cursor: text; }
+
+.reply-channel { margin: 6px 0; padding: 6px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--ink); font-size: 13px; font-weight: 700; }

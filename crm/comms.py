@@ -740,7 +740,7 @@ def _wz_tg_rekey(con, chat_id: str, phone: str, echo_id: str = "") -> None:
 
 def wz_hook(con, payload: dict) -> None:
     for m in payload.get("messages") or []:
-        ct = m.get("chatType") or ""
+        ct = {"maxapi":"max", "tgapi":"telegram", "wapi":"whatsapp"}.get(m.get("chatType"),m.get("chatType") or "")
         if ct not in ("whatsapp", "telegram", "max"):
             continue
         channel = "whatsapp" if ct == "whatsapp" else f"wazzup_{ct}"
@@ -748,6 +748,8 @@ def wz_hook(con, payload: dict) -> None:
         phone = m.get("chatId") if ct == "whatsapp" else (contact.get("phone") or "")
         if ct == "telegram":
             _wz_tg_rekey(con, str(m.get("chatId") or ""), phone, str(m.get("messageId") or "") if m.get("isEcho") else "")
+        if ct == "max":
+            _wz_max_rekey(con, str(m.get("chatId") or ""), phone, str(m.get("messageId") or "") if m.get("isEcho") else "")
         ext = m.get("chatId")
         if ct == "whatsapp":  # чат, начатый из карточки, хранится по номеру 7XXXXXXXXXX: ответ должен попасть в него же
             pn = normalize_phone(str(ext or ""))
@@ -766,11 +768,35 @@ def wz_hook(con, payload: dict) -> None:
                     external_id=m.get("messageId"), user_name="Из Wazzup" if echo else "", ts=dt)
 
 
-def _wz_send_raw(con, cid, conv: dict, text: str) -> str:
+WZ_ROUTE = {
+    "whatsapp": ("whatsapp", "wazzup_channel", "WhatsApp"),
+    "wazzup_telegram": ("telegram", "wazzup_tg_channel", "Telegram"),
+    "wazzup_max": ("max", "wazzup_max_channel", "MAX"),
+}
+
+
+def _wz_destination(con, conv):
+    if conv["channel"] not in WZ_ROUTE:
+        raise CommsError("Этот канал Wazzup не поддерживается")
+    chat_type, config_key, label = WZ_ROUTE[conv["channel"]]
     meta = json.loads(conv["meta"] or "{}")
+    stored_type = {"maxapi":"max", "tgapi":"telegram", "wapi":"whatsapp"}.get(meta.get("chatType"), meta.get("chatType"))
+    if stored_type and stored_type != chat_type:
+        raise CommsError(f"Данные канала {label} не совпадают. Сообщение не отправлено")
+    channel_id = meta.get("channelId") or get(con, config_key)
+    if not channel_id:
+        raise CommsError(f"{label} через Wazzup не подключён. Сообщение не отправлено")
+    cached = json.loads(get(con, "wazzup_channels") or "[]")
+    known = next((c for c in cached if c.get("id") == channel_id), None)
+    allowed = {"whatsapp":{"whatsapp","wapi"}, "telegram":{"telegram","tgapi"}, "max":{"max","maxapi"}}[chat_type]
+    if known and known.get("transport") not in allowed:
+        raise CommsError(f"Выбранный канал не относится к {label}. Сообщение не отправлено")
+    return {"channelId":channel_id,"chatType":chat_type}
+
+
+def _wz_send_raw(con, cid, conv: dict, text: str) -> str:
     crm_id = uuid.uuid4().hex
-    body = {"channelId": meta.get("channelId") or get(con, "wazzup_channel"),
-            "chatType": meta.get("chatType") or "whatsapp", "text": text, "crmMessageId": crm_id}
+    body = _wz_destination(con, conv) | {"text": text, "crmMessageId": crm_id}
     if conv["external_id"].startswith("phone:"):  # первое сообщение в Telegram по номеру: чата ещё нет
         body["phone"] = conv["external_id"][6:]
     else:
@@ -814,10 +840,7 @@ def send_sticker(con, cid: int, sticker: str, user: dict) -> dict:
                           data={"attachments": [{"type": "image", "payload": {"url": url}}]})
             ext = (((js or {}).get("message") or {}).get("body") or {}).get("mid") or ("x" + uuid.uuid4().hex)
         elif conv["channel"] == "whatsapp" or conv["channel"].startswith("wazzup_"):
-            meta = json.loads(conv["meta"] or "{}")
-            payload = {"channelId": meta.get("channelId") or get(con, "wazzup_channel"),
-                       "chatType": meta.get("chatType") or "whatsapp", "contentUri": url,
-                       "crmMessageId": uuid.uuid4().hex}
+            payload = _wz_destination(con, conv) | {"contentUri": url, "crmMessageId": uuid.uuid4().hex}
             if conv["external_id"].startswith("phone:"):
                 payload["phone"] = conv["external_id"][6:]
             else:
@@ -890,6 +913,37 @@ def start_wazzup_telegram(con, phone: str) -> int:
         raise CommsError("Неверный номер телефона")
     return upsert_conversation(con, "wazzup_telegram", "phone:" + p, phone=p,
                                meta={"channelId": get(con, "wazzup_tg_channel"), "chatType": "telegram"})
+
+
+def start_wazzup_max(con, phone: str) -> int:
+    if not status(con)["wazzup_max"]:
+        raise CommsError("MAX через Wazzup не подключён")
+    p = normalize_phone(phone)
+    if len(p) != 11:
+        raise CommsError("Неверный номер телефона")
+    existing = con.execute("SELECT id FROM conversations WHERE channel='wazzup_max' AND phone_norm=? ORDER BY last_at DESC,id DESC LIMIT 1", (p,)).fetchone()
+    if existing:
+        return existing[0]
+    return upsert_conversation(con, "wazzup_max", "phone:" + p, phone=p,
+                               meta={"channelId":get(con,"wazzup_max_channel"),"chatType":"max"})
+
+
+def _wz_max_rekey(con, chat_id, phone, echo_id=""):
+    """Match a phone-started MAX conversation only by exact phone or sent message ID."""
+    if not chat_id or chat_id.startswith("phone:"):
+        return
+    pn = normalize_phone(phone) if phone else ""
+    candidate = con.execute("SELECT id FROM conversations WHERE channel='wazzup_max' AND external_id=?", ("phone:"+pn,)).fetchone() if pn else None
+    if not candidate and echo_id:
+        candidate = con.execute("""SELECT c.id FROM conversations c JOIN messages m ON m.conversation_id=c.id
+                                  WHERE c.channel='wazzup_max' AND c.external_id LIKE 'phone:%' AND m.external_id=?""", (echo_id,)).fetchone()
+    if not candidate:
+        return
+    existing = con.execute("SELECT id FROM conversations WHERE channel='wazzup_max' AND external_id=?", (chat_id,)).fetchone()
+    if existing and existing[0] != candidate[0]:
+        merge_conversations(con,candidate[0],existing[0])
+    elif not existing:
+        con.execute("UPDATE conversations SET external_id=? WHERE id=?",(chat_id,candidate[0]))
 
 
 def media_for(con, mid: int) -> tuple[bytes, str]:

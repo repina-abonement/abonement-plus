@@ -2602,7 +2602,11 @@ def family_whatsapp(con, h, user, body, q, fid):
     p = con.execute("SELECT phone FROM parents WHERE family_id=? AND id=?", (int(fid), int(body.get("parent_id") or 0))).fetchone()
     if not p:
         raise ApiError("Родитель не найден")
-    start = comms.start_wazzup_telegram if body.get("channel") == "telegram" else comms.start_whatsapp
+    channel = body.get("channel") or "whatsapp"
+    starts = {"telegram": comms.start_wazzup_telegram, "whatsapp": comms.start_whatsapp, "max": comms.start_wazzup_max}
+    if channel not in starts:
+        raise ApiError("Неизвестный мессенджер: сообщение не отправлено")
+    start = starts[channel]
     cid = cx(start, con, p[0])
     comms.link(con, cid, int(fid))
     return cx(comms.send, con, cid, body.get("text") or "", user)
