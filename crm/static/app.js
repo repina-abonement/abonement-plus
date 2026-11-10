@@ -1449,7 +1449,6 @@ function quoteHtml(q) {
     ${q.pricing && q.pricing.newcomer ? `<div class="small">Новичок: только оставшиеся занятия этого месяца, без надбавки</div>` : ""}
     ${q.pricing && !q.pricing.late && q.pricing.late_pct && q.pricing.late_total > q.total ? `<div class="small muted">При оплате после ${dShort(q.pricing.deadline)}: ${rub(q.pricing.late_total)} без скидок</div>` : ""}
     ${q.discount ? `<div class="small">Скидка «${esc(q.discount.name)}» ${q.discount.percent}%: −${rub(q.discount.amount)}${q.discount.auto ? ". Действует при оплате сегодня" : ""}</div>` : ""}
-    <div class="small muted">Даты: ${q.dates.map(dShort).join(", ")}</div>
     ${q.waitlist ? `<div class="alert" style="margin-top:6px">Оплата после срока: место не гарантировано, в листе ожидания ${q.waitlist}</div>` : ""}`;
 }
 
