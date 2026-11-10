@@ -58,8 +58,12 @@ def main():
         except urllib.error.HTTPError as e:return e.code,json.loads(e.read())
     assert call('/api/login',{'login':'admin','password':'admin-pass-123'})[0]==200
     with patch.object(comms,'wz_call',return_value={'messageId':'family-max-1'}) as send:
-        assert call(f'/api/families/{family}/whatsapp',{'parent_id':parent,'text':'Hello MAX','channel':'max'})[0]==200
+        code,sent=call(f'/api/families/{family}/whatsapp',{'parent_id':parent,'text':'Hello MAX','channel':'max'})
+        assert code==200 and sent['conversation_id']==cid
         assert send.call_args.args[3]['chatType']=='max'
+        send.reset_mock()
+        assert call(f'/api/families/{family}/whatsapp',{'parent_id':parent,'sticker':'thanks','channel':'max'})[0]==200
+        assert send.call_args.args[3]['chatType']=='max' and 'contentUri' in send.call_args.args[3]
         send.reset_mock()
         assert call(f'/api/families/{family}/whatsapp',{'parent_id':parent,'text':'Wrong channel','channel':'unknown'})[0]==400
         assert not send.called

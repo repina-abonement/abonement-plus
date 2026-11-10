@@ -2609,7 +2609,11 @@ def family_whatsapp(con, h, user, body, q, fid):
     start = starts[channel]
     cid = cx(start, con, p[0])
     comms.link(con, cid, int(fid))
-    return cx(comms.send, con, cid, body.get("text") or "", user)
+    if body.get("sticker"):
+        result = cx(comms.send_sticker, con, cid, body["sticker"], user)
+    else:
+        result = cx(comms.send, con, cid, body.get("text") or "", user)
+    return result | {"conversation_id": cid}
 
 
 @route("GET", "/api/messages/{mid}/media", role="operator")

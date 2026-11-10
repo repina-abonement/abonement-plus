@@ -260,8 +260,11 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     const draft = $("#cm-text").value;
     const to = $("#cm-to").value;
     if (!to) throw new Error("Выберите мессенджер для отправки");
-    if (to[0] !== "c") throw new Error("Сначала отправьте текст, чтобы создать диалог");
-    await api("POST", `/api/conversations/${to.slice(1)}/send`, { sticker });
+    if (to[0] === "c") await api("POST", `/api/conversations/${to.slice(1)}/send`, { sticker });
+    else {
+      const created = await api("POST", `/api/families/${familyId}/whatsapp`, {parent_id:+to.slice(1),sticker,channel:to[0] === "m" ? "max" : to[0] === "t" ? "telegram" : "whatsapp"});
+      if (created.conversation_id) S.familySendTargets[targetKey] = "c" + created.conversation_id;
+    }
     await loadFamilyComms(familyId, parents, studentId, kid);
     if ($("#cm-text")) $("#cm-text").value = draft;
   });
@@ -273,7 +276,10 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     send.disabled = true;
     try {
       if (to[0] === "c") await api("POST", `/api/conversations/${to.slice(1)}/send`, { text });
-      else await api("POST", `/api/families/${familyId}/whatsapp`, { parent_id: +to.slice(1), text, channel: to[0] === "m" ? "max" : to[0] === "t" ? "telegram" : "whatsapp" });
+      else {
+        const created = await api("POST", `/api/families/${familyId}/whatsapp`, {parent_id:+to.slice(1),text,channel:to[0] === "m" ? "max" : to[0] === "t" ? "telegram" : "whatsapp"});
+        if (created.conversation_id) S.familySendTargets[targetKey] = "c" + created.conversation_id;
+      }
       loadFamilyComms(familyId, parents, studentId, kid);
     } catch (e) { fail(e); send.disabled = false; }
   };
