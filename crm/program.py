@@ -1,4 +1,4 @@
-"""Направления со своими правилами продаж. Первое: «Сборная ПРО» (8+).
+"""Направления со своими правилами продаж. Первое: «Сборная ПРО» (допуск по решению тренера).
 
 Группы направления: занятия в «Арктике» (lesson_kind='arena') и ОФП в «Небе» (lesson_kind='ofp', на выбор чт или сб).
 Ребёнок ходит в группу Арктики (там его тариф и счёт) и, если тариф «Арктика + ОФП», ещё в одну группу ОФП
@@ -64,6 +64,7 @@ def init(con):
         con.execute("ALTER TABLE enrollments ADD COLUMN next_plan TEXT NOT NULL DEFAULT ''")
     pid = ensure_sbornaya(con)
     setup_sbornaya_groups(con, pid)
+    con.execute("UPDATE groups SET age='' WHERE program_id=? AND age!=''", (pid,))
 
 
 def ensure_sbornaya(con) -> int:
@@ -96,7 +97,7 @@ def setup_sbornaya_groups(con, pid: int):
         if r:
             return r[0]
         return con.execute("""INSERT INTO groups(branch_id, name, weekdays, time, age, is_makeup, coach_id, capacity, program_id,
-                              lesson_kind) VALUES (?,?,?,?,?,0,?,10,?,'ofp')""", (nebo[0], name, wd, t, "8+", coach, pid)).lastrowid
+                              lesson_kind) VALUES (?,?,?,?,?,0,?,10,?,'ofp')""", (nebo[0], name, wd, t, "", coach, pid)).lastrowid
     thu = mk("Сборная ОФП Чт 20:30", "3", "20:30")
     sat = mk("Сборная ОФП Сб 17:00", "5", "17:00")
     pup = con.execute("""SELECT id FROM groups WHERE branch_id=? AND active=1 AND weekdays='5' AND time='17:00' AND id!=?
@@ -183,7 +184,7 @@ def is_newcomer(con, sid: int, pid: int, ym: str) -> bool:
 
 # ---------------- расчёт абонемента ----------------
 
-def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = None, excluded_dates=None) -> dict:
+def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = None, excluded_dates=None, selection=None, validate_selection=False) -> dict:
     from . import money, subscriptiondates
     on = on or date.today()
     g = con.execute("SELECT * FROM groups WHERE id=?", (e["group_id"],)).fetchone()
@@ -195,6 +196,24 @@ def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = N
     nxt = plan.get("next")
     if nxt and ym >= nxt.get("from", "9999"):
         tariff, ofp_gid = nxt["tariff"], nxt.get("ofp_group_id")
+    if selection:
+        old = (tariff, ofp_gid)
+        tariff = selection.get("tariff") or tariff
+        if tariff not in TARIFFS:
+            raise ApiError("Выберите тариф сборной")
+        if tariff == "pkg":
+            try:
+                ofp_gid = int(selection.get("ofp_group_id") or ofp_gid or 0)
+            except (ValueError, TypeError):
+                raise ApiError("Выберите день ОФП")
+            if not con.execute("SELECT 1 FROM groups WHERE id=? AND program_id=? AND lesson_kind='ofp' AND active=1", (ofp_gid,prog["id"])).fetchone():
+                raise ApiError("Выберите день ОФП")
+        else:
+            ofp_gid = None
+        if validate_selection and old != (tariff, ofp_gid) and ym <= logic.month_of(on) and con.execute(
+            """SELECT 1 FROM subscriptions x JOIN enrollments en ON en.id=x.enrollment_id JOIN groups gr ON gr.id=en.group_id
+               WHERE x.student_id=? AND gr.program_id=? AND x.status='paid'""", (sid,prog["id"])).fetchone():
+            raise ApiError("Тариф и день ОФП сборной можно менять со следующего месяца")
     pr = prices_for(con, prog["id"], ym)
     arena_dates = _dates(con, g["id"], ym)
     ofp_dates = _dates(con, ofp_gid, ym) if tariff == "pkg" and ofp_gid else []
@@ -252,7 +271,7 @@ def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = N
         "calendar_dates": available, "excluded_dates": exceptions,
         "dates": [d.isoformat() for d in sorted(arena_dates + ofp_dates)], "vacation_dates": [],
         "program": {"id": prog["id"], "name": prog["name"], "tariff": tariff, "tariff_label": TARIFFS[tariff],
-                    "ofp_group": ofp_g["name"] if ofp_g else "", "lines": lines, "late": late, "newcomer": newcomer,
+                    "ofp_group": ofp_g["name"] if ofp_g else "", "ofp_group_id": ofp_gid, "lines": lines, "late": late, "newcomer": newcomer,
                     "deadline": deadline.isoformat(), "on_time_total": on_time_total, "late_total": late_total,
                     "note": disc_note, "waitlist": waiting_count(con, g["id"])},
     }
@@ -275,7 +294,7 @@ def reprice(con, sub_id: int, on: date | None = None) -> bool:
     if money.balance(con, s["student_id"])["covered"].get(sub_id, 0):
         return False  # уже частично оплачен — не трогаем
     e = next((x for x in sv.enrollments_of(con, s["student_id"], active_only=False) if x["id"] == s["enrollment_id"]), None)
-    q = quote(con, s["student_id"], s["month"], e, on=on, excluded_dates=json.loads(s["excluded_dates"]))
+    q = quote(con, s["student_id"], s["month"], e, on=on, excluded_dates=json.loads(s["excluded_dates"]), selection=json.loads(s["program_selection"]) if s["program_selection"] else None)
     d = q["discount"] or {}
     if q["total"] == s["price"] and q["late_fee"] == s["late_fee"]:
         return False

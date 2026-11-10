@@ -267,13 +267,36 @@ def _pick_enrollment(con, sid: int, enrollment_id) -> dict:
     return ens[0]
 
 
-def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False) -> dict:
+def sale_enrollment(con, sid, enrollment_id, group_id=None):
+    """Другая доступная группа для расчёта без изменения записей клиента."""
+    source = _pick_enrollment(con, sid, enrollment_id)
+    try:
+        group_id = int(group_id) if group_id else None
+    except (ValueError, TypeError):
+        raise ApiError("Выберите группу")
+    if not group_id or group_id == source["group_id"]:
+        return source
+    own = next((e for e in enrollments_of(con, sid) if e["group_id"] == int(group_id)), None)
+    if own:
+        return own
+    g = con.execute("""SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id
+        WHERE g.id=? AND g.active=1 AND b.active=1 AND g.is_makeup=0 AND g.lesson_kind!='ofp'""", (int(group_id),)).fetchone()
+    if not g:
+        raise ApiError("Выберите действующую группу для абонемента")
+    if (g["program_id"] or None) != (source["program_id"] or None):
+        raise ApiError("Переход между обычной группой и сборной оформляется отдельно")
+    return dict(source, id=None, group_id=g["id"], group_name=g["name"], group_weekdays=g["weekdays"],
+                weekdays="", group_age=g["age"], branch_name=g["branch"], source_id=source["id"])
+
+
+def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None) -> dict:
     get_student_row(con, sid)
-    e = _pick_enrollment(con, sid, enrollment_id)
+    e = sale_enrollment(con, sid, enrollment_id, group_id)
     if tariff is not None:
-        if e.get("program_id") or e.get("lesson_kind") == "arena":
-            if tariff != e["tariff"]:
-                raise ApiError("Тариф Арктики меняется в настройках программы со следующего месяца")
+        if e.get("program_id"):
+            from . import program
+            if tariff not in program.TARIFFS:
+                raise ApiError("Выберите тариф сборной")
         elif tariff not in ("fixed", "flex"):
             raise ApiError("Неизвестный тариф")
         else:
@@ -287,7 +310,7 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
     requested = credit_requested is True or credit_requested == "1"
     from . import closures, pricing, program, subscriptiondates
     if program.program_of_group(con, e["group_id"]):
-        return program.quote(con, sid, ym, e, discount_id=discount_id, excluded_dates=excluded_dates)
+        return program.quote(con, sid, ym, e, discount_id=discount_id, excluded_dates=excluded_dates, selection={"tariff": tariff, "ofp_group_id": ofp_group_id} if tariff is not None else None, validate_selection=True)
     on = today()
     pr = pricing.prices_for(con, ym)  # прайс оплачиваемого месяца (pricing.py)
     ms, me = logic.month_bounds(ym)
@@ -343,7 +366,51 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
     return q
 
 
-def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False) -> dict:
+def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id=None, tariff=None,
+                   excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None, group_action="transfer") -> dict:
+    from . import program, transfer, smart
+    smart.require(con, sid, "sale")
+    e = sale_enrollment(con, sid, enrollment_id, group_id)
+    q = quote_for(con, sid, ym, enrollment_id, discount_id, tariff, excluded_dates, credit_requested, group_id, ofp_group_id)
+    con.execute("SAVEPOINT sale_invoice")
+    try:
+        if e["id"] is None:
+            if group_action not in ("transfer", "add"):
+                raise ApiError("Выберите: перевести в новую группу или добавить вторую")
+            if group_action == "transfer":
+                if con.execute("SELECT 1 FROM subscriptions WHERE enrollment_id=? AND month>=? AND status!='cancelled'", (e["source_id"], ym)).fetchone():
+                    raise ApiError("На выбранный или будущий месяц в прежней группе уже есть абонемент. Измените его через перевод группы")
+                if e.get("program_id"):
+                    raise ApiError("Перевод между группами сборной оформляется отдельно")
+                eid = transfer.apply(con, e["source_id"], e["group_id"], ym + "-01", user)["enrollment_id"]
+                con.execute("UPDATE enrollments SET tariff=? WHERE id=?", (q["tariff"], eid))
+                sync_primary(con, sid)
+            else:
+                if e.get("program_id"):
+                    raise ApiError("Вторая группа сборной оформляется отдельно")
+                eid = add_enrollment(con, sid, e["group_id"], None, q["tariff"], user)
+                con.execute("UPDATE enrollments SET start_date=? WHERE id=?", (ym + "-01", eid))
+        else:
+            eid = e["id"]
+        if q.get("program") and tariff is not None:
+            plan = program.plan_of(con, sid, e["program_id"])
+            selected = {"tariff": q["tariff"], "ofp_group_id": q["program"].get("ofp_group_id")}
+            effective = dict(plan)
+            if plan.get("next") and ym >= plan["next"]["from"]:
+                effective.update(plan["next"])
+            if any(effective.get(k) != v for k, v in selected.items()):
+                program.set_plan(con, sid, e["program_id"], selected["tariff"], selected["ofp_group_id"], user)
+        q["enrollment_id"] = eid
+        result = _create_invoice(con, sid, ym, user, eid, quote=q)
+        con.execute("RELEASE sale_invoice")
+        return result
+    except BaseException:
+        con.execute("ROLLBACK TO sale_invoice")
+        con.execute("RELEASE sale_invoice")
+        raise
+
+
+def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False, quote=None) -> dict:
     from . import smart
     smart.require(con, sid, "sale")  # почта родителя нужна для чека PayKeeper
     e = _pick_enrollment(con, sid, enrollment_id)
@@ -351,7 +418,7 @@ def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id
                            (e["id"], ym)).fetchone()
     if existing:
         raise ApiError(f"На {logic.month_label(ym)} в группу {e['group_name']} уже есть абонемент")
-    q = quote_for(con, sid, ym, e["id"], discount_id, tariff, excluded_dates, credit_requested)
+    q = quote or quote_for(con, sid, ym, e["id"], discount_id, tariff, excluded_dates, credit_requested)
     con.execute("DELETE FROM subscriptions WHERE enrollment_id=? AND month=? AND status='cancelled'", (e["id"], ym))
     d = q.get("discount") or {}
     sub_id = con.execute(
@@ -359,7 +426,9 @@ def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id
            late_fee, price, status, created_at, discount_name, discount_amount) VALUES (?,?,?,?,?,?,?,?,?,'invoiced',?,?,?)""",
         (sid, e["id"], ym, q["tariff"], q["lessons_paid"], q["per_lesson"], q["credit_lessons"], q["late_fee"],
          q["total"], now_iso(), d.get("name", ""), d.get("amount", 0))).lastrowid
-    con.execute("UPDATE subscriptions SET excluded_dates=? WHERE id=?", (json.dumps(q.get("excluded_dates", [])), sub_id))
+    snapshot = {"tariff": q["tariff"], "ofp_group_id": q["program"].get("ofp_group_id")} if q.get("program") else None
+    con.execute("UPDATE subscriptions SET excluded_dates=?, program_selection=? WHERE id=?",
+                (json.dumps(q.get("excluded_dates", [])), json.dumps(snapshot) if snapshot else "", sub_id))
     from . import money
     money.reconcile(con, sid)  # депозит сам закрывает новый счёт
     for aid in q["credit_absence_ids"]:
@@ -728,8 +797,8 @@ def student_detail(con, sid: int) -> dict:
     out = {
         "student": s, "family": fam, "parents": parents, "siblings": siblings, "group": grp,
         "subscriptions": subs, "vacations": vacs,
-        "enrollments": [e | {"age_warn": logic.age_warning(s["birth"], e["group_age"], e["branch_name"])} for e in enrollments_of(con, sid)],
-        "trial_age_warn": logic.age_warning(s["birth"], grp["age"], _branch_name(con, grp["branch_id"])) if grp and s["funnel"] == "sales" else "", "makeups": makeups, "history": hist,
+        "enrollments": [e | {"age_warn": "" if e["program_id"] else logic.age_warning(s["birth"], e["group_age"], e["branch_name"])} for e in enrollments_of(con, sid)],
+        "trial_age_warn": logic.age_warning(s["birth"], grp["age"], _branch_name(con, grp["branch_id"])) if grp and not grp["program_id"] and s["funnel"] == "sales" else "", "makeups": makeups, "history": hist,
         "counters": absence_counters(con, sid) if s["funnel"] == "members" else None,
         "balance": _balance_out(con, sid),
         "trial_hold": __import__("crm.capacity", fromlist=["active_holds"]).active_holds(con, student_id=sid)[:1],

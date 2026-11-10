@@ -1131,12 +1131,12 @@ def vacation_del(con, h, user, body, q, vid):
 
 @route("GET", "/api/students/{sid}/quote", role="operator")
 def quote(con, h, user, body, q, sid):
-    return sv.quote_for(con, int(sid), q.get("month"), q.get("enrollment_id"), q.get("discount_id"), q.get("tariff"), q.get("excluded_dates"), q.get("credit_requested"))
+    return sv.quote_for(con, int(sid), q.get("month"), q.get("enrollment_id"), q.get("discount_id"), q.get("tariff"), q.get("excluded_dates"), q.get("credit_requested"), q.get("group_id"), q.get("ofp_group_id"))
 
 
 @route("POST", "/api/students/{sid}/invoice", role="operator")
 def invoice(con, h, user, body, q, sid):
-    return sv.create_invoice(con, int(sid), body.get("month"), user, body.get("enrollment_id"), body.get("discount_id"), body.get("tariff"), body.get("excluded_dates"), body.get("credit_requested", False))
+    return sv.create_invoice(con, int(sid), body.get("month"), user, body.get("enrollment_id"), body.get("discount_id"), body.get("tariff"), body.get("excluded_dates"), body.get("credit_requested", False), body.get("group_id"), body.get("ofp_group_id"), body.get("group_action", "transfer"))
 
 
 @route("POST", "/api/students/{sid}/enrollments", role="operator")

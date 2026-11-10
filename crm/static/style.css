@@ -1602,3 +1602,23 @@ html.theme-soft .sidebar-account [data-account-logout] { background: var(--surfa
 
 .sc-extra-actions { position:relative; } .sc-extra-actions summary { list-style:none; cursor:pointer; }
 .sc-extra-actions>div { position:absolute; z-index:6; right:0; min-width:240px; padding:8px; margin-top:5px; display:flex; flex-direction:column; gap:5px; background:var(--surface); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); }
+
+#cm-text { min-height:160px; max-height:60vh; resize:vertical; line-height:1.55; }
+#comms-box #cm-send { align-self:flex-end; }
+@media(max-width:600px) { #cm-text { min-height:180px; } }
+
+#client-search-form { margin:0; }
+textarea.nav-q { height:40px; min-height:40px; max-height:40px; resize:none; overflow:hidden; white-space:pre; line-height:22px; }
+
+.sc-family-contacts { margin:12px 0; font-size:14px; }
+.sc-contact-line { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; padding:8px 0; border-bottom:1px solid var(--line); }
+.sc-contact-line:last-child { border-bottom:0; }
+.sc-contact-line dt { color:var(--ink-2); }
+.sc-contact-line dd { margin:0; display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+
+.sell > .row:first-child { flex-wrap:nowrap; }
+.sell > .row:first-child h3 { flex:1 1 auto; min-width:0; }
+#sl-x { flex:0 0 32px; min-width:32px; width:32px; }
+#comms-box .composer .row { flex-wrap:wrap; }
+#cm-text { flex:1 1 100%; min-width:0; }
+#comms-box #cm-send { min-width:120px; margin-left:auto; }

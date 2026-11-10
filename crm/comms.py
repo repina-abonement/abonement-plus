@@ -277,14 +277,77 @@ http = _http  # тесты подменяют
 def family_by_phone(con, phone_norm: str) -> int | None:
     if len(phone_norm or "") < 10:
         return None
-    r = con.execute("SELECT family_id FROM parents WHERE phone_norm=? ORDER BY id LIMIT 1", (phone_norm,)).fetchone()
-    return r[0] if r else None
+    rows = con.execute("SELECT DISTINCT family_id FROM parents WHERE phone_norm=?", (normalize_phone(phone_norm),)).fetchall()
+    return rows[0][0] if len(rows) == 1 else None
+
+
+def telegram_username(value):
+    value = (value or "").strip()
+    match = re.fullmatch(r"(?:@|https?://(?:t\.me|telegram\.me)/|(?:telegram|tg)\s*:\s*@?)([A-Za-z0-9_]{5,32})/?", value, re.I)
+    return match[1].casefold() if match else ""
+
+
+def family_by_telegram_username(con, username):
+    handle = (username or "").strip().lstrip("@").casefold()
+    if not re.fullmatch(r"[a-z0-9_]{5,32}", handle):
+        return None
+    families = {r["family_id"] for r in con.execute("SELECT family_id,messenger FROM parents WHERE messenger!=''")
+                if telegram_username(r["messenger"]) == handle}
+    return next(iter(families)) if len(families) == 1 else None
+
+
+def identity_family(con, channel, phone, username):
+    families = {family_by_phone(con, phone)}
+    if channel in ("telegram", "wazzup_telegram", "tg_archive"):
+        families.add(family_by_telegram_username(con, username))
+    families.discard(None)
+    return next(iter(families)) if len(families) == 1 else None
+
+
+def telegram_user_id(channel, external_id):
+    if channel == "tg_archive" and (external_id or "").startswith("tga:"):
+        external_id = external_id[4:]
+    return external_id if channel in ("telegram", "wazzup_telegram", "tg_archive") and re.fullmatch(r"[1-9][0-9]*", external_id or "") else ""
+
+
+def relink_family_conversations(con, family_id):
+    """Однозначные телефон, Telegram username или Telegram ID. Ручные связи сохраняем."""
+    by_phone, by_handle = {}, {}
+    for p in con.execute("SELECT family_id,phone_norm,messenger FROM parents"):
+        phone = normalize_phone(p["phone_norm"] or "")
+        handle = telegram_username(p["messenger"])
+        if phone:
+            by_phone.setdefault(phone, set()).add(p["family_id"])
+        if handle:
+            by_handle.setdefault(handle, set()).add(p["family_id"])
+    tg_channels = ("telegram", "wazzup_telegram", "tg_archive")
+    by_id = {}
+    for c in con.execute("SELECT channel,external_id,family_id FROM conversations WHERE family_id IS NOT NULL AND channel IN (?,?,?)", tg_channels):
+        identity = telegram_user_id(c["channel"], c["external_id"])
+        if identity:
+            by_id.setdefault(identity, set()).add(c["family_id"])
+    for c in con.execute("SELECT id,channel,external_id,username,phone,phone_norm FROM conversations WHERE family_id IS NULL").fetchall():
+        families = set()
+        phone = normalize_phone(c["phone"] or c["phone_norm"] or "")
+        phone_families = by_phone.get(phone, set())
+        if len(phone_families) == 1:
+            families |= phone_families
+        if c["channel"] in tg_channels:
+            handle = (c["username"] or "").strip().lstrip("@").casefold()
+            handle_families = by_handle.get(handle, set())
+            if len(handle_families) == 1:
+                families |= handle_families
+            id_families = by_id.get(telegram_user_id(c["channel"], c["external_id"]), set())
+            if len(id_families) == 1:
+                families |= id_families
+        if families == {family_id}:
+            con.execute("UPDATE conversations SET family_id=? WHERE id=? AND family_id IS NULL", (family_id,c["id"]))
 
 
 def relink_phone(con, phone: str, family_id: int):
     """Новый телефон в семье: подтянуть к ней звонки и переписки с этого номера."""
     p = normalize_phone(phone or "")
-    if len(p) < 10:
+    if len(p) < 10 or family_by_phone(con, p) != family_id:
         return
     con.execute("UPDATE conversations SET family_id=? WHERE phone_norm=? AND family_id IS NULL", (family_id, p))
     con.execute("UPDATE calls SET family_id=? WHERE phone_norm=? AND family_id IS NULL", (family_id, p))
@@ -299,7 +362,7 @@ def upsert_conversation(con, channel: str, ext: str, *, title: str = "", usernam
         cid = con.execute(
             """INSERT INTO conversations(channel, external_id, title, username, phone, phone_norm, family_id, meta,
                created_at) VALUES (?,?,?,?,?,?,?,?,?)""",
-            (channel, ext, title or "", username or "", phone or "", pn, family_by_phone(con, pn),
+            (channel, ext, title or "", username or "", phone or "", pn, identity_family(con, channel, pn, username),
              json.dumps(meta or {}, ensure_ascii=False), ts_now())).lastrowid
         return cid
     sets, args = [], []
@@ -307,12 +370,12 @@ def upsert_conversation(con, channel: str, ext: str, *, title: str = "", usernam
         sets.append("title=?"); args.append(title)
     if username and username != r["username"]:
         sets.append("username=?"); args.append(username)
+    if not r["family_id"]:
+        fam = identity_family(con, channel, pn or r["phone_norm"], username or r["username"])
+        if fam:
+            sets.append("family_id=?"); args.append(fam)
     if pn and pn != r["phone_norm"]:
         sets += ["phone=?", "phone_norm=?"]; args += [phone, pn]
-        if not r["family_id"]:
-            fam = family_by_phone(con, pn)
-            if fam:
-                sets.append("family_id=?"); args.append(fam)
     if meta:
         m = json.loads(r["meta"] or "{}")
         if any(m.get(k) != v for k, v in meta.items()):
@@ -717,7 +780,7 @@ def merge_wazzup_duplicates(con) -> int:
 
 def _wz_tg_rekey(con, chat_id: str, phone: str, echo_id: str = "") -> None:
     """Первое сообщение в Telegram мы отправили «по номеру» (phone:…), а ответ приходит с настоящим номером чата.
-    Связываем: по телефону, если Telegram его показал; иначе единственный недавний чат «по номеру» без ответа."""
+    Связываем: по телефону, если Telegram его показал; или по точному ID эха. Без совпадения не объединяем."""
     pn = normalize_phone(phone) if phone else ""
     row = None
     if echo_id:  # эхо нашего же сообщения: по его номеру точно знаем, какая переписка «по номеру» это была
@@ -730,12 +793,6 @@ def _wz_tg_rekey(con, chat_id: str, phone: str, echo_id: str = "") -> None:
         if row:
             merge_conversations(con, row[0], existing[0])
         return
-    if not row:
-        since = (datetime.now() - timedelta(hours=48)).isoformat(timespec="seconds")
-        cands = con.execute("""SELECT c.id FROM conversations c WHERE c.channel='wazzup_telegram' AND c.external_id LIKE 'phone:%'
-                               AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND m.direction='out' AND m.ts>=?)
-                               AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND m.direction='in')""", (since,)).fetchall()
-        row = cands[0] if len(cands) == 1 else None
     if row:
         con.execute("UPDATE conversations SET external_id=? WHERE id=?", (chat_id, row[0]))
 
@@ -1288,7 +1345,7 @@ def history(con, family_id: int | None, phones: list[str], mark_read: bool = Tru
     phones = [p for p in phones if p]
     ph_sql = ",".join("?" * len(phones)) or "''"
     convs = [_conv_out(con, r) for r in con.execute(
-        f"SELECT * FROM conversations WHERE (family_id=? AND family_id IS NOT NULL) OR phone_norm IN ({ph_sql}) ORDER BY last_at DESC",
+        f"SELECT * FROM conversations WHERE (family_id=? AND family_id IS NOT NULL) OR (family_id IS NULL AND phone_norm IN ({ph_sql})) ORDER BY last_at DESC",
         (family_id, *phones))]
     items = []
     for c in convs:
@@ -1297,7 +1354,7 @@ def history(con, family_id: int | None, phones: list[str], mark_read: bool = Tru
             items.append({"type": "msg", "ts": m["ts"], "channel": c["channel"], "channel_label": c["channel_label"],
                           "conversation_id": c["id"], **{k: m[k] for k in ("id", "direction", "text", "kind", "media",
                                                                             "user_name", "status", "error")}})
-    for k in con.execute(f"SELECT * FROM calls WHERE (family_id=? AND family_id IS NOT NULL) OR phone_norm IN ({ph_sql}) ORDER BY id DESC LIMIT 60",
+    for k in con.execute(f"SELECT * FROM calls WHERE (family_id=? AND family_id IS NOT NULL) OR (family_id IS NULL AND phone_norm IN ({ph_sql})) ORDER BY id DESC LIMIT 60",
                          (family_id, *phones)):
         items.append({"type": "call", "ts": k["started_at"], "id": k["id"], "direction": k["direction"],
                       "status": k["status"], "talk": k["talk"], "duration": k["duration"], "phone": k["phone"],
@@ -1312,8 +1369,10 @@ def history(con, family_id: int | None, phones: list[str], mark_read: bool = Tru
 
 
 def family_comms(con, family_id: int) -> dict:
+    relink_family_conversations(con, family_id)
     phones = [r[0] for r in con.execute("SELECT phone_norm FROM parents WHERE family_id=? AND phone_norm != ''",
                                         (family_id,))]
+    phones = [phone for phone in phones if family_by_phone(con, phone) == family_id]
     convs, items = history(con, family_id, phones)
     return {"conversations": convs, "items": items, "status": status(con)}
 

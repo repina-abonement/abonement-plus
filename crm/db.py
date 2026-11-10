@@ -265,6 +265,8 @@ def init_db(con: sqlite3.Connection):
         """)
     if "excluded_dates" not in {r[1] for r in con.execute("PRAGMA table_info(subscriptions)")}:
         con.execute("ALTER TABLE subscriptions ADD COLUMN excluded_dates TEXT NOT NULL DEFAULT '[]'")
+    if "program_selection" not in {r[1] for r in con.execute("PRAGMA table_info(subscriptions)")}:
+        con.execute("ALTER TABLE subscriptions ADD COLUMN program_selection TEXT NOT NULL DEFAULT ''")
     sync_enrollments(con)
     from . import ai, calldigest, capacity, closures, comms, program, pu, staffdocs, waitlist, expenses, fakegen, legal, merch, money, offers, planner, schedule, sources, staff, tasks, fiscal
     from . import recents

@@ -334,7 +334,7 @@ function sideNav(views) {
   const item = ([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}<span>${t}</span>${badge(k)}</button>`;
   if (views.length <= 8) return views.map(item).join("");
   const has = (k) => views.find(([v]) => v === k);
-  const search = has("search") ? `<input class="nav-q" id="nav-q" type="search" name="crm-client-search" readonly autocomplete="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="🔍 Найти клиента   /" title="Имя, фамилия или телефон. Быстро открыть поиск: клавиша /">` : "";
+  const search = has("search") ? `<form id="client-search-form" role="search" autocomplete="off"><textarea class="nav-q" id="nav-q" role="searchbox" rows="1" name="crm-customer-query" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" placeholder="🔍 Найти клиента   /" aria-label="Найти клиента" title="Имя, фамилия или телефон. Быстро открыть поиск: клавиша /"></textarea></form>` : "";
   const placed = new Set(["search"]);
   const top = NAV_TOP.filter(has).map((k) => { placed.add(k); return item(has(k)); }).join("");
   const o = navOpen();
@@ -387,6 +387,7 @@ function wireNavSearch(nq) {
   nq.addEventListener("focus", () => { if (!nq.value.trim()) showHistory(); });
   nq.oninput = () => {
     clearTimeout(t); generation++;
+    nq.value = nq.value.replace(/[\r\n]+/g, " ");
     const v = nq.value.trim();
     if (!v) return showHistory();
     historyMode = false;
@@ -481,13 +482,8 @@ function shell() {
   }));
   const nq = $("#nav-q");
   if (nq) {
-    // поле только для чтения, пока человек сам в него не нажал: браузер не подставляет туда сохранённый логин
-    const unlock = () => nq.removeAttribute("readonly");
-    nq.addEventListener("pointerdown", unlock); nq.addEventListener("focus", unlock);
-    nq.addEventListener("blur", () => { if (!nq.value) nq.setAttribute("readonly", ""); });
+    $("#client-search-form").onsubmit = e => e.preventDefault();
     wireNavSearch(nq);
-    // браузер иногда сам вписывает сюда сохранённый логин: стираем, если человек не печатал
-    [50, 400, 1200].forEach((ms) => setTimeout(() => { if (document.activeElement !== nq) nq.value = ""; }, ms));
   }
   const more = $("[data-more]");
   if (more) more.onclick = () => { $(".more-sheet").hidden = !$(".more-sheet").hidden; };
@@ -1478,17 +1474,28 @@ async function openSell(d, reload) {
   scTab("abon");
   const ens = d.enrollments.filter((e) => e.lesson_kind !== "ofp");
   const previous = (d.subscriptions || []).filter((s) => s.status !== "cancelled" && s.month < d.next_month && ens.some((e) => e.id === s.enrollment_id))
-    .sort((a, b) => b.month.localeCompare(a.month) || b.id - a.id);
+    .sort((a, b) => Number(b.status === "paid") - Number(a.status === "paid") || b.month.localeCompare(a.month) || b.id - a.id);
   const preferred = ens.find((e) => e.id === previous[0]?.enrollment_id) || ens.find((e) => e.group_id === d.student.group_id) || ens[0];
+  const availableGroups = (S.meta.groups || []).filter(g => !g.is_makeup && g.lesson_kind !== "ofp" &&
+    ((g.program_id || null) === (preferred.program_id || null) || ens.some(e => e.group_id === g.id)));
+  const choices = availableGroups.map(g => {
+    const own = ens.find(e => e.group_id === g.id);
+    return { ...preferred, ...own, id: own?.id || preferred.id, group_id: g.id, group_name: g.name,
+      program_id: g.program_id, lesson_kind: g.lesson_kind, branch_name: g.branch || "", new_group: !own };
+  });
+  ens.forEach(e => { if (!choices.some(c => c.group_id === e.group_id)) choices.push(e); });
   const methods = Object.entries(PAY_METHODS).filter(([k]) => !PAY_INTERNAL.includes(k) && k !== "online");
   box.innerHTML = `<div class="section sell">
     <div class="row" style="align-items:center"><h3 class="grow" style="margin:0">🛒 Продать абонемент</h3><button class="icon-btn" id="sl-x" title="Закрыть">✕</button></div>
     <div class="row" style="margin-top:8px">
       <div class="field"><label>Месяц</label><select id="sl-month">${[d.cur_month, d.next_month].map((m) => `<option value="${m}" ${m === d.next_month ? "selected" : ""}>${monthLabel(m)}</option>`).join("")}</select></div>
-      <div class="field"><label>Группа</label><select id="sl-en">${ens.map((e) => `<option value="${e.id}" ${e === preferred ? "selected" : ""}>${esc(e.group_name)}</option>`).join("")}</select></div></div>
+      <div class="field"><label>Группа</label><select id="sl-en">${choices.map((e) => `<option value="${e.group_id}" ${e.group_id === preferred.group_id ? "selected" : ""}>${esc(e.group_name)}${e.new_group ? " · другая группа" : ""}</option>`).join("")}</select></div></div>
     <div class="row">
       <div class="field"><label>Тариф</label><select id="sl-tar"><option value="fixed">Негибкий</option><option value="flex">Гибкий</option></select></div>
       <div class="field"><label>Скидка</label><select id="sl-disc"><option value="">По правилам (или без скидки)</option>${(d.discounts || []).map((x) => `<option value="${x.id}">${esc(x.name)}, ${x.percent}%</option>`).join("")}</select></div></div>
+    <div class="small muted" id="sl-admission" hidden>Допуск в сборную — по решению тренера, без фиксированного возрастного порога.</div>
+    <div class="field" id="sl-ofp-box" hidden><label>День ОФП</label><select id="sl-ofp"></select></div>
+    <div class="field" id="sl-group-action-box" hidden><label>Как изменить группу с начала выбранного месяца</label><select id="sl-group-action"><option value="transfer">Перевести из прежней группы</option><option value="add">Добавить вторую, сохранить прежнюю</option></select><div class="small muted">Изменение сохранится только при оформлении абонемента.</div></div>
     <label class="sale-credit" id="sl-credit-box" hidden><input type="checkbox" id="sl-credit"> Клиент запросил перерасчёт пропусков прошлого месяца <span class="small muted" id="sl-credit-info"></span></label>
     <div class="quote" id="sl-q">Считаю…</div>
     <div class="sc-actions" style="margin-top:10px">
@@ -1496,16 +1503,26 @@ async function openSell(d, reload) {
       <button class="btn" id="sl-now">✅ Оплачено сейчас</button>
       </div>
     <div id="sl-res"></div></div>`;
-  const en = () => ens.find((e) => e.id === +$("#sl-en").value);
+  const en = () => choices.find((e) => e.group_id === +$("#sl-en").value);
   let total = 0, quoteVersion = 0;
   const excludedDates = new Set();
+  const programFor = () => (d.program?.programs || []).find(p => p.id === en().program_id);
+  const syncFields = () => {
+    $("#sl-admission").hidden = !en().program_id;
+    $("#sl-ofp-box").hidden = !en().program_id || $("#sl-tar").value !== "pkg";
+    $("#sl-group-action-box").hidden = !en().new_group;
+  };
   const recommendTariff = () => {
     const last = previous.find((s) => s.enrollment_id === en().id && s.month < $("#sl-month").value);
-    const tariff = last?.tariff || en().tariff || "fixed";
-    $("#sl-tar").innerHTML = ["pkg", "arena_only"].includes(tariff)
-      ? `<option value="${esc(tariff)}">${tariff === "pkg" ? "Арктика + ОФП" : "Только Арктика"}</option>`
+    const p = programFor(), plan = p?.plan;
+    const effective = plan?.next && $("#sl-month").value >= plan.next.from ? plan.next : plan;
+    const tariff = en().program_id ? effective?.tariff || last?.tariff || "arena_only" : last?.tariff || en().tariff || "fixed";
+    $("#sl-tar").innerHTML = en().program_id
+      ? '<option value="arena_only">Только Арктика</option><option value="pkg">Арктика + ОФП</option>'
       : '<option value="fixed">Негибкий</option><option value="flex">Гибкий</option>';
     $("#sl-tar").value = tariff;
+    $("#sl-ofp").innerHTML = (p?.ofp_groups || []).map(g => `<option value="${g.id}" ${g.id === effective?.ofp_group_id ? "selected" : ""}>${esc(g.name)}</option>`).join("");
+    syncFields();
   };
   recommendTariff();
   const quote = async () => {
@@ -1514,12 +1531,9 @@ async function openSell(d, reload) {
     $("#sl-res").innerHTML = "";
     $("#sl-q").innerHTML = "Считаю…";
     try {
-      const q = await api("GET", `/api/students/${id}/quote?month=${$("#sl-month").value}&enrollment_id=${en().id}${en().program_id ? "" : "&tariff=" + encodeURIComponent($("#sl-tar").value)}&excluded_dates=${encodeURIComponent([...excludedDates].join(","))}&credit_requested=${$("#sl-credit").checked ? "1" : "0"}${$("#sl-disc").value ? "&discount_id=" + $("#sl-disc").value : ""}`);
+      const q = await api("GET", `/api/students/${id}/quote?month=${$("#sl-month").value}&enrollment_id=${en().id}&group_id=${en().group_id}&tariff=${encodeURIComponent($("#sl-tar").value)}&ofp_group_id=${$("#sl-ofp").value || ""}&excluded_dates=${encodeURIComponent([...excludedDates].join(","))}&credit_requested=${$("#sl-credit").checked ? "1" : "0"}${$("#sl-disc").value ? "&discount_id=" + $("#sl-disc").value : ""}`);
       if (version !== quoteVersion) return;
       total = q.total;
-      if (q.program) {
-        $("#sl-tar").innerHTML = `<option value="${esc(q.tariff)}">${esc(q.program.tariff_label)}</option>`;
-      }
       q.calendar_picker = true;
       $("#sl-q").innerHTML = (q.program ? programQuoteHtml(q) : quoteHtml(q)) + saleCalendarHtml(q, $("#sl-month").value);
       $("#sl-credit-box").hidden = !q.credit_available;
@@ -1537,11 +1551,12 @@ async function openSell(d, reload) {
     } catch (e) { if (version === quoteVersion) $("#sl-q").textContent = e.message; }
   };
   const resetExceptions = () => { excludedDates.clear(); $("#sl-credit").checked = false; };
-  $("#sl-month").onchange = () => { resetExceptions(); quote(); }; $("#sl-en").onchange = () => { resetExceptions(); recommendTariff(); quote(); }; $("#sl-disc").onchange = quote;
-  $("#sl-tar").onchange = () => { $("#sl-credit").checked = false; quote(); };
+  $("#sl-month").onchange = () => { resetExceptions(); recommendTariff(); quote(); }; $("#sl-en").onchange = () => { resetExceptions(); recommendTariff(); quote(); }; $("#sl-disc").onchange = quote;
+  $("#sl-tar").onchange = () => { resetExceptions(); syncFields(); quote(); };
+  $("#sl-ofp").onchange = () => { resetExceptions(); quote(); };
   $("#sl-credit").onchange = quote;
   $("#sl-x").onclick = () => { box.innerHTML = ""; };
-  const invoice = () => api("POST", `/api/students/${id}/invoice`, { month: $("#sl-month").value, enrollment_id: en().id, tariff: en().program_id ? undefined : $("#sl-tar").value, excluded_dates: [...excludedDates], credit_requested: $("#sl-credit").checked, discount_id: $("#sl-disc").value || null });
+  const invoice = () => api("POST", `/api/students/${id}/invoice`, { month: $("#sl-month").value, enrollment_id: en().id, group_id: en().group_id, group_action: $("#sl-group-action").value, tariff: $("#sl-tar").value, ofp_group_id: $("#sl-tar").value === "pkg" ? +$("#sl-ofp").value : null, excluded_dates: [...excludedDates], credit_requested: $("#sl-credit").checked, discount_id: $("#sl-disc").value || null });
   const busy = (on) => box.querySelectorAll(".sc-actions button").forEach((b) => (b.disabled = on));
   $("#sl-now").onclick = () => {
     $("#sl-res").innerHTML = `<div class="row" style="margin-top:10px;align-items:flex-end"><div class="field"><label>Как оплатили</label><select id="sl-m">${methods.map(([k, t]) => `<option value="${k}">${t}</option>`).join("")}</select></div>
@@ -1561,7 +1576,7 @@ async function openSell(d, reload) {
       const what = `Абонемент на ${monthLabel($("#sl-month").value)}: ${d.student.name}`;
       const l = await api("POST", `/api/students/${id}/paylinks`, { amount: r.quote.total, purpose: what, subscription_id: r.id });
       const tariffLabel = $("#sl-tar").selectedOptions[0]?.textContent || "";
-      const msg = `Абонемент на ${monthLabel($("#sl-month").value)}\n${d.student.name}\n\nГруппа: ${en().group_name}\nТариф: ${tariffLabel}\n\nК оплате: ${rub(l.amount)}\n\nСсылка для оплаты:\n${l.url}`;
+      const msg = `Абонемент на ${monthLabel($("#sl-month").value)}\n${d.student.name}\n\nГруппа: ${en().lesson_kind === "arena" || /сборная.*арктика/i.test(en().group_name) ? "Сборная Арктика" : en().group_name}\nТариф: ${tariffLabel}\n\nК оплате: ${rub(l.amount)}\n\nСсылка для оплаты:\n${l.url}`;
       $("#sl-res").innerHTML = `<div class="field" style="margin-top:10px"><label>Счёт выставлен. Отправьте родителю, после оплаты абонемент отметится сам</label><textarea id="sl-msg" rows="3">${esc(msg)}</textarea></div>
         <div class="sc-actions"><button class="btn primary" id="sl-send">Вставить в чат с семьёй</button><button class="btn" id="sl-copy">Скопировать</button><button class="btn" id="sl-done">Готово</button></div>`;
       $("#sl-copy").onclick = () => navigator.clipboard.writeText($("#sl-msg").value).then(() => toast("Скопировано"));
@@ -1621,8 +1636,6 @@ async function openStudent(id) {
       <div><b>Что сказать.</b> ${esc(d.stage_tip.say)}</div><div style="margin-top:4px"><b>Чтобы перейти дальше:</b> ${esc(d.stage_tip.next)}</div></details>` : ""}
     <div class="sc-actions">
       ${isMember && full && regular.length ? `<button class="btn primary" id="act-sell">🛒 Продать абонемент</button>` : ""}
-      ${isMember && full ? `<button class="btn" id="act-link">💳 Ссылка на оплату</button>` : ""}
-      ${isMember ? `<button class="btn" id="act-pay">+ Принять оплату</button>` : ""}
       ${!isMember ? `<button class="btn primary" id="act-trial">📅 Записать на пробное</button>` : ""}
       ${d.parents.some((p) => p.phone) ? `<button class="btn" id="act-call">📞 Позвонить</button>` : ""}
       ${isMember ? `<details class="sc-extra-actions"><summary class="btn">Ещё</summary><div><button class="btn" id="act-vac">Отпуск</button>${regular.length === 1 ? `<button class="btn" id="act-move">Перевести в другую группу</button>` : ""}</div></details>` : ""}
@@ -1653,7 +1666,7 @@ async function openStudent(id) {
     <h3>Семья ${esc(d.family.name)}</h3>
     <div class="field"><label>Заметка для персонала (видна в шапке карточки)</label><textarea id="fam-note" rows="2" placeholder="Например: аллергия, звонить только маме">${esc(d.family.note || "")}</textarea></div>
     ${consentHtml(d.family)}
-    <dl class="kv">${d.parents.map((p) => `<dt>${esc(p.name)}</dt><dd><button class="linkish" data-copy-phone="${esc(p.phone)}" title="Скопировать номер">${esc(p.phone)}</button>${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}</dd>`).join("")}</dl>
+    <dl class="sc-family-contacts">${d.parents.map((p) => `<div class="sc-contact-line"><dt>${esc(p.name)}</dt><dd>${p.phone ? `<button class="linkish" data-copy-phone="${esc(p.phone)}" title="Скопировать номер">${esc(p.phone)}</button>` : `<span class="muted">Телефон не указан</span>`}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}</dd></div>`).join("")}</dl>
     ${d.siblings.length ? `<div style="margin-top:10px" class="chips">${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}</div>` : ""}
     <button class="btn sm" style="margin-top:10px" id="add-sibling">+ Брат или сестра</button>
   </div>
@@ -1708,7 +1721,7 @@ async function openStudent(id) {
       ${d.enrollments.length ? d.enrollments.map((e) => e.lesson_kind === "ofp" ? `
         <div class="enr"><div class="enr-head"><b>${esc(e.group_name)}</b><span class="muted small">входит в абонемент сборной</span></div></div>` : e.lesson_kind === "arena" ? `
         <div class="enr">
-          <div class="enr-head"><b>${esc(e.group_name)}</b><span class="muted small">${esc(e.group_age)} лет</span></div>
+          <div class="enr-head"><b>${esc(e.group_name)}</b><span class="muted small">По решению тренера</span></div>
           <div class="quote muted" data-quote="${e.id}">Считаю…</div>
         </div>` : `
         <div class="enr">
@@ -1833,10 +1846,8 @@ async function openStudent(id) {
   const firstPhone = (d.parents.find((p) => p.phone) || {}).phone;
   if ($("#act-call")) $("#act-call").onclick = () => dial(firstPhone);
   if ($("#act-sell")) $("#act-sell").onclick = () => openSell(d, reload);
-  if ($("#act-link")) $("#act-link").onclick = async () => { if (!(await ensureRequired(id, "sale"))) return; scTab("abon"); const b = $("#pay-link"); if (b) b.click(); };
-  if ($("#act-pay")) $("#act-pay").onclick = () => { scTab("abon"); $("#pay-free").click(); };
   if ($("#act-vac")) $("#act-vac").onclick = () => openFold(body, "vac");
-  if ($("#act-move")) $("#act-move").onclick = () => { const b = body.querySelector("[data-entr]"); if (b) { b.click(); b.scrollIntoView({ block: "center", behavior: "smooth" }); } };
+  if ($("#act-move")) $("#act-move").onclick = () => { openFold(body, "abon"); const b = body.querySelector("[data-entr]"); if (b) { b.click(); b.scrollIntoView({ block: "center", behavior: "smooth" }); } };
   if ($("#act-trial")) $("#act-trial").onclick = () => { scTab("feed"); const b = $("#to-book"); if (b) { b.click(); b.scrollIntoView({ block: "center", behavior: "smooth" }); } else { const f = $("#f-trial"); if (f) f.scrollIntoView({ block: "center", behavior: "smooth" }); } };
   body.querySelectorAll("[data-chstop]").forEach((b) => (b.onclick = async () => {
     if (!confirm("Остановить автоцепочку для этого клиента? Больше сообщений по ней не уйдёт")) return;
@@ -1850,7 +1861,7 @@ async function openStudent(id) {
     else if (a === "offer") { scTab("feed"); click("#to-open"); }
     else if (a === "trial") click("#act-trial");
     else if (a === "sell") { if (!click("#act-sell")) { openFold(body, "stage"); const f = $("#f-stage"); if (f) { f.scrollIntoView({ block: "center", behavior: "smooth" }); f.focus(); } } }
-    else if (a === "link") click("#act-link");
+    else if (a === "link") { scTab("abon"); click("#pay-link"); }
     else if (a === "makeup") openFold(body, "skips");
     else if (a === "task") { closeDrawer(); go("planner"); }
   };
@@ -2027,10 +2038,7 @@ async function renderCoachKids(page) {
 }
 
 function ageText(birth) {
-  const b = new Date(birth + "T00:00:00"), n = new Date();
-  let y = n.getFullYear() - b.getFullYear();
-  if (n < new Date(n.getFullYear(), b.getMonth(), b.getDate())) y--;
-  return isFinite(y) ? `${y} ${y % 10 === 1 && y % 100 !== 11 ? "год" : [2, 3, 4].includes(y % 10) && ![12, 13, 14].includes(y % 100) ? "года" : "лет"}` : "";
+  return ageYM(birth);
 }
 
 function isoDate(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
@@ -2245,11 +2253,12 @@ const jTag = (r) => { const t = J_TAGS[r.tag]; return t && !(r.tag === "unpaid" 
 const jNum = (r) => r.n ? `<span class="jn">${r.n}.</span>` : "";
 /* возраст с месяцами: «3 года 5 мес.» (Юлия, 04.11) */
 function ageYM(birth, on) {
-  const b = new Date(birth + "T12:00"), n = new Date((on || S.meta.today) + "T12:00");
-  if (!isFinite(b)) return "";
+  const today = on || new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Moscow" }).format(new Date());
+  const b = new Date(String(birth).slice(0, 10) + "T12:00"), n = new Date(today + "T12:00");
+  if (!isFinite(b) || !isFinite(n) || b > n) return "";
   const months = (n.getFullYear() - b.getFullYear()) * 12 + n.getMonth() - b.getMonth() - (n.getDate() < b.getDate() ? 1 : 0);
   const y = Math.floor(months / 12), m = months % 12;
-  return `${y} ${plural(y, "год", "года", "лет")}${m ? ` ${m} мес.` : ""}`;
+  return `${y} ${plural(y, "год", "года", "лет")} ${m} ${plural(m, "месяц", "месяца", "месяцев")}`;
 }
 const jAge = (r) => r.birth ? ` <span class="small muted">· ${ageYM(r.birth, S.journal.date)}</span>` : "";
 

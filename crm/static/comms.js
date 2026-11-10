@@ -206,9 +206,13 @@ async function dial(phone) {
 async function loadFamilyComms(familyId, parents, studentId, kid) {
   const box = $("#comms-box");
   if (!box) return;
+  const sameFamily = box.dataset.familyId === String(familyId);
+  let draft = sameFamily ? $("#cm-text")?.value || "" : "";
   let d;
   try { d = await api("GET", `/api/families/${familyId}/comms`); } catch (e) { box.innerHTML = `<h3>Связь с семьёй</h3><div class="error">${esc(e.message)}</div>`; return; }
-  if (!$("#comms-box")) return;
+  if ($("#comms-box") !== box) return;
+  if (sameFamily) draft = $("#cm-text")?.value || "";
+  box.dataset.familyId = familyId;
   const st = d.status;
   const targets = d.conversations.filter((c) => c.channel !== "tg_archive").map((c) => ({ v: "c" + c.id, t: `${chLabel(c.channel)}${c.title ? " · " + c.title : ""}` }));
   if (st.whatsapp) parents.filter((p) => p.phone && !d.conversations.some((c) => c.channel === "whatsapp" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
@@ -232,8 +236,9 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     ${targets.length ? `
       <div class="composer">
         ${targets.length > 1 ? `<select id="cm-to" aria-label="Мессенджер для отправки"><option value="">Выберите мессенджер для отправки</option>${targets.map((x) => `<option value="${x.v}" ${x.v === selectedTarget ? "selected" : ""}>${esc(x.t)}</option>`).join("")}</select>` : `<div class="small muted">Ответ уйдёт: ${esc(targets[0].t)}</div><input type="hidden" id="cm-to" value="${targets[0].v}">`}
-        <div class="row"><textarea id="cm-text" rows="2" placeholder="Сообщение родителю…"></textarea><button class="btn primary" id="cm-send" style="flex:0">Отправить</button></div>
+        <div class="row"><textarea id="cm-text" rows="6" placeholder="Сообщение родителю…"></textarea><button class="btn primary" id="cm-send" style="flex:0">Отправить</button></div>
       </div>` : `<div class="small muted">Написать отсюда можно, когда родитель напишет школе в Telegram или MAX${st.whatsapp || st.wazzup_telegram ? "" : ". Первыми написать можно после подключения Wazzup"}</div>`}`;
+  if ($("#cm-text")) $("#cm-text").value = draft;
   const toSelect = $("#cm-to"); if (toSelect) toSelect.onchange = () => { S.familySendTargets[targetKey] = toSelect.value; };
   const feed = $("#feed"); if (feed) feed.scrollTop = feed.scrollHeight;
   // карточка открыта: новые сообщения подтягиваем сами каждые 10 секунд (раньше были видны только после повторного открытия)
@@ -246,6 +251,8 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     if (document.hidden) return;
     let n; try { n = await api("GET", `/api/families/${familyId}/comms`); } catch (_) { return; }
     const k = lastKey(n.items);
+    if ($("#comms-box") !== box) return;
+    if (n.conversations.map(c => c.id).sort((a,b) => a-b).join(",") !== d.conversations.map(c => c.id).sort((a,b) => a-b).join(",")) return loadFamilyComms(familyId, parents, studentId, kid);
     if (k === seen || !$("#feed")) return;
     seen = k;
     if (n.conversations.length !== d.conversations.length) return loadFamilyComms(familyId, parents, studentId, kid);  // новый чат: перестроить и список «кому»
