@@ -308,6 +308,8 @@ def reprice_from(con, gid: int, f: date, user: dict) -> int:
         from . import closures
         a, b = logic.month_bounds(x["month"])
         closed = closures.closed_dates(con, gid, a, b)
+        import json
+        closed |= set(json.loads(x["excluded_dates"]))
         new = [d for d in month_dates(con, g, x["own"], x["month"]) if d.isoformat() not in closed and not logic.in_vacation(d, vac)]
         if len(new) == x["lessons"] or not x["lessons"]:
             continue

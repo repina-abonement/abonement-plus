@@ -1,6 +1,7 @@
 """Операции CRM поверх базы: воронки, карточка, абонементы, журнал, отработки."""
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta
 
 from . import logic
@@ -80,13 +81,16 @@ def absence_counters(con, sid: int, ref: date | None = None) -> dict:
     prev = logic.shift_month(cur, -1)
     w_start, w_end = logic.makeup_window(ref)
     rows = _rows(con.execute(
-        """SELECT a.id, a.date, a.resolved, a.cert,
+        """SELECT a.id, a.date, a.group_id, a.resolved, a.cert,
                   (SELECT m.id FROM makeups m WHERE m.absence_id = a.id AND m.status = 'booked') AS booked_id
            FROM attendance a WHERE a.student_id = ? AND a.status = 'absent' AND a.date BETWEEN ? AND ?
            ORDER BY a.date""", (sid, w_start.isoformat(), w_end.isoformat())))
     c = {"absent_cur": 0, "absent_prev": 0, "made_up": 0, "credited": 0, "booked": 0, "available": 0,
          "available_ids": [], "month_cur": cur, "month_prev": prev}
+    from . import subscriptiondates
     for r in rows:
+        if subscriptiondates.excluded(con, sid, r["group_id"], r["date"]):
+            continue
         c["absent_cur" if r["date"].startswith(cur) else "absent_prev"] += 1
         if r["resolved"] == "makeup":
             c["made_up"] += 1
@@ -105,12 +109,14 @@ def unresolved_absences_in_month(con, sid: int, ym: str, group_id: int | None = 
     extra, args = ("AND a.group_id = ?", (group_id,)) if group_id else ("", ())
     if cert_only:
         extra += " AND a.cert = 1"
-    return _rows(con.execute(
-        f"""SELECT a.id, a.date FROM attendance a
+    rows = _rows(con.execute(
+        f"""SELECT a.id, a.date, a.group_id FROM attendance a
            WHERE a.student_id = ? AND a.status = 'absent' AND a.resolved IS NULL
              AND a.date BETWEEN ? AND ? {extra}
              AND NOT EXISTS (SELECT 1 FROM makeups m WHERE m.absence_id = a.id AND m.status = 'booked')
            ORDER BY a.date""", (sid, start.isoformat(), end.isoformat(), *args)))
+    from . import subscriptiondates
+    return [r for r in rows if not subscriptiondates.excluded(con, sid, r["group_id"], r["date"])]
 
 
 # ---------- группы ученика ----------
@@ -261,7 +267,7 @@ def _pick_enrollment(con, sid: int, enrollment_id) -> dict:
     return ens[0]
 
 
-def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tariff=None) -> dict:
+def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False) -> dict:
     get_student_row(con, sid)
     e = _pick_enrollment(con, sid, enrollment_id)
     if tariff is not None:
@@ -275,9 +281,13 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
     cert_from = (con.execute("SELECT value FROM settings WHERE key='cert_required_from'").fetchone() or ["9999"])[0]
     # перерасчёт на «Гибком»: без справки (с 01.11.2026), не больше 3 и только при оплате следующего месяца
     prev_abs = unresolved_absences_in_month(con, sid, logic.shift_month(ym, -1), e["group_id"], cert_only=ym >= cert_from)
-    from . import closures, pricing, program
+    prev_flex = con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND enrollment_id=? AND month=?
+        AND tariff='flex' AND status='paid'""", (sid, e["id"], logic.shift_month(ym, -1))).fetchone()
+    eligible = prev_abs if prev_flex and e["tariff"] == "flex" else []
+    requested = credit_requested is True or credit_requested == "1"
+    from . import closures, pricing, program, subscriptiondates
     if program.program_of_group(con, e["group_id"]):
-        return program.quote(con, sid, ym, e, discount_id=discount_id)
+        return program.quote(con, sid, ym, e, discount_id=discount_id, excluded_dates=excluded_dates)
     on = today()
     pr = pricing.prices_for(con, ym)  # прайс оплачиваемого месяца (pricing.py)
     ms, me = logic.month_bounds(ym)
@@ -293,10 +303,18 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
     if newcomer:  # новичок в текущем месяце: только оставшиеся занятия
         start = pricing.newcomer_start(con, sid, on)
         closed = closed | {d.isoformat() for d in logic.lesson_dates(weekdays, ym) if d < start}
+    available = [d.isoformat() for d in logic.lesson_dates(weekdays, ym)
+                 if d.isoformat() not in closed and not logic.in_vacation(d, vacations_of(con, sid))]
+    exceptions = subscriptiondates.validate(excluded_dates, available)
+    closed = closed | set(exceptions)
     q = logic.quote(weekdays=weekdays, ym=ym, tariff=e["tariff"], prices={"fixed": pr["fixed"], "flex": pr["flex"]},
-                    vacations=vacations_of(con, sid), prev_unresolved_absences=len(prev_abs), closed=closed)
-    q["credit_absence_ids"] = [a["id"] for a in prev_abs[:q["credit_lessons"]]]
-    q["credit_absence_dates"] = [a["date"] for a in prev_abs[:q["credit_lessons"]]]
+                    vacations=vacations_of(con, sid), prev_unresolved_absences=min(len(eligible), len(available) - len(exceptions)) if requested else 0, closed=closed)
+    q["calendar_dates"] = available
+    q["excluded_dates"] = exceptions
+    q["credit_available"] = min(len(eligible), logic.MAX_FLEX_CREDIT)
+    q["credit_requested"] = requested
+    q["credit_absence_ids"] = [a["id"] for a in eligible[:q["credit_lessons"]]]
+    q["credit_absence_dates"] = [a["date"] for a in eligible[:q["credit_lessons"]]]
     dl = pricing.deadline(con, ym)
     late = on > dl and not newcomer and pr["late_pct"] > 0
     total, fee = q["total"], 0
@@ -325,7 +343,7 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
     return q
 
 
-def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id=None, tariff=None) -> dict:
+def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False) -> dict:
     from . import smart
     smart.require(con, sid, "sale")  # почта родителя нужна для чека PayKeeper
     e = _pick_enrollment(con, sid, enrollment_id)
@@ -333,7 +351,7 @@ def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id
                            (e["id"], ym)).fetchone()
     if existing:
         raise ApiError(f"На {logic.month_label(ym)} в группу {e['group_name']} уже есть абонемент")
-    q = quote_for(con, sid, ym, e["id"], discount_id, tariff)
+    q = quote_for(con, sid, ym, e["id"], discount_id, tariff, excluded_dates, credit_requested)
     con.execute("DELETE FROM subscriptions WHERE enrollment_id=? AND month=? AND status='cancelled'", (e["id"], ym))
     d = q.get("discount") or {}
     sub_id = con.execute(
@@ -341,11 +359,14 @@ def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id
            late_fee, price, status, created_at, discount_name, discount_amount) VALUES (?,?,?,?,?,?,?,?,?,'invoiced',?,?,?)""",
         (sid, e["id"], ym, q["tariff"], q["lessons_paid"], q["per_lesson"], q["credit_lessons"], q["late_fee"],
          q["total"], now_iso(), d.get("name", ""), d.get("amount", 0))).lastrowid
+    con.execute("UPDATE subscriptions SET excluded_dates=? WHERE id=?", (json.dumps(q.get("excluded_dates", [])), sub_id))
     from . import money
     money.reconcile(con, sid)  # депозит сам закрывает новый счёт
     for aid in q["credit_absence_ids"]:
         con.execute("UPDATE attendance SET resolved='credit', resolved_month=? WHERE id=?", (ym, aid))
     extra = f", перерасчёт {q['credit_lessons']} пропуск(а) −{q['credit']} ₽" if q["credit_lessons"] else ""
+    if q.get("excluded_dates"):
+        extra += ", индивидуально исключены даты: " + ", ".join(q["excluded_dates"])
     if d:
         extra += f", скидка «{d['name']}» −{d['amount']} ₽"
     log(con, sid, f"Выставлен счёт на {q['month_label']}, {e['group_name']}: {q['total']} ₽ ({q['lessons_paid']} занятий{extra})",
@@ -924,6 +945,9 @@ def journal(con, group_id: int, day: str, paid_only: bool = False) -> dict:
                 continue
             a = con.execute("SELECT status, resolved, warned, note FROM attendance WHERE student_id=? AND date=? AND group_id=?",
                             (s["id"], day, group_id)).fetchone()
+            from . import subscriptiondates
+            if subscriptiondates.excluded(con, s["id"], group_id, day) and not a:
+                continue
             vac = logic.in_vacation(d, vacations_of(con, s["id"]))
             # в журнале только те, у кого оплачено фактически: абонемент на месяц или разовое (Юлия, 04.11).
             # Уже отмеченных не прячем, чтобы не потерять отметку
@@ -1038,6 +1062,9 @@ def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -
         raise ApiError("Этот пропуск уже учтён в перерасчёте абонемента")
     if a and a["resolved"] == "makeup" and status != "absent":
         raise ApiError("Этот пропуск уже отработан")
+    from . import subscriptiondates
+    if status != "clear" and subscriptiondates.excluded(con, sid, group_id, day):
+        raise ApiError("Эта дата исключена из абонемента: сначала оформите занятие отдельно")
     if status == "clear":
         if a:
             con.execute("UPDATE makeups SET status='cancelled' WHERE absence_id=? AND status='booked'", (a["id"],))

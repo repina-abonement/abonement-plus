@@ -183,8 +183,8 @@ def is_newcomer(con, sid: int, pid: int, ym: str) -> bool:
 
 # ---------------- расчёт абонемента ----------------
 
-def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = None) -> dict:
-    from . import money
+def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = None, excluded_dates=None) -> dict:
+    from . import money, subscriptiondates
     on = on or date.today()
     g = con.execute("SELECT * FROM groups WHERE id=?", (e["group_id"],)).fetchone()
     prog = program_of_group(con, g["id"])
@@ -207,6 +207,10 @@ def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = N
             start = date.fromisoformat(s["trial_at"][:10]) + timedelta(days=1)
         arena_dates = [d for d in arena_dates if d >= start]
         ofp_dates = [d for d in ofp_dates if d >= start]
+    available = sorted({d.isoformat() for d in arena_dates + ofp_dates})
+    exceptions = subscriptiondates.validate(excluded_dates, available)
+    arena_dates = [d for d in arena_dates if d.isoformat() not in exceptions]
+    ofp_dates = [d for d in ofp_dates if d.isoformat() not in exceptions]
     deadline = _deadline(ym, prog["deadline_day"])
     late = on > deadline and not newcomer
     pa = pr["arena_only"] if tariff == "arena_only" else pr["arena"]
@@ -245,6 +249,7 @@ def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = N
         "credit_absence_ids": [], "credit_absence_dates": [], "total": total, "late_fee": (gross - base) if late else 0,
         "discount": {"id": disc["id"], "name": disc["name"], "percent": disc["percent"], "amount": off, "auto": True} if disc else None,
         "tariff": tariff, "group": e.get("group_name") or g["name"], "enrollment_id": e["id"], "days_label": "",
+        "calendar_dates": available, "excluded_dates": exceptions,
         "dates": [d.isoformat() for d in sorted(arena_dates + ofp_dates)], "vacation_dates": [],
         "program": {"id": prog["id"], "name": prog["name"], "tariff": tariff, "tariff_label": TARIFFS[tariff],
                     "ofp_group": ofp_g["name"] if ofp_g else "", "lines": lines, "late": late, "newcomer": newcomer,
@@ -270,7 +275,7 @@ def reprice(con, sub_id: int, on: date | None = None) -> bool:
     if money.balance(con, s["student_id"])["covered"].get(sub_id, 0):
         return False  # уже частично оплачен — не трогаем
     e = next((x for x in sv.enrollments_of(con, s["student_id"], active_only=False) if x["id"] == s["enrollment_id"]), None)
-    q = quote(con, s["student_id"], s["month"], e, on=on)
+    q = quote(con, s["student_id"], s["month"], e, on=on, excluded_dates=json.loads(s["excluded_dates"]))
     d = q["discount"] or {}
     if q["total"] == s["price"] and q["late_fee"] == s["late_fee"]:
         return False

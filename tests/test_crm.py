@@ -65,10 +65,13 @@ def test_flow():
     c = sv.absence_counters(con, sid)
     check(c["made_up"] == 1 and c["available"] == 3, "Отработал: 1 отработан, 3 остались")
 
-    q = sv.quote_for(con, sid, "2026-11")
+    eid = sv.enrollments_of(con, sid)[0]["id"]
+    con.execute("""INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,per_lesson,price,status,created_at)
+                   VALUES (?,?,'2026-10','flex',9,1550,13950,'paid','2026-09-20')""", (sid,eid))
+    q = sv.quote_for(con, sid, "2026-11", credit_requested=True)
     check(q["credit_lessons"] == 3 and q["lessons_paid"] == 9, "Ноябрь: перерасчёт 3 неотработанных пропусков")
     check(q["total"] == 9 * 1550 - 3 * 1550, "Ноябрь: 13 950 − 4 650 = 9 300 ₽")
-    sv.create_invoice(con, sid, "2026-11", USER)
+    sv.create_invoice(con, sid, "2026-11", USER, credit_requested=True)
     c = sv.absence_counters(con, sid)
     check(c["available"] == 0 and c["credited"] == 3, "После счёта пропуски обнулились и пропали из отработок")
     try:
@@ -76,7 +79,7 @@ def test_flow():
         check(False, "Нельзя отработать пересчитанный пропуск")
     except sv.ApiError:
         check(True, "Нельзя отработать пересчитанный пропуск")
-    sub = con.execute("SELECT id FROM subscriptions").fetchone()[0]
+    sub = con.execute("SELECT id FROM subscriptions WHERE month='2026-11'").fetchone()[0]
     sv.cancel_subscription(con, sub, USER)
     c = sv.absence_counters(con, sid)
     check(c["available"] == 3, "Отмена счёта возвращает пропуски")
