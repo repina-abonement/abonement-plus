@@ -1154,13 +1154,13 @@ def enrollment_patch(con, h, user, body, q, eid):
 @route("GET", "/api/enrollments/{eid}/transfer", role="operator")
 def enrollment_transfer_plan(con, h, user, body, q, eid):
     from . import transfer
-    return transfer.plan(con, int(eid), int(q.get("group_id") or 0), q.get("date") or "", [int(x) for x in (q.get("weekdays") or "").split(",") if x])
+    return transfer.plan(con, int(eid), int(q.get("group_id") or 0), q.get("date") or "", [int(x) for x in (q.get("weekdays") or "").split(",") if x], q.get("tariff") or "fixed")
 
 
 @route("POST", "/api/enrollments/{eid}/transfer", role="operator")
 def enrollment_transfer(con, h, user, body, q, eid):
     from . import transfer
-    return transfer.apply(con, int(eid), int(body.get("group_id") or 0), body.get("date") or "", user, body.get("weekdays"))
+    return transfer.apply(con, int(eid), int(body.get("group_id") or 0), body.get("date") or "", user, body.get("weekdays"), body.get("tariff") or "fixed", body.get("expected"))
 
 
 @route("GET", "/api/subscriptions/{sub}/payment-quote", role="operator")

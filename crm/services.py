@@ -442,7 +442,7 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
          q["total"], now_iso(), d.get("name", ""), d.get("amount", 0))).lastrowid
     snapshot = {"tariff":q["tariff"],"ofp_group_id":q["program"].get("ofp_group_id"),
                 "contract":{"base":q["base"],"on_time_total":q["program"]["on_time_total"],"late_total":q["program"]["late_total"],
-                            "deadline":q["program"]["deadline"],"lessons":q["lessons_paid"]}} if q.get("program") else None
+                            "deadline":q["program"]["deadline"],"lessons":q["lessons_paid"],"components":q["components"]}} if q.get("program") else None
     con.execute("UPDATE subscriptions SET excluded_dates=?, program_selection=? WHERE id=?",
                 (json.dumps(q.get("excluded_dates", [])), json.dumps(snapshot) if snapshot else "", sub_id))
     from . import money

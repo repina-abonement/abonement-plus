@@ -262,6 +262,8 @@ def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = N
         "discount": {"id": disc["id"], "name": disc["name"], "percent": disc["percent"], "amount": off, "auto": True} if disc else None,
         "tariff": tariff, "group": e.get("group_name") or g["name"], "enrollment_id": e["id"], "days_label": "",
         "calendar_dates": available, "excluded_dates": exceptions,
+        "components": [{"kind":"arena","group_id":g["id"],"rate":pa,"dates":[d.isoformat() for d in arena_dates]},
+                       {"kind":"ofp","group_id":ofp_gid,"rate":po,"dates":[d.isoformat() for d in ofp_dates]}],
         "dates": [d.isoformat() for d in sorted(arena_dates + ofp_dates)], "vacation_dates": [],
         "program": {"id": prog["id"], "name": prog["name"], "tariff": tariff, "tariff_label": TARIFFS[tariff],
                     "ofp_group": ofp_g["name"] if ofp_g else "", "ofp_group_id": ofp_gid, "lines": lines, "late": late, "newcomer": newcomer,

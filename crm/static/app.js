@@ -1770,7 +1770,6 @@ async function openStudent(id, options = {}) {
   wireClientAttendance(body,d,reload);
   body.querySelectorAll("[data-sub-transfer]").forEach(b => b.onclick = () => {
     const sub=d.subscriptions.find(s=>s.id===+b.dataset.subTransfer), e=d.enrollments.find(e=>e.id===sub.enrollment_id), box=body.querySelector(`[data-sub-transfer-box="${sub.id}"]`);
-    if(e.program_id){ box.hidden=false; box.innerHTML='<div class="finance-note">Для перевода из сборной нужно согласовать стоимость и условия ОФП с руководителем.</div>'; return; }
     openTransfer(e.id,box,d,groups,reload,sub.month>d.cur_month?sub.month+'-01':S.meta.today);
   });
   const patch = async (data) => { try { await api("PATCH", `/api/students/${id}`, data); reload(); } catch (e) { fail(e); } };
@@ -2709,25 +2708,31 @@ function openTransfer(eid, box, d, groups, reload, initialDate) {
   box.innerHTML = `<div class="row" style="margin-top:8px">
       <div class="field"><label>В группу</label><select data-trg><option value="">Выберите группу</option>${opts.map((g) => `<option value="${g.id}">${esc(g.name)} · ${esc(g.age)} лет</option>`).join("")}</select></div>
       <div class="field" style="flex:0 0 150px"><label>С какого дня</label><input type="date" data-trd value="${initialDate || iso(first)}" min="${iso(new Date(t.getFullYear(), t.getMonth(), 1))}"></div></div>
+    ${e.program_id?'<div class="field"><label>Тариф новой группы</label><select data-trtar><option value="fixed">Негибкий</option><option value="flex">Гибкий</option></select></div>':""}
     <div data-trplan class="small muted">Выберите группу: покажу, что станет с абонементом и оплатой</div>`;
   const sel = box.querySelector("[data-trg]"), dt = box.querySelector("[data-trd]"), out = box.querySelector("[data-trplan]");
+  let transferVersion=0;
   const calc = async () => {
-    if (!sel.value) return;
+    const request=++transferVersion;
+    if (!sel.value) {out.textContent="Выберите группу";return;}
+    const target=+sel.value,start=dt.value,tariff=box.querySelector("[data-trtar]")?.value||"fixed";
     out.textContent = "Считаю…";
     try {
-      const p = await api("GET", `/api/enrollments/${eid}/transfer?group_id=${sel.value}&date=${dt.value}`);
-      const rows = p.months.map((m) => `<li><b>${esc(m.label)}</b>: было ${m.old_lessons} зан. за ${rub(m.old_price)} →
+      const p = await api("GET", `/api/enrollments/${eid}/transfer?group_id=${target}&date=${start}&tariff=${tariff}`);
+      if(request!==transferVersion||!box.isConnected)return;
+      const rows = p.months.map((m) => p.program_transfer?`<li><b>${esc(m.label)}</b><div>Остаток Арктики: ${rub(m.arena_credit)} · ОФП: ${rub(m.ofp_credit)}</div><div>Зачёт стоимости: ${rub(m.credit)} · Новая группа: ${m.new_lessons} занятий, ${rub(m.new_price)}</div></li>`:`<li><b>${esc(m.label)}</b>: было ${m.old_lessons} зан. за ${rub(m.old_price)} →
         ${m.keep_lessons ? `${m.keep_lessons} зан. в старой группе (${rub(m.keep_price)}) и ` : ""}${m.new_lessons} зан. в новой (${rub(m.new_price)})</li>`).join("");
       out.innerHTML = `<div style="margin:6px 0">С ${dShort(p.start)} в группу <b>${esc(p.to_group)}</b>. До этой даты ребёнок остаётся в журнале старой группы</div>
-        ${rows ? `<ul style="margin:4px 0 6px 18px">${rows}</ul><div>${p.diff > 0 ? `Доплата ${rub(p.diff)}: появится как долг` : p.diff < 0 ? `Разница ${rub(-p.diff)} уйдёт на депозит` : "По деньгам без изменений"}</div>`
+        ${p.program_transfer?'<p>Арктика и ОФП прекращаются с даты перевода. Остатки обоих направлений учитываются вместе. Если прежний абонемент оплачен частично, в балансе учитываются только реальные платежи.</p>':""}
+        ${rows ? `<ul style="margin:4px 0 6px 18px">${rows}</ul><div>${p.program_transfer?`После перевода по всем счетам клиента: к оплате ${rub(p.projected_due)}, остаток на балансе ${rub(p.projected_deposit)}`:p.diff > 0 ? `Доплата ${rub(p.diff)}: появится как долг` : p.diff < 0 ? `Разница ${rub(-p.diff)} уйдёт на депозит` : "По деньгам без изменений"}</div>`
           : `<div>Абонементов с этой даты нет, переносить нечего</div>`}
         <button class="btn primary sm" data-trgo style="margin-top:8px">Перевести</button>`;
       out.querySelector("[data-trgo]").onclick = async () => {
-        try { await api("POST", `/api/enrollments/${eid}/transfer`, { group_id: +sel.value, date: dt.value }); toast("Ученик переведён"); reload(); } catch (err) { fail(err); }
+        try { out.querySelector("[data-trgo]").disabled=true; await api("POST", `/api/enrollments/${eid}/transfer`, { group_id: target, date: start, tariff, expected:{diff:p.diff,credit_total:p.credit_total??null,months:p.months.map(m=>[m.sub_id,m.old_price,m.keep_price,m.new_price,m.new_lessons])} }); toast("Ученик переведён"); reload(); } catch (err) { fail(err); if(out.querySelector("[data-trgo]"))out.querySelector("[data-trgo]").disabled=false; }
       };
-    } catch (err) { out.innerHTML = `<span style="color:#b42318">${esc(err.message)}</span>`; }
+    } catch (err) { if(request===transferVersion)out.innerHTML = `<span style="color:#b42318">${esc(err.message)}</span>`; }
   };
-  sel.onchange = calc; dt.onchange = calc;
+  sel.onchange = calc; dt.onchange = calc; if(box.querySelector("[data-trtar]"))box.querySelector("[data-trtar]").onchange=calc;
 }
 
 /* Первый вход сотрудника: принять документы (NDA, правила работы с данными, согласие, журнал, ПЭП) */
