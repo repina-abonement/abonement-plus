@@ -261,9 +261,17 @@ def _pick_enrollment(con, sid: int, enrollment_id) -> dict:
     return ens[0]
 
 
-def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None) -> dict:
+def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tariff=None) -> dict:
     get_student_row(con, sid)
     e = _pick_enrollment(con, sid, enrollment_id)
+    if tariff is not None:
+        if e.get("program_id") or e.get("lesson_kind") == "arena":
+            if tariff != e["tariff"]:
+                raise ApiError("Тариф Арктики меняется в настройках программы со следующего месяца")
+        elif tariff not in ("fixed", "flex"):
+            raise ApiError("Неизвестный тариф")
+        else:
+            e = dict(e, tariff=tariff)
     cert_from = (con.execute("SELECT value FROM settings WHERE key='cert_required_from'").fetchone() or ["9999"])[0]
     # перерасчёт на «Гибком»: без справки (с 01.11.2026), не больше 3 и только при оплате следующего месяца
     prev_abs = unresolved_absences_in_month(con, sid, logic.shift_month(ym, -1), e["group_id"], cert_only=ym >= cert_from)
@@ -317,7 +325,7 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None) -> d
     return q
 
 
-def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id=None) -> dict:
+def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id=None, tariff=None) -> dict:
     from . import smart
     smart.require(con, sid, "sale")  # почта родителя нужна для чека PayKeeper
     e = _pick_enrollment(con, sid, enrollment_id)
@@ -325,7 +333,7 @@ def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id
                            (e["id"], ym)).fetchone()
     if existing:
         raise ApiError(f"На {logic.month_label(ym)} в группу {e['group_name']} уже есть абонемент")
-    q = quote_for(con, sid, ym, e["id"], discount_id)
+    q = quote_for(con, sid, ym, e["id"], discount_id, tariff)
     con.execute("DELETE FROM subscriptions WHERE enrollment_id=? AND month=? AND status='cancelled'", (e["id"], ym))
     d = q.get("discount") or {}
     sub_id = con.execute(

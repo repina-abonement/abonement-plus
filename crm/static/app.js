@@ -1464,12 +1464,15 @@ async function openSell(d, reload) {
   const id = d.student.id, box = $("#sell-box");
   scTab("abon");
   const ens = d.enrollments.filter((e) => e.lesson_kind !== "ofp");
+  const previous = (d.subscriptions || []).filter((s) => s.status !== "cancelled" && s.month < d.next_month && ens.some((e) => e.id === s.enrollment_id))
+    .sort((a, b) => b.month.localeCompare(a.month) || b.id - a.id);
+  const preferred = ens.find((e) => e.id === previous[0]?.enrollment_id) || ens.find((e) => e.group_id === d.student.group_id) || ens[0];
   const methods = Object.entries(PAY_METHODS).filter(([k]) => !PAY_INTERNAL.includes(k) && k !== "online");
   box.innerHTML = `<div class="section sell">
     <div class="row" style="align-items:center"><h3 class="grow" style="margin:0">🛒 Продать абонемент</h3><button class="icon-btn" id="sl-x" title="Закрыть">✕</button></div>
     <div class="row" style="margin-top:8px">
       <div class="field"><label>Месяц</label><select id="sl-month">${[d.cur_month, d.next_month].map((m) => `<option value="${m}" ${m === d.next_month ? "selected" : ""}>${monthLabel(m)}</option>`).join("")}</select></div>
-      <div class="field"><label>Группа</label><select id="sl-en">${ens.map((e) => `<option value="${e.id}">${esc(e.group_name)}</option>`).join("")}</select></div></div>
+      <div class="field"><label>Группа</label><select id="sl-en">${ens.map((e) => `<option value="${e.id}" ${e === preferred ? "selected" : ""}>${esc(e.group_name)}</option>`).join("")}</select></div></div>
     <div class="row">
       <div class="field"><label>Тариф</label><select id="sl-tar"><option value="fixed">Негибкий</option><option value="flex">Гибкий</option></select></div>
       <div class="field"><label>Скидка</label><select id="sl-disc"><option value="">По правилам (или без скидки)</option>${(d.discounts || []).map((x) => `<option value="${x.id}">${esc(x.name)}, ${x.percent}%</option>`).join("")}</select></div></div>
@@ -1477,24 +1480,36 @@ async function openSell(d, reload) {
     <div class="sc-actions" style="margin-top:10px">
       <button class="btn primary" id="sl-link">💳 Ссылка на оплату</button>
       <button class="btn" id="sl-now">✅ Оплачено сейчас</button>
-      <button class="btn" id="sl-inv">🧾 Только выставить счёт</button></div>
+      </div>
     <div id="sl-res"></div></div>`;
   const en = () => ens.find((e) => e.id === +$("#sl-en").value);
-  let total = 0;
+  let total = 0, quoteVersion = 0;
+  const recommendTariff = () => {
+    const last = previous.find((s) => s.enrollment_id === en().id && s.month < $("#sl-month").value);
+    const tariff = last?.tariff || en().tariff || "fixed";
+    $("#sl-tar").innerHTML = ["pkg", "arena_only"].includes(tariff)
+      ? `<option value="${esc(tariff)}">${tariff === "pkg" ? "Арктика + ОФП" : "Только Арктика"}</option>`
+      : '<option value="fixed">Негибкий</option><option value="flex">Гибкий</option>';
+    $("#sl-tar").value = tariff;
+  };
+  recommendTariff();
   const quote = async () => {
-    $("#sl-tar").value = en().tariff || "fixed";
+    const version = ++quoteVersion;
+    busy(true);
+    $("#sl-res").innerHTML = "";
     $("#sl-q").innerHTML = "Считаю…";
     try {
-      const q = await api("GET", `/api/students/${id}/quote?month=${$("#sl-month").value}&enrollment_id=${en().id}${$("#sl-disc").value ? "&discount_id=" + $("#sl-disc").value : ""}`);
+      const q = await api("GET", `/api/students/${id}/quote?month=${$("#sl-month").value}&enrollment_id=${en().id}&tariff=${encodeURIComponent($("#sl-tar").value)}${$("#sl-disc").value ? "&discount_id=" + $("#sl-disc").value : ""}`);
+      if (version !== quoteVersion) return;
       total = q.total; $("#sl-q").innerHTML = q.program ? programQuoteHtml(q) : quoteHtml(q);
-    } catch (e) { $("#sl-q").textContent = e.message; }
+      busy(false);
+    } catch (e) { if (version === quoteVersion) $("#sl-q").textContent = e.message; }
   };
-  $("#sl-month").onchange = quote; $("#sl-en").onchange = quote; $("#sl-disc").onchange = quote;
-  $("#sl-tar").onchange = async (e) => { try { await api("PATCH", `/api/enrollments/${en().id}`, { tariff: e.target.value }); en().tariff = e.target.value; quote(); } catch (err) { fail(err); } };
+  $("#sl-month").onchange = quote; $("#sl-en").onchange = () => { recommendTariff(); quote(); }; $("#sl-disc").onchange = quote;
+  $("#sl-tar").onchange = quote;
   $("#sl-x").onclick = () => { box.innerHTML = ""; };
-  const invoice = () => api("POST", `/api/students/${id}/invoice`, { month: $("#sl-month").value, enrollment_id: en().id, discount_id: $("#sl-disc").value || null });
+  const invoice = () => api("POST", `/api/students/${id}/invoice`, { month: $("#sl-month").value, enrollment_id: en().id, tariff: $("#sl-tar").value, discount_id: $("#sl-disc").value || null });
   const busy = (on) => box.querySelectorAll(".sc-actions button").forEach((b) => (b.disabled = on));
-  $("#sl-inv").onclick = async () => { busy(true); try { const r = await invoice(); toast(`Счёт выставлен: ${rub(r.quote.total)}`); reload(); } catch (e) { fail(e); busy(false); } };
   $("#sl-now").onclick = () => {
     $("#sl-res").innerHTML = `<div class="row" style="margin-top:10px;align-items:flex-end"><div class="field"><label>Как оплатили</label><select id="sl-m">${methods.map(([k, t]) => `<option value="${k}">${t}</option>`).join("")}</select></div>
       <button class="btn primary" id="sl-ok" style="flex:0">Принять ${rub(total)}</button></div>`;
@@ -1512,7 +1527,8 @@ async function openSell(d, reload) {
       const r = await invoice();
       const what = `Абонемент на ${monthLabel($("#sl-month").value)}: ${d.student.name}`;
       const l = await api("POST", `/api/students/${id}/paylinks`, { amount: r.quote.total, purpose: what, subscription_id: r.id });
-      const msg = `Здравствуйте! Ссылка для оплаты: ${l.purpose}, ${l.amount} ₽\n${l.url}`;
+      const tariffLabel = $("#sl-tar").selectedOptions[0]?.textContent || "";
+      const msg = `Абонемент на ${monthLabel($("#sl-month").value)}\n${d.student.name}\n\nГруппа: ${en().group_name}\nТариф: ${tariffLabel}\n\nК оплате: ${rub(l.amount)}\n\nСсылка для оплаты:\n${l.url}`;
       $("#sl-res").innerHTML = `<div class="field" style="margin-top:10px"><label>Счёт выставлен. Отправьте родителю, после оплаты абонемент отметится сам</label><textarea id="sl-msg" rows="3">${esc(msg)}</textarea></div>
         <div class="sc-actions"><button class="btn primary" id="sl-send">Вставить в чат с семьёй</button><button class="btn" id="sl-copy">Скопировать</button><button class="btn" id="sl-done">Готово</button></div>`;
       $("#sl-copy").onclick = () => navigator.clipboard.writeText($("#sl-msg").value).then(() => toast("Скопировано"));

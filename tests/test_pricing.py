@@ -48,6 +48,16 @@ def main():
     q = sv.quote_for(con, b, "2026-12", discount_id=con.execute("SELECT id FROM discounts WHERE name LIKE 'Многодет%'").fetchone()[0])
     check(q["discount"] is None and q["total"] == 12758, "После 25-го ни автоматической, ни ручной скидки, только +5%")
 
+    print("Тариф в окне продажи")
+    selected = sv.quote_for(con, a, "2027-02", tariff="flex")
+    check(selected["tariff"] == "flex" and selected["per_lesson"] == 1600,
+          "Выбранный гибкий тариф используется в расчёте")
+    inv_selected = sv.create_invoice(con, a, "2027-02", OP, tariff="flex")
+    check(con.execute("SELECT tariff FROM subscriptions WHERE id=?", (inv_selected["id"],)).fetchone()[0] == "flex",
+          "Счёт сохраняет выбранный в окне тариф")
+    check(sv.enrollments_of(con, a)[0]["tariff"] == "fixed",
+          "Просмотр и продажа другого тарифа не переписывают текущую запись клиента")
+
     print("Дата оплаты решает")
     sv.today = lambda: date(2026, 11, 20)
     inv = sv.create_invoice(con, b, "2026-12", OP)
