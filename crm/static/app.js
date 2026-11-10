@@ -2706,7 +2706,7 @@ function openTransfer(eid, box, d, groups, reload, initialDate) {
   const opts = groups.filter((g) => !g.program_id && !g.is_makeup && g.id !== e.group_id && !d.enrollments.some((x) => x.group_id === g.id));
   box.hidden = false;
   box.innerHTML = `<div class="row" style="margin-top:8px">
-      <div class="field"><label>В группу</label><select data-trg><option value="">Выберите группу</option>${opts.map((g) => `<option value="${g.id}">${esc(g.name)} · ${esc(g.age)} лет</option>`).join("")}</select></div>
+      <div class="field"><label>В группу</label><select data-trg><option value="">Выберите группу</option>${opts.map((g) => `<option value="${g.id}">${esc(g.name)}${g.age?' · '+esc(g.age)+' лет':''}</option>`).join("")}</select></div>
       <div class="field" style="flex:0 0 150px"><label>С какого дня</label><input type="date" data-trd value="${initialDate || iso(first)}" min="${iso(new Date(t.getFullYear(), t.getMonth(), 1))}"></div></div>
     ${e.program_id?'<div class="field"><label>Тариф новой группы</label><select data-trtar><option value="fixed">Негибкий</option><option value="flex">Гибкий</option></select></div>':""}
     <div data-trplan class="small muted">Выберите группу: покажу, что станет с абонементом и оплатой</div>`;
