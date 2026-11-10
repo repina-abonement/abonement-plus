@@ -370,7 +370,7 @@ def paylinks_create(con, h, user, body, q, sid):
         sub = int(body["subscription_id"]) if body.get("subscription_id") else None
         if sub and not con.execute("SELECT 1 FROM subscriptions WHERE id=? AND student_id=?", (sub, int(sid))).fetchone():
             raise ApiError("Абонемент не найден")
-        return paylinks.create(con, int(sid), body.get("amount"), user, body.get("purpose") or "", sub)
+        return paylinks.create(con, int(sid), body.get("amount"), user, body.get("purpose") or "", sub, full_payment=bool(body.get("full_payment")))
     except paylinks.PayLinkError as e:
         raise ApiError(str(e))
 
@@ -1163,6 +1163,11 @@ def enrollment_transfer(con, h, user, body, q, eid):
     return transfer.apply(con, int(eid), int(body.get("group_id") or 0), body.get("date") or "", user, body.get("weekdays"))
 
 
+@route("GET", "/api/subscriptions/{sub}/payment-quote", role="operator")
+def subscription_payment_quote(con,h,user,body,q,sub):
+    return sv.payment_quote(con,int(sub))
+
+
 @route("POST", "/api/subscriptions/{sub}/pay", role="operator")
 def pay(con, h, user, body, q, sub):
     sv.pay_subscription(con, int(sub), user, body.get("method") or "cash", body.get("amount"))
@@ -1183,9 +1188,18 @@ def payment_add(con, h, user, body, q, sid):
                      comment=body.get("comment") or "")}
 
 
+@route("GET", "/api/students/{sid}/single-quote", role="operator")
+def single_quote(con, h, user, body, q, sid):
+    from . import singles
+    return singles.sale_quote(con,int(sid),int(q.get("group_id") or 0),q.get("month") or "",q.get("date"))
+
+
 @route("POST", "/api/students/{sid}/single", role="operator")
 def single_sell(con, h, user, body, q, sid):
     sv.get_student_row(con, int(sid))
+    if body.get("date"):
+        from . import singles
+        return singles.sell_visit(con,int(sid),int(body.get("group_id") or 0),body["date"],user)
     return {"id": mx(money.sell_single, con, int(sid), user)}
 
 
@@ -1849,6 +1863,18 @@ def move_balance(con, h, user, body, q, sid):
 def refund(con, h, user, body, q, sid):
     mx(money.refund, con, int(sid), int(body.get("amount") or 0), user, body.get("comment") or "")
     return {"ok": True}
+
+
+@route("GET", "/api/students/{sid}/attendance-calendar", role="operator")
+def client_calendar(con,h,user,body,q,sid):
+    from . import clientattendance
+    return clientattendance.calendar(con,int(sid),q.get("month") or sv.today().isoformat()[:7])
+
+
+@route("GET", "/api/students/{sid}/makeup-suggestions", role="operator")
+def client_makeup_suggestions(con,h,user,body,q,sid):
+    from . import clientattendance
+    return clientattendance.suggestions(con,int(sid))
 
 
 @route("POST", "/api/students/{sid}/makeups", role="operator")

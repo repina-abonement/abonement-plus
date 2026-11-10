@@ -47,12 +47,23 @@ def ready(con) -> bool:
     return all(fiscal.cfg(con, k) for k in ("fx_pk_server", "fx_pk_user", "fx_pk_password"))
 
 
-def create(con, sid: int, amount: int, user: dict, purpose: str = "", subscription_id: int | None = None) -> dict:
+def create(con, sid: int, amount: int, user: dict, purpose: str = "", subscription_id: int | None = None, full_payment: bool = False) -> dict:
     if not ready(con):
         raise PayLinkError("PayKeeper не подключён: Чеки → Подключение, адрес, логин и пароль PayKeeper")
     amount = int(amount or 0)
     if amount <= 0:
         raise PayLinkError("Укажите сумму")
+    if subscription_id:
+        from . import program, pricing
+        row=con.execute("SELECT student_id,status FROM subscriptions WHERE id=?",(subscription_id,)).fetchone()
+        if not row or row["student_id"]!=sid or row["status"]=='cancelled':
+            raise PayLinkError("Абонемент не найден или отменён")
+        program.reprice(con,subscription_id)
+        pricing.reprice(con,subscription_id)
+        price=con.execute("SELECT price FROM subscriptions WHERE id=?",(subscription_id,)).fetchone()[0]
+        left=0 if row["status"]=="paid" else max(0,price-money.balance(con,sid)["covered"].get(subscription_id,0))
+        if full_payment and amount!=left:
+            raise PayLinkError("Сумма к оплате изменилась. Обновите расчёт и создайте ссылку заново")
     s = con.execute("""SELECT s.name, (SELECT p.name FROM parents p WHERE p.family_id=s.family_id ORDER BY p.id LIMIT 1),
                        (SELECT p.phone FROM parents p WHERE p.family_id=s.family_id AND p.phone!='' ORDER BY p.id LIMIT 1)
                        FROM students s WHERE s.id=?""", (sid,)).fetchone()
@@ -87,7 +98,7 @@ def create(con, sid: int, amount: int, user: dict, purpose: str = "", subscripti
 
 def listing(con, sid: int) -> list[dict]:
     return [dict(r) for r in con.execute(
-        "SELECT id, amount, url, purpose, status, created_at, created_by, paid_at FROM pay_links WHERE student_id=? ORDER BY id DESC LIMIT 10",
+        "SELECT id, amount, url, purpose, status, created_at, created_by, paid_at,subscription_id FROM pay_links WHERE student_id=? ORDER BY id DESC LIMIT 10",
         (sid,))]
 
 
@@ -106,6 +117,12 @@ def apply_payments(con, pays: list[dict]) -> int:
             continue
         amount = int(round(float(str(p.get("pay_amount") or link["amount"]).replace(",", "."))))
         paid_at = str(p.get("success_datetime") or p.get("obtain_datetime") or _now())[:16].replace(" ", "T")
+        if link["subscription_id"]:
+            from . import program, pricing
+            try:paid_day=date.fromisoformat(paid_at[:10])
+            except ValueError:paid_day=date.today()
+            program.reprice(con,link["subscription_id"],on=paid_day)
+            pricing.reprice(con,link["subscription_id"],on=paid_day)
         pid = money.add_payment(con, link["student_id"], amount, "online", ROBOT, subscription_id=link["subscription_id"],
                                 comment=f"по ссылке PayKeeper №{p.get('id', '')}", paid_at=paid_at)
         con.execute("UPDATE pay_links SET status='paid', paid_at=?, payment_id=?, pk_payment_id=? WHERE id=?",

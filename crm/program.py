@@ -6,7 +6,7 @@
 
 Правила (Юлия, 28.10.2026):
 - абонемент только на полный месяц, по реальным датам расписания (праздники исключены); разовых нет;
-- новичок с середины месяца платит за занятия с ближайшего (после ПУ, если было), без надбавки;
+- автоматической продажи части месяца нет; индивидуальные исключения дат задаёт администратор;
 - цена по прайсу оплачиваемого месяца; при оплате позже 25 числа предыдущего месяца +5% (с декабря 2026);
 - скидка только «второму и следующему ребёнку» 20% и только при оплате до 25 числа; скидки не суммируются;
 - переносов и перерасчётов нет; тариф и день ОФП меняются только со следующего месяца;
@@ -191,7 +191,7 @@ def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = N
     prog = program_of_group(con, g["id"])
     if g["lesson_kind"] == "ofp":
         raise ApiError("ОФП сборной оплачивается в общем абонементе: выставьте счёт по группе Арктики")
-    plan = plan_of(con, sid, prog["id"])
+    plan = plan_of(con, sid, prog["id"]) or {"tariff":"arena_only","ofp_group_id":None,"next":None}
     tariff, ofp_gid = plan["tariff"], plan["ofp_group_id"]
     nxt = plan.get("next")
     if nxt and ym >= nxt.get("from", "9999"):
@@ -217,15 +217,8 @@ def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = N
     pr = prices_for(con, prog["id"], ym)
     arena_dates = _dates(con, g["id"], ym)
     ofp_dates = _dates(con, ofp_gid, ym) if tariff == "pkg" and ofp_gid else []
-    cur_month = logic.month_of(on)
-    newcomer = is_newcomer(con, sid, prog["id"], ym) and ym == cur_month
-    if newcomer:  # с ближайшей тренировки (после ПУ, если оно было в этом месяце)
-        s = con.execute("SELECT trial_at FROM students WHERE id=?", (sid,)).fetchone()
-        start = on
-        if s and s["trial_at"] and s["trial_at"][:10] >= on.isoformat():
-            start = date.fromisoformat(s["trial_at"][:10]) + timedelta(days=1)
-        arena_dates = [d for d in arena_dates if d >= start]
-        ofp_dates = [d for d in ofp_dates if d >= start]
+    # Правила Юлии от 10.11: полный месяц, исключения только явным выбором дат.
+    newcomer = False
     available = sorted({d.isoformat() for d in arena_dates + ofp_dates})
     exceptions = subscriptiondates.validate(excluded_dates, available)
     arena_dates = [d for d in arena_dates if d.isoformat() not in exceptions]
@@ -289,12 +282,37 @@ def reprice(con, sub_id: int, on: date | None = None) -> bool:
     from . import money, services as sv
     s = con.execute("""SELECT x.*, e.group_id FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id
                        WHERE x.id=? AND x.status='invoiced' AND x.kind='month'""", (sub_id,)).fetchone()
-    if not s or not program_of_group(con, s["group_id"]):
+    if not s or s["corrected"] or not program_of_group(con, s["group_id"]):
         return False
     if money.balance(con, s["student_id"])["covered"].get(sub_id, 0):
         return False  # уже частично оплачен — не трогаем
+    saved=json.loads(s["program_selection"]) if s["program_selection"] else {}
+    contract=saved.get("contract")
+    if contract:
+        late=(on or date.today()).isoformat()>contract["deadline"]
+        price=contract["late_total"] if late else contract["on_time_total"]
+        fee=max(0,contract["late_total"]-contract["base"]) if late else 0
+        discount=max(0,contract["base"]-contract["on_time_total"]) if not late else 0
+        if price==s["price"] and fee==s["late_fee"]:
+            return False
+        con.execute("UPDATE subscriptions SET price=?,late_fee=?,discount_amount=?,discount_name=CASE WHEN ?=0 THEN '' ELSE discount_name END WHERE id=?",(price,fee,discount,discount,sub_id))
+        sv.log(con,s["student_id"],f"Счёт сборной пересчитан по сроку оплаты с сохранением условий: {price} ₽",None,"payment")
+        return True
     e = next((x for x in sv.enrollments_of(con, s["student_id"], active_only=False) if x["id"] == s["enrollment_id"]), None)
     q = quote(con, s["student_id"], s["month"], e, on=on, excluded_dates=json.loads(s["excluded_dates"]), selection=json.loads(s["program_selection"]) if s["program_selection"] else None)
+    if not saved.get("contract") and not json.loads(s["excluded_dates"]) and s["lessons"] < q["lessons_paid"]:
+        # Счета до введения полного месяца сохраняют проданное количество занятий.
+        target_day=on or date.today()
+        pr=prices_for(con,q["program"]["id"],s["month"])
+        if target_day <= _deadline(s["month"],25) or not pr["late_pct"]:
+            return False
+        base=s["price"]+s["discount_amount"]-s["late_fee"]
+        fee=math.ceil(base*pr["late_pct"]/100-1e-9)
+        if base+fee==s["price"] and fee==s["late_fee"]:
+            return False
+        con.execute("UPDATE subscriptions SET price=?,late_fee=?,discount_amount=0,discount_name='' WHERE id=?",(base+fee,fee,sub_id))
+        sv.log(con,s["student_id"],f"Счёт сборной пересчитан по сроку оплаты, проданные занятия сохранены: {base+fee} ₽",None,"payment")
+        return True
     d = q["discount"] or {}
     if q["total"] == s["price"] and q["late_fee"] == s["late_fee"]:
         return False
@@ -383,11 +401,22 @@ def check_makeup(con, sid: int, group_id: int, day: str):
     if not sp:
         return
     d = date.fromisoformat(day)
+    g = con.execute("SELECT g.*,b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.id=?", (group_id,)).fetchone()
+    if g and g["lesson_kind"] == "ofp":
+        if sp["plan"]["tariff"] == "arena_only":
+            raise ApiError("На тарифе «Только Арктика» ОФП не засчитывается как отработка")
+        if g["program_id"] != sp["program"]["id"]:
+            raise ApiError("Выберите ОФП своего направления")
+        if g["id"] == sp["plan"]["ofp_group_id"]:
+            raise ApiError("Для отработки выберите другой день ОФП")
+        return
     if d.weekday() == 3:
-        raise ApiError("Сборная: в четверг отработок нет")
-    g = con.execute("SELECT name, lesson_kind FROM groups WHERE id=?", (group_id,)).fetchone()
-    if sp["plan"]["tariff"] == "arena_only" and g and (g["lesson_kind"] == "ofp" or "ОФП" in g["name"]):
-        raise ApiError("На тарифе «Только Арктика» ОФП не засчитывается как отработка")
+        raise ApiError("Сборная: в четверг отработок нет, кроме смены дня ОФП на тарифе с ОФП")
+    branch=(g["branch"] if g else "").casefold()
+    saturday=d.weekday()==5 and any(w in branch for w in ("небо","западн","чобот"))
+    monday=d.weekday()==0 and "небо" in branch and g and logic.group_time(g,d.weekday()) in ("18:45","19:45")
+    if not saturday and not monday:
+        raise ApiError("Сборная: выберите субботу в Небе/СК Западный или согласованный понедельник в Небе")
 
 
 def only_program(con, sid: int) -> bool:

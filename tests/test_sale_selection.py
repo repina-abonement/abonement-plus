@@ -63,7 +63,7 @@ def main():
     sale=sv.create_invoice(con,sid3,'2026-12',user,ae,tariff='pkg',ofp_group_id=sat)
     assert program.plan_of(con,sid3,pid)['next']['ofp_group_id']==sat
     snapshot=json.loads(con.execute('SELECT program_selection FROM subscriptions WHERE id=?',(sale['id'],)).fetchone()[0])
-    assert snapshot=={'tariff':'pkg','ofp_group_id':sat}
+    assert snapshot['tariff']=='pkg' and snapshot['ofp_group_id']==sat and snapshot['contract']['lessons']==13
     con.execute("UPDATE groups SET age='8+' WHERE id=?", (arena,))
     con.execute("UPDATE students SET birth='2021-01-01' WHERE id=?", (sid3,))
     assert not any(e['age_warn'] for e in sv.student_detail(con,sid3)['enrollments'])

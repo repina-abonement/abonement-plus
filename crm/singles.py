@@ -33,6 +33,8 @@ DEFAULT_TEXT = ("Здравствуйте! Напоминаем: завтра, {
 
 def init(con) -> None:
     con.executescript(SCHEMA)
+    if "subscription_id" not in {r[1] for r in con.execute("PRAGMA table_info(single_visits)")}:
+        con.execute("ALTER TABLE single_visits ADD COLUMN subscription_id INTEGER REFERENCES subscriptions(id)")
 
 
 def _now() -> datetime:
@@ -146,3 +148,55 @@ def rows_for_day(con, group_id: int, day: str) -> list:
     return con.execute("""SELECT v.id AS single_id, s.id, s.name, s.birth FROM single_visits v JOIN students s ON s.id=v.student_id
                           WHERE v.group_id=? AND v.date=? AND v.status='booked' AND s.archived=0 ORDER BY s.name""",
                        (group_id, day)).fetchall()
+
+
+def sale_quote(con, sid, group_id, ym, day=None):
+    from . import services as sv, schedule, closures, logic, money
+    sv.get_student_row(con, sid)
+    g = con.execute("SELECT * FROM groups WHERE id=? AND active=1 AND is_makeup=0", (group_id,)).fetchone()
+    if not g:
+        raise sv.ApiError("Выберите группу")
+    if g["program_id"]:
+        raise sv.ApiError("В сборной разовых занятий нет")
+    price = sv.settings(con).get("price_single")
+    if not str(price or "").isdigit() or int(price) <= 0:
+        raise sv.ApiError("Укажите стоимость разового занятия в настройках цен")
+    ms, me = logic.month_bounds(ym)
+    closed = closures.closed_dates(con, group_id, ms, me)
+    dates = [d.isoformat() for d in schedule.month_dates(con, g, "", ym) if d >= sv.today() and d.isoformat() not in closed]
+    selected = day or (dates[0] if dates else None)
+    if selected not in dates:
+        raise sv.ApiError("Выберите доступную дату занятия")
+    existing = con.execute("""SELECT x.id,x.price,x.status FROM single_visits v JOIN subscriptions x ON x.id=v.subscription_id
+        WHERE v.student_id=? AND v.group_id=? AND v.date=? AND v.status='booked' AND x.status!='cancelled'""", (sid,group_id,selected)).fetchone()
+    paid = 0
+    if existing:
+        price = existing["price"]
+        paid = price if existing["status"] == "paid" else money.balance(con,sid)["covered"].get(existing["id"],0)
+    return {"single":True,"month":ym,"group":g["name"],"group_id":group_id,"tariff":"single",
+            "total":max(0,int(price)-paid),"price_total":int(price),"paid":paid,"lessons_paid":1,
+            "dates":[selected],"calendar_dates":dates,"excluded_dates":[],"existing_id":existing["id"] if existing else None}
+
+
+def sell_visit(con, sid, group_id, day, user):
+    from . import services as sv, money, smart
+    smart.require(con, sid, "sale")
+    q = sale_quote(con,sid,group_id,(day or "")[:7],day)
+    if q["existing_id"]:
+        return {"id":q["existing_id"],"quote":q}
+    con.execute("SAVEPOINT sell_single_visit")
+    try:
+        visit=con.execute("SELECT id,group_id FROM single_visits WHERE student_id=? AND date=? AND status='booked'",(sid,day)).fetchone()
+        if visit and visit["group_id"] != group_id:
+            raise sv.ApiError("На эту дату уже есть запись в другую группу")
+        vid=visit["id"] if visit else book(con,sid,group_id,day,user)
+        sub=money.sell_single(con,sid,user,group_id)
+        con.execute("UPDATE subscriptions SET month=? WHERE id=?",(day[:7],sub))
+        con.execute("UPDATE single_visits SET subscription_id=? WHERE id=?",(sub,vid))
+        q["existing_id"]=sub
+        con.execute("RELEASE sell_single_visit")
+        return {"id":sub,"quote":q}
+    except BaseException:
+        con.execute("ROLLBACK TO sell_single_visit")
+        con.execute("RELEASE sell_single_visit")
+        raise

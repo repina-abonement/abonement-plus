@@ -1622,3 +1622,52 @@ textarea.nav-q { height:40px; min-height:40px; max-height:40px; resize:none; ove
 #comms-box .composer .row { flex-wrap:wrap; }
 #cm-text { flex:1 1 100%; min-width:0; }
 #comms-box #cm-send { min-width:120px; margin-left:auto; }
+/* Абонементы и деньги: карточки с подписанными суммами */
+.sub-list,.pay-list { list-style:none; margin:12px 0; padding:0; display:grid; gap:12px; }
+.subscription-card,.payment-card { border:1px solid var(--line); border-radius:12px; padding:16px; background:var(--surface); }
+.finance-card-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+.finance-card-head h4 { margin:0 0 5px; font-size:17px; }
+.finance-card-head h4::first-letter { text-transform:uppercase; }
+.finance-card-head time { font-size:13px; color:var(--ink-2); white-space:nowrap; }
+.subscription-meta { margin:8px 0; }
+.finance-numbers { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; padding:12px 0; }
+.finance-numbers small { display:block; color:var(--ink-2); font-size:12px; margin-bottom:4px; }
+.finance-numbers b { font-size:18px; }
+.finance-due { color:#ad5919; }
+.finance-detail { margin-top:12px; font-size:14px; line-height:1.6; }
+.finance-detail summary { cursor:pointer; color:var(--ink-2); }
+.finance-detail>.btn { margin-top:8px; }
+.subscription-card>[data-sub-transfer] { margin-top:10px; }
+.balance-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:14px 0; }
+.balance-summary>div { padding:16px; border-radius:12px; background:var(--bg); }
+.balance-summary small,.balance-summary span { display:block; color:var(--ink-2); font-size:12px; }
+.balance-summary b { display:block; font-size:22px; margin:7px 0; }
+.balance-summary .has-debt { border-left:3px solid #c33240; }
+.balance-summary .has-debt b { color:#b12d3b; }
+.finance-note { background:var(--bg); border-left:3px solid var(--accent); padding:12px 14px; border-radius:8px; font-size:14px; margin:12px 0; }
+.finance-history-title { margin:22px 0 12px; font-size:16px; }
+.payment-amount { font-size:20px; color:var(--accent); }
+.payment-amount.refund { color:#ad5919; }
+.payment-comment { font-size:14px; margin:10px 0 6px; overflow-wrap:anywhere; }
+.is-cancelled { opacity:.6; }
+.payment-link-card { padding:12px; border:1px solid var(--line); border-radius:10px; margin-top:10px; }
+.payment-link-card>.btn { margin-top:8px; }
+.sale-cal-day.available { background:var(--surface); border-style:dashed; cursor:pointer; }
+#sl-msg { min-height:210px; resize:vertical; line-height:1.55; }
+@media(max-width:600px) { .balance-summary { grid-template-columns:1fr; } .finance-numbers b { font-size:16px; } .finance-card-head { flex-wrap:wrap; } .subscription-card,.payment-card { padding:12px; } }
+/* Единая вкладка посещений */
+.sc-grid>.sc-left,.sc-grid>.sc-right,.sc-grid>.sc-info,.sc-grid>.sc-attendance { display:none; }
+.sc-grid[data-tab=feed]>.sc-left,.sc-grid[data-tab=abon]>.sc-right,.sc-grid[data-tab=info]>.sc-info,.sc-grid[data-tab=visits]>.sc-attendance { display:block; }
+.sc-debt-summary { display:flex; gap:12px; align-items:center; padding:10px 12px; background:#fff1f2; color:#9c2435; border-radius:8px; font-size:14px; }
+.attendance-toolbar { display:flex; gap:8px; align-items:center; margin:16px 0; max-width:400px; }
+.attendance-toolbar input { flex:1; min-width:0; }.attendance-toolbar .btn { flex:0 0 40px; }
+.attendance-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:16px; }
+.attendance-stats>div { background:var(--bg); padding:12px; border-radius:10px; }.attendance-stats b { display:block; font-size:24px; }.attendance-stats span { font-size:12px; color:var(--ink-2); }.attendance-stats .available { border-bottom:3px solid var(--accent); }
+.attendance-legend { display:flex; flex-wrap:wrap; gap:10px 16px; margin:14px 0; font-size:12px; }.attendance-legend>span { display:flex; align-items:center; gap:5px; }.attendance-legend i { font-style:normal; padding:2px 6px; border-radius:4px; }
+.attendance-calendar { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:5px; }.attendance-weekday { text-align:center; font-size:12px; color:var(--ink-2); padding:6px 0; }
+.attendance-day { min-height:82px; border:1px solid var(--line); background:var(--surface); color:var(--ink); border-radius:9px; padding:6px; text-align:left; cursor:pointer; min-width:0; }.attendance-day>b { font-size:13px; }.attendance-day.selected { outline:2px solid var(--accent); outline-offset:-2px; }.attendance-day.today>b { color:var(--accent); text-decoration:underline; }
+.attendance-day-tags { display:flex; flex-direction:column; gap:3px; margin-top:5px; }.attendance-day-tags>span { border-radius:4px; padding:2px 5px; font-size:11px; white-space:nowrap; }
+.att-subscription { background:#e5f5ec; color:#196b44; }.att-makeup { background:#e5f0ff; color:#225d9a; }.att-trial { background:#f1e9ff; color:#7043a5; }.att-single { background:#fff1df; color:#92591d; }.att-status-absent { text-decoration:line-through; }.att-status-warned { border:1px dashed currentColor; }
+#attendance-day-detail { margin:18px 0; padding:14px; border:1px solid var(--line); border-radius:12px; }#attendance-day-detail h4 { margin:0 0 12px; }.attendance-event { display:flex; flex-direction:column; gap:8px; padding:10px 0; }.attendance-event+.attendance-event { border-top:1px solid var(--line); }.attendance-event>div:first-child { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.makeup-panel { border-top:1px solid var(--line); margin-top:20px; padding-top:16px; }.makeup-panel h4 { margin:0 0 8px; font-size:17px; }.makeup-slot-list { display:grid; gap:10px; }.makeup-slot { border:1px solid var(--line); border-radius:10px; padding:12px; display:flex; justify-content:space-between; gap:14px; }.makeup-slot-count { text-align:right; flex:0 0 115px; }.makeup-slot-count>b,.makeup-slot-count>small { display:block; }.makeup-slot-count>b { font-size:20px; }.makeup-slot-count>small { color:var(--ink-2); margin-bottom:7px; }.makeup-slot.extra-slot { display:none; }#attendance-message { margin-top:16px; }#attendance-message textarea { line-height:1.55; min-height:200px; margin-bottom:10px; }
+@media(max-width:600px) { .attendance-stats { grid-template-columns:repeat(2,minmax(0,1fr)); }.attendance-calendar { gap:3px; }.attendance-day { min-height:68px; padding:4px; }.attendance-day-tags>span { font-size:10px; padding:2px 3px; }.sc-tabs { gap:2px; }.sc-tabs button { font-size:11px; }.makeup-slot { flex-wrap:wrap; }.makeup-slot-count { display:flex; gap:8px; align-items:center; flex:1; text-align:left; }.makeup-slot-count>small { margin:0; }.makeup-slot-count>.btn { margin-left:auto; } }

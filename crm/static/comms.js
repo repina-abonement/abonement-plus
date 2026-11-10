@@ -203,6 +203,12 @@ async function dial(phone) {
 }
 
 /* ---------- блок в карточке ученика ---------- */
+function resizeMessageInput(input) {
+  if(!input)return;
+  const minimum=parseFloat(getComputedStyle(input).minHeight)||160;
+  input.style.height="auto";
+  input.style.height=Math.max(minimum,Math.min(input.scrollHeight+2,window.innerHeight*.6))+"px";
+}
 async function loadFamilyComms(familyId, parents, studentId, kid) {
   const box = $("#comms-box");
   if (!box) return;
@@ -238,7 +244,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
         ${targets.length > 1 ? `<select id="cm-to" aria-label="Мессенджер для отправки"><option value="">Выберите мессенджер для отправки</option>${targets.map((x) => `<option value="${x.v}" ${x.v === selectedTarget ? "selected" : ""}>${esc(x.t)}</option>`).join("")}</select>` : `<div class="small muted">Ответ уйдёт: ${esc(targets[0].t)}</div><input type="hidden" id="cm-to" value="${targets[0].v}">`}
         <div class="row"><textarea id="cm-text" rows="6" placeholder="Сообщение родителю…"></textarea><button class="btn primary" id="cm-send" style="flex:0">Отправить</button></div>
       </div>` : `<div class="small muted">Написать отсюда можно, когда родитель напишет школе в Telegram или MAX${st.whatsapp || st.wazzup_telegram ? "" : ". Первыми написать можно после подключения Wazzup"}</div>`}`;
-  if ($("#cm-text")) $("#cm-text").value = draft;
+  if ($("#cm-text")) { $("#cm-text").value = draft; $("#cm-text").addEventListener("input",e=>resizeMessageInput(e.target)); resizeMessageInput($("#cm-text")); }
   const toSelect = $("#cm-to"); if (toSelect) toSelect.onchange = () => { S.familySendTargets[targetKey] = toSelect.value; };
   const feed = $("#feed"); if (feed) feed.scrollTop = feed.scrollHeight;
   // карточка открыта: новые сообщения подтягиваем сами каждые 10 секунд (раньше были видны только после повторного открытия)

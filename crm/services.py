@@ -208,7 +208,8 @@ def book_makeup(con, sid: int, group_id: int, day: str, absence_id: int | None, 
     d = date.fromisoformat(day)
     if d < today():
         raise ApiError("Дата отработки уже прошла")
-    if d.weekday() not in logic.parse_weekdays(g["weekdays"]):
+    from . import schedule, closures
+    if not g["active"] or d.weekday() not in logic.parse_weekdays(schedule.on(con,g,d)["weekdays"]) or closures.is_closed(con,group_id,d):
         raise ApiError("В этот день у группы нет занятия")
     if not g["is_makeup"] and con.execute("""SELECT 1 FROM enrollments WHERE student_id=? AND group_id=? AND active=1""",
                                           (sid, group_id)).fetchone():
@@ -229,8 +230,8 @@ def book_makeup(con, sid: int, group_id: int, day: str, absence_id: int | None, 
         raise ApiError("Ученик уже записан на эту отработку")
     mid = con.execute("INSERT INTO makeups(student_id, absence_id, group_id, date) VALUES (?,?,?,?)",
                       (sid, absence_id, group_id, day)).lastrowid
+    from . import capacity
     if not g["is_makeup"]:
-        from . import capacity
         capacity.ensure(con, group_id, day, "записать на отработку")
     absence_date = con.execute("SELECT date FROM attendance WHERE id=?", (absence_id,)).fetchone()[0]
     con.execute("UPDATE students SET skip_stage='none' WHERE id=?", (sid,))
@@ -269,13 +270,16 @@ def _pick_enrollment(con, sid: int, enrollment_id) -> dict:
 
 def sale_enrollment(con, sid, enrollment_id, group_id=None):
     """Другая доступная группа для расчёта без изменения записей клиента."""
-    source = _pick_enrollment(con, sid, enrollment_id)
+    enrollments = enrollments_of(con, sid)
+    source = _pick_enrollment(con, sid, enrollment_id) if enrollments or enrollment_id else None
     try:
         group_id = int(group_id) if group_id else None
     except (ValueError, TypeError):
         raise ApiError("Выберите группу")
-    if not group_id or group_id == source["group_id"]:
+    if source and (not group_id or group_id == source["group_id"]):
         return source
+    if not group_id:
+        raise ApiError("Выберите группу")
     own = next((e for e in enrollments_of(con, sid) if e["group_id"] == int(group_id)), None)
     if own:
         return own
@@ -283,10 +287,11 @@ def sale_enrollment(con, sid, enrollment_id, group_id=None):
         WHERE g.id=? AND g.active=1 AND b.active=1 AND g.is_makeup=0 AND g.lesson_kind!='ofp'""", (int(group_id),)).fetchone()
     if not g:
         raise ApiError("Выберите действующую группу для абонемента")
-    if (g["program_id"] or None) != (source["program_id"] or None):
+    if source and (g["program_id"] or None) != (source["program_id"] or None):
         raise ApiError("Переход между обычной группой и сборной оформляется отдельно")
-    return dict(source, id=None, group_id=g["id"], group_name=g["name"], group_weekdays=g["weekdays"],
-                weekdays="", group_age=g["age"], branch_name=g["branch"], source_id=source["id"])
+    return dict(source or {}, id=None, student_id=sid, group_id=g["id"], group_name=g["name"], group_weekdays=g["weekdays"],
+                weekdays="", group_age=g["age"], branch_name=g["branch"], source_id=source["id"] if source else None,
+                program_id=g["program_id"], lesson_kind=g["lesson_kind"], tariff=(source or {}).get("tariff") or "fixed")
 
 
 def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None) -> dict:
@@ -377,7 +382,16 @@ def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id
         if e["id"] is None:
             if group_action not in ("transfer", "add"):
                 raise ApiError("Выберите: перевести в новую группу или добавить вторую")
-            if group_action == "transfer":
+            if e.get("source_id") is None:
+                if e.get("program_id"):
+                    program.set_plan(con,sid,e["program_id"],q["tariff"],q["program"].get("ofp_group_id"),user)
+                    eid=program.plan_of(con,sid,e["program_id"])["enrollment_id"]
+                    con.execute("UPDATE enrollments SET group_id=?,start_date=? WHERE id=?",(e["group_id"],ym+"-01",eid))
+                    con.execute("UPDATE enrollments SET start_date=? WHERE student_id=? AND active=1 AND group_id IN (SELECT id FROM groups WHERE program_id=?)",(ym+"-01",sid,e["program_id"]))
+                else:
+                    eid=add_enrollment(con,sid,e["group_id"],None,q["tariff"],user)
+                    con.execute("UPDATE enrollments SET start_date=? WHERE id=?",(ym+"-01",eid))
+            elif group_action == "transfer":
                 if con.execute("SELECT 1 FROM subscriptions WHERE enrollment_id=? AND month>=? AND status!='cancelled'", (e["source_id"], ym)).fetchone():
                     raise ApiError("На выбранный или будущий месяц в прежней группе уже есть абонемент. Измените его через перевод группы")
                 if e.get("program_id"):
@@ -426,7 +440,9 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
            late_fee, price, status, created_at, discount_name, discount_amount) VALUES (?,?,?,?,?,?,?,?,?,'invoiced',?,?,?)""",
         (sid, e["id"], ym, q["tariff"], q["lessons_paid"], q["per_lesson"], q["credit_lessons"], q["late_fee"],
          q["total"], now_iso(), d.get("name", ""), d.get("amount", 0))).lastrowid
-    snapshot = {"tariff": q["tariff"], "ofp_group_id": q["program"].get("ofp_group_id")} if q.get("program") else None
+    snapshot = {"tariff":q["tariff"],"ofp_group_id":q["program"].get("ofp_group_id"),
+                "contract":{"base":q["base"],"on_time_total":q["program"]["on_time_total"],"late_total":q["program"]["late_total"],
+                            "deadline":q["program"]["deadline"],"lessons":q["lessons_paid"]}} if q.get("program") else None
     con.execute("UPDATE subscriptions SET excluded_dates=?, program_selection=? WHERE id=?",
                 (json.dumps(q.get("excluded_dates", [])), json.dumps(snapshot) if snapshot else "", sub_id))
     from . import money
@@ -441,6 +457,23 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
     log(con, sid, f"Выставлен счёт на {q['month_label']}, {e['group_name']}: {q['total']} ₽ ({q['lessons_paid']} занятий{extra})",
         user, "payment")
     return {"id": sub_id, "quote": q}
+
+
+def payment_quote(con, sub_id):
+    """Сумма к оплате на сегодня; все временные изменения расчёта откатываются."""
+    from . import program, pricing, money
+    con.execute("SAVEPOINT payment_preview")
+    try:
+        program.reprice(con,sub_id)
+        pricing.reprice(con,sub_id)
+        row=con.execute("SELECT * FROM subscriptions WHERE id=? AND status!='cancelled'",(sub_id,)).fetchone()
+        if not row:
+            raise ApiError("Счёт не найден или отменён",404)
+        paid=row["price"] if row["status"]=="paid" else max(0,money.balance(con,row["student_id"])["covered"].get(sub_id,0))
+        return {"id":sub_id,"price":row["price"],"paid":paid,"total":max(0,row["price"]-paid),"late_fee":row["late_fee"]}
+    finally:
+        con.execute("ROLLBACK TO payment_preview")
+        con.execute("RELEASE payment_preview")
 
 
 def pay_subscription(con, sub_id: int, user, method: str = "cash", amount=None) -> None:
@@ -777,8 +810,9 @@ def student_detail(con, sid: int) -> dict:
     siblings = _rows(con.execute("SELECT id, name, birth FROM students WHERE family_id=? AND id != ?",
                                  (s["family_id"], sid)))
     grp = dict(con.execute("SELECT * FROM groups WHERE id=?", (s["group_id"],)).fetchone()) if s["group_id"] else None
-    subs = _rows(con.execute("""SELECT x.*, g.name AS group_name FROM subscriptions x
-                                LEFT JOIN enrollments e ON e.id = x.enrollment_id LEFT JOIN groups g ON g.id = e.group_id
+    subs = _rows(con.execute("""SELECT x.*, COALESCE(g.name,sg.name) AS group_name,v.date AS single_date,COALESCE(e.group_id,v.group_id) AS group_id FROM subscriptions x
+                                LEFT JOIN enrollments e ON e.id=x.enrollment_id LEFT JOIN groups g ON g.id=e.group_id
+                                LEFT JOIN single_visits v ON v.subscription_id=x.id LEFT JOIN groups sg ON sg.id=v.group_id
                                 WHERE x.student_id=? ORDER BY x.month DESC, x.id""", (sid,)))
     vacs = _rows(con.execute("SELECT * FROM vacations WHERE student_id=? ORDER BY start DESC", (sid,)))
     makeups = _rows(con.execute(

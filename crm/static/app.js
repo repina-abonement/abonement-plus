@@ -1404,6 +1404,7 @@ function askLeftReason(sid, done) {
 }
 
 function openDrawer(html, size) {
+  S.studentCardRequest=(S.studentCardRequest||0)+1;
   $("#drawer-body").innerHTML = html; $("#drawer").hidden = false; document.body.style.overflow = "hidden";
   const panel = $("#drawer .drawer-panel"); if (panel) panel.classList.toggle("wide", size === "wide");
   const state = { ...(history.state || {}), drawer: true }; delete state.studentCard;
@@ -1412,7 +1413,7 @@ function openDrawer(html, size) {
     else history.replaceState(state, "");
   } catch (_) {}
 }
-function hideDrawer() { const d = $("#drawer"); if (d) d.hidden = true; document.body.style.overflow = ""; }
+function hideDrawer() { S.studentCardRequest=(S.studentCardRequest||0)+1; const d = $("#drawer"); if (d) d.hidden = true; document.body.style.overflow = ""; }
 /* закрыть карточку: крестиком, Esc, после сохранения или кнопкой/свайпом «назад» на телефоне */
 function closeDrawer() {
   forgetStudentCard();
@@ -1445,7 +1446,8 @@ function layoutStudentCard(body, isMember) {
   if (!isMember && take("pu")) left.appendChild(take("pu"));
   left.appendChild(body.querySelector("#comms-box"));
   ["subs", "balance"].forEach(k => { if (take(k)) right.appendChild(take(k)); });
-  ["abon", "visits", "skips", "vac"].forEach(k => fold(k, right));
+  ["vac"].forEach(k => fold(k, right));
+  if(take("visits")) grid.querySelector(".sc-attendance").appendChild(take("visits"));
   ["family", "stage", "hist"].forEach(k => fold(k, info, k === "family"));
   if (take("arch")) info.appendChild(take("arch"));
   body.querySelectorAll("[data-sctab]").forEach((b) => (b.onclick = () => {
@@ -1457,7 +1459,10 @@ function layoutStudentCard(body, isMember) {
   }));
 }
 const scTab = (tab) => { const b = document.querySelector(`#drawer-body [data-sctab="${tab}"]`); if (b) b.click(); };
-const openFold = (body, k) => { scTab(["family", "stage", "hist"].includes(k) ? "info" : "abon"); const f = body.querySelector(`[data-fold="${k}"]`); if (f) { f.open = true; f.scrollIntoView({ block: "start", behavior: "smooth" }); } };
+const openFold = (body, k) => {
+  if(["visits","skips"].includes(k)){scTab("visits");body.querySelector('[data-sc="visits"]')?.scrollIntoView({block:"start",behavior:"smooth"});return}
+  scTab(["family","stage","hist"].includes(k)?"info":"abon");const f=body.querySelector(`[data-fold="${k}"]`);if(f){f.open=true;f.scrollIntoView({block:"start",behavior:"smooth"})}
+};
 
 function quoteHtml(q) {
   return `<div class="total">${rub(q.total)}</div>
@@ -1477,146 +1482,181 @@ async function ensureRequired(sid, kind) {
   return !info || !info.missing.length || await askRequired(info);
 }
 function saleCalendarHtml(q, ym) {
-  const dates = new Set(q.calendar_dates || q.dates), excluded = new Set(q.excluded_dates || []);
-  const [year, month] = ym.split("-").map(Number), first = new Date(year, month - 1, 1);
-  const offset = (first.getDay() + 6) % 7, count = new Date(year, month, 0).getDate();
-  const cells = Array(offset).fill('<span class="sale-cal-empty"></span>');
-  for (let day = 1; day <= count; day++) {
-    const iso = `${ym}-${String(day).padStart(2, "0")}`;
-    cells.push(dates.has(iso)
-      ? `<label class="sale-cal-day ${excluded.has(iso) ? "excluded" : "selected"}"><span>${day}</span><input type="checkbox" data-sale-date="${iso}" ${excluded.has(iso) ? "" : "checked"} aria-label="Занятие ${dShort(iso)}"><small>${excluded.has(iso) ? "исключено" : "занятие"}</small></label>`
-      : `<span class="sale-cal-day off"><span>${day}</span></span>`);
+  const dates = new Set(q.calendar_dates || q.dates), selected = new Set(q.dates), excluded = new Set(q.excluded_dates || []);
+  const [year, month] = ym.split('-').map(Number), offset = (new Date(year, month - 1, 1).getDay() + 6) % 7;
+  const cells = Array(offset).fill('<span></span>');
+  for (let day = 1; day <= new Date(year, month, 0).getDate(); day++) {
+    const iso = `${ym}-${String(day).padStart(2,'0')}`, checked = q.single ? selected.has(iso) : !excluded.has(iso);
+    cells.push(dates.has(iso) ? `<label class="sale-cal-day ${checked ? 'selected' : q.single ? 'available' : 'excluded'}"><span>${day}</span><input type="${q.single ? 'radio' : 'checkbox'}" name="sale-lesson" data-sale-date="${iso}" ${checked ? 'checked' : ''} aria-label="Занятие ${dShort(iso)}"><small>${checked ? 'занятие' : q.single ? 'выбрать' : 'исключено'}</small></label>` : `<span class="sale-cal-day off">${day}</span>`);
   }
-  return `<div class="sale-calendar" id="sl-calendar"><b>${esc(monthLabel(ym))}</b><div class="small muted">Отмеченные дни входят в абонемент. Снимайте отметки только для согласованных исключений.</div><div class="sale-cal-grid">${["Пн","Вт","Ср","Чт","Пт","Сб","Вс"].map(d => `<b class="sale-cal-week">${d}</b>`).join("")}${cells.join("")}</div><div class="small">Выбрано занятий: <b>${q.dates.length}</b>${excluded.size ? ` · исключено: ${excluded.size}` : ""}</div></div>`;
+  return `<div class="sale-calendar" id="sl-calendar"><b>${esc(monthLabel(ym))}</b><div class="small muted">${q.single ? 'Выберите одно занятие.' : 'Отмеченные дни входят в абонемент. Снимайте отметки только для согласованных исключений.'}</div><div class="sale-cal-grid">${WD.map(d=>`<b class="sale-cal-week">${d}</b>`).join('')}${cells.join('')}</div><div class="small">Выбрано занятий: <b>${q.dates.length}</b>${excluded.size ? ` · исключено: ${excluded.size}` : ''}</div></div>`;
+}
+const clientGroupLabel = e => e.lesson_kind === 'arena' || /сборная.*арктика/i.test(e.group_name || e.name || '') ? 'Сборная Арктика' : e.group_name || e.name || '';
+async function openSell(d, reload) {
+  if (!(await ensureRequired(d.student.id,'sale'))) return;
+  const id=d.student.id;
+  d=await api('GET',`/api/students/${id}`).catch(()=>d);
+  const box=$('#sell-box'); if(!box)return;
+  const session=String(S.saleSequence=(S.saleSequence||0)+1);box.dataset.saleSession=session;
+  const isCurrent=()=>box.isConnected&&box.dataset.saleSession===session&&$('#sell-box')===box;
+  scTab('abon');
+  const ens=d.enrollments.filter(e=>e.lesson_kind!=='ofp');
+  const previous=(d.subscriptions||[]).filter(s=>s.status!=='cancelled'&&s.kind!=='single'&&s.month<d.next_month&&(!ens.length||ens.some(e=>e.id===s.enrollment_id))).sort((a,b)=>Number(b.status==='paid')-Number(a.status==='paid')||b.month.localeCompare(a.month)||b.id-a.id);
+  const preferred=ens.find(e=>e.id===previous[0]?.enrollment_id)||ens.find(e=>e.group_id===d.student.group_id)||ens[0]||{id:null,tariff:previous[0]?.tariff||d.student.tariff||'fixed',group_id:previous[0]?.group_id,program_id:(S.meta.groups||[]).find(g=>g.id===previous[0]?.group_id)?.program_id};
+  const choices=(S.meta.groups||[]).filter(g=>!g.is_makeup&&g.lesson_kind!=='ofp'&&(!ens.length||(g.program_id||null)===(preferred.program_id||null)||ens.some(e=>e.group_id===g.id))).map(g=>{
+    const own=ens.find(e=>e.group_id===g.id);
+    return {...preferred,...own,id:own?.id||preferred.id,group_id:g.id,group_name:g.name,program_id:g.program_id,lesson_kind:g.lesson_kind,new_group:!own};
+  });
+  ens.forEach(e=>{if(!choices.some(c=>c.group_id===e.group_id))choices.push(e)});
+  if(!choices.length)return toast('Нет доступных групп для продажи',true);
+  const months=[...new Set([d.cur_month,d.next_month,...d.subscriptions.filter(s=>s.status==='invoiced').map(s=>s.month)])].sort().reverse();
+  const pendingSingles=d.subscriptions.filter(s=>s.kind==='single'&&s.status==='invoiced');
+  const methods=Object.entries(PAY_METHODS).filter(([k])=>!PAY_INTERNAL.includes(k)&&k!=='online');
+  box.innerHTML=`<div class="section sell"><div class="row" style="align-items:center"><h3 class="grow" style="margin:0">Продать абонемент</h3><button class="icon-btn" id="sl-x" title="Закрыть">✕</button></div>
+    <div class="field" style="margin-top:14px"><label>Что оформляем</label><select id="sl-kind"><option value="month">На месяц</option><option value="single">Разовое занятие</option></select></div>
+    <div class="field" id="sl-single-invoice-field" hidden><label>Разовое занятие</label><select id="sl-single-invoice"><option value="">Оформить новое занятие</option>${pendingSingles.map(s=>`<option value="${s.id}">Уже выставлено: ${s.single_date?dShort(s.single_date):monthLabel(s.month)} · ${rub(s.price)}</option>`).join('')}</select></div>
+    <div class="row"><div class="field" id="sl-month-field"><label>Месяц</label><select id="sl-month">${months.map(m=>`<option value="${m}" ${m===d.next_month?'selected':''}>${monthLabel(m)}</option>`).join('')}</select></div><div class="field"><label>Группа</label><select id="sl-en">${choices.map(e=>`<option value="${e.group_id}" ${e.group_id===preferred.group_id?'selected':''}>${esc(e.group_name)}${e.new_group&&ens.length?' · другая группа':''}</option>`).join('')}</select></div></div>
+    <div class="row"><div class="field" id="sl-tar-field"><label>Тариф</label><select id="sl-tar"></select></div><div class="field" id="sl-disc-field"><label>Скидка</label><select id="sl-disc"><option value="">По правилам</option>${(d.discounts||[]).map(x=>`<option value="${x.id}">${esc(x.name)}, ${x.percent}%</option>`).join('')}</select></div></div>
+    <div class="small muted" id="sl-admission" hidden>Допуск в сборную — по решению тренера. Разовых занятий нет.</div>
+    <div class="field" id="sl-ofp-box" hidden><label>День ОФП</label><select id="sl-ofp"></select></div>
+    <div class="field" id="sl-group-action-box" hidden><label>Как изменить группу с начала месяца</label><select id="sl-group-action"><option value="transfer">Перевести из прежней группы</option><option value="add">Добавить вторую, сохранить прежнюю</option></select><small class="muted">Изменение сохранится при оформлении.</small></div>
+    <label class="sale-credit" id="sl-credit-box" hidden><input type="checkbox" id="sl-credit"> Клиент запросил перерасчёт пропусков прошлого месяца <span class="small muted" id="sl-credit-info"></span></label>
+    <div class="quote" id="sl-q">Считаю…</div><div class="sc-actions"><button class="btn primary" id="sl-link">Ссылка на оплату</button><button class="btn" id="sl-now">Оплачено сейчас</button></div><div id="sl-res"></div></div>`;
+  const en=()=>choices.find(e=>e.group_id===+$('#sl-en').value), single=()=>$('#sl-kind').value==='single';
+  let total=0,version=0,singleDay=null,existing=null;
+  const exclusions=new Set();
+  const busy=on=>box.querySelectorAll('.sc-actions button').forEach(b=>b.disabled=on);
+  const lock=on=>{box.querySelectorAll('select,input').forEach(e=>e.disabled=on);if(!on)syncFields()};
+  const syncFields=()=>{
+    $('#sl-kind option[value=single]').disabled=!!en().program_id&&!pendingSingles.length;
+    $('#sl-single-invoice option[value=""]').disabled=!!en().program_id;
+    if(en().program_id&&single()&&!$('#sl-single-invoice').value){if(pendingSingles.length)$('#sl-single-invoice').value=String(pendingSingles[0].id);else $('#sl-kind').value='month'}
+    $('#sl-single-invoice-field').hidden=!single()||!pendingSingles.length;
+    $('#sl-month-field').hidden=single()&&!!$('#sl-single-invoice').value;
+    $('#sl-tar-field').hidden=single();$('#sl-disc-field').hidden=single();
+    $('#sl-admission').hidden=!en().program_id;
+    $('#sl-ofp-box').hidden=single()||!en().program_id||$('#sl-tar').value!=='pkg';
+    $('#sl-group-action-box').hidden=single()||!en().new_group||!ens.length;
+  };
+  const recommend=()=>{
+    const p=(d.program?.programs||[]).find(p=>p.id===en().program_id),plan=p?.plan;
+    const effective=plan?.next&&$('#sl-month').value>=plan.next.from?plan.next:plan;
+    const last=previous.find(s=>s.enrollment_id===en().id&&s.month<$('#sl-month').value);
+    $('#sl-tar').innerHTML=en().program_id?'<option value="arena_only">Только Арктика</option><option value="pkg">Арктика + ОФП</option>':'<option value="fixed">Негибкий</option><option value="flex">Гибкий</option>';
+    $('#sl-tar').value=en().program_id?effective?.tariff||last?.tariff||'arena_only':last?.tariff||en().tariff||'fixed';
+    $('#sl-ofp').innerHTML=(p?.ofp_groups||[]).map(g=>`<option value="${g.id}" ${g.id===effective?.ofp_group_id?'selected':''}>${esc(g.name)}</option>`).join('');syncFields();
+  };
+  const quote=async()=>{
+    const request=++version;busy(true);existing=null;$('#sl-res').innerHTML='';$('#sl-q').innerHTML='Считаю…';
+    ['#sl-tar','#sl-disc','#sl-ofp'].forEach(s=>$(s).disabled=false);$('#sl-credit-box').hidden=true;
+    const own=ens.find(e=>e.group_id===en().group_id);
+    const sub=single()?pendingSingles.find(s=>s.id===+$('#sl-single-invoice').value):own&&d.subscriptions.find(s=>s.enrollment_id===own.id&&s.month===$('#sl-month').value&&s.kind!=='single'&&s.status!=='cancelled');
+    if(sub){
+      existing=sub;let current;try{current=await api('GET',`/api/subscriptions/${sub.id}/payment-quote`)}catch(e){if(request===version&&isCurrent())$('#sl-q').textContent=e.message;return}if(request!==version||!isCurrent())return;const paid=current.paid;total=current.total;
+      $('#sl-tar').value=sub.tariff;syncFields();['#sl-tar','#sl-disc','#sl-ofp'].forEach(s=>$(s).disabled=true);
+      $('#sl-q').innerHTML=`<b>${single()?(total?'Разовое занятие уже оформлено':'Разовое занятие оплачено'):(total?'Абонемент уже оформлен':'Абонемент оплачен')}</b><div class="finance-numbers"><div><small>Стоимость</small><b>${rub(current.price)}</b></div><div><small>Оплачено</small><b>${rub(paid)}</b></div><div><small>Осталось оплатить</small><b>${rub(total)}</b></div></div><p class="small muted">Повторный абонемент создаваться не будет.</p>`;busy(total<=0);return;
+    }
+    try{
+      const params=new URLSearchParams({month:$('#sl-month').value,group_id:en().group_id});
+      if(single()){if(singleDay)params.set('date',singleDay)}else{
+        params.set('enrollment_id',en().id||'');params.set('tariff',$('#sl-tar').value);params.set('ofp_group_id',$('#sl-ofp').value||'');params.set('excluded_dates',[...exclusions].join(','));params.set('credit_requested',$('#sl-credit').checked?'1':'0');if($('#sl-disc').value)params.set('discount_id',$('#sl-disc').value);
+      }
+      const q=await api('GET',`/api/students/${id}/${single()?'single-quote':'quote'}?${params}`);if(request!==version||!isCurrent())return;
+      total=q.total;if(q.single)singleDay=q.dates[0];q.calendar_picker=true;
+      $('#sl-q').innerHTML=(q.single?`<div class="total">${rub(q.total)}</div><div class="small">Разовое занятие · ${dShort(singleDay)}</div>`:q.program?programQuoteHtml(q):quoteHtml(q))+saleCalendarHtml(q,$('#sl-month').value);
+      $('#sl-credit-box').hidden=!q.credit_available;$('#sl-credit-info').textContent=q.credit_available?`(до ${q.credit_available} занятий)`:'';
+      $('#sl-calendar').onchange=e=>{const day=e.target.dataset.saleDate;if(!day)return;if(single()){singleDay=day;quote();return}if(!e.target.checked&&!$('#sl-calendar').querySelector('input:checked')){e.target.checked=true;return toast('Оставьте хотя бы одно занятие',true)}if(e.target.checked)exclusions.delete(day);else exclusions.add(day);quote()};busy(total<=0);
+    }catch(e){if(request===version&&isCurrent())$('#sl-q').textContent=e.message}
+  };
+  const reset=()=>{exclusions.clear();singleDay=null;$('#sl-credit').checked=false};
+  $('#sl-single-invoice').onchange=()=>{reset();syncFields();quote()};
+  $('#sl-kind').onchange=()=>{reset();if(single())$('#sl-month').value=d.cur_month;syncFields();quote()};
+  $('#sl-month').onchange=$('#sl-en').onchange=()=>{reset();recommend();quote()};
+  $('#sl-tar').onchange=()=>{reset();syncFields();quote()};$('#sl-ofp').onchange=()=>{reset();quote()};$('#sl-disc').onchange=$('#sl-credit').onchange=quote;
+  $('#sl-x').onclick=()=>{version++;box.dataset.saleSession='';box.innerHTML=''};
+  const selection=()=>({single:single(),month:$('#sl-month').value,date:existing?.single_date||singleDay,group_id:en().group_id,enrollment_id:en().id,group_action:$('#sl-group-action').value,tariff:$('#sl-tar').value,ofp_group_id:$('#sl-tar').value==='pkg'?+$('#sl-ofp').value:null,excluded_dates:[...exclusions],credit_requested:$('#sl-credit').checked,discount_id:$('#sl-disc').value||null,group:existing?.group_name?clientGroupLabel(existing):existing?.kind==='single'?'':clientGroupLabel(en()),tariffLabel:single()?'Разовое занятие':$('#sl-tar').selectedOptions[0]?.textContent,existing_id:existing?.id});
+  const invoice=async order=>{
+    let result=order.existing_id?{id:order.existing_id,quote:{}}:await api('POST',`/api/students/${id}/${order.single?'single':'invoice'}`,order);
+    const current=await api('GET',`/api/subscriptions/${result.id}/payment-quote`);
+    return {...result,quote:{...result.quote,total:current.total}};
+  };
+  $('#sl-now').onclick=async()=>{
+    const order=selection();busy(true);lock(true);
+    try{
+      const prepared=await invoice(order);if(!isCurrent())return;
+      if(prepared.quote.total<=0){toast('Счёт уже оплачен с баланса');reload();return}
+      $('#sl-res').innerHTML=`<div class="row" style="margin-top:14px;align-items:flex-end"><div class="field"><label>Сумма, ₽</label><input type="number" id="sl-amount" min="1" step="1" value="${prepared.quote.total}"></div><div class="field"><label>Как оплатили</label><select id="sl-m">${methods.map(([k,t])=>`<option value="${k}">${t}</option>`).join('')}</select></div></div><button class="btn primary" id="sl-ok">Принять ${rub(prepared.quote.total)}</button><p class="small muted">Можно указать частичную оплату. Остаток останется к оплате.</p>`;
+      $('#sl-amount').oninput=()=>$('#sl-ok').textContent='Принять '+rub($('#sl-amount').value);
+      $('#sl-ok').onclick=async()=>{const amount=Number($('#sl-amount').value),method=$('#sl-m').value;if(!Number.isInteger(amount)||amount<=0)return toast('Укажите сумму в рублях',true);$('#sl-ok').disabled=true;try{await api('POST',`/api/subscriptions/${prepared.id}/pay`,{amount,method});toast('Оплата принята');if(isCurrent())reload()}catch(e){fail(e);if(isCurrent()&&$('#sl-ok'))$('#sl-ok').disabled=false}};
+    }catch(e){fail(e);if(isCurrent()){lock(false);busy(false)}}
+  };
+  $('#sl-link').onclick=async()=>{
+    const order=selection();busy(true);lock(true);
+    try{
+      const st=await api('GET',`/api/students/${id}/paylinks`);if(!st.ready)throw Error('PayKeeper не подключён: Чеки → Подключение');
+      const r=await invoice(order);if(!isCurrent())return;if(r.quote.total<=0){toast('Счёт уже оплачен с баланса');reload();return}
+      const title=order.single?`Разовое занятие${order.date?' '+dShort(order.date):''}`:`Абонемент на ${monthLabel(order.month)}`;
+      const previousLink=(st.links||[]).find(l=>l.status==='open'&&l.subscription_id===r.id&&l.amount===r.quote.total);
+      const l=previousLink||await api('POST',`/api/students/${id}/paylinks`,{amount:r.quote.total,purpose:`${title}: ${d.student.name}`,subscription_id:r.id,full_payment:true});if(!isCurrent())return;
+      const msg=`${title}\n${d.student.name}\n\n${order.group?'Группа: '+order.group+'\n':''}Тариф: ${order.tariffLabel}\n\nК оплате: ${rub(l.amount)}\n\nСсылка для оплаты:\n${l.url}`;
+      $('#sl-res').innerHTML=`<label style="margin-top:14px">Сообщение родителю</label><textarea id="sl-msg" rows="9">${esc(msg)}</textarea><div class="sc-actions" style="margin-top:10px"><button class="btn primary" id="sl-send">Вставить в чат с семьёй</button><button class="btn" id="sl-copy">Скопировать</button><button class="btn" id="sl-done">Готово</button></div>`;
+      resizeMessageInput($('#sl-msg'));
+      $('#sl-copy').onclick=()=>copyTextWithNotice($('#sl-msg').value,'Текст скопирован');
+      $('#sl-send').onclick=()=>{scTab('feed');const t=$('#cm-text');if(!t)return toast('Нет открытого чата: скопируйте сообщение',true);t.value=$('#sl-msg').value;t.dispatchEvent(new Event('input',{bubbles:true}));t.focus();t.scrollIntoView({block:'center',behavior:'smooth'});toast('Сообщение вставлено. Проверьте и отправьте')};$('#sl-done').onclick=reload;
+    }catch(e){fail(e);if(isCurrent()){lock(false);busy(false)}}
+  };
+  recommend();quote();box.scrollIntoView({block:'start',behavior:'smooth'});
 }
 
-async function openSell(d, reload) {
-  if (!(await ensureRequired(d.student.id, "sale"))) return;
-  const id = d.student.id, box = $("#sell-box");
-  scTab("abon");
-  const ens = d.enrollments.filter((e) => e.lesson_kind !== "ofp");
-  const previous = (d.subscriptions || []).filter((s) => s.status !== "cancelled" && s.month < d.next_month && ens.some((e) => e.id === s.enrollment_id))
-    .sort((a, b) => Number(b.status === "paid") - Number(a.status === "paid") || b.month.localeCompare(a.month) || b.id - a.id);
-  const preferred = ens.find((e) => e.id === previous[0]?.enrollment_id) || ens.find((e) => e.group_id === d.student.group_id) || ens[0];
-  const availableGroups = (S.meta.groups || []).filter(g => !g.is_makeup && g.lesson_kind !== "ofp" &&
-    ((g.program_id || null) === (preferred.program_id || null) || ens.some(e => e.group_id === g.id)));
-  const choices = availableGroups.map(g => {
-    const own = ens.find(e => e.group_id === g.id);
-    return { ...preferred, ...own, id: own?.id || preferred.id, group_id: g.id, group_name: g.name,
-      program_id: g.program_id, lesson_kind: g.lesson_kind, branch_name: g.branch || "", new_group: !own };
-  });
-  ens.forEach(e => { if (!choices.some(c => c.group_id === e.group_id)) choices.push(e); });
-  const methods = Object.entries(PAY_METHODS).filter(([k]) => !PAY_INTERNAL.includes(k) && k !== "online");
-  box.innerHTML = `<div class="section sell">
-    <div class="row" style="align-items:center"><h3 class="grow" style="margin:0">🛒 Продать абонемент</h3><button class="icon-btn" id="sl-x" title="Закрыть">✕</button></div>
-    <div class="row" style="margin-top:8px">
-      <div class="field"><label>Месяц</label><select id="sl-month">${[d.cur_month, d.next_month].map((m) => `<option value="${m}" ${m === d.next_month ? "selected" : ""}>${monthLabel(m)}</option>`).join("")}</select></div>
-      <div class="field"><label>Группа</label><select id="sl-en">${choices.map((e) => `<option value="${e.group_id}" ${e.group_id === preferred.group_id ? "selected" : ""}>${esc(e.group_name)}${e.new_group ? " · другая группа" : ""}</option>`).join("")}</select></div></div>
-    <div class="row">
-      <div class="field"><label>Тариф</label><select id="sl-tar"><option value="fixed">Негибкий</option><option value="flex">Гибкий</option></select></div>
-      <div class="field"><label>Скидка</label><select id="sl-disc"><option value="">По правилам (или без скидки)</option>${(d.discounts || []).map((x) => `<option value="${x.id}">${esc(x.name)}, ${x.percent}%</option>`).join("")}</select></div></div>
-    <div class="small muted" id="sl-admission" hidden>Допуск в сборную — по решению тренера, без фиксированного возрастного порога.</div>
-    <div class="field" id="sl-ofp-box" hidden><label>День ОФП</label><select id="sl-ofp"></select></div>
-    <div class="field" id="sl-group-action-box" hidden><label>Как изменить группу с начала выбранного месяца</label><select id="sl-group-action"><option value="transfer">Перевести из прежней группы</option><option value="add">Добавить вторую, сохранить прежнюю</option></select><div class="small muted">Изменение сохранится только при оформлении абонемента.</div></div>
-    <label class="sale-credit" id="sl-credit-box" hidden><input type="checkbox" id="sl-credit"> Клиент запросил перерасчёт пропусков прошлого месяца <span class="small muted" id="sl-credit-info"></span></label>
-    <div class="quote" id="sl-q">Считаю…</div>
-    <div class="sc-actions" style="margin-top:10px">
-      <button class="btn primary" id="sl-link">💳 Ссылка на оплату</button>
-      <button class="btn" id="sl-now">✅ Оплачено сейчас</button>
-      </div>
-    <div id="sl-res"></div></div>`;
-  const en = () => choices.find((e) => e.group_id === +$("#sl-en").value);
-  let total = 0, quoteVersion = 0;
-  const excludedDates = new Set();
-  const programFor = () => (d.program?.programs || []).find(p => p.id === en().program_id);
-  const syncFields = () => {
-    $("#sl-admission").hidden = !en().program_id;
-    $("#sl-ofp-box").hidden = !en().program_id || $("#sl-tar").value !== "pkg";
-    $("#sl-group-action-box").hidden = !en().new_group;
+async function copyTextWithNotice(text, notice='Текст скопирован') {
+  try { await navigator.clipboard.writeText(text); }
+  catch (_) {
+    const input=document.createElement('textarea'),previous=document.activeElement;
+    input.value=text;input.style.cssText='position:fixed;opacity:0;width:1px;height:1px';document.body.appendChild(input);input.focus();input.select();
+    const copied=document.execCommand('copy');input.remove();previous?.focus({preventScroll:true});
+    if(!copied){prompt('Скопируйте текст',text);return}
+  }
+  toast(notice);
+}
+function clientSubscriptionsHtml(d) {
+  const tariffs={fixed:'Негибкий',flex:'Гибкий',pkg:'Арктика + ОФП',arena_only:'Только Арктика',single:'Разовое занятие'};
+  const card=x=>{
+    const paid=x.status==='paid'?x.price:Math.min(x.price,(d.balance.covered||{})[x.id]||0),left=Math.max(0,x.price-paid),cancelled=x.status==='cancelled';
+    const status=cancelled?'Отменён':!left?'Оплачен':paid?'Оплачен частично':'Ожидает оплаты';
+    const own=d.enrollments.find(e=>e.id===x.enrollment_id),active=own&&x.kind!=='single'&&!cancelled&&x.month>=d.cur_month;
+    return `<li class="subscription-card ${cancelled?'is-cancelled':''}"><div class="finance-card-head"><div><h4>${x.kind==='single'?`Разовое занятие${x.single_date?' · '+dShort(x.single_date):''}`:monthLabel(x.month)}</h4><div class="muted">${esc(clientGroupLabel(x))}</div></div><span class="pill ${!left&&!cancelled?'green':cancelled?'':'yellow'}">${status}</span></div>
+      <div class="small muted subscription-meta">${esc(tariffs[x.tariff]||'Абонемент')} · ${x.lessons} ${plural(x.lessons,'занятие','занятия','занятий')}</div>
+      <div class="finance-numbers"><div><small>Стоимость</small><b>${rub(x.price)}</b></div><div><small>Оплачено</small><b>${rub(paid)}</b></div><div><small>${cancelled?'Статус':'Осталось оплатить'}</small><b class="${left&&!cancelled?'finance-due':''}">${cancelled?'Отменён':rub(left)}</b></div></div>
+      ${x.credit_lessons||x.late_fee||x.discount_amount||x.corrected||x.excluded_dates&&x.excluded_dates!=='[]'?`<details class="finance-detail"><summary>Расчёт и условия</summary>${x.credit_lessons?`<div>Перерасчёт пропусков: ${x.credit_lessons}</div>`:''}${x.late_fee?`<div>Надбавка: ${rub(x.late_fee)}</div>`:''}${x.discount_amount?`<div>Скидка: ${rub(x.discount_amount)}</div>`:''}${x.corrected?'<div>Сумма скорректирована</div>':''}${x.excluded_dates&&x.excluded_dates!=='[]'?`<div>Исключены: ${JSON.parse(x.excluded_dates).map(dShort).join(', ')}</div>`:''}</details>`:''}
+      ${active?`<button type="button" class="btn sm" data-sub-transfer="${x.id}">Поменять группу</button><div class="subscription-transfer" data-sub-transfer-box="${x.id}" hidden></div>`:''}</li>`;
   };
-  const recommendTariff = () => {
-    const last = previous.find((s) => s.enrollment_id === en().id && s.month < $("#sl-month").value);
-    const p = programFor(), plan = p?.plan;
-    const effective = plan?.next && $("#sl-month").value >= plan.next.from ? plan.next : plan;
-    const tariff = en().program_id ? effective?.tariff || last?.tariff || "arena_only" : last?.tariff || en().tariff || "fixed";
-    $("#sl-tar").innerHTML = en().program_id
-      ? '<option value="arena_only">Только Арктика</option><option value="pkg">Арктика + ОФП</option>'
-      : '<option value="fixed">Негибкий</option><option value="flex">Гибкий</option>';
-    $("#sl-tar").value = tariff;
-    $("#sl-ofp").innerHTML = (p?.ofp_groups || []).map(g => `<option value="${g.id}" ${g.id === effective?.ofp_group_id ? "selected" : ""}>${esc(g.name)}</option>`).join("");
-    syncFields();
-  };
-  recommendTariff();
-  const quote = async () => {
-    const version = ++quoteVersion;
-    busy(true);
-    $("#sl-res").innerHTML = "";
-    $("#sl-q").innerHTML = "Считаю…";
-    try {
-      const q = await api("GET", `/api/students/${id}/quote?month=${$("#sl-month").value}&enrollment_id=${en().id}&group_id=${en().group_id}&tariff=${encodeURIComponent($("#sl-tar").value)}&ofp_group_id=${$("#sl-ofp").value || ""}&excluded_dates=${encodeURIComponent([...excludedDates].join(","))}&credit_requested=${$("#sl-credit").checked ? "1" : "0"}${$("#sl-disc").value ? "&discount_id=" + $("#sl-disc").value : ""}`);
-      if (version !== quoteVersion) return;
-      total = q.total;
-      q.calendar_picker = true;
-      $("#sl-q").innerHTML = (q.program ? programQuoteHtml(q) : quoteHtml(q)) + saleCalendarHtml(q, $("#sl-month").value);
-      $("#sl-credit-box").hidden = !q.credit_available;
-      $("#sl-credit-info").textContent = q.credit_available ? `(доступно до ${q.credit_available} занятий)` : "";
-      $("#sl-calendar").onchange = (e) => {
-        const day = e.target.dataset.saleDate;
-        if (!day) return;
-        if (!e.target.checked && $("#sl-calendar").querySelectorAll("input:checked").length === 0) {
-          e.target.checked = true; toast("Оставьте хотя бы одно занятие", true); return;
-        }
-        if (e.target.checked) excludedDates.delete(day); else excludedDates.add(day);
-        quote();
-      };
-      busy(false);
-    } catch (e) { if (version === quoteVersion) $("#sl-q").textContent = e.message; }
-  };
-  const resetExceptions = () => { excludedDates.clear(); $("#sl-credit").checked = false; };
-  $("#sl-month").onchange = () => { resetExceptions(); recommendTariff(); quote(); }; $("#sl-en").onchange = () => { resetExceptions(); recommendTariff(); quote(); }; $("#sl-disc").onchange = quote;
-  $("#sl-tar").onchange = () => { resetExceptions(); syncFields(); quote(); };
-  $("#sl-ofp").onchange = () => { resetExceptions(); quote(); };
-  $("#sl-credit").onchange = quote;
-  $("#sl-x").onclick = () => { box.innerHTML = ""; };
-  const invoice = () => api("POST", `/api/students/${id}/invoice`, { month: $("#sl-month").value, enrollment_id: en().id, group_id: en().group_id, group_action: $("#sl-group-action").value, tariff: $("#sl-tar").value, ofp_group_id: $("#sl-tar").value === "pkg" ? +$("#sl-ofp").value : null, excluded_dates: [...excludedDates], credit_requested: $("#sl-credit").checked, discount_id: $("#sl-disc").value || null });
-  const busy = (on) => box.querySelectorAll(".sc-actions button").forEach((b) => (b.disabled = on));
-  $("#sl-now").onclick = () => {
-    $("#sl-res").innerHTML = `<div class="row" style="margin-top:10px;align-items:flex-end"><div class="field"><label>Как оплатили</label><select id="sl-m">${methods.map(([k, t]) => `<option value="${k}">${t}</option>`).join("")}</select></div>
-      <button class="btn primary" id="sl-ok" style="flex:0">Принять ${rub(total)}</button></div>`;
-    $("#sl-ok").onclick = async () => {
-      busy(true); $("#sl-ok").disabled = true;
-      try { const r = await invoice(); await api("POST", `/api/subscriptions/${r.id}/pay`, { amount: r.quote.total, method: $("#sl-m").value }); toast("Абонемент продан и оплачен"); reload(); }
-      catch (e) { fail(e); busy(false); $("#sl-ok").disabled = false; }
-    };
-  };
-  $("#sl-link").onclick = async () => {
-    busy(true);
-    try {
-      const st = await api("GET", `/api/students/${id}/paylinks`);
-      if (!st.ready) throw new Error("PayKeeper не подключён: Чеки → Подключение");
-      const r = await invoice();
-      const what = `Абонемент на ${monthLabel($("#sl-month").value)}: ${d.student.name}`;
-      const l = await api("POST", `/api/students/${id}/paylinks`, { amount: r.quote.total, purpose: what, subscription_id: r.id });
-      const tariffLabel = $("#sl-tar").selectedOptions[0]?.textContent || "";
-      const msg = `Абонемент на ${monthLabel($("#sl-month").value)}\n${d.student.name}\n\nГруппа: ${en().lesson_kind === "arena" || /сборная.*арктика/i.test(en().group_name) ? "Сборная Арктика" : en().group_name}\nТариф: ${tariffLabel}\n\nК оплате: ${rub(l.amount)}\n\nСсылка для оплаты:\n${l.url}`;
-      $("#sl-res").innerHTML = `<div class="field" style="margin-top:10px"><label>Счёт выставлен. Отправьте родителю, после оплаты абонемент отметится сам</label><textarea id="sl-msg" rows="3">${esc(msg)}</textarea></div>
-        <div class="sc-actions"><button class="btn primary" id="sl-send">Вставить в чат с семьёй</button><button class="btn" id="sl-copy">Скопировать</button><button class="btn" id="sl-done">Готово</button></div>`;
-      $("#sl-copy").onclick = () => navigator.clipboard.writeText($("#sl-msg").value).then(() => toast("Скопировано"));
-      $("#sl-send").onclick = () => { scTab("feed"); const t = $("#cm-text"); if (!t) return toast("Нет открытого чата с семьёй: скопируйте и отправьте вручную", true); t.value = $("#sl-msg").value; t.focus(); t.scrollIntoView({ block: "center", behavior: "smooth" }); toast("Текст в поле сообщения: проверьте и нажмите «Отправить»"); };
-      $("#sl-done").onclick = reload;
-    } catch (e) { fail(e); busy(false); }
-  };
-  quote();
-  box.scrollIntoView({ block: "start", behavior: "smooth" });
+  return `<h3>Абонементы</h3><p class="small muted">Условия и состояние оплаты каждого абонемента.</p>${d.subscriptions.length?`<ul class="sub-list ${d.subscriptions.length>3?'folded':''}">${d.subscriptions.map(card).join('')}</ul>`:'<p class="muted">Абонементов пока нет. Оформите первый кнопкой «Продать абонемент».</p>'}${d.subscriptions.length>3?`<button class="linkish" id="sub-more">Показать историю (${d.subscriptions.length})</button>`:''}`;
+}
+function clientBalanceHtml(d) {
+  return `<h3>Оплаты и баланс</h3><div class="balance-summary"><div class="${d.balance.debt?'has-debt':''}"><small>Задолженность</small><b>${rub(d.balance.debt)}</b><span>По прошедшим и текущим счетам</span></div><div><small>Будущие занятия</small><b>${rub(d.balance.upcoming)}</b><span>К оплате за следующий месяц</span></div><div><small>Деньги на балансе</small><b>${rub(d.balance.deposit)}</b><span>Доступны для оплаты занятий</span></div></div>
+    ${(d.unpaid_cur||[]).length?`<div class="finance-note">За текущий месяц ещё не оформлен или не оплачен абонемент: ${(d.unpaid_cur||[]).map(esc).join(', ')}</div>`:''}
+    <div id="pay-form"></div><div id="pay-links"></div>
+    <h4 class="finance-history-title">История денег</h4>${d.payments.length?`<ul class="pay-list ${d.payments.length>4?'folded':''}">${d.payments.map(p=>`<li class="payment-card ${p.cancelled?'is-cancelled':''}"><div class="finance-card-head"><div><b class="payment-amount ${p.amount<0?'refund':''}">${p.amount<0?'−':'+'}${rub(Math.abs(p.amount))}</b><div class="small muted">${p.amount<0?'Возврат':'Поступление'} · ${esc(PAY_METHODS[p.method]||p.method)}</div></div><time>${dtShort(p.paid_at)}</time></div>${p.comment?`<div class="payment-comment">${esc(p.comment)}</div>`:''}<div class="small muted">${esc(p.user_name||'')}${p.cancelled?' · отменён':p.confirmed?'':' · ждёт подтверждения'}</div>${S.user.role==='admin'&&!p.cancelled&&p.method!=='unknown'?`<details class="finance-detail"><summary>Действия с платежом</summary>${p.confirmed?'':`<button class="btn sm" data-pconf="${p.id}">Подтвердить</button>`}<button class="btn sm danger" data-pcancel="${p.id}">Отменить платёж</button></details>`:''}</li>`).join('')}</ul>`:'<p class="muted">Платежей пока нет</p>'}${d.payments.length>4?`<button class="linkish" id="pay-more">Показать всю историю (${d.payments.length})</button>`:''}
+    ${d.family_kids.length||d.balance.deposit?`<details class="finance-detail"><summary>Другие операции</summary><div class="sc-actions">${d.family_kids.length?'<button class="btn sm" id="pay-fam">Оплата за семью</button>':''}${d.balance.deposit&&d.family_kids.length?'<button class="btn sm" id="bal-move">Перенести баланс другому ребёнку</button>':''}${d.balance.deposit&&can('payments','view')?'<button class="btn sm" id="bal-refund">Вернуть деньги с баланса</button>':''}</div></details>`:''}`;
+}
+async function loadClientPaymentLinks(sid) {
+  const box=$('#pay-links');if(!box)return;
+  const data=await api('GET',`/api/students/${sid}/paylinks`).catch(()=>({links:[]}));if($('#pay-links')!==box)return;
+  const links=data.links.filter(l=>l.status==='open');
+  box.innerHTML=links.length?`<details class="finance-detail payment-links"><summary>Ссылки, по которым ждём оплату (${links.length})</summary>${links.map(l=>`<div class="payment-link-card"><b>${rub(l.amount)}</b><div>${esc(l.purpose)}</div><div class="small muted">Создана ${dtShort(l.created_at)}</div><button class="btn sm" data-plcopy="${esc(l.url)}">Скопировать ссылку</button><details class="finance-detail"><summary>Другие действия</summary><button class="btn sm" data-plx="${l.id}">Отменить ссылку</button></details></div>`).join('')}</details>`:'';
+  box.querySelectorAll('[data-plcopy]').forEach(b=>b.onclick=()=>copyTextWithNotice(b.dataset.plcopy,'Ссылка скопирована'));
+  box.querySelectorAll('[data-plx]').forEach(b=>b.onclick=async()=>{await api('POST',`/api/paylinks/${b.dataset.plx}/cancel`,{});loadClientPaymentLinks(sid)});
 }
 
 const NEXT_GO = { reply: "Ответить", call: "Позвонить", offer: "Предложить дни", trial: "Записать", sell: "Продать", link: "Ссылка на оплату", makeup: "Отработка", task: "К задаче" };
 async function openStudent(id, options = {}) {
+  const request=S.studentCardRequest=(S.studentCardRequest||0)+1;
   const previous = history.state?.studentCard;
   const tab = options.tab || (previous?.id === +id && previous.userId === S.user?.id ? previous.tab : "feed") || "feed";
   let d;
   try { d = await api("GET", `/api/students/${id}`); }
-  catch (e) { if (options.restoring) closeDrawer(); return fail(e); }
+  catch (e) { if(request!==S.studentCardRequest)return; if (options.restoring) closeDrawer(); return fail(e); }
+  if(request!==S.studentCardRequest)return;
   const s = d.student, g = d.group, c = d.counters;
   const groups = S.meta.groups.filter((x) => !x.is_makeup && !x.program_id);
   const makeupGroups = S.meta.groups.filter((x) => x.is_makeup);
@@ -1653,22 +1693,22 @@ async function openStudent(id, options = {}) {
     <div class="sc-meta">${isMember ? (regular.length ? regular.map((e) => `<span class="pill">${esc(e.group_name)}</span>`).join(" ") : `<span class="muted small">Группа не выбрана</span>`)
       : `${s.trial_at ? `<span class="pill">Пробное ${dtShort(s.trial_at)}</span>` : ""}`}</div>
     <div class="sc-parents">${d.parents.map((p) => `<span class="sc-parent"><b>${esc(p.name)}</b> <button class="rel-chip ${p.relation ? "" : "empty"}" data-rel="${p.id}" title="Кем приходится ребёнку">${p.relation ? esc(p.relation) : "кем приходится?"}</button>${p.phone ? ` <button class="linkish" data-copy-phone="${esc(p.phone)}" title="Скопировать номер">${esc(p.phone)}</button> <button class="icon-btn" data-dial="${esc(p.phone)}" title="Позвонить через Sipuni">📞</button>` : ""}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}${p.email ? ` <span class="small muted">✉ ${esc(p.email)}</span>` : ""}</span>`).join("")}</div>
-    ${isMember ? `<div class="sc-finance-summary"><div><small>Долг</small><b class="${d.balance.debt ? "sc-debt" : ""}">${rub(d.balance.debt || 0)}</b></div><div><small>Следующий месяц</small><b>${rub(d.balance.upcoming || 0)}</b></div><div><small>На балансе</small><b>${rub(d.balance.deposit || 0)}</b></div><div><small>Доступно отработок</small><b>${c.available || 0}</b></div></div>` : ""}
+    ${isMember && d.balance.debt ? `<div class="sc-debt-summary">Задолженность <b>${rub(d.balance.debt)}</b></div>` : ""}
     ${d.family.note ? `<div class="sc-staff-note"><b>Заметка для команды</b><div>${esc(d.family.note)}</div></div>` : ""}
     ${alerts ? `<div class="sc-alerts">${alerts}</div>` : ""}
     ${d.next_step && !(d.next_step.action === "task" && d.tasks?.open?.length) ? `<div class="next-step"><span><b>Задача:</b> ${esc(d.next_step.text)}</span><button class="btn sm primary" id="ns-go">${NEXT_GO[d.next_step.action] || "Сделать"}</button></div>` : ""}
     ${!isMember && d.stage_tip ? `<details class="stage-tip" ${S.tipsOpen === true ? "open" : ""}><summary>💡 Подсказка на этапе «${esc(d.stage_label)}»</summary>
       <div><b>Что сказать.</b> ${esc(d.stage_tip.say)}</div><div style="margin-top:4px"><b>Чтобы перейти дальше:</b> ${esc(d.stage_tip.next)}</div></details>` : ""}
     <div class="sc-actions">
-      ${isMember && full && regular.length ? `<button class="btn primary" id="act-sell">🛒 Продать абонемент</button>` : ""}
+      ${isMember && full ? `<button class="btn primary" id="act-sell">🛒 Продать абонемент</button>` : ""}
       ${!isMember ? `<button class="btn primary" id="act-trial">📅 Записать на пробное</button>` : ""}
       ${d.parents.some((p) => p.phone) ? `<button class="btn" id="act-call">📞 Позвонить</button>` : ""}
-      ${isMember ? `<details class="sc-extra-actions"><summary class="btn">Ещё</summary><div><button class="btn" id="act-vac">Отпуск</button>${regular.length === 1 ? `<button class="btn" id="act-move">Перевести в другую группу</button>` : ""}</div></details>` : ""}
+      ${isMember ? `<details class="sc-extra-actions"><summary class="btn">Ещё</summary><div><button class="btn" id="act-vac">Отпуск</button></div></details>` : ""}
     </div>
   </div>
   <div class="sc-tasks">${cardTasksBlock(d)}</div>
-  <div class="sc-tabs" role="tablist" aria-label="Разделы карточки"><button class="on" role="tab" aria-selected="true" data-sctab="feed">Общение</button><button role="tab" aria-selected="false" data-sctab="abon">Абонементы и оплаты</button><button role="tab" aria-selected="false" data-sctab="info">Данные клиента</button></div>
-  <div class="sc-grid" data-tab="feed"><div class="sc-left"></div><div class="sc-right"><div id="sell-box"></div></div><div class="sc-info"></div></div>
+  <div class="sc-tabs" role="tablist" aria-label="Разделы карточки"><button class="on" role="tab" aria-selected="true" data-sctab="feed">Общение</button><button role="tab" aria-selected="false" data-sctab="abon">Абонементы и оплаты</button><button role="tab" aria-selected="false" data-sctab="visits">Посещения</button><button role="tab" aria-selected="false" data-sctab="info">Данные клиента</button></div>
+  <div class="sc-grid" data-tab="feed"><div class="sc-left"></div><div class="sc-right"><div id="sell-box"></div></div><div class="sc-info"></div><div class="sc-attendance"></div></div>
 
   <div class="section" data-sc="stage">
     ${s.erp_status ? `<p class="small muted">Статус при переносе из ERP: ${esc(s.erp_status)}</p>` : ""}
@@ -1699,111 +1739,10 @@ async function openStudent(id, options = {}) {
   <div data-sc="pu">${puCardBlock(d)}</div>
   <div class="section" id="comms-box"><h3>Связь с семьёй</h3><div class="muted small">Загружаю переписку…</div></div>
 
-  ${isMember ? `
-  <div class="section" data-sc="visits" data-title="📅 Посещения">
-    <h3>Посещения</h3>
-    ${can("journal", "full") && d.enrollments.some((e) => e.lesson_kind !== "ofp") ? `<div class="cm-box">
-      <div class="small"><b>Отметить на тренировке</b></div>
-      <div class="row" style="margin-top:6px;align-items:flex-end;flex-wrap:wrap">
-        <div class="field"><label>Группа</label><select id="cm-group">${d.enrollments.filter((e) => e.lesson_kind !== "ofp").map((e) => `<option value="${e.group_id}" data-wd="${esc(e.weekdays || e.group_weekdays)}">${esc(e.branch_name)} · ${esc(groupNoBranch({ name: e.group_name, branch: e.branch_name }))}</option>`).join("")}</select></div>
-        <div class="field" style="flex:0 0 190px"><label>Тренировка</label><select id="cm-date"></select></div></div>
-      <div id="cm-state" class="small muted" style="margin:4px 0 6px"></div>
-      <div class="mark" id="cm-btns"></div></div>` : ""}
-    ${can("sales", "full") ? singlesBlock(d) : ""}
-    ${visitsHtml(d.visits || [], d.cur_month)}
-    <div id="warn-box" style="margin-top:10px"></div>
-  </div>
-  <div class="section" data-sc="skips" data-title="🩹 Пропуски и отработки">
-    <h3>Пропуски и отработки</h3>
-    <div class="counters">
-      <div class="counter"><b>${c.absent_cur}</b><span>пропущено в этом месяце</span></div>
-      <div class="counter"><b>${c.absent_prev}</b><span>пропущено в прошлом</span></div>
-      <div class="counter"><b>${c.made_up}</b><span>отработано</span></div>
-      <div class="counter hl"><b>${c.available}</b><span>можно отработать</span></div>
-    </div>
-    ${c.available_ids.length ? `<div class="small" style="margin-top:8px"><b>Неотработанные пропуски:</b> ${c.available_ids.map((a) => dShort(a.date)).join(", ")}
-      <div class="muted">На «Гибком» пропуски переносим и без справки: не больше 3 и только при оплате следующего месяца</div></div>` : ""}
-    ${c.booked ? `<div class="small muted" style="margin-top:8px">Записан на отработку: ${c.booked}</div>` : ""}
-    ${c.credited ? `<div class="small muted" style="margin-top:4px">Ушло в перерасчёт: ${c.credited}</div>` : ""}
-    ${c.available ? `
-      <div class="row" style="margin-top:12px">
-        <div class="field"><label>Группа отработок</label><select id="mk-group">${makeupGroups.map((x) => `<option value="${x.id}">${esc(x.name)} · ${esc(x.age)} лет</option>`).join("")}</select></div>
-        <div class="field"><label>Дата</label><select id="mk-date">${nextSaturdays(5).map((x) => `<option value="${x}">${dShort(x)}</option>`).join("")}</select></div>
-      </div>
-      <button class="btn primary sm" id="mk-book">Записать на отработку</button>
-      <div id="mk-slots"></div>` : ""}
-    ${d.makeups.length ? `<ul class="history" style="margin-top:10px">${d.makeups.map((m) => `<li>${dShort(m.date)} · ${esc(m.group_name)} · за пропуск ${dShort(m.absence_date)} <span class="pill ${m.status === "done" ? "green" : m.status === "missed" ? "red" : ""}">${{ booked: "записан", done: "отработал", missed: "не пришёл", cancelled: "отменена" }[m.status]}</span>
-      ${m.status === "booked" ? `<button class="btn sm" data-mk="${m.id}" data-st="cancelled">Отменить</button>` : ""}</li>`).join("")}</ul>` : ""}
-  </div>` : ""}
+  <div class="section" data-sc="visits" data-title="Посещения и отработки">${clientAttendanceMarkup()}</div>
 
-  <div class="section" data-sc="abon" data-title="🏟 Группы, сборная, лист ожидания">
-    <h3>${isMember ? "Группы и абонементы" : "Абонемент"}</h3>
-    ${waitlistCard(d)}
-    ${isMember ? `
-      <div class="row"><div class="field"><label>Месяц абонемента</label><select id="q-month">${[d.cur_month, d.next_month].map((m) => `<option value="${m}" ${m === d.next_month ? "selected" : ""}>${monthLabel(m)}</option>`).join("")}</select></div>
-        <div class="field"><label>Скидка</label><select id="q-disc"><option value="">Без скидки (или по правилу)</option>${(d.discounts || []).map((x) => `<option value="${x.id}">${esc(x.name)}, ${x.percent}%</option>`).join("")}</select></div></div>
-      ${programBlock(d)}
-      ${d.enrollments.length ? d.enrollments.map((e) => e.lesson_kind === "ofp" ? `
-        <div class="enr"><div class="enr-head"><b>${esc(e.group_name)}</b><span class="muted small">входит в абонемент сборной</span></div></div>` : e.lesson_kind === "arena" ? `
-        <div class="enr">
-          <div class="enr-head"><b>${esc(e.group_name)}</b><span class="muted small">По решению тренера</span></div>
-          <div class="quote muted" data-quote="${e.id}">Считаю…</div>
-        </div>` : `
-        <div class="enr">
-          <div class="enr-head"><b>${esc(e.group_name)}</b><span class="muted small">${esc(e.group_age)} лет</span>
-            ${e.age_warn ? `<span class="pill red" title="Проверьте группу">⚠️ ${esc(e.age_warn)}</span>` : ""}
-            ${e.start_date && e.start_date > S.meta.today ? `<span class="pill yellow">ходит с ${dShort(e.start_date)}</span>` : ""}
-            <button class="btn sm" data-entr="${e.id}" title="Перевести в другую группу вместе с абонементом">Перевести</button>
-            <button class="icon-btn" data-enoff="${e.id}" title="Больше не ходит в эту группу">✕</button></div>
-          <div class="enr-tr" data-trbox="${e.id}" hidden></div>
-          <div class="chips" style="margin:6px 0 8px">${e.group_weekdays.split(",").map((wd) => { const on = !e.weekdays || e.weekdays.split(",").includes(wd); return `<button class="chip day ${on ? "on" : ""}" data-enday="${e.id}" data-wd="${wd}">${WD[+wd]}</button>`; }).join("")}
-            <select data-entar="${e.id}" style="width:auto;padding:4px 8px"><option value="fixed" ${e.tariff === "fixed" ? "selected" : ""}>Негибкий</option><option value="flex" ${e.tariff === "flex" ? "selected" : ""}>Гибкий</option></select></div>
-          <div class="quote muted" data-quote="${e.id}">Считаю…</div>
-        </div>`).join("") : `<div class="muted small">Ученик пока не ходит ни в одну группу.</div>`}
-      <div class="row" style="margin-top:12px">
-        <div class="field"><label>Добавить группу</label><select id="en-group"><option value="">— выберите —</option>${groups.filter((x) => !x.program_id && !d.enrollments.some((e) => e.group_id === x.id)).map((x) => `<option value="${x.id}">${esc(x.name)} · ${esc(x.age)} лет</option>`).join("")}</select></div>
-        <div class="field" style="flex:0 0 130px"><label>Тариф</label><select id="en-tariff"><option value="fixed">Негибкий</option><option value="flex">Гибкий</option></select></div>
-      </div>
-      <button class="btn sm" id="en-add">+ Добавить группу</button>
-      <div class="small muted" style="margin-top:6px">Дни можно снять, если ребёнок ходит в группу не во все её дни: цена посчитается только за выбранные.</div>`
-    : `<div class="muted small">Абонемент выставляется, когда клиент переходит в этап «Купил абонемент».</div>`}
-  </div>
-  <div class="section" data-sc="subs">
-    <h3>Абонементы</h3>
-    ${d.subscriptions.length ? "" : `<div class="muted small">Абонементов пока нет${isMember && regular.length ? ": кнопка «🛒 Продать абонемент» вверху" : ""}</div>`}
-    ${d.subscriptions.length ? `<ul class="history sub-list ${d.subscriptions.length > 3 ? "folded" : ""}" style="margin-top:10px">${d.subscriptions.map((x) => { const cov = (d.balance.covered || {})[x.id] || 0; return `<li><b>${x.kind === "single" ? "Разовое занятие" : monthLabel(x.month)}</b>${x.group_name ? " · " + esc(x.group_name) : ""} · ${rub(x.price)}${x.kind === "single" ? "" : ` · ${x.lessons} зан.`}${x.credit_lessons ? ` · перерасчёт ${x.credit_lessons}` : ""}${x.excluded_dates && x.excluded_dates !== "[]" ? `<div class="small muted">Исключены по согласованию: ${JSON.parse(x.excluded_dates).map(dShort).join(", ")}</div>` : ""}${x.late_fee ? ` · наценка ${rub(x.late_fee)}` : ""}${x.discount_amount ? ` · скидка ${rub(x.discount_amount)}` : ""}
-      <span class="pill ${x.status === "paid" ? "green" : x.status === "cancelled" ? "" : "yellow"}">${x.status === "invoiced" && cov ? `оплачено ${rub(cov)} из ${rub(x.price)}` : { paid: "оплачен", invoiced: "ждёт оплаты", cancelled: "отменён" }[x.status]}</span>
-      ${x.corrected ? `<span class="pill">корректировка</span>` : ""}
-</li>`; }).join("")}</ul>` : ""}
-    ${d.subscriptions.length > 3 ? `<button class="linkish small" id="sub-more">Показать все абонементы (${d.subscriptions.length})</button>` : ""}
-  </div>
-
-  <div class="section" data-sc="balance">
-    <h3>Баланс и оплаты</h3>
-    <div class="chips">
-      <span class="pill ${d.balance.debt ? "red" : "green"}">${d.balance.debt ? `Долг ${rub(d.balance.debt)}` : "Долга по выставленным счетам нет"}</span>
-      ${(d.unpaid_cur || []).map((g) => `<span class="pill red">Не оплачен ${esc(monthLabel(S.meta.today.slice(0, 7)).split(" ")[0])}: ${esc(g)}</span>`).join("")}
-      ${d.balance.upcoming ? `<span class="pill yellow">К оплате за следующий месяц ${rub(d.balance.upcoming)}</span>` : ""}
-      ${d.balance.deposit ? `<span class="pill green">Депозит ${rub(d.balance.deposit)}</span>` : ""}
-    </div>
-    <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:6px"><button class="btn sm" id="pay-free" style="flex:0">+ Принять оплату</button>
-      ${d.family_kids.length ? `<button class="btn sm" id="pay-fam" style="flex:0" title="Один платёж закроет счета всех детей семьи, остаток на баланс">Оплата за семью</button>` : ""}
-      ${d.balance.deposit && d.family_kids.length ? `<button class="btn sm" id="bal-move" style="flex:0">Перенести с баланса</button>` : ""}
-      ${d.balance.deposit && can("payments", "view") ? `<button class="btn sm" id="bal-refund" style="flex:0">Вернуть деньги</button>` : ""}
-      <button class="btn sm" id="sell-single" style="flex:0">Разовое занятие</button>
-      ${can("members", "full") ? `<button class="btn sm" id="pay-link" style="flex:0" title="Счёт PayKeeper: родитель платит картой или СБП, оплата сама попадёт в CRM">💳 Ссылка на оплату</button>` : ""}</div>
-    <div id="pay-form"></div><div id="pay-links"></div>
-    ${d.payments.length ? `<ul class="history pay-list ${d.payments.length > 4 ? "folded" : ""}" style="margin-top:10px">${d.payments.map((p) => `<li class="${p.cancelled ? "struck" : ""}"><b>${rub(p.amount)}</b> · ${esc(PAY_METHODS[p.method] || p.method)} · ${dtShort(p.paid_at)}${p.comment ? " · " + esc(p.comment) : ""}
-      <div class="when">${esc(p.user_name)}${p.cancelled ? ` · отменён (${esc(p.cancelled_by)})` : p.confirmed ? "" : " · ждёт подтверждения"}</div>
-      ${S.user.role === "admin" && !p.cancelled && p.method !== "unknown" ? `${p.confirmed ? "" : `<button class="btn sm" data-pconf="${p.id}">Подтвердить</button> `}<button class="btn sm danger" data-pcancel="${p.id}">Отменить платёж</button>` : ""}</li>`).join("")}</ul>
-      ${d.payments.length > 4 ? `<button class="linkish small" id="pay-more">Показать все платежи (${d.payments.length})</button>` : ""}` : ""}
-    ${d.ledger.length ? `<details style="margin-top:10px"><summary class="linkish small">Лента баланса: все поступления и списания</summary>
-      <table class="tbl" style="margin-top:6px"><thead><tr><th>Когда</th><th>Что</th><th>Сумма</th><th>Остаток</th></tr></thead><tbody>
-      ${d.ledger.map((e) => `<tr class="${e.cancelled ? "muted" : ""}"><td>${dtShort(e.at)}</td><td>${esc(e.text)}</td>
-        <td class="${e.amount < 0 ? "" : "s-good"}" style="white-space:nowrap">${e.cancelled ? "отменён" : (e.amount > 0 ? "+" : "−") + rub(Math.abs(e.amount))}</td>
-        <td style="white-space:nowrap"><b>${e.rest < 0 ? "−" : ""}${rub(Math.abs(e.rest))}</b></td></tr>`).join("")}</tbody></table>
-      <div class="small muted">Остаток плюс: переплата на балансе, минус: долг. Переплата сама закрывает следующий счёт</div></details>` : ""}
-  </div>
+  <div class="section" data-sc="subs">${clientSubscriptionsHtml(d)}</div>
+  <div class="section" data-sc="balance">${clientBalanceHtml(d)}</div>
 
   <div class="section" data-sc="vac" data-title="🌴 Отпуск">
     <h3>Отпуск</h3>
@@ -1823,11 +1762,17 @@ async function openStudent(id, options = {}) {
   </div>
   <div style="margin-top:14px" data-sc="arch"><button class="btn sm ${s.archived ? "" : "danger"}" id="s-arch">${s.archived ? "Вернуть из архива" : "Перенести в архив"}</button></div>`;
   openDrawer(html, "wide");
-  try { history.replaceState({ ...history.state, studentCard: { id: +id, userId: S.user.id, tab } }, ""); } catch (_) {}
+  try { history.replaceState({ ...history.state, studentCard: { ...(previous?.id === +id ? previous : {}), id: +id, userId: S.user.id, tab } }, ""); } catch (_) {}
   const body = $("#drawer-body");
   layoutStudentCard(body, isMember);
   scTab(tab);
   const reload = () => { openStudent(id); render(); };
+  wireClientAttendance(body,d,reload);
+  body.querySelectorAll("[data-sub-transfer]").forEach(b => b.onclick = () => {
+    const sub=d.subscriptions.find(s=>s.id===+b.dataset.subTransfer), e=d.enrollments.find(e=>e.id===sub.enrollment_id), box=body.querySelector(`[data-sub-transfer-box="${sub.id}"]`);
+    if(e.program_id){ box.hidden=false; box.innerHTML='<div class="finance-note">Для перевода из сборной нужно согласовать стоимость и условия ОФП с руководителем.</div>'; return; }
+    openTransfer(e.id,box,d,groups,reload,sub.month>d.cur_month?sub.month+'-01':S.meta.today);
+  });
   const patch = async (data) => { try { await api("PATCH", `/api/students/${id}`, data); reload(); } catch (e) { fail(e); } };
 
   $("#f-stage").onchange = async (e) => {
@@ -1888,7 +1833,7 @@ async function openStudent(id, options = {}) {
     else if (a === "offer") { scTab("feed"); click("#to-open"); }
     else if (a === "trial") click("#act-trial");
     else if (a === "sell") { if (!click("#act-sell")) { openFold(body, "stage"); const f = $("#f-stage"); if (f) { f.scrollIntoView({ block: "center", behavior: "smooth" }); f.focus(); } } }
-    else if (a === "link") { scTab("abon"); click("#pay-link"); }
+    else if (a === "link") { click("#act-sell"); }
     else if (a === "makeup") openFold(body, "skips");
     else if (a === "task") { closeDrawer(); go("planner"); }
   };
@@ -1961,42 +1906,7 @@ async function openStudent(id, options = {}) {
     (amount, method) => api("POST", `/api/subscriptions/${b.dataset.pay}/pay`, { amount, method }))));
   if ($("#sub-more")) $("#sub-more").onclick = (e) => { body.querySelector(".sub-list").classList.remove("folded"); e.target.remove(); };
   if ($("#pay-more")) $("#pay-more").onclick = (e) => { body.querySelector(".pay-list").classList.remove("folded"); e.target.remove(); };
-  $("#pay-free").onclick = () => payForm("Оплата на депозит", d.balance.debt || 0,
-    (amount, method, comment) => api("POST", `/api/students/${id}/payments`, { amount, method, comment }));
-  if ($("#pay-link")) {
-    const drawLinks = async () => {
-      const r = await api("GET", `/api/students/${id}/paylinks`).catch(() => ({ links: [] }));
-      const open = r.links.filter((l) => l.status === "open"), paid = r.links.filter((l) => l.status === "paid").slice(0, 3);
-      $("#pay-links").innerHTML = open.length || paid.length ? `<ul class="history" style="margin-top:8px">${[...open, ...paid].map((l) => `<li>
-        ${l.status === "paid" ? "✅" : "⏳"} <b>${rub(l.amount)}</b> · ${esc(l.purpose)} · ${l.status === "paid" ? "оплачено " + dtShort(l.paid_at) : "ждём оплату, ссылка от " + dtShort(l.created_at)}
-        ${l.status === "open" ? `<button class="linkish small" data-plcopy="${esc(l.url)}">скопировать ссылку</button> <button class="linkish small" data-plx="${l.id}">отменить</button>` : ""}</li>`).join("")}</ul>` : "";
-      $("#pay-links").querySelectorAll("[data-plcopy]").forEach((b) => (b.onclick = () => navigator.clipboard.writeText(b.dataset.plcopy).then(() => toast("Ссылка скопирована"))));
-      $("#pay-links").querySelectorAll("[data-plx]").forEach((b) => (b.onclick = async () => { await api("POST", `/api/paylinks/${b.dataset.plx}/cancel`, {}); drawLinks(); }));
-    };
-    drawLinks();
-    const linkForm = (amount, what, subId) => {
-      $("#pay-form").innerHTML = `<div class="quote" style="margin-top:10px"><b>Ссылка на оплату</b>
-        <div class="small muted">Родитель откроет ссылку и заплатит картой или по СБП. Оплата сама появится в CRM в течение 10 минут, чек пробьёт PayKeeper</div>
-        <div class="row" style="margin-top:8px"><div class="field"><label>Сумма, ₽</label><input id="pl-sum" type="number" min="1" value="${amount}"></div>
-          <div class="field"><label>За что (увидит родитель)</label><input id="pl-p" value="${esc((what || "Занятия футболом") + ": " + d.student.name)}"></div></div>
-        <button class="btn primary sm" id="pl-ok">Создать ссылку</button><div id="pl-res"></div></div>`;
-      $("#pl-ok").onclick = async (e) => {
-        e.target.disabled = true;
-        try {
-          const r = await api("POST", `/api/students/${id}/paylinks`, { amount: +$("#pl-sum").value, purpose: $("#pl-p").value, subscription_id: subId || null });
-          const msg = `Здравствуйте! Ссылка для оплаты: ${r.purpose}, ${r.amount} ₽\n${r.url}`;
-          $("#pl-res").innerHTML = `<div class="field" style="margin-top:10px"><label>Отправьте родителю</label><textarea id="pl-msg" rows="3">${esc(msg)}</textarea></div>
-            <button class="btn sm primary" id="pl-copy">Скопировать сообщение</button>`;
-          $("#pl-copy").onclick = () => navigator.clipboard.writeText($("#pl-msg").value).then(() => toast("Скопировано: вставьте в чат с родителем"));
-          drawLinks();
-        } catch (err) { fail(err); e.target.disabled = false; }
-      };
-      $("#pay-form").scrollIntoView({ block: "center", behavior: "smooth" });
-    };
-    $("#pay-link").onclick = () => linkForm(d.balance.debt || d.balance.upcoming || "", "", null);
-    body.querySelectorAll("[data-plsub]").forEach((b) => (b.onclick = () => linkForm(+b.dataset.left, b.dataset.what, +b.dataset.plsub)));
-  }
-  $("#sell-single").onclick = async () => { try { await api("POST", `/api/students/${id}/single`, {}); toast("Разовое занятие выставлено"); reload(); } catch (e) { fail(e); } };
+  loadClientPaymentLinks(id);
   body.querySelectorAll("[data-pconf]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/payments/${b.dataset.pconf}/confirm`, {}); reload(); } catch (e) { fail(e); } }));
   body.querySelectorAll("[data-pcancel]").forEach((b) => (b.onclick = async () => { if (!confirm("Отменить платёж? Он останется в реестре как отменённый.")) return; try { await api("POST", `/api/payments/${b.dataset.pcancel}/cancel`, {}); reload(); } catch (e) { fail(e); } }));
   body.querySelectorAll("[data-pcanc]").forEach((b) => (b.onclick = () => {  // оплаченный: куда деньги
@@ -2789,7 +2699,7 @@ async function renderDocs(page) {
 
 
 /* Перевод в другую группу вместе с абонементом: сначала показываем, что станет с оплатой, потом переводим */
-function openTransfer(eid, box, d, groups, reload) {
+function openTransfer(eid, box, d, groups, reload, initialDate) {
   if (!box.hidden) { box.hidden = true; return; }
   const e = d.enrollments.find((x) => x.id === eid);
   const t = new Date(), first = new Date(t.getFullYear(), t.getMonth() + 1, 1);
@@ -2798,7 +2708,7 @@ function openTransfer(eid, box, d, groups, reload) {
   box.hidden = false;
   box.innerHTML = `<div class="row" style="margin-top:8px">
       <div class="field"><label>В группу</label><select data-trg><option value="">Выберите группу</option>${opts.map((g) => `<option value="${g.id}">${esc(g.name)} · ${esc(g.age)} лет</option>`).join("")}</select></div>
-      <div class="field" style="flex:0 0 150px"><label>С какого дня</label><input type="date" data-trd value="${iso(first)}" min="${iso(new Date(t.getFullYear(), t.getMonth(), 1))}"></div></div>
+      <div class="field" style="flex:0 0 150px"><label>С какого дня</label><input type="date" data-trd value="${initialDate || iso(first)}" min="${iso(new Date(t.getFullYear(), t.getMonth(), 1))}"></div></div>
     <div data-trplan class="small muted">Выберите группу: покажу, что станет с абонементом и оплатой</div>`;
   const sel = box.querySelector("[data-trg]"), dt = box.querySelector("[data-trd]"), out = box.querySelector("[data-trplan]");
   const calc = async () => {
