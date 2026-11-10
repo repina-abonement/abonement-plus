@@ -250,6 +250,11 @@ async function offerPin() {
 
 /* ---------- вход ---------- */
 async function renderLogin(force = false) {
+  try {
+    if (sessionStorage.getItem("crm.force_password_login") === "1") {
+      force = true; sessionStorage.removeItem("crm.force_password_login");
+    }
+  } catch (_) {}
   closeDrawer();
   if (!force && deviceToken()) {
     const h = await fetch("/api/pin/hello?device=" + encodeURIComponent(deviceToken())).then((r) => r.json()).catch(() => ({}));
@@ -459,10 +464,15 @@ function shell() {
     <div class="brand"><i aria-hidden="true">⚽</i><div>Абонемент <span>Плюс</span></div></div>
     <nav class="nav">${sideNav(views)}</nav>
     ${can("members", "full") ? `<button class="btn" id="new-client">+ Клиент</button>` : ""}
+    <div class="sidebar-account">
+      <div class="sidebar-account-text"><b>${esc(S.user.name)}</b><small>${esc(S.user.title || "")}</small></div>
+      <button type="button" class="btn sm" data-account-logout aria-label="Выйти из аккаунта">Выйти</button>
+    </div>
   </header>
   <main class="page" id="page"></main>
   <nav class="tabbar">${tabs.map(([k, t]) => `<button data-${k === "more" ? "more" : "view"}="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}<span>${SHORT[k] || t}</span>${badge(k)}</button>`).join("")}</nav>
   <div class="more-sheet" hidden><div class="sheet">${views.slice(4).map(([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}${t}</button>`).join("")}</div></div>`;
+  app.querySelectorAll("[data-account-logout]").forEach(b => b.onclick = logoutCurrentAccount);
   app.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => { $(".more-sheet").hidden = true; go(b.dataset.view); }));
   app.querySelectorAll("[data-fold]").forEach((b) => (b.onclick = () => {
     const f = b.closest(".nav-fold"), open = f.classList.toggle("open");
@@ -2418,7 +2428,7 @@ async function renderSettings(page) {
     </form>
     <div class="small muted" data-tab="profile" style="margin-top:12px">Вы вошли как ${esc(S.user.name)}. Версия 0.2, тестовая.</div>
     </div>`;
-  $("#logout").onclick = async () => { await api("POST", "/api/logout", {}).catch(() => {}); renderLogin(); };
+  $("#logout").onclick = logoutCurrentAccount;
   settingsTiles(page);
   if ($("#set")) $("#set").onsubmit = async (e) => {
     e.preventDefault();
@@ -2842,3 +2852,16 @@ document.addEventListener("click", async (e) => {
     toast("Номер скопирован");
   } catch (error) { fail(error); }
 });
+
+
+async function logoutCurrentAccount() {
+  const buttons = [...document.querySelectorAll("[data-account-logout], #logout")];
+  buttons.forEach(b => b.disabled = true);
+  try {
+    try { await api("POST", "/api/logout", {}); }
+    catch (err) { if (err.message !== "Нужно войти") throw err; }
+    try { sessionStorage.setItem("crm.force_password_login", "1"); } catch (_) {}
+    // A full reload clears private in-memory data, timers and the previous user's drafts.
+    location.reload();
+  } catch (err) { buttons.forEach(b => b.disabled = false); fail(err); }
+}

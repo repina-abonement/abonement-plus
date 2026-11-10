@@ -1534,3 +1534,18 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .no-copy .drawer-panel .task-copyable { -webkit-user-select: text; user-select: text; cursor: text; }
 
 .reply-channel { margin: 6px 0; padding: 6px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--ink); font-size: 13px; font-weight: 700; }
+
+.sidebar-account { position: sticky; bottom: -16px; z-index: 3; flex: none; display: flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 12px 0 4px; border-top: 1px solid rgba(255,255,255,.17); background: var(--pitch); }
+.sidebar-account-text { min-width: 0; flex: 1; overflow-wrap: anywhere; font-size: 12px; line-height: 1.35; }
+.sidebar-account-text small { display: block; margin-top: 3px; color: rgba(255,255,255,.65); }
+.sidebar-account [data-account-logout] { flex: none; min-height: 40px; background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.23); color: #fff; }
+html.theme-soft .sidebar-account { background: var(--surface); border-color: var(--line); }
+html.theme-soft .sidebar-account-text small { color: var(--ink-2); }
+html.theme-soft .sidebar-account [data-account-logout] { background: var(--surface-2); border-color: var(--line); color: var(--ink); }
+@media(max-width:760px) {
+  .sidebar-account { position: static; margin: 0; padding: 0; border: 0; background: transparent; }
+  .sidebar-account-text { display: none; }
+  .topbar .brand { min-width: 0; }
+  .topbar .brand > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
