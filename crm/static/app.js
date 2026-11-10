@@ -2353,7 +2353,7 @@ async function renderSettings(page) {
     <div class="section" id="resp-settings" data-tab="resp"></div>
     <div class="section" data-tab="users">
       <h3>Сотрудники</h3>
-      <div class="list" style="box-shadow:none;margin-bottom:10px">${users.map((u) => `<div class="list-row staff-row"><div class="grow"><span class="who" data-prof="${u.id}">${avatar(u.id, u.name, 34)}<span>${esc(u.name)} <span class="muted small">${esc(u.login)}</span></span></span></div>
+      <div class="list" style="box-shadow:none;margin-bottom:10px">${users.map((u) => `<div class="list-row staff-row"><div class="grow"><span class="who" data-prof="${u.id}">${avatar(u.id, u.name, 34)}<span>${esc(u.name)} <button type="button" class="linkish small muted" data-ulogin="${u.id}" data-login="${esc(u.login)}" data-name="${esc(u.name)}" title="Изменить логин">${esc(u.login)} ✎</button></span></span></div>
         <input data-uph="${u.id}" value="${esc(u.phone || "")}" placeholder="телефон" title="Телефон сотрудника" inputmode="tel" style="flex:0 0 130px;padding:5px 8px">
         <input data-tgu="${u.id}" value="${esc(u.tg_username ? "@" + u.tg_username : "")}" placeholder="@telegram" title="Ник в Telegram: CRM отметит сотрудника в рабочих чатах" style="flex:0 0 120px;padding:5px 8px">
         ${u.role === "coach" ? "" : `<input data-sip="${u.id}" value="${esc(u.sip_number || "")}" placeholder="вн. номер" title="Внутренний номер Sipuni: на него придёт звонок из карточки" inputmode="numeric" style="flex:0 0 96px;padding:5px 8px">`}
@@ -2363,9 +2363,9 @@ async function renderSettings(page) {
         ${u.id !== S.user.id ? `<button class="icon-btn" data-ucopy="${u.id}" data-login="${esc(u.login)}" data-name="${esc(u.name)}" title="Скопировать вход: новый пароль и сообщение с логином">📋</button><button class="icon-btn" data-upw="${u.id}" title="Задать новый пароль">🔑</button><button class="icon-btn" data-uarch="${u.id}" title="В архив">🗄</button>` : ""}</div>`).join("")}</div>
       <div class="small muted" style="margin:-4px 0 10px">Внутренний номер Sipuni нужен, чтобы звонить клиенту прямо из карточки</div>
       <form id="nu">
-        <div class="row"><div class="field"><label>Имя</label><input name="name" required></div><div class="field"><label>Логин</label><input name="login" autocomplete="off" required></div></div>
-        <div class="row"><div class="field"><label>Пароль (от 8 символов)</label><div class="pw-wrap"><input name="password" type="password" autocomplete="new-password" minlength="8" required><button type="button" class="pw-eye" aria-label="Показать пароль">👁</button></div></div>
-          <div class="field"><label>Должность</label><select name="post">${POSTS.map(([k, t]) => `<option value="${k}" ${k === "operator" ? "selected" : ""}>${t}</option>`).join("")}</select></div></div>
+        <div class="row"><div class="field"><label>Имя и фамилия</label><input name="name" autocomplete="off" required></div><div class="field"><label>Телефон</label><input name="phone" type="tel" placeholder="Необязательно"></div></div>
+        <div class="field"><label>Должность</label><select name="post">${POSTS.map(([k, t]) => `<option value="${k}" ${k === "operator" ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+        <p class="small muted">Логин и случайный пароль CRM создаст сама и покажет после добавления сотрудника.</p>
         <label class="check small" style="margin-bottom:8px"><input type="checkbox" name="is_promoter" value="1"> Ещё и промоутер</label>
         <button class="btn sm">Добавить сотрудника</button>
       </form>
@@ -2406,7 +2406,19 @@ async function renderSettings(page) {
   };
   if ($("#nu")) $("#nu").onsubmit = async (e) => {
     e.preventDefault();
-    try { await api("POST", "/api/users", Object.fromEntries(new FormData(e.target))); toast("Сотрудник добавлен"); render(); } catch (err) { fail(err); }
+    const button = e.target.querySelector("button[type=submit], button:not([type])");
+    if (button) button.disabled = true;
+    try {
+      const r = await api("POST", "/api/users", Object.fromEntries(new FormData(e.target)));
+      await render();
+      const text = `${r.name}\nВход в CRM: ${location.origin}\nЛогин: ${r.login}\nПароль: ${r.password}`;
+      openDrawer(`<h2>Сотрудник добавлен</h2><p>${esc(r.name)}</p><dl class="kv"><dt>Логин</dt><dd><b>${esc(r.login)}</b></dd><dt>Пароль</dt><dd><code>${esc(r.password)}</code></dd></dl><p class="small muted">Скопируйте данные для входа перед закрытием этой карточки. Пароль показывается только сейчас.</p><button type="button" class="btn primary" id="new-staff-copy">Скопировать данные для входа</button>`);
+      $("#new-staff-copy").onclick = async () => {
+        try { await navigator.clipboard.writeText(text); toast("Данные для входа скопированы"); }
+        catch (_) { prompt("Скопируйте данные для входа", text); }
+      };
+    } catch (err) { fail(err); }
+    finally { if (button) button.disabled = false; }
   };
   if ($("#tour-again")) $("#tour-again").onclick = () => startTour(true);
   if ($("#owner-tg")) renderOwnerTg($("#owner-tg"));
@@ -2486,6 +2498,18 @@ async function renderSettings(page) {
   page.querySelectorAll("[data-uph]").forEach((inp) => (inp.onchange = async () => {
     try { await api("PATCH", `/api/users/${inp.dataset.uph}`, { phone: inp.value }); toast("Телефон сохранён"); } catch (err) { fail(err); }
   }));
+  page.querySelectorAll("[data-ulogin]").forEach(b => b.onclick = async e => {
+    e.stopPropagation();
+    const value = prompt(`Новый логин для ${b.dataset.name}\nЛатинские буквы, цифры, точка, дефис или подчёркивание. Пароль останется прежним.`, b.dataset.login);
+    if (value === null || value.trim().toLowerCase() === b.dataset.login) return;
+    b.disabled = true;
+    try {
+      await api("PATCH", `/api/users/${b.dataset.ulogin}`, {login:value});
+      if (+b.dataset.ulogin === S.user.id) S.user.login = value.trim().toLowerCase();
+      toast("Логин изменён. Пароль прежний"); await render();
+    } catch (err) { fail(err); }
+    finally { b.disabled = false; }
+  });
   page.querySelectorAll("[data-upost]").forEach((sel) => (sel.onchange = async () => {
     const t = POSTS.find(([k]) => k === sel.value)[1];
     if (!confirm(`Сделать должность «${t}»? Разделы и права поменяются сразу, сотруднику нужно будет войти заново`)) { render(); return; }

@@ -283,6 +283,17 @@ def user_profile_save(con, h, user, body, q, uid):
 
 @route("PATCH", "/api/users/{uid}", role="admin")
 def users_patch(con, h, user, body, q, uid):
+    if "login" in body:
+        target = con.execute("SELECT login FROM users WHERE id=?", (int(uid),)).fetchone()
+        if not target:
+            raise ApiError("Сотрудник не найден", 404)
+        login_ = str(body["login"] or "").strip().lower()
+        if not re.fullmatch(r"[a-z0-9._-]{1,80}", login_):
+            raise ApiError("Логин: от 1 до 80 символов, латинские буквы, цифры, точка, дефис или подчёркивание")
+        if con.execute("SELECT 1 FROM users WHERE lower(login)=? AND id!=?", (login_, int(uid))).fetchone():
+            raise ApiError("Такой логин уже занят")
+        con.execute("UPDATE users SET login=? WHERE id=?", (login_, int(uid)))
+        sv.audit(con, user, "user.login", f"{uid}:{target['login']}->{login_}")
     if body.get("post") or "is_promoter" in body:
         if int(uid) == user["id"] and body.get("post") not in (None, "owner"):
             raise ApiError("Нельзя снять с себя должность руководителя")
@@ -447,19 +458,30 @@ def users_bulk(con, h, user, body, q):
 
 @route("POST", "/api/users", role="admin")
 def users_create(con, h, user, body, q):
-    login_ = (body.get("login") or "").strip()
-    pw = body.get("password") or ""
-    if not login_ or len(pw) < 8:
-        raise ApiError("Нужен логин и пароль от 8 символов")
-    try:
-        uid = con.execute("INSERT INTO users(login, name, role, pw_hash) VALUES (?,?,'operator',?)",
-                          (login_, body.get("name") or login_, db.hash_password(pw))).lastrowid
-    except Exception:
+    name = " ".join(str(body.get("name") or "").split())[:80]
+    login_ = str(body.get("login") or "").strip()
+    if not name and not login_:
+        raise ApiError("Укажите имя сотрудника")
+    name = name or login_
+    if not login_:
+        base = schedule._login(name)[:60] or "user"
+        login_, suffix = base, 2
+        while con.execute("SELECT 1 FROM users WHERE lower(login)=?", (login_.lower(),)).fetchone():
+            login_ = f"{base}{suffix}"
+            suffix += 1
+    elif con.execute("SELECT 1 FROM users WHERE lower(login)=?", (login_.lower(),)).fetchone():
         raise ApiError("Такой логин уже есть")
+    pw = body.get("password") or "".join(secrets.choice("abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(18))
+    if len(pw) < 8:
+        raise ApiError("Пароль от 8 символов")
+    uid = con.execute("INSERT INTO users(login, name, role, pw_hash) VALUES (?,?,'operator',?)",
+                      (login_, name, db.hash_password(pw))).lastrowid
     set_post(con, uid, body.get("post") or {"admin": "owner"}.get(body.get("role"), body.get("role")) or "operator",
              body.get("is_promoter") in (True, "1", "on"))
+    if "phone" in body:
+        users_patch(con, h, user, {"phone": body["phone"]}, q, str(uid))
     sv.audit(con, user, "user.create", login_)
-    return {"ok": True}
+    return {"ok": True, "id": uid, "name": name, "login": login_, "password": pw}
 
 
 # ---------------- данные ----------------
