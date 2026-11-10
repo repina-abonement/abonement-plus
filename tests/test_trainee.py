@@ -36,8 +36,18 @@ def main():
     assert meta['settings']=={} and meta['groups']==[] and meta['branches']==[]
     assert [u['id'] for u in meta['staff']]==[one]
     assert perms.view_of({'role':'trainee','is_senior':1,'is_promoter':1,'is_journal':1})=={'planner':'own'}
-    for path in ['/api/users','/api/students','/api/payments','/api/inbox','/api/team','/api/settings','/api/staff-docs','/api/views',f'/api/users/{two}/profile']:
+    for path in ['/api/users','/api/students','/api/payments','/api/inbox','/api/team','/api/settings','/api/views',f'/api/users/{two}/profile']:
         assert trainee('GET',path)[0] in (403,404), path
+    assert meta['staff_docs_pending']==5
+    assert trainee('GET','/api/planner')[0]==403
+    assert trainee('POST','/api/planner/tasks',{'title':'Blocked until accepted','date':meta['today']})[0]==403
+    code, legal=trainee('GET','/api/staff-docs'); assert code==200 and len(legal['docs'])==5
+    slugs=[d['slug'] for d in legal['docs']]
+    assert trainee('POST','/api/staff-docs/accept',{'docs':slugs[:-1],'signed_name':'test-trainee-one'})[0]==400
+    assert trainee('POST','/api/staff-docs/accept',{'docs':slugs,'signed_name':'test-trainee-one'})[0]==200
+    assert trainee('GET','/api/meta')[1]['staff_docs_pending']==0
+    assert trainee('GET','/api/staff-docs/overview')[0]==403
+    assert trainee('GET',f'/api/staff-docs/log/{two}')[0]==403
     code, plan=trainee('GET','/api/planner'); assert code==200 and not plan['can_manage']
     today=meta['today']
     assert trainee('GET',f'/api/planner/week?start={today}&user={two}')[1]['user_id']==one
@@ -55,6 +65,20 @@ def main():
             assert trainee('POST',f'/api/tasks/{task["id"]}/done',{})[0]==403
     assert trainee('PUT','/api/planner/settings',{})[0]==403
     assert trainee('PATCH',f'/api/users/{one}',{'post':'owner'})[0]==403
+    con=db.connect()
+    accepted=con.execute('SELECT * FROM staff_acceptances WHERE user_id=?',(one,)).fetchall()
+    assert len(accepted)==5 and all(r['sha256'] and r['accepted_at'] and r['ip'] for r in accepted)
+    assert trainee('POST','/api/staff-docs/accept',{'docs':slugs,'signed_name':'test-trainee-one'})[1]['accepted']==0
+    # A changed rendered document requires renewed acceptance and closes planner again.
+    from crm import staffdocs
+    original=staffdocs.DOCS
+    try:
+        staffdocs.DOCS=[(slug,title,text+' Updated' if slug=='nda' else text) for slug,title,text in original]
+        assert trainee('GET','/api/meta')[1]['staff_docs_pending']==1
+        assert trainee('GET','/api/planner')[0]==403
+    finally:
+        staffdocs.DOCS=original
+    con.close()
     srv.shutdown()
     print('Trainee restrictions and senior access: OK')
 if __name__=='__main__': main()

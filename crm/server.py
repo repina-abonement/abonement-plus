@@ -505,9 +505,10 @@ def meta(con, h, user, body, q):
     user |= {"perms": perms.view_of(user), "title": perms.title(user)}
     if user["role"] == "trainee":
         from datetime import date
+        from . import staffdocs
         return {"user": user, "today": date.today().isoformat(), "staff": [{"id": user["id"], "name": user["name"], "role": "trainee", "photo_at": "", "photo_sq": 0}],
                 "branches": [], "groups": [], "sales_stages": [], "ad": [], "settings": {},
-                "comms": {}, "demo": False, "festive": False, "staff_docs_pending": 0, "tour_pending": False}
+                "comms": {}, "demo": False, "festive": False, "staff_docs_pending": staffdocs.pending(con, user), "tour_pending": False}
     m = sv.meta(con) | {"user": user, "demo": os.environ.get("CRM_DEMO", "1") == "1" and not perms.real_staff(con), "comms": comms.status(con)}
     if user["role"] == "coach":
         m["groups"] = [g for g in m["groups"] if schedule.coach_may(con, user["id"], g["id"])]
@@ -2890,7 +2891,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not user:
                         raise ApiError("Нужно войти", 401)
                     if user["role"] == "trainee":
-                        safe = url.path.startswith("/api/planner") or url.path in ("/api/meta", "/api/me", "/api/me/password", "/api/pin", "/api/logout")
+                        safe = url.path.startswith("/api/planner") or url.path in ("/api/meta", "/api/me", "/api/me/password", "/api/pin", "/api/logout", "/api/staff-docs", "/api/staff-docs/accept")
                         safe = safe or bool(re.fullmatch(r"/api/tasks/[0-9]+/done", url.path))
                         safe = safe or url.path in (f"/api/users/{user['id']}/profile", f"/api/users/{user['id']}/photo")
                         if not safe:
@@ -2899,6 +2900,10 @@ class Handler(BaseHTTPRequestHandler):
                         raise ApiError("Недостаточно прав", 403)
                 con.execute("BEGIN" if method in ("GET", "HEAD") else "BEGIN IMMEDIATE")
                 try:
+                    if user and user["role"] == "trainee" and (url.path.startswith("/api/planner") or re.fullmatch(r"/api/tasks/[0-9]+/done", url.path)):
+                        from . import staffdocs
+                        if staffdocs.pending(con, user):
+                            raise ApiError("Перед работой в Планере прочитайте и примите документы при входе", 403)
                     result = fn(con, self, user, body, q, **mt.groupdict())
                     con.execute("COMMIT")
                 except BaseException:
