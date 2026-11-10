@@ -168,7 +168,7 @@ function cardTasksBlock(d) {
   const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   const row = (t, main) => `<div class="ct-row ${main ? "main" : ""} ${t.due_at < now ? "late" : ""}" data-ctask="${t.id}" role="button" tabindex="0" title="Нажмите, чтобы изменить или передать">
     <span class="ct-ico">${t.icon || "✅"}</span><div class="grow"><b>${esc(t.title)}</b> ${kindPill(t)}
-    <div class="small muted">${t.due_at < now ? "⏰ просрочено, " : ""}${dtWhen(t.due_at)}${t.assignee ? ` · ${esc(t.assignee)}` : ""}${t.note ? ` · ${esc(t.note)}` : ""}</div></div>
+    <div class="small muted">${t.due_at < now ? "⏰ просрочено, " : ""}${dtWhen(t.due_at)}${t.assignee ? ` · ${esc(t.assignee)}` : ""}</div></div>
     <span class="ct-edit">✎</span></div>`;
   const last = (d.history || []).slice(0, 2);
   return `<div class="ct-box">
@@ -177,8 +177,7 @@ function cardTasksBlock(d) {
     ${T.open.length ? row(T.open[0], true) : `<div class="small muted">Открытых задач нет</div>`}
     ${T.open.length > 1 ? `<details class="ct-more"><summary class="small">Ещё ${T.open.length - 1}</summary>${T.open.slice(1).map((t) => row(t)).join("")}</details>` : ""}
     <div data-ctaddbox></div>
-    ${last.length ? `<div class="ct-hist small">${last.map((h) => `<div><span class="muted">${dtShort(h.ts)} · ${esc(h.user_name || "")}</span> ${esc(h.text)}</div>`).join("")}
-      <button class="linkish small" data-cthist>Вся история</button></div>` : ""}
+    ${last.length ? `<button class="linkish small ct-history-link" data-cthist>История клиента</button>` : ""}
   </div>`;
 }
 function wireCardTasks(root, reload, sid) {

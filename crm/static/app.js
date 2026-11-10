@@ -1417,29 +1417,29 @@ document.addEventListener("click", (e) => {
   i.focus();
 });
 
-/* Карточка клиента: слева общение, справа абонементы и оплаты, ниже свёрнутые блоки. На телефоне две вкладки */
+/* Карточка клиента: общение, абонементы и данные на отдельных вкладках. */
 function layoutStudentCard(body, isMember) {
-  const grid = body.querySelector(".sc-grid"), left = grid.querySelector(".sc-left"), right = grid.querySelector(".sc-right");
+  const grid = body.querySelector(".sc-grid"), left = grid.querySelector(".sc-left"), right = grid.querySelector(".sc-right"), info = grid.querySelector(".sc-info");
   const take = (k) => body.querySelector(`[data-sc="${k}"]`);
-  left.appendChild($("#comms-box"));
-  if (take("visits")) left.appendChild(take("visits"));  // Юлия, 04.11: посещения на виду, под перепиской
-  const order = isMember ? ["subs", "balance"] : ["stage", "pu", "abon"];
-  order.forEach((k) => take(k) && right.appendChild(take(k)));
-  const folds = isMember ? ["abon", "skips", "family", "stage", "vac", "hist"] : ["subs", "family", "balance", "hist"];
-  folds.forEach((k) => {
+  const fold = (k, pane, open = false) => {
     const sec = take(k); if (!sec) return;
-    const det = document.createElement("details"); det.className = "sc-fold"; det.dataset.fold = k;
-    det.innerHTML = `<summary>${sec.dataset.title || (k === "stage" ? "⚙️ Этап и источник" : k === "balance" ? "💳 Баланс и оплаты" : "")}</summary>`;
-    det.appendChild(sec); right.appendChild(det);
-  });
-  if (take("arch")) right.appendChild(take("arch"));
+    const det = document.createElement("details"); det.className = "sc-fold"; det.dataset.fold = k; det.open = open;
+    det.innerHTML = `<summary>${sec.dataset.title || (k === "stage" ? "Этап и источник" : k === "balance" ? "Баланс и оплаты" : k === "subs" ? "Абонементы" : k)}</summary>`;
+    det.appendChild(sec); pane.appendChild(det);
+  };
+  if (!isMember && take("pu")) left.appendChild(take("pu"));
+  left.appendChild(body.querySelector("#comms-box"));
+  ["subs", "balance"].forEach(k => { if (take(k)) right.appendChild(take(k)); });
+  ["abon", "visits", "skips", "vac"].forEach(k => fold(k, right));
+  ["family", "stage", "hist"].forEach(k => fold(k, info, k === "family"));
+  if (take("arch")) info.appendChild(take("arch"));
   body.querySelectorAll("[data-sctab]").forEach((b) => (b.onclick = () => {
     grid.dataset.tab = b.dataset.sctab;
-    body.querySelectorAll("[data-sctab]").forEach((x) => x.classList.toggle("on", x === b));
+    body.querySelectorAll("[data-sctab]").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-selected", String(x === b)); });
   }));
 }
 const scTab = (tab) => { const b = document.querySelector(`#drawer-body [data-sctab="${tab}"]`); if (b) b.click(); };
-const openFold = (body, k) => { scTab("abon"); const f = body.querySelector(`[data-fold="${k}"]`); if (f) { f.open = true; f.scrollIntoView({ block: "start", behavior: "smooth" }); } };
+const openFold = (body, k) => { scTab(["family", "stage", "hist"].includes(k) ? "info" : "abon"); const f = body.querySelector(`[data-fold="${k}"]`); if (f) { f.open = true; f.scrollIntoView({ block: "start", behavior: "smooth" }); } };
 
 function quoteHtml(q) {
   return `<div class="total">${rub(q.total)}</div>
@@ -1591,17 +1591,15 @@ async function openStudent(id) {
   const full = can("members", "full");
   const alerts = [
     s.priority ? `<span class="pill red">🔥 Заявка с сайта: обработать первой</span>` : "",
-    // статус клиента (Юлия, 04.11): «Лид», пока ни разу не был нашим клиентом
-    `<span class="pill ${s.funnel === "members" && s.stage !== "left" ? "green" : ""}" title="Статус клиента">${d.single_now ? "Разовые занятия" : s.funnel === "members" && s.stage !== "left" ? "Клиент" : s.converted_at || (d.subscriptions || []).some((x) => x.status === "paid") ? "Бывший клиент" : "Лид"}</span>`,
-    d.family.note ? `<span class="pill yellow" title="Заметка для персонала">📝 ${esc(d.family.note)}</span>` : "",
-    s.erp_status ? `<span class="pill" title="Статус клиента в ERP при переносе">ERP: ${esc(s.erp_status)}</span>` : "",
-    isMember && d.balance.debt ? `<span class="pill red">Долг ${rub(d.balance.debt)}</span>` : "",
-    isMember && d.balance.upcoming ? `<span class="pill yellow">К оплате ${rub(d.balance.upcoming)}</span>` : "",
-    isMember && d.balance.deposit ? `<span class="pill green">На балансе ${rub(d.balance.deposit)}</span>` : "",
+
+
+
+
+
     ...(d.trial_hold || []).map((h) => `<span class="pill yellow" title="Пока родитель присылает данные, другим это время не предлагается">⏳ Держим место на пробное ${esc(dShort(h.date))} в ${esc(h.time)} до ${esc(h.until.slice(11, 16))}</span>`),
     ...(d.unpaid_cur || []).map((g) => `<span class="pill red" title="Абонемент за этот месяц по этой группе не оплачен и счёт не выставлен">Не оплачен ${esc(monthLabel(S.meta.today.slice(0, 7)).split(" ")[0])}: ${esc(g)}</span>`),
-    isMember && !d.balance.debt && !d.balance.upcoming && !(d.unpaid_cur || []).length ? `<span class="pill green">Долга нет</span>` : "",
-    isMember && c.available ? `<span class="pill">Можно отработать: ${c.available}</span>` : "",
+
+
     !s.birth ? `<span class="pill yellow">Нет даты рождения</span>` : "",
     ...d.enrollments.filter((e) => e.age_warn).map((e) => `<span class="pill red">⚠️ ${esc(e.group_name)}: ${esc(e.age_warn)}</span>`),
     d.trial_age_warn ? `<span class="pill red">⚠️ Пробное ${esc(d.trial_age_warn)}</span>` : "",
@@ -1616,9 +1614,11 @@ async function openStudent(id) {
     <div class="sc-meta">${isMember ? (regular.length ? regular.map((e) => `<span class="pill">${esc(e.group_name)}</span>`).join(" ") : `<span class="muted small">Группа не выбрана</span>`)
       : `${s.trial_at ? `<span class="pill">Пробное ${dtShort(s.trial_at)}</span>` : ""}`}</div>
     <div class="sc-parents">${d.parents.map((p) => `<span class="sc-parent"><b>${esc(p.name)}</b> <button class="rel-chip ${p.relation ? "" : "empty"}" data-rel="${p.id}" title="Кем приходится ребёнку">${p.relation ? esc(p.relation) : "кем приходится?"}</button>${p.phone ? ` <button class="linkish" data-copy-phone="${esc(p.phone)}" title="Скопировать номер">${esc(p.phone)}</button> <button class="icon-btn" data-dial="${esc(p.phone)}" title="Позвонить через Sipuni">📞</button>` : ""}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}${p.email ? ` <span class="small muted">✉ ${esc(p.email)}</span>` : ""}</span>`).join("")}</div>
-    ${alerts ? `<div class="chips sc-alerts">${alerts}</div>` : ""}
-    ${d.next_step ? `<div class="next-step"><span><b>Задача:</b> ${esc(d.next_step.text)}</span><button class="btn sm primary" id="ns-go">${NEXT_GO[d.next_step.action] || "Сделать"}</button></div>` : ""}
-    ${!isMember && d.stage_tip ? `<details class="stage-tip" ${S.tipsOpen === false ? "" : "open"}><summary>💡 Подсказка на этапе «${esc(d.stage_label)}»</summary>
+    ${isMember ? `<div class="sc-finance-summary"><div><small>Долг</small><b class="${d.balance.debt ? "sc-debt" : ""}">${rub(d.balance.debt || 0)}</b></div><div><small>Следующий месяц</small><b>${rub(d.balance.upcoming || 0)}</b></div><div><small>На балансе</small><b>${rub(d.balance.deposit || 0)}</b></div><div><small>Доступно отработок</small><b>${c.available || 0}</b></div></div>` : ""}
+    ${d.family.note ? `<div class="sc-staff-note"><b>Заметка для команды</b><div>${esc(d.family.note)}</div></div>` : ""}
+    ${alerts ? `<div class="sc-alerts">${alerts}</div>` : ""}
+    ${d.next_step && !(d.next_step.action === "task" && d.tasks?.open?.length) ? `<div class="next-step"><span><b>Задача:</b> ${esc(d.next_step.text)}</span><button class="btn sm primary" id="ns-go">${NEXT_GO[d.next_step.action] || "Сделать"}</button></div>` : ""}
+    ${!isMember && d.stage_tip ? `<details class="stage-tip" ${S.tipsOpen === true ? "open" : ""}><summary>💡 Подсказка на этапе «${esc(d.stage_label)}»</summary>
       <div><b>Что сказать.</b> ${esc(d.stage_tip.say)}</div><div style="margin-top:4px"><b>Чтобы перейти дальше:</b> ${esc(d.stage_tip.next)}</div></details>` : ""}
     <div class="sc-actions">
       ${isMember && full && regular.length ? `<button class="btn primary" id="act-sell">🛒 Продать абонемент</button>` : ""}
@@ -1626,15 +1626,15 @@ async function openStudent(id) {
       ${isMember ? `<button class="btn" id="act-pay">+ Принять оплату</button>` : ""}
       ${!isMember ? `<button class="btn primary" id="act-trial">📅 Записать на пробное</button>` : ""}
       ${d.parents.some((p) => p.phone) ? `<button class="btn" id="act-call">📞 Позвонить</button>` : ""}
-      ${isMember ? `<button class="btn" id="act-vac">🌴 Отпуск</button>` : ""}
-      ${isMember && regular.length === 1 ? `<button class="btn" id="act-move">↔ Перевести</button>` : ""}
+      ${isMember ? `<details class="sc-extra-actions"><summary class="btn">Ещё</summary><div><button class="btn" id="act-vac">Отпуск</button>${regular.length === 1 ? `<button class="btn" id="act-move">Перевести в другую группу</button>` : ""}</div></details>` : ""}
     </div>
   </div>
   <div class="sc-tasks">${cardTasksBlock(d)}</div>
-  <div class="sc-tabs"><button class="on" data-sctab="feed">💬 Общение</button><button data-sctab="abon">💳 Абонементы и инфо</button></div>
-  <div class="sc-grid" data-tab="feed"><div class="sc-left"></div><div class="sc-right"><div id="sell-box"></div></div></div>
+  <div class="sc-tabs" role="tablist" aria-label="Разделы карточки"><button class="on" role="tab" aria-selected="true" data-sctab="feed">Общение</button><button role="tab" aria-selected="false" data-sctab="abon">Абонементы и оплаты</button><button role="tab" aria-selected="false" data-sctab="info">Данные клиента</button></div>
+  <div class="sc-grid" data-tab="feed"><div class="sc-left"></div><div class="sc-right"><div id="sell-box"></div></div><div class="sc-info"></div></div>
 
   <div class="section" data-sc="stage">
+    ${s.erp_status ? `<p class="small muted">Статус при переносе из ERP: ${esc(s.erp_status)}</p>` : ""}
     ${(d.nodeadline || []).length ? d.nodeadline.map((n) => `<div class="nd-in">⏸ В воронке без дедлайнов <b>«${esc(n.title)}»</b> с ${dShort(n.added_at)}${n.note ? `<div class="small muted">${esc(n.note)}</div>` : ""}
       <button class="btn sm" id="nd-out" type="button">Убрать из воронки</button></div>`).join("")
       : `<button class="btn sm" id="nd-in" type="button" style="margin-bottom:10px" title="Без задач по сроку: позвоним, когда появится акция">⏸ В «Ждут акцию»</button>`}
@@ -1854,7 +1854,7 @@ async function openStudent(id) {
     else if (a === "call") dial(firstPhone);
     else if (a === "offer") { scTab("feed"); click("#to-open"); }
     else if (a === "trial") click("#act-trial");
-    else if (a === "sell") { if (!click("#act-sell")) { scTab("abon"); const f = $("#f-stage"); if (f) { f.scrollIntoView({ block: "center", behavior: "smooth" }); f.focus(); } } }
+    else if (a === "sell") { if (!click("#act-sell")) { openFold(body, "stage"); const f = $("#f-stage"); if (f) { f.scrollIntoView({ block: "center", behavior: "smooth" }); f.focus(); } } }
     else if (a === "link") click("#act-link");
     else if (a === "makeup") openFold(body, "skips");
     else if (a === "task") { closeDrawer(); go("planner"); }
