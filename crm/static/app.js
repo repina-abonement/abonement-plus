@@ -2682,7 +2682,9 @@ async function boot() {
     S.user = S.meta.user;
   } catch (e) { if (e.message !== "Нужно войти") renderLogin(); return; }
   S.view = visibleViews()[0][0];
-  try { const v = localStorage.getItem("crm.view"); if (v && visibleViews().some(([k]) => k === v)) S.view = v; } catch (_) {}
+  const requestedView = location.hash.slice(1);
+  if (visibleViews().some(([k]) => k === requestedView)) S.view = requestedView;
+  else try { const v = localStorage.getItem("crm.view"); if (v && visibleViews().some(([k]) => k === v)) S.view = v; } catch (_) {}
   shell();
   applyFestive();
   try { history.replaceState({ view: S.view, sub: navSnap(), depth: 0 }, "", "#" + S.view); } catch (_) {}
