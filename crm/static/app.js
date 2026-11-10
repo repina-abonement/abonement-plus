@@ -314,7 +314,7 @@ const LEVELS = { own: 1, view: 2, full: 3 };
 const can = (sec, lvl = "own") => (LEVELS[((S.user && S.user.perms) || {})[sec]] || 0) >= LEVELS[lvl];
 const isOwner = () => can("settings", "full");
 const visibleViews = () => VIEWS.filter(([k]) => can(k === "manual" ? "planner" : k === "nodeadline" ? "sales" : k) && (k !== "today" || !isOwner())
-  && (k !== "manual" || S.user.role !== "coach"))  // тренеру задачи приходят на «Сегодня» и в отчёт, отдельная вкладка не нужна  // руководитель смотрит стол тренера через «Как видит»
+  && (k !== "manual" || !["coach", "trainee"].includes(S.user.role)))  // тренеру задачи приходят на «Сегодня» и в отчёт, отдельная вкладка не нужна  // руководитель смотрит стол тренера через «Как видит»
   .map(([k, t]) => [k, k === "coaches" && !can("coaches", "view") ? "Мои результаты" : k === "members" && !can("members", "full") ? "Мои ученики" : t]);
 const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
 function isCoachShort() { return "Результаты"; }
@@ -2564,7 +2564,7 @@ async function renderPriceList(box) {
 }
 
 /* должности для Настроек → Сотрудники (perms.py) */
-const POSTS = [["owner", "Руководитель"], ["senior", "Старший администратор"], ["operator", "Администратор"], ["coach", "Тренер"], ["lawyer", "Юрист"]];
+const POSTS = [["owner", "Руководитель"], ["senior", "Старший администратор"], ["operator", "Администратор"], ["coach", "Тренер"], ["lawyer", "Юрист"], ["trainee", "Стажёр (только Планер)"]];
 const postOf = (u) => u.role === "admin" ? "owner" : u.role === "operator" ? (u.is_senior ? "senior" : "operator") : u.role;
 
 /* ---------- старт ---------- */

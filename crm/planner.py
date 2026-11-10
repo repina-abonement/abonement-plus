@@ -61,10 +61,14 @@ def controller(con) -> int | None:
 
 def can_manage(con, user: dict) -> bool:
     """Ставить задачи другим и видеть всю команду: руководитель и старший администратор."""
+    if user["role"] == "trainee":
+        return False
     return user["role"] == "admin" or bool(user.get("is_senior")) or user["id"] == controller(con)
 
 
 def can_view_plan(con, user: dict, uid: int) -> bool:
+    if user["role"] == "trainee":
+        return uid == user["id"]
     if uid == user["id"] or user["role"] == "admin":
         return True
     return bool(user.get("is_senior") and con.execute(
@@ -217,7 +221,7 @@ def week(con, user: dict, start: str, who: int | None = None, *, rolling: bool =
         (uid, min(today.isoformat(), d0.isoformat())))]
     name = (con.execute("SELECT name FROM users WHERE id=?", (uid,)).fetchone() or [""])[0]
     return {"start": d0.isoformat(), "days": days, "overdue": overdue, "user_id": uid, "user_name": name,
-            "can_manage": user["role"] == "admin" or bool(user.get("is_senior")),
+            "can_manage": user["role"] != "trainee" and (user["role"] == "admin" or bool(user.get("is_senior"))),
             "staff": visible_staff(con, user)}
 
 
@@ -307,7 +311,7 @@ def view(con, user: dict) -> dict:
         """SELECT r.*, u.name AS assignee FROM recurring r JOIN users u ON u.id=r.assignee_id
             WHERE r.active=1 ORDER BY u.name, r.title""") if can_view_plan(con, user, r["assignee_id"])]
     out = {"mine": mine, "given": given, "recurring": recurring, "today": today,
-           "can_manage": user["role"] == "admin" or bool(user.get("is_senior")),
+           "can_manage": user["role"] != "trainee" and (user["role"] == "admin" or bool(user.get("is_senior"))),
            "controller": controller(con), "rules": RULES,
            "staff": visible_staff(con, user)}
     if out["can_manage"]:

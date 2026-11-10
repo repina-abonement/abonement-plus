@@ -199,12 +199,14 @@ def users_list(con, h, user, body, q):
 
 def set_post(con, uid: int, post: str | None, promoter=None):
     """Должность из Настроек: owner | senior | operator | coach | lawyer (+ отметка промоутера)."""
-    roles = {"owner": ("admin", 0), "senior": ("operator", 1), "operator": ("operator", 0), "coach": ("coach", 0), "lawyer": ("lawyer", 0)}
+    roles = {"owner": ("admin", 0), "senior": ("operator", 1), "operator": ("operator", 0), "coach": ("coach", 0), "lawyer": ("lawyer", 0), "trainee": ("trainee", 0)}
     if post:
         if post not in roles:
             raise ApiError("Неизвестная должность")
         role, senior = roles[post]
         con.execute("UPDATE users SET role=?, is_senior=? WHERE id=?", (role, senior, uid))
+        if role == "trainee":
+            con.execute("UPDATE users SET is_promoter=0, is_journal=0 WHERE id=?", (uid,))
         if role != "coach":
             con.execute("UPDATE groups SET coach_id=NULL WHERE coach_id=?", (uid,))
             con.execute("UPDATE groups SET assistant_id=NULL WHERE assistant_id=?", (uid,))
@@ -479,6 +481,11 @@ def coach_guard(con, user, group_id: int):
 def meta(con, h, user, body, q):
     user["sip_number"] = con.execute("SELECT sip_number FROM users WHERE id=?", (user["id"],)).fetchone()[0]
     user |= {"perms": perms.view_of(user), "title": perms.title(user)}
+    if user["role"] == "trainee":
+        from datetime import date
+        return {"user": user, "today": date.today().isoformat(), "staff": [{"id": user["id"], "name": user["name"], "role": "trainee", "photo_at": "", "photo_sq": 0}],
+                "branches": [], "groups": [], "sales_stages": [], "ad": [], "settings": {},
+                "comms": {}, "demo": False, "festive": False, "staff_docs_pending": 0, "tour_pending": False}
     m = sv.meta(con) | {"user": user, "demo": os.environ.get("CRM_DEMO", "1") == "1" and not perms.real_staff(con), "comms": comms.status(con)}
     if user["role"] == "coach":
         m["groups"] = [g for g in m["groups"] if schedule.coach_may(con, user["id"], g["id"])]
@@ -862,9 +869,11 @@ def tasks_list(con, h, user, body, q):
     return tasks.my_tasks(con, user, q.get("scope", "mine"))
 
 
-@route("POST", "/api/tasks/{tid}/done", role="coach")
+@route("POST", "/api/tasks/{tid}/done", role="coach|planner")
 def task_done(con, h, user, body, q, tid):
-    t = con.execute("SELECT assignee_id FROM tasks WHERE id=?", (int(tid),)).fetchone()
+    t = con.execute("SELECT assignee_id, kind FROM tasks WHERE id=?", (int(tid),)).fetchone()
+    if user["role"] == "trainee" and (not t or t["assignee_id"] != user["id"] or t["kind"] not in ("plan", "bday")):
+        raise ApiError("Это не ваша задача Планера", 403)
     if user["role"] == "coach" and (not t or t["assignee_id"] != user["id"]):
         raise ApiError("Это не ваша задача", 403)
     cx(tasks.complete, con, int(tid), user, body.get("result") or "")
@@ -2846,6 +2855,12 @@ class Handler(BaseHTTPRequestHandler):
                     user = current_user(con, self)
                     if not user:
                         raise ApiError("Нужно войти", 401)
+                    if user["role"] == "trainee":
+                        safe = url.path.startswith("/api/planner") or url.path in ("/api/meta", "/api/me", "/api/me/password", "/api/pin", "/api/logout")
+                        safe = safe or bool(re.fullmatch(r"/api/tasks/[0-9]+/done", url.path))
+                        safe = safe or url.path in (f"/api/users/{user['id']}/profile", f"/api/users/{user['id']}/photo")
+                        if not safe:
+                            raise ApiError("Стажёру доступен только Планер", 403)
                     if not any(perms.allowed(user, x) for x in role.split("|")):
                         raise ApiError("Недостаточно прав", 403)
                 con.execute("BEGIN" if method in ("GET", "HEAD") else "BEGIN IMMEDIATE")

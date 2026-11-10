@@ -12,14 +12,14 @@ from __future__ import annotations
 LEVEL = {"own": 1, "view": 2, "full": 3}
 
 TITLES = {"owner": "Руководитель", "senior": "Старший администратор", "operator": "Администратор",
-          "coach": "Тренер", "promoter": "Промоутер", "lawyer": "Юрист"}
+          "coach": "Тренер", "promoter": "Промоутер", "lawyer": "Юрист", "trainee": "Стажёр"}
 
 DESK = {"owner": "full", "senior": "full", "operator": "full"}
 SECTIONS: dict[str, dict[str, str]] = {
     "sales": DESK, "inbox": DESK, "skips": DESK, "merch": DESK, "search": DESK,
     "members": DESK | {"coach": "own"},  # тренер: дети своих групп и телефоны родителей, без правок
     "today": {"owner": "full", "coach": "own"},
-    "planner": {"owner": "full", "senior": "full", "operator": "own", "coach": "own", "promoter": "own", "lawyer": "own"},
+    "planner": {"owner": "full", "senior": "full", "operator": "own", "coach": "own", "promoter": "own", "lawyer": "own", "trainee": "own"},
     "journal": {"owner": "full", "senior": "full", "operator": "view", "coach": "own", "journal": "full"},  # journal: отметка «отмечает журнал»
     "schedule": {"owner": "full", "senior": "full", "operator": "view", "coach": "view", "promoter": "view"},
     "coaches": {"owner": "full", "senior": "view", "coach": "own"},
@@ -47,6 +47,8 @@ LEGACY = {
 
 def roles_of(user: dict) -> set[str]:
     base = user.get("role")
+    if base == "trainee":
+        return {"trainee"}
     out = set()
     if base == "admin":
         out.add("owner")
@@ -88,7 +90,7 @@ def view_of(user: dict) -> dict:
 
 def title(user: dict) -> str:
     rs = roles_of(user)
-    main = next((TITLES[r] for r in ("owner", "senior", "operator", "coach", "lawyer") if r in rs), "")
+    main = next((TITLES[r] for r in ("owner", "senior", "operator", "coach", "lawyer", "trainee") if r in rs), "")
     if "promoter" in rs:
         return f"{main}, промоутер" if main else TITLES["promoter"]
     return main
