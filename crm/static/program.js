@@ -45,7 +45,7 @@ function programQuoteHtml(q) {
     <div class="small muted">Сумма выбирается сама по дате оплаты</div>`}
     ${p.note ? `<div class="small" style="color:#b42318">${esc(p.note)}</div>` : ""}
     ${p.late && p.waitlist ? `<div class="alert" style="margin-top:6px">Оплата после срока: место не гарантировано, в листе ожидания ${p.waitlist}</div>` : ""}
-    ${q.calendar_picker ? "" : `<div class="small muted">Даты: ${q.dates.map(dShort).join(", ")}</div>`}`;
+    `;
 }
 
 /* Настройки: цены направлений и дни без занятий */
