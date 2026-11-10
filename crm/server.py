@@ -2727,6 +2727,26 @@ def integrations_put(con, h, user, body, q):
     return comms.admin_view(con, base_url(h))
 
 
+@route("GET", "/api/sticker-packs", role="operator")
+def sticker_pack_list(con, h, user, body, q):
+    from . import stickerpacks
+    return stickerpacks.catalog(con) | {"telegram_ready": bool(comms.get(con, "tg_token"))}
+
+
+@route("POST", "/api/sticker-packs", role="admin")
+def sticker_pack_add(con, h, user, body, q):
+    from . import stickerpacks
+    return cx(stickerpacks.import_pack, con, body.get("url") or "")
+
+
+@route("GET", "/api/sticker-image", role="public")
+def sticker_image(con, h, user, body, q):
+    row = con.execute("SELECT image,mime FROM custom_stickers WHERE id=?", (q.get("t") or "",)).fetchone()
+    if not row:
+        raise ApiError("Стикер не найден", 404)
+    return Raw(row["image"], row["mime"])
+
+
 @route("POST", "/api/integrations/telegram/connect", role="admin")
 def int_tg(con, h, user, body, q):
     return cx(comms.tg_connect, con, base_url(h))

@@ -1565,3 +1565,7 @@ html.theme-soft .sidebar-account [data-account-logout] { background: var(--surfa
 @media(max-width:500px) { .sale-cal-day { min-height:52px; font-size:13px; } .sale-cal-grid { gap:3px; } .sale-cal-day small { font-size:8px; } }
 
 .sale-credit input { width:18px; height:18px; flex:0 0 18px; margin:0; accent-color:var(--accent); }
+
+.custom-sticker-pack { padding-top:14px; margin-top:14px; border-top:1px solid var(--line); }
+.sticker-import { margin:12px 0; } .sticker-import summary { cursor:pointer; color:var(--accent); }
+.sticker-import input { margin:8px 0; }

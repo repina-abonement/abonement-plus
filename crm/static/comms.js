@@ -751,11 +751,14 @@ function wireMessagePicker(selector, sendSticker) {
   const stickers = [["smile", "1f60a", "Улыбка"], ["thanks", "1f64f", "Спасибо"], ["yes", "1f44d", "Отлично"], ["heart", "2764", "Сердце"], ["party", "1f389", "Поздравляем"], ["football", "26bd", "Футбол"]];
   panel.innerHTML = `<div class="chips"><button type="button" class="btn sm" data-picker-tab="emoji" aria-expanded="false">😊 Смайлы</button><button type="button" class="btn sm" data-picker-tab="sticker" aria-expanded="false">Стикеры</button></div>
     <div class="chips picker-options" data-picker-panel="emoji" hidden>${["😊", "😀", "😄", "😉", "😍", "🥰", "😘", "😎", "🤔", "😢", "😭", "😂", "👍", "👏", "🙏", "❤️", "🎉", "⚽", "✅", "🔥", "💪"].map(x => `<button type="button" class="btn sm" data-emoji="${esc(x)}">${x}</button>`).join("")}</div>
-    <div class="picker-options" data-picker-panel="sticker" hidden><div class="sticker-grid">${stickers.map(([id, code, label]) => `<button type="button" class="sticker-choice" data-sticker="${id}" title="Отправить: ${label}" aria-label="Отправить стикер: ${label}"><img src="https://raw.githubusercontent.com/jdecked/twemoji/v15.1.0/assets/72x72/${code}.png" width="56" height="56" alt="${label}"><span>${label}</span></button>`).join("")}</div><p class="small muted">Графические стикеры отправляются картинками, без анимации. Twemoji, CC BY 4.0.</p></div>`;
+    <div class="picker-options" data-picker-panel="sticker" hidden><div class="sticker-grid">${stickers.map(([id, code, label]) => `<button type="button" class="sticker-choice" data-sticker="${id}" title="Отправить: ${label}" aria-label="Отправить стикер: ${label}"><img src="https://raw.githubusercontent.com/jdecked/twemoji/v15.1.0/assets/72x72/${code}.png" width="56" height="56" alt="${label}"><span>${label}</span></button>`).join("")}</div><p class="small muted">Базовые стикеры: Twemoji, CC BY 4.0.</p><div data-custom-packs></div>
+      ${S.user?.role === "admin" ? `<details class="sticker-import"><summary>+ Добавить свой набор Telegram</summary><label>Ссылка на набор<input data-pack-url value="https://t.me/addstickers/Footbolika_Olya" placeholder="https://t.me/addstickers/Название"></label><button class="btn sm" type="button" data-pack-import>Добавить набор</button><div class="small muted" data-pack-status>Для импорта нужен подключённый Telegram-бот. Набор будет доступен всей команде.</div></details>` : ""}
+      <p class="small muted">Свои наборы: в Telegram-боте — настоящие стикеры с анимацией. Через Wazzup/MAX — изображения или статичные превью; поддержка WEBP зависит от канала.</p></div>`;
   panel.querySelectorAll("[data-picker-tab]").forEach(b => {
     b.onmousedown = e => e.preventDefault();
     b.onclick = () => {
       const opening = b.getAttribute("aria-expanded") !== "true";
+      if (opening && b.dataset.pickerTab === "sticker") loadCustomPacks().catch(fail);
       panel.querySelectorAll("[data-picker-tab]").forEach(x => x.setAttribute("aria-expanded", String(opening && x === b)));
       panel.querySelectorAll("[data-picker-panel]").forEach(x => { x.hidden = !opening || x.dataset.pickerPanel !== b.dataset.pickerTab; });
     };
@@ -765,7 +768,24 @@ function wireMessagePicker(selector, sendSticker) {
     b.onmousedown = e => e.preventDefault();
     b.onclick = () => { input.setRangeText(b.dataset.emoji, input.selectionStart, input.selectionEnd, "end"); input.focus(); input.dispatchEvent(new Event("input", { bubbles: true })); };
   });
-  panel.querySelectorAll("[data-sticker]").forEach(b => b.onclick = async () => {
+  const loadCustomPacks = async () => {
+    const root = panel.querySelector("[data-custom-packs]");
+    const data = await api("GET", "/api/sticker-packs");
+    if (!panel.isConnected) return;
+    root.innerHTML = data.packs.map(p => `<div class="custom-sticker-pack"><b>${esc(p.title)}</b><div class="sticker-grid">${p.stickers.map(s => `<button type="button" class="sticker-choice" data-sticker="${esc(s.id)}" title="Отправить стикер ${esc(s.emoji)}"><img src="${esc(s.image)}" width="72" height="72" loading="lazy" alt="${esc(s.emoji || "Стикер")}"><span>${esc(s.emoji)}${s.animated ? " · анимация в TG" : ""}</span></button>`).join("")}</div></div>`).join("");
+  };
+  const importer = panel.querySelector("[data-pack-import]");
+  if (importer) importer.onclick = async () => {
+    const status = panel.querySelector("[data-pack-status]");
+    importer.disabled = true; status.textContent = "Импортирую набор…";
+    try {
+      const result = await api("POST", "/api/sticker-packs", {url: panel.querySelector("[data-pack-url]").value});
+      await loadCustomPacks(); status.textContent = `Набор добавлен: ${result.total} стикеров`;
+    } catch (e) { status.textContent = e.message; }
+    finally { importer.disabled = false; }
+  };
+  panel.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-sticker]"); if (!b || b.disabled) return;
     b.disabled = true;
     try { await sendSticker(b.dataset.sticker); panel.querySelectorAll("[data-picker-panel]").forEach(x => x.hidden = true); panel.querySelectorAll("[data-picker-tab]").forEach(x => x.setAttribute("aria-expanded", "false")); }
     catch (e) { fail(e); }

@@ -131,6 +131,8 @@ def _ts_from_unix(v) -> str | None:
 
 def init(con):
     con.executescript(SCHEMA)
+    from . import stickerpacks
+    stickerpacks.init(con)
     ucols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
     if "sip_number" not in ucols:
         con.execute("ALTER TABLE users ADD COLUMN sip_number TEXT NOT NULL DEFAULT ''")
@@ -815,13 +817,17 @@ STICKERS = {
 
 def send_sticker(con, cid: int, sticker: str, user: dict) -> dict:
     """Graphic stickers travel as images; providers do not guarantee native stickers."""
-    if sticker not in STICKERS:
+    custom = None
+    if isinstance(sticker, str) and sticker.startswith("custom:"):
+        custom = con.execute("SELECT * FROM custom_stickers WHERE id=?", (sticker[7:],)).fetchone()
+    if sticker not in STICKERS and not custom:
         raise CommsError("Стикер не найден")
     row = con.execute("SELECT * FROM conversations WHERE id=?", (cid,)).fetchone()
     if not row:
         raise CommsError("Переписка не найдена")
     conv = dict(row)
-    url = "https://raw.githubusercontent.com/jdecked/twemoji/v15.1.0/assets/72x72/" + STICKERS[sticker] + ".png"
+    url = ((get(con, "public_url") or "https://ab-plus.ru").rstrip("/") + "/api/sticker-image?t=" + custom["id"] if custom else
+           "https://raw.githubusercontent.com/jdecked/twemoji/v15.1.0/assets/72x72/" + STICKERS[sticker] + ".png")
     name = user.get("name") or ""
     if conv["channel"] == "tg_archive":
         raise CommsError("В архив нельзя отправить стикер")
@@ -830,11 +836,11 @@ def send_sticker(con, cid: int, sticker: str, user: dict) -> dict:
         if demo:
             ext = "demo" + uuid.uuid4().hex
         elif conv["channel"] == "telegram":
-            payload = {"chat_id": int(conv["external_id"]), "photo": url}
+            payload = {"chat_id": int(conv["external_id"]), **({"sticker": custom["file_id"]} if custom else {"photo": url})}
             meta = json.loads(conv["meta"] or "{}")
             if meta.get("biz"):
                 payload["business_connection_id"] = meta["biz"]
-            ext = str(tg_call(con, "sendPhoto", payload).get("message_id"))
+            ext = str(tg_call(con, "sendSticker" if custom else "sendPhoto", payload).get("message_id"))
         elif conv["channel"] == "max":
             js = max_call(con, "POST", "messages", query={"chat_id": conv["external_id"]},
                           data={"attachments": [{"type": "image", "payload": {"url": url}}]})
