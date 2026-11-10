@@ -253,6 +253,9 @@ def _shift(con, branch_id: int, d: date, main_id: int | None = None, uid: int | 
 
 
 def get_or_create(con, branch_id: int, d: date, user: dict, any_coach: bool = False, main_id: int | None = None) -> dict:
+    from . import coachpolicy
+    if not coachpolicy.reports_enabled(con, branch_id):
+        raise ReportError("В Небе тренерские отчёты отключены")
     s = _shift(con, branch_id, d, main_id, None if any_coach else user["id"])
     r = con.execute("SELECT * FROM coach_reports WHERE branch_id=? AND date=? AND main_id=?", (branch_id, d.isoformat(), s["main_id"])).fetchone()
     if not r:
@@ -271,6 +274,9 @@ def _row(con, rid: int) -> dict:
 
 def check_access(con, rid: int, user: dict, manager: bool) -> tuple[dict, dict]:
     r = _row(con, rid)
+    from . import coachpolicy
+    if not manager and not coachpolicy.reports_enabled(con, r["branch_id"]):
+        raise ReportError("В Небе тренерские отчёты отключены")
     s = _shift(con, r["branch_id"], date.fromisoformat(r["date"]), r["main_id"])
     if not manager and user["id"] != r["main_id"] and user["id"] not in s["assistants"]:
         raise ReportError("Это не твоя смена")
@@ -609,6 +615,9 @@ def overdue(con, now: datetime | None = None) -> list[dict]:
         if d.isoformat() < since:
             continue
         for s in shifts(con, d):
+            from . import coachpolicy
+            if not coachpolicy.reports_enabled(con, s["branch_id"]):
+                continue
             if not s["end"] or now < s["end"] + timedelta(minutes=LATE_SENIOR):
                 continue
             r = con.execute("SELECT id, status FROM coach_reports WHERE branch_id=? AND date=? AND main_id=?",

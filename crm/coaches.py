@@ -56,7 +56,7 @@ def _of(a, b):
 
 def coach_stats(con, coach_id: int, ym: str) -> dict:
     groups = [dict(r) for r in con.execute(
-        "SELECT id, name, capacity FROM groups WHERE coach_id=? AND is_makeup=0 AND active=1 ORDER BY name", (coach_id,))]
+        "SELECT id, name, capacity FROM groups WHERE (coach_id=? OR assistant_id=?) AND is_makeup=0 AND active=1 ORDER BY name", (coach_id,coach_id))]
     gids = [g["id"] for g in groups]
     if not gids:
         return {"groups": 0, "group_names": [], "kids": 0, "kids_prev": 0, "seats": 0}
@@ -83,7 +83,10 @@ def coach_stats(con, coach_id: int, ym: str) -> dict:
                      (*gids, start.isoformat(), end.isoformat())).fetchone()
     present, marked = at[0] or 0, at[1] or 0
     seats = sum(g["capacity"] or 0 for g in groups)
+    group_counts = [{"id": g["id"], "name": g["name"], "capacity": g["capacity"], "kids": con.execute("""SELECT COUNT(DISTINCT x.student_id) FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id
+                      WHERE e.group_id=? AND x.month=? AND x.status!='cancelled'""", (g["id"],ym)).fetchone()[0]} for g in groups]
     return {
+        "group_counts": group_counts,
         "groups": len(groups), "group_names": [g["name"] for g in groups],
         "kids": len(k_now), "kids_prev": len(k_prev), "seats": seats,
         "fill": _pct(len(k_now), seats),

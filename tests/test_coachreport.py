@@ -21,12 +21,12 @@ def main():
     add = lambda login, name, role: con.execute("INSERT INTO users(login,name,role,pw_hash) VALUES (?,?,?,'x')", (login, name, role)).lastrowid
     nik, art, varya = add("nik", "Никита", "coach"), add("art", "Артём", "coach"), add("varya", "Варя", "operator")
     con.execute("UPDATE users SET is_senior=1 WHERE id=?", (varya,))
-    br = con.execute("INSERT INTO branches(name) VALUES ('ТЦ «Небо»')").lastrowid
+    br = con.execute("INSERT INTO branches(name) VALUES ('Чоботовская')").lastrowid
     wd = str(today.weekday())
     g1 = con.execute("INSERT INTO groups(branch_id,name,weekdays,time,coach_id,assistant_id) VALUES (?,?,?,?,?,?)",
-                     (br, "Небо 00:05", wd, "00:05", nik, art)).lastrowid
-    g2 = con.execute("INSERT INTO groups(branch_id,name,weekdays,time,coach_id) VALUES (?,?,?,?,?)", (br, "Небо 00:10", wd, "00:10", nik)).lastrowid
-    OP = {"id": varya, "name": "Варя", "role": "operator"}
+                     (br, "Чоботовская 00:05", wd, "00:05", nik, art)).lastrowid
+    g2 = con.execute("INSERT INTO groups(branch_id,name,weekdays,time,coach_id) VALUES (?,?,?,?,?)", (br, "Чоботовская 00:10", wd, "00:10", nik)).lastrowid
+    OP = {"id": varya, "name": "Варя", "role": "operator", "is_senior": 1}
     kids = [sv.create_student(con, {"name": f"Ребёнок {i}", "parent_name": "Мама", "phone": f"+7 900 100-00-0{i}", "funnel": "members",
                                     "group_id": g, "tariff": "fixed"}, OP) for i, g in enumerate((g1, g1, g2))]
     for k in kids:  # в журнале только оплатившие (04.11)
@@ -37,7 +37,7 @@ def main():
 
     print("Смена и отчёт")
     sh = cr.my_shifts(con, nik, today)
-    check(len(sh) == 1 and len(sh[0]["groups"]) == 2 and art in sh[0]["assistants"], "Две тренировки Никиты в Небе - одна смена, Артём помощник")
+    check(len(sh) == 1 and len(sh[0]["groups"]) == 2 and art in sh[0]["assistants"], "Две тренировки Никиты на Чоботовской - одна смена, Артём помощник")
     v = cr.get_or_create(con, br, today, ART)
     check(v["main"] == "Никита" and not v["ready"], "Помощник открывает тот же отчёт главного")
     step = lambda v, k: next(x["done"] for x in v["steps"] if x["key"] == k)
@@ -81,7 +81,7 @@ def main():
 
     print("Оплаты: поиск, наличные, конверт")
     found = cr.search_clients(con, "ребёнок 2")
-    check(found and found[0]["id"] == kids[2] and "phone" not in found[0] and found[0]["label"] == "Небо 00:10", "Поиск по CRM: имя и группа, без телефона")
+    check(found and found[0]["id"] == kids[2] and "phone" not in found[0] and found[0]["label"] == "Чоботовская 00:10", "Поиск по CRM: имя и группа, без телефона")
     cash = {"name": "Ребёнок 2", "student_id": kids[2], "amount": 12150, "method": "cash", "what": "month", "tariff": "fixed", "check": True}
     check(not cr.pay_ok(cash) and cr.pay_ok(cash | {"env": True}), "Наличные только с чеком и в конверте")
     check(not cr.pay_ok({**cash, "env": True, "tariff": ""}), "Абонемент без тарифа не принимаем")

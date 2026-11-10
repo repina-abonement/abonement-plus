@@ -63,9 +63,31 @@ function newInboxAlert(what) {
 }
 
 /* ---------- сообщение ---------- */
+function chatDateLabel(day) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return "Дата не указана";
+  const today = (S.meta && S.meta.today) || isoDate(new Date());
+  if (day === today) return "Сегодня";
+  if (day === addDays(today, -1)) return "Вчера";
+  return new Intl.DateTimeFormat("ru-RU", {day:"numeric",month:"long",year:"numeric"}).format(new Date(day + "T12:00:00"));
+}
+
+function chatHistoryHtml(items) {
+  let html = "", previous = null;
+  for (const item of items) {
+    const day = String(item.ts || item.started_at || "").slice(0,10);
+    if (day !== previous) {
+      if (previous !== null) html += "</section>";
+      html += `<section class="chat-day-group" data-chat-day="${esc(day)}"><div class="chat-day-label"><span>${esc(chatDateLabel(day))}</span></div>`;
+      previous = day;
+    }
+    html += item.type === "call" ? callHtml(item) : msgHtml(item);
+  }
+  return html + (previous !== null ? "</section>" : "");
+}
+
 function msgHtml(m) {
-  const media = m.media ? (m.kind === "image"
-    ? `<a href="/api/messages/${m.id}/media" target="_blank" rel="noopener"><img class="msg-img" loading="lazy" src="/api/messages/${m.id}/media" alt="Фото"></a>`
+  const media = m.media ? (["image", "sticker"].includes(m.kind)
+    ? `<a href="/api/messages/${m.id}/media" target="_blank" rel="noopener"><img class="msg-img${m.kind === "sticker" ? " msg-sticker" : ""}" loading="lazy" src="/api/messages/${m.id}/media" alt="${m.kind === "sticker" ? "Стикер" : "Фото"}">${m.kind === "sticker" ? `<span hidden>Стикер: открыть файл</span>` : ""}</a>`
     : m.kind === "audio" ? `<audio controls preload="none" src="/api/messages/${m.id}/media"></audio>`
     : `<a href="/api/messages/${m.id}/media" target="_blank" rel="noopener">Открыть вложение</a>`) : "";
   const label = !m.text && !media ? ({ sticker: "Стикер", contact: "Контакт", other: "Вложение" }[m.kind] || "") : "";
@@ -200,7 +222,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
       <div class="small muted">Вернуться к ${esc(dtShort(c.open_due))}${c.open_by ? ` · отметил(а) ${esc(c.open_by)}` : ""}</div></div>
       <button class="btn sm" data-oqchat="${c.id}">Открыть диалог</button></div>`).join("")}
     <div class="chips" style="margin-bottom:10px">${parents.filter((p) => p.phone).map((p) => `<button class="btn sm" data-dial="${esc(p.phone)}">📞 ${esc(p.name.split(" ")[0])}${p.relation ? ` (${esc(p.relation)})` : ""} · ${esc(p.phone)}</button>`).join("")}</div>
-    <div class="feed" id="feed">${d.items.length ? d.items.map((i) => i.type === "call" ? callHtml(i) : msgHtml(i)).join("") : `<div class="muted small">Пока ни переписки, ни звонков</div>`}</div>
+    <div class="feed" id="feed">${d.items.length ? chatHistoryHtml(d.items) : `<div class="muted small">Пока ни переписки, ни звонков</div>`}</div>
     ${kid && kid.funnel === "sales" ? `<div class="to-bar" style="margin-top:10px"><button class="btn sm" id="to-open">📅 Предложить дни для пробного</button><button class="btn sm" id="to-book">✅ Записать на пробное</button></div><div id="to-panel" hidden></div>` : ""}
     ${targets.length ? `
       <div class="composer">
@@ -222,7 +244,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     seen = k;
     if (n.conversations.length !== d.conversations.length) return loadFamilyComms(familyId, parents, studentId, kid);  // новый чат: перестроить и список «кому»
     const atEnd = f.scrollHeight - f.scrollTop - f.clientHeight < 80;
-    f.innerHTML = n.items.map((i) => i.type === "call" ? callHtml(i) : msgHtml(i)).join("");
+    f.innerHTML = chatHistoryHtml(n.items);
     if (atEnd) f.scrollTop = f.scrollHeight;
   }, 10000);
   box.querySelectorAll("[data-dial]").forEach((b) => (b.onclick = () => dial(b.dataset.dial)));
@@ -322,8 +344,11 @@ async function renderCalls(body) {
 /* ---------- окно переписки ---------- */
 let chatTimer = null;
 async function openChat(cid, keepScroll = false) {
+  const previousFeed = $("#chat-feed");
+  const previousScroll = previousFeed ? previousFeed.scrollTop : 0;
+  const wasAtEnd = !previousFeed || previousFeed.scrollHeight - previousFeed.scrollTop - previousFeed.clientHeight < 80;
   let d;
-  try { d = await api("GET", `/api/conversations/${cid}`); } catch (e) { return fail(e); }
+  try { d = await api("GET", `/api/conversations/${cid}${keepScroll ? "" : "?remember=1"}`); } catch (e) { return fail(e); }
   const c = d.conversation;
   const draft = $("#chat-text") ? $("#chat-text").value : "";
   const html = `
@@ -343,7 +368,7 @@ async function openChat(cid, keepScroll = false) {
           <div class="small muted">Вернуться к ${esc(dtShort(c.open_due))}${c.open_by ? ` · отметил(а) ${esc(c.open_by)}` : ""}</div></div>
           <button class="btn sm primary" id="oq-close">✅ Вопрос решён</button></div>`
         : `<button class="btn sm" id="oq-open" title="В диалоге осталось незакрытое дело: он появится на рабочем столе у всех администраторов">❗ Открытый вопрос</button>`}</div>
-      <div class="feed chat-feed" id="chat-feed">${(d.history || d.messages).map((m) => m.type === "call" ? callHtml(m) : msgHtml(m)).join("") || `<div class="muted small">Сообщений нет</div>`}</div>
+      <div class="feed chat-feed" id="chat-feed">${chatHistoryHtml(d.history || d.messages) || `<div class="muted small">Сообщений нет</div>`}</div>
       <div class="composer sticky">
         <div class="to-bar"><button class="btn sm" id="to-open">📅 Предложить ближайшие ПУ</button></div>
         <div id="to-panel" hidden></div>
@@ -353,7 +378,7 @@ async function openChat(cid, keepScroll = false) {
       </div>
     </div>`;
   openDrawer(html);
-  const feed = $("#chat-feed"); feed.scrollTop = feed.scrollHeight;
+  const feed = $("#chat-feed"); feed.scrollTop = keepScroll && !wasAtEnd ? previousScroll : feed.scrollHeight;
   const body = $("#drawer-body");
   body.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => { stopChatTimer(); openStudent(+b.dataset.open); }));
   if (c.family_id) loadWarnBox(c.family_id, $("#warn-box"));
@@ -401,7 +426,7 @@ async function openChat(cid, keepScroll = false) {
     if (!open || $("#drawer").hidden) return stopChatTimer();
     const n = await api("GET", `/api/conversations/${cid}`).catch(() => null);
     const len = (x) => (x.history || x.messages).length + ":" + JSON.stringify(((x.history || x.messages).slice(-1)[0] || {}).id);
-    if (n && len(n) !== len(d)) { stopChatTimer(); openChat(cid); }
+    if (n && len(n) !== len(d)) { stopChatTimer(); openChat(cid, true); }
   }, 8000);
   pollCounts();
   if (S.view === "inbox" && !keepScroll) render();
@@ -700,10 +725,20 @@ function wireTrialOffer(c, textSel = "#chat-text") {
 /* One picker shared by the inbox and the client card. */
 function wireMessagePicker(selector, sendSticker) {
   const input = $(selector); if (!input) return;
-  const panel = document.createElement("details");
+  const panel = document.createElement("div");
   panel.className = "message-picker";
-  const stickers = [["smile", "😊", "Улыбка"], ["thanks", "🙏", "Спасибо"], ["yes", "👍", "Отлично"], ["heart", "❤", "Сердце"], ["party", "🎉", "Поздравляем"], ["football", "⚽", "Футбол"]];
-  panel.innerHTML = `<summary>😊 Смайлики и стикеры</summary><div class="chips" data-emojis>${["😊", "😀", "😄", "😉", "😍", "🥰", "😘", "😎", "🤔", "😢", "😭", "😂", "👍", "👏", "🙏", "❤️", "🎉", "⚽", "✅", "🔥", "💪"].map(x => `<button type="button" class="btn sm" data-emoji="${esc(x)}">${x}</button>`).join("")}</div><div class="small muted">Стикеры отправляются картинками, без анимации.</div><div class="chips">${stickers.map(([id, emoji, label]) => `<button type="button" class="btn" data-sticker="${id}" title="Отправить: ${label}">${emoji} ${label}</button>`).join("")}</div>`;
+  const stickers = [["smile", "1f60a", "Улыбка"], ["thanks", "1f64f", "Спасибо"], ["yes", "1f44d", "Отлично"], ["heart", "2764", "Сердце"], ["party", "1f389", "Поздравляем"], ["football", "26bd", "Футбол"]];
+  panel.innerHTML = `<div class="chips"><button type="button" class="btn sm" data-picker-tab="emoji" aria-expanded="false">😊 Смайлы</button><button type="button" class="btn sm" data-picker-tab="sticker" aria-expanded="false">Стикеры</button></div>
+    <div class="chips picker-options" data-picker-panel="emoji" hidden>${["😊", "😀", "😄", "😉", "😍", "🥰", "😘", "😎", "🤔", "😢", "😭", "😂", "👍", "👏", "🙏", "❤️", "🎉", "⚽", "✅", "🔥", "💪"].map(x => `<button type="button" class="btn sm" data-emoji="${esc(x)}">${x}</button>`).join("")}</div>
+    <div class="picker-options" data-picker-panel="sticker" hidden><div class="sticker-grid">${stickers.map(([id, code, label]) => `<button type="button" class="sticker-choice" data-sticker="${id}" title="Отправить: ${label}" aria-label="Отправить стикер: ${label}"><img src="https://raw.githubusercontent.com/jdecked/twemoji/v15.1.0/assets/72x72/${code}.png" width="56" height="56" alt="${label}"><span>${label}</span></button>`).join("")}</div><p class="small muted">Графические стикеры отправляются картинками, без анимации. Twemoji, CC BY 4.0.</p></div>`;
+  panel.querySelectorAll("[data-picker-tab]").forEach(b => {
+    b.onmousedown = e => e.preventDefault();
+    b.onclick = () => {
+      const opening = b.getAttribute("aria-expanded") !== "true";
+      panel.querySelectorAll("[data-picker-tab]").forEach(x => x.setAttribute("aria-expanded", String(opening && x === b)));
+      panel.querySelectorAll("[data-picker-panel]").forEach(x => { x.hidden = !opening || x.dataset.pickerPanel !== b.dataset.pickerTab; });
+    };
+  });
   input.closest(".row").before(panel);
   panel.querySelectorAll("[data-emoji]").forEach(b => {
     b.onmousedown = e => e.preventDefault();
@@ -711,8 +746,16 @@ function wireMessagePicker(selector, sendSticker) {
   });
   panel.querySelectorAll("[data-sticker]").forEach(b => b.onclick = async () => {
     b.disabled = true;
-    try { await sendSticker(b.dataset.sticker); panel.open = false; }
+    try { await sendSticker(b.dataset.sticker); panel.querySelectorAll("[data-picker-panel]").forEach(x => x.hidden = true); panel.querySelectorAll("[data-picker-tab]").forEach(x => x.setAttribute("aria-expanded", "false")); }
     catch (e) { fail(e); }
     finally { b.disabled = false; }
   });
 }
+
+// Unsupported animated sticker formats remain available as downloadable files.
+document.addEventListener("error", e => {
+  if (e.target instanceof HTMLImageElement && e.target.classList.contains("msg-sticker")) {
+    e.target.hidden = true;
+    if (e.target.nextElementSibling) e.target.nextElementSibling.hidden = false;
+  }
+}, true);

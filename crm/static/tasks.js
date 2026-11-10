@@ -4,7 +4,7 @@
 S.tasks = { scope: "mine" };
 const AUTO_LABEL = { day_before: "за день", "2h_before": "за 2 часа", after: "после пробного" };
 
-function taskRow(t) {
+function taskRow(t, options = {}) {
   const s = t.student || {};
   const trial = s.trial_at ? `пробное ${dtWhen(s.trial_at)}` : "";
   const auto = (t.auto || []).map((a) => `<span class="pill ${a.ok ? "green" : "red"}" title="${esc(a.error || "")}">✉️ ${AUTO_LABEL[a.kind] || a.kind}: ${a.ok ? "ушло" : "не ушло"}</span>`).join("");
@@ -25,9 +25,9 @@ function taskRow(t) {
     <span class="small muted when">${dtWhen(t.due_at)}</span>
     <div class="now-act">
       ${s.phone ? `<button class="btn sm" data-dial="${esc(s.phone)}">📞</button>` : ""}
-      ${t.kind === "rebook" ? `<button class="btn sm primary" data-rebook="${t.id}">Итог звонка</button>` : S.user.role === "coach" ? "" : `<button class="btn sm" data-done>Выполнено</button>`}
+      ${t.kind === "rebook" ? `<button class="btn sm primary" data-rebook="${t.id}">Итог звонка</button>` : S.user.role === "coach" && !options.directComplete ? "" : `<button class="btn sm" data-done>Выполнено</button>`}
       ${["admin", "operator"].includes(S.user.role) ? `<button class="btn sm" data-tpass title="Передать другому сотруднику">Передать</button>` : ""}
-      ${t.kind === "plan" && (S.tasks.canManage || t.created_by_id === S.user.id) ? `<button class="btn sm" data-tcancel="${t.id}" title="Убрать задачу">✕</button>` : ""}
+      ${t.kind === "plan" && S.user.role !== "coach" && (S.tasks.canManage || t.created_by_id === S.user.id) ? `<button class="btn sm" data-tcancel="${t.id}" title="Убрать задачу">✕</button>` : ""}
     </div>
   </div>`;
 }
@@ -244,6 +244,7 @@ const WD_LOW = ["понедельник", "вторник", "среда", "че�
 
 async function renderCoachToday(page, coachId, viewBar = "") {
   const d = await api("GET", "/api/coach/today" + (coachId ? "?coach_id=" + coachId : ""));
+  if (d.dashboard_only) return renderNeboDashboard(page, d, coachId, viewBar);
   const first = firstName((d.coach && d.coach.name) || S.user.name);
   const t = d.totals, wd = (iso) => WD_LOW[(new Date(iso + "T00:00").getDay() + 6) % 7];
   const line = COACH_LINES[new Date(d.date + "T00:00").getDate() % COACH_LINES.length];
@@ -376,4 +377,22 @@ async function renderTaskSettings(box, users) {
     try { await api("PUT", "/api/tasks/settings", body); toast("Сохранено"); }
     catch (e) { fail(e); }
   };
+}
+
+
+function renderNeboDashboard(page, d, coachId, viewBar = "") {
+  const st = d.stats || {}, name = (d.coach && d.coach.name) || S.user.name;
+  page.innerHTML = `${viewBar}<div class="page-head"><h2>Мой дашборд</h2><span class="small muted">${esc(firstName(name))} · ${dShort(d.date)}</span></div>
+    ${(d.tasks || []).length ? `<section class="now tasks-box"><div class="now-head"><h3>Задачи к смене · ${d.tasks.length}</h3></div>${d.tasks.map(t => taskRow(t, {directComplete:true})).join("")}</section>` : ""}
+    <div class="tiles" style="margin-top:14px">
+      ${tile("🧒", "Детей в моих группах", st.kids || 0, `${st.groups || 0} групп · ${st.seats || 0} мест`, "", "", st.fill)}
+      ${tile("🎯", "Конверсия пробных", st.trial_conv == null ? "—" : `${st.trial_conv}%`, `Пришли: ${st.came || 0} · остались: ${st.bought || 0}`, "", "", st.trial_conv)}
+      ${tile("🛡️", "Продления", st.stay == null ? "—" : `${st.stay}%`, `Продлились: ${st.stayed || 0} из ${st.kids_prev || 0}`, "", "", st.stay)}
+      ${tile("❤️", "Посещаемость", st.attendance == null ? "—" : `${st.attendance}%`, "По отметкам в журнале", "", "", st.attendance)}
+    </div>
+    ${(st.group_counts || []).length ? `<section class="panel" style="margin-top:16px"><h3>Мои группы</h3>${st.group_counts.map(g => `<div class="list-row"><b class="grow">${esc(g.name)}</b><span>${g.kids} из ${g.capacity} мест</span></div>`).join("")}</section>` : ""}
+    <h3 style="margin:18px 0 10px">Тренировки сегодня</h3>
+    ${d.today.length ? `<div class="today-grid">${d.today.map(g => `<section class="today-card"><b>${esc(g.name)}</b><div class="small muted">${esc(g.branch)} · ${esc(g.time)} · ${esc(g.age)}</div><p>Детей: ${g.kids + g.trials} · пробных: ${g.trials}</p><button class="btn primary" data-nebo-j="${g.id}">Открыть журнал</button></section>`).join("")}</div>` : `<p class="muted">Сегодня тренировок нет</p>`}`;
+  page.querySelectorAll("[data-nebo-j]").forEach(b => b.onclick = () => { S.journal.group = +b.dataset.neboJ; S.journal.date = d.date; go("journal"); });
+  if (!coachId) wireTasks(page);
 }

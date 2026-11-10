@@ -17,7 +17,7 @@ TITLES = {"owner": "Руководитель", "senior": "Старший адм�
 DESK = {"owner": "full", "senior": "full", "operator": "full"}
 SECTIONS: dict[str, dict[str, str]] = {
     "sales": DESK, "inbox": DESK, "skips": DESK, "merch": DESK, "search": DESK,
-    "members": DESK | {"coach": "own"},  # тренер: дети своих групп и телефоны родителей, без правок
+    "members": DESK | {"coach": "own"},  # тренер: дети своих групп без телефонов, только просмотр
     "today": {"owner": "full", "coach": "own"},
     "planner": {"owner": "full", "senior": "full", "operator": "own", "coach": "own", "promoter": "own", "lawyer": "own", "trainee": "own"},
     "journal": {"owner": "full", "senior": "full", "operator": "view", "coach": "own", "journal": "full"},  # journal: отметка «отмечает журнал»
@@ -64,6 +64,11 @@ def roles_of(user: dict) -> set[str]:
 
 
 def level(user: dict, section: str) -> int:
+    if user.get("role") == "coach":
+        if section == "planner":
+            return 0
+        if user.get("coach_nebo_only") and section not in ("today", "journal"):
+            return 0
     rules = SECTIONS.get(section, {})
     return max((LEVEL[rules[r]] for r in roles_of(user) if r in rules), default=0)
 

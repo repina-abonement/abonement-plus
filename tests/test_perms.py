@@ -97,10 +97,12 @@ def main():
     print("Тренер видит своих детей")
     import sqlite3
     c2 = sqlite3.connect(os.environ["CRM_DB"])
+    c2.execute("UPDATE branches SET name='Чоботовская' WHERE id=(SELECT branch_id FROM groups WHERE id=?)", (gid,))
     c2.execute("UPDATE groups SET coach_id=? WHERE id=?", (users["lesha"]["id"], gid)); c2.commit()
     kids = json.loads(S["lesha"]("GET", "/api/coach/kids")[1])["groups"]
     check(len(kids) == 1 and kids[0]["id"] == gid and all("parents" in k for k in kids[0]["kids"]),
-          "Только его группа, у детей телефоны родителей")
+          "Только его группа, без телефонов родителей")
+    check("phone" not in json.dumps(kids), "Телефоны не передаются тренеру")
     check("members" in menu("lesha"), "В меню тренера «Мои ученики»")
 
     print("Модели оплаты: только своя")

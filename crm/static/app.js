@@ -315,7 +315,7 @@ const can = (sec, lvl = "own") => (LEVELS[((S.user && S.user.perms) || {})[sec]]
 const isOwner = () => can("settings", "full");
 const visibleViews = () => VIEWS.filter(([k]) => can(k === "manual" ? "planner" : k === "nodeadline" ? "sales" : k) && (k !== "today" || !isOwner())
   && (k !== "manual" || !["coach", "trainee"].includes(S.user.role)))  // тренеру задачи приходят на «Сегодня» и в отчёт, отдельная вкладка не нужна  // руководитель смотрит стол тренера через «Как видит»
-  .map(([k, t]) => [k, k === "coaches" && !can("coaches", "view") ? "Мои результаты" : k === "members" && !can("members", "full") ? "Мои ученики" : t]);
+  .map(([k, t]) => [k, k === "today" && S.user.coach_nebo_only ? "Мой дашборд" : k === "coaches" && !can("coaches", "view") ? "Мои результаты" : k === "members" && !can("members", "full") ? "Мои ученики" : t]);
 const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
 function isCoachShort() { return "Результаты"; }
 const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></span>` : "";
@@ -350,24 +350,43 @@ function wireNavSearch(nq) {
   const box = document.createElement("div");
   box.className = "nav-res"; box.hidden = true;
   nq.after(box);
-  let t, rows = [], cur = -1;
+  let t, rows = [], cur = -1, historyMode = false, generation = 0;
   const close = () => { box.hidden = true; cur = -1; };
   const paint = () => {
-    box.innerHTML = rows.length ? rows.slice(0, 8).map((r, i) => `<button class="${i === cur ? "on" : ""}" data-nr="${r.id}"><b>${esc(r.name)}</b>
+    box.innerHTML = (historyMode ? `<div class="nav-recent-head"><b>Недавно открывали</b>${rows.length ? `<button type="button" data-clear-recent>Очистить</button>` : ""}</div>` : "") + (rows.length ? rows.slice(0, 8).map((r, i) => `<button class="${i === cur ? "on" : ""}" data-nr="${r.id}"><b>${esc(r.name)}</b>
       <small>${esc([r.parent, r.phone].filter(Boolean).join(" · "))}${r.funnel === "members" ? "" : " · лид"}</small></button>`).join("")
       + (rows.length > 8 ? `<button data-nall><small>Все результаты: ${rows.length} →</small></button>` : "")
-      : `<div class="small" style="padding:8px 10px;opacity:.7">Никого не нашли</div>`;
+      : `<div class="small" style="padding:8px 10px;opacity:.7">${historyMode ? "Здесь появятся последние карточки клиентов" : "Никого не нашли"}</div>`);
     box.style.top = nq.offsetTop + nq.offsetHeight + 4 + "px";
     box.hidden = false;
     box.querySelectorAll("[data-nr]").forEach((b) => (b.onmousedown = (e) => { e.preventDefault(); nq.value = ""; close(); openStudent(+b.dataset.nr); }));
+    const clear = box.querySelector("[data-clear-recent]");
+    if (clear) {
+      clear.onmousedown = e => e.preventDefault();
+      clear.onclick = async () => {
+        try { await api("DELETE", "/api/students/recent"); if (!nq.value.trim()) { rows = []; cur = -1; paint(); } }
+        catch (err) { fail(err); }
+      };
+    }
     const all = box.querySelector("[data-nall]"); if (all) all.onmousedown = (e) => { e.preventDefault(); goAll(); };
   };
   const goAll = () => { S.search = nq.value.trim(); nq.value = ""; close(); go("search"); setTimeout(() => { const q = $("#q"); if (q) { q.focus(); q.dispatchEvent(new Event("input")); } }, 50); };
+  const showHistory = async () => {
+    const request = ++generation;
+    try {
+      const recent = await api("GET", "/api/students/recent");
+      if (request !== generation || nq.value.trim() || document.activeElement !== nq) return;
+      rows = recent; historyMode = true; cur = rows.length ? 0 : -1; paint();
+    } catch (_) { close(); }
+  };
+  nq.addEventListener("focus", () => { if (!nq.value.trim()) showHistory(); });
   nq.oninput = () => {
-    clearTimeout(t);
+    clearTimeout(t); generation++;
     const v = nq.value.trim();
+    if (!v) return showHistory();
+    historyMode = false;
     if (v.length < 2) return close();
-    t = setTimeout(async () => { try { rows = await api("GET", "/api/students?q=" + encodeURIComponent(v)); cur = rows.length ? 0 : -1; if (nq.value.trim() === v) paint(); } catch (_) {} }, 200);
+    t = setTimeout(async () => { try { rows = await api("GET", "/api/students?q=" + encodeURIComponent(v)); cur = rows.length ? 0 : -1; if (nq.value.trim() === v && document.activeElement === nq) paint(); } catch (_) {} }, 200);
   };
   nq.onkeydown = (e) => {
     if (e.key === "Escape") { nq.value = ""; close(); nq.blur(); }
@@ -2711,7 +2730,7 @@ async function renderStaffDocs(page) {
       <details ${i === 0 ? "open" : ""}><summary class="linkish small">Прочитать полностью</summary><div class="legal-text">${x.html}</div></details></div>`).join("")}
     <div class="section"><div class="field"><label>Впишите свои фамилию и имя: это ваша подпись</label><input id="sd-name" placeholder="${esc(d.name)}" autocomplete="off"></div>
       <button class="btn primary" id="sd-ok" disabled>Принимаю и подписываю</button>
-      <div class="small muted" style="margin-top:6px">Мы сохраним дату, время и IP-адрес подписания. Копию документов можно попросить у руководителя</div></div></div>`;
+      <div class="small muted" style="margin-top:6px">Мы сохраним дату, время и IP-адрес подписания.</div></div></div>`;
   const ok = $("#sd-ok");
   const sync = () => { ok.disabled = !([...page.querySelectorAll("[data-sd]")].every((c) => c.checked) && $("#sd-name").value.trim().length > 2); };
   page.querySelectorAll("[data-sd]").forEach((c) => (c.onchange = sync));

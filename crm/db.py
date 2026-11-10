@@ -265,6 +265,8 @@ def init_db(con: sqlite3.Connection):
         """)
     sync_enrollments(con)
     from . import ai, calldigest, capacity, closures, comms, program, pu, staffdocs, waitlist, expenses, fakegen, legal, merch, money, offers, planner, schedule, sources, staff, tasks, fiscal
+    from . import recents
+    recents.init(con)
     legal.init(con)
     schedule.init(con)
     capacity.init(con)

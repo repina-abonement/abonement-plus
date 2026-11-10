@@ -212,8 +212,9 @@ def main():
     call("POST", "/api/login", {"login": "trener", "password": "trener-test-1"})
     call("GET", "/api/inbox", expect=403)
     check(True, "Тренер не видит переписки и звонки")
-    b = call("GET", "/api/coaches/board")
-    check(b["hero"] and any(r["is_me"] for r in b["rows"]), "Тренер видит своё место в таблице")
+    call("GET", "/api/coaches/board", expect=403)
+    b = call("GET", "/api/coach/today")["stats"]
+    check(b and "kids" in b and "trial_conv" in b, "Тренер Неба видит показатели своих групп")
     check("revenue" not in json.dumps(b) and "price" not in json.dumps(b), "В результатах тренеров нет денег")
     srv.shutdown()
 

@@ -83,7 +83,11 @@ def current_user(con, handler) -> dict | None:
     if (datetime.now() - datetime.fromisoformat(r["created_at"])).days > SESSION_DAYS:
         con.execute("DELETE FROM sessions WHERE token=?", (tok.value,))
         return None
-    return dict(r)
+    out = dict(r)
+    if out["role"] == "coach":
+        from . import coachpolicy
+        out["coach_nebo_only"] = coachpolicy.nebo_only(con, out["id"])
+    return out
 
 
 def _start_session(con, h, u) -> None:
@@ -513,13 +517,15 @@ def meta(con, h, user, body, q):
     if user["role"] == "coach":
         m["groups"] = [g for g in m["groups"] if schedule.coach_may(con, user["id"], g["id"])]
         m["settings"] = {}
+        if user.get("coach_nebo_only"):
+            m["comms"], m["ad"] = {}, []
     elif not perms.allowed(user, "any"):  # юрист: группы и цены ему не нужны
         m["groups"], m["settings"] = [], {}
     m["festive"] = (con.execute("SELECT value FROM settings WHERE key='festive'").fetchone() or ["1"])[0] != "0"
     from . import staffdocs
     m["staff_docs_pending"] = staffdocs.pending(con, user)
     from . import tour
-    m["tour_pending"] = tour.pending(con, user)
+    m["tour_pending"] = tour.pending(con, user) and not user.get("coach_nebo_only")
     import json as _json
     m["staff"] = []
     for r in con.execute("SELECT id, name, role, photo_at, photo_sq, bio FROM users WHERE active=1 ORDER BY name"):
@@ -1043,6 +1049,19 @@ def move(con, h, user, body, q, sid):
     return {"ok": True} | (r or {})
 
 
+@route("GET", "/api/students/recent", role="operator")
+def recent_students(con, h, user, body, q):
+    from . import recents
+    return recents.listing(con, user["id"])
+
+
+@route("DELETE", "/api/students/recent", role="operator")
+def recent_students_clear(con, h, user, body, q):
+    from . import recents
+    recents.clear(con, user["id"])
+    return {"ok": True}
+
+
 @route("GET", "/api/students", role="operator")
 def students(con, h, user, body, q):
     return sv.search_students(con, q.get("q", ""), q.get("archived") == "1")
@@ -1072,6 +1091,8 @@ def student_create(con, h, user, body, q):
 
 @route("GET", "/api/students/{sid}", role="operator")
 def student_get(con, h, user, body, q, sid):
+    from . import recents
+    recents.remember(con, user["id"], int(sid))
     return sv.student_detail(con, int(sid))
 
 
@@ -1917,7 +1938,12 @@ def coach_today(con, h, user, body, q):
     for les in out["today"]:
         les["staff"] = staff.lesson_staff(con, les["id"], out["date"])
     out["coaches"] = [dict(r) for r in con.execute("SELECT id, name FROM users WHERE role='coach' AND active=1 ORDER BY name")]
-    out["merch"] = merch.my_shift(con, cid, out["date"])
+    from . import coachpolicy
+    out["nebo_only"] = coachpolicy.nebo_only(con, cid)
+    branch_ids = {r[0] for les in out["today"] for r in con.execute("SELECT branch_id FROM groups WHERE id=?", (les["id"],))}
+    out["dashboard_only"] = out["nebo_only"] or (bool(branch_ids) and all(not coachpolicy.reports_enabled(con, bid) for bid in branch_ids))
+    out["stats"] = coaches.coach_stats(con, cid, out["date"][:7]) if out["dashboard_only"] else None
+    out["merch"] = {} if out["dashboard_only"] else merch.my_shift(con, cid, out["date"])
     out["tasks"] = [tasks._task_out(con, r) for r in con.execute(
         "SELECT * FROM tasks WHERE status='open' AND assignee_id=? AND due_at<=? ORDER BY due_at", (cid, out["date"] + "T23:59"))]
     from . import pu
@@ -1977,6 +2003,9 @@ def coach_shifts(con, h, user, body, q):
     out = []
     for d in (_d.today() - _td(days=1), _d.today()):
         for s in coachreport.my_shifts(con, user["id"], d):
+            from . import coachpolicy
+            if not coachpolicy.reports_enabled(con, s["branch_id"]):
+                continue
             r = con.execute("SELECT id, status FROM coach_reports WHERE branch_id=? AND date=? AND main_id=?",
                             (s["branch_id"], d.isoformat(), s["main_id"])).fetchone()
             if d < _d.today() and r and r["status"] == "done":
@@ -2274,7 +2303,12 @@ def trial_hold(con, h, user, body, q):
 
 @route("GET", "/api/conversations/{cid}", role="operator")
 def conv_get(con, h, user, body, q, cid):
-    return cx(comms.conversation, con, int(cid))
+    detail = cx(comms.conversation, con, int(cid))
+    from . import recents
+    if q.get("remember") == "1":
+        for student in detail.get("conversation", {}).get("students", []):
+            recents.remember(con, user["id"], student["id"])
+    return detail
 
 
 @route("POST", "/api/conversations/{cid}/send", role="operator")
@@ -2890,6 +2924,10 @@ class Handler(BaseHTTPRequestHandler):
                     user = current_user(con, self)
                     if not user:
                         raise ApiError("Нужно войти", 401)
+                    if user["role"] == "coach" and url.path == "/api/tasks/manual":
+                        raise ApiError("Тренеру доступен список задач на экране смены, без Планера", 403)
+                    if user.get("coach_nebo_only") and (url.path.startswith("/api/envelope") or url.path == "/api/tasks/manual" or url.path == "/api/report-search"):
+                        raise ApiError("Этот раздел недоступен тренеру Неба", 403)
                     if user["role"] == "trainee":
                         safe = url.path.startswith("/api/planner") or url.path in ("/api/meta", "/api/me", "/api/me/password", "/api/pin", "/api/logout", "/api/staff-docs", "/api/staff-docs/accept")
                         safe = safe or bool(re.fullmatch(r"/api/tasks/[0-9]+/done", url.path))
@@ -2911,6 +2949,11 @@ class Handler(BaseHTTPRequestHandler):
                     raise
                 if isinstance(result, Raw):
                     return self._send_raw(result)
+                if user and user["role"] == "coach":
+                    from . import coachpolicy
+                    result = coachpolicy.redact_contacts(result)
+                    if user.get("coach_nebo_only"):
+                        result = coachpolicy.redact_finances(result)
                 return self._send(200, result)
             raise ApiError("Не найдено", 404)
         except ApiError as e:
