@@ -1671,3 +1671,24 @@ textarea.nav-q { height:40px; min-height:40px; max-height:40px; resize:none; ove
 #attendance-day-detail { margin:18px 0; padding:14px; border:1px solid var(--line); border-radius:12px; }#attendance-day-detail h4 { margin:0 0 12px; }.attendance-event { display:flex; flex-direction:column; gap:8px; padding:10px 0; }.attendance-event+.attendance-event { border-top:1px solid var(--line); }.attendance-event>div:first-child { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .makeup-panel { border-top:1px solid var(--line); margin-top:20px; padding-top:16px; }.makeup-panel h4 { margin:0 0 8px; font-size:17px; }.makeup-slot-list { display:grid; gap:10px; }.makeup-slot { border:1px solid var(--line); border-radius:10px; padding:12px; display:flex; justify-content:space-between; gap:14px; }.makeup-slot-count { text-align:right; flex:0 0 115px; }.makeup-slot-count>b,.makeup-slot-count>small { display:block; }.makeup-slot-count>b { font-size:20px; }.makeup-slot-count>small { color:var(--ink-2); margin-bottom:7px; }.makeup-slot.extra-slot { display:none; }#attendance-message { margin-top:16px; }#attendance-message textarea { line-height:1.55; min-height:200px; margin-bottom:10px; }
 @media(max-width:600px) { .attendance-stats { grid-template-columns:repeat(2,minmax(0,1fr)); }.attendance-calendar { gap:3px; }.attendance-day { min-height:68px; padding:4px; }.attendance-day-tags>span { font-size:10px; padding:2px 3px; }.sc-tabs { gap:2px; }.sc-tabs button { font-size:11px; }.makeup-slot { flex-wrap:wrap; }.makeup-slot-count { display:flex; gap:8px; align-items:center; flex:1; text-align:left; }.makeup-slot-count>small { margin:0; }.makeup-slot-count>.btn { margin-left:auto; } }
+/* Полные подписи занятий и крупная отметка непосредственно в дне календаря. */
+.attendance-calendar-scroll { overflow-x:auto; padding:2px; margin:0 -2px; }
+.attendance-calendar { min-width:700px; gap:7px; }
+.attendance-day { min-height:148px; padding:7px; cursor:default; }
+.attendance-date { display:block; min-height:36px; min-width:36px; padding:4px 7px; border:0; border-radius:7px; background:transparent; color:inherit; font-size:15px; font-weight:700; text-align:left; cursor:pointer; }
+.attendance-day.today .attendance-date { color:var(--accent); background:var(--bg); }
+.attendance-day-tags { gap:6px; margin-top:5px; }
+.attendance-cell-event { display:flex; flex-direction:column; gap:5px; padding:8px; border-radius:7px; min-width:0; text-decoration:none; }
+.attendance-cell-event strong { font-size:13px; line-height:1.3; overflow-wrap:anywhere; }
+.attendance-cell-event>small { font-size:12px; }
+.attendance-cell-mark,.attendance-cell-status { min-height:44px; display:flex; align-items:center; justify-content:center; padding:7px 4px; border:1px solid currentColor; border-radius:7px; font-size:13px; font-weight:600; line-height:1.25; white-space:normal; overflow-wrap:anywhere; background:rgba(255,255,255,.8); color:inherit; text-decoration:none; }
+.attendance-cell-mark { width:100%; cursor:pointer; }
+.attendance-cell-mark:hover { background:#fff; box-shadow:0 0 0 1px currentColor; }
+.attendance-cell-event.att-status-absent .attendance-cell-mark,.attendance-cell-event.att-status-absent .attendance-cell-status { color:#ad2435; background:#fff1f2; }
+.attendance-cell-menu:not([hidden]) { display:grid; gap:6px; margin-top:3px; }
+.attendance-cell-menu button { min-height:44px; padding:6px 4px; width:100%; font-size:12px; line-height:1.3; border:1px solid currentColor; border-radius:7px; background:white; color:inherit; cursor:pointer; }
+.attendance-cell-menu button:disabled { opacity:.5; }
+.attendance-detail-mark { min-height:48px; min-width:120px; font-size:15px; }
+@media(max-width:600px) { .attendance-calendar { gap:5px; }.attendance-day { min-height:150px; padding:5px; }.attendance-cell-event { padding:6px; }.attendance-cell-event strong { font-size:12px; }.attendance-date { min-height:44px; }.attendance-cell-mark { min-height:48px; } }
+.attendance-calendar-hint { display:none; }
+@media(max-width:600px) { .attendance-calendar-hint { display:block; } }

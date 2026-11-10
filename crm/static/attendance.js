@@ -18,30 +18,43 @@ function wireClientAttendance(body,studentData,onChanged){
     const [year,m]=month.split('-').map(Number),first=new Date(year,m-1,1),cells=Array((first.getDay()+6)%7).fill('<span></span>');
     for(let n=1;n<=new Date(year,m,0).getDate();n++){
       const iso=`${month}-${String(n).padStart(2,'0')}`,events=data.events.filter(e=>e.date===iso);
-      cells.push(`<button type="button" class="attendance-day ${iso===day?'selected':''} ${iso===data.today?'today':''}" data-att-day="${iso}" aria-label="${dShort(iso)}: ${events.length} занятий"><b>${n}</b><span class="attendance-day-tags">${events.slice(0,3).map(e=>`<span class="att-${e.kind} att-status-${e.status}" title="${esc(ATTENDANCE_KINDS[e.kind][1]+' · '+ATTENDANCE_STATUS[e.status]+(e.group?' · '+e.group:''))}">${ATTENDANCE_KINDS[e.kind][0]} ${e.status==='present'?'✓':e.status==='absent'?'×':e.status==='warned'?'!':'○'}</span>`).join('')}${events.length>3?`<small>+${events.length-3}</small>`:''}</span></button>`);
+      cells.push(`<div class="attendance-day ${iso===day?'selected':''} ${iso===data.today?'today':''}" data-att-day="${iso}"><button type="button" class="attendance-date" data-att-select="${iso}" aria-label="Открыть ${dShort(iso)}">${n}</button><div class="attendance-day-tags">${events.map(e=>{
+        const index=data.events.indexOf(e),editable=can('journal','full')&&e.group_id&&e.kind!=='trial'&&(!e.future||e.kind==='subscription');
+        const status=e.status==='present'?'✓ Был':e.status==='absent'?'× Пропуск':e.status==='warned'?'Не придёт':e.future?'По плану':'Отметить';
+        return `<div class="attendance-cell-event att-${e.kind} att-status-${e.status}"><strong>${ATTENDANCE_KINDS[e.kind][1]}</strong>${e.time?`<small>${esc(e.time)}</small>`:''}${editable?`<button type="button" class="attendance-cell-mark" data-att-edit="${index}" aria-expanded="false" aria-label="${dShort(iso)}, ${ATTENDANCE_KINDS[e.kind][1]}: ${status}">${status}</button><div class="attendance-cell-menu" data-att-menu="${index}" hidden>${e.future?`<button type="button" data-att-cell-warn="${index}">${e.status==='warned'?'Снова придёт':'Не придёт'}</button>`:['present','absent','clear'].map(v=>`<button type="button" data-att-cell-mark="${index}|${v}">${v==='present'?'✓ Был':v==='absent'?'× Пропуск':'Снять отметку'}</button>`).join('')}</div>`:`<span class="attendance-cell-status">${status}</span>`}</div>`;
+      }).join('')}</div></div>`);
     }
     const c=data.counters;
     box.innerHTML=`<div class="attendance-toolbar"><button class="btn sm" data-att-prev aria-label="Предыдущий месяц">←</button><input type="month" id="att-month" value="${month}" aria-label="Месяц посещений"><button class="btn sm" data-att-next aria-label="Следующий месяц">→</button></div>
       <div class="attendance-stats"><div><b>${data.attended}</b><span>посещено за месяц</span></div><div><b>${data.missed}</b><span>пропусков за месяц</span></div><div class="available"><b>${c.available}</b><span>можно отработать сейчас</span></div><div><b>${c.booked}</b><span>записано на отработку</span></div></div>
-      <div class="attendance-legend">${Object.entries(ATTENDANCE_KINDS).map(([k,[short,label]])=>`<span><i class="att-${k}">${short}</i>${label}</span>`).join('')}<span>✓ был · × пропуск · ○ план</span></div>
-      <div class="attendance-calendar">${WD.map(d=>`<b class="attendance-weekday">${d}</b>`).join('')}${cells.join('')}</div><div id="attendance-day-detail"></div>
+      <div class="attendance-legend">${Object.entries(ATTENDANCE_KINDS).map(([k,[short,label]])=>`<span><i class="att-${k}" aria-hidden="true">●</i>${label}</span>`).join('')}<span>✓ был · × пропуск · ○ план</span></div>
+      <p class="attendance-calendar-hint small muted">Листайте календарь вбок, чтобы увидеть остальные дни недели.</p><div class="attendance-calendar-scroll" tabindex="0" role="region" aria-label="Календарь посещений"><div class="attendance-calendar">${WD.map(d=>`<b class="attendance-weekday">${d}</b>`).join('')}${cells.join('')}</div></div><div id="attendance-day-detail"></div>
       <div class="makeup-panel"><h4>Отработать пропуски</h4><p class="small muted">Доступны неиспользованные пропуски текущего и прошлого месяца. Уже отработанные и учтённые в перерасчёте сюда не входят.</p>${c.available?`<div class="sc-actions"><button class="btn primary" id="att-find-makeup">Подобрать отработку</button><button class="btn" id="att-makeup-message">Подготовить сообщение родителю</button></div>`:'<p class="muted">Нет доступных пропусков для отработки</p>'}<div id="attendance-slots"></div><div id="attendance-message"></div></div>`;
     box.querySelector('[data-att-prev]').onclick=()=>setMonth(-1);box.querySelector('[data-att-next]').onclick=()=>setMonth(1);
     box.querySelector('#att-month').onchange=e=>{if(e.target.value){month=e.target.value;day=null;load()}};
-    box.querySelectorAll('[data-att-day]').forEach(b=>b.onclick=()=>{day=b.dataset.attDay;box.querySelectorAll('[data-att-day]').forEach(x=>x.classList.toggle('selected',x===b));paintDay()});
+    box.querySelectorAll('[data-att-select]').forEach(b=>b.onclick=()=>{day=b.dataset.attSelect;box.querySelectorAll('[data-att-day]').forEach(x=>x.classList.toggle('selected',x.dataset.attDay===day));saveMonth();paintDay()});
+    box.querySelectorAll('[data-att-edit]').forEach(b=>b.onclick=()=>{
+      const menu=box.querySelector(`[data-att-menu="${b.dataset.attEdit}"]`),open=menu.hidden;
+      box.querySelectorAll('[data-att-menu]').forEach(x=>x.hidden=true);box.querySelectorAll('[data-att-edit]').forEach(x=>x.setAttribute('aria-expanded','false'));
+      menu.hidden=!open;b.setAttribute('aria-expanded',String(open));
+    });
+    box.querySelectorAll('[data-att-cell-mark]').forEach(b=>b.onclick=()=>{const [i,status]=b.dataset.attCellMark.split('|');markEvent(data.events[+i],status,b)});
+    box.querySelectorAll('[data-att-cell-warn]').forEach(b=>b.onclick=()=>warnEvent(data.events[+b.dataset.attCellWarn],b));
     if(c.available){box.querySelector('#att-find-makeup').onclick=()=>showSlots();box.querySelector('#att-makeup-message').onclick=()=>showMessage()}
     paintDay();
   };
   const paintDay=()=>{
     const root=box.querySelector('#attendance-day-detail'),events=data.events.filter(e=>e.date===day);
     root.innerHTML=`<h4>${dShort(day)} · ${monthLabel(month)}</h4>${events.length?events.map((e,i)=>`<div class="attendance-event"><div><span class="pill att-${e.kind}">${ATTENDANCE_KINDS[e.kind][1]}</span><b>${ATTENDANCE_STATUS[e.status]}</b></div><div class="small muted">${esc([e.time,e.group,e.branch].filter(Boolean).join(' · '))}</div>${e.note?`<p>${esc(e.note)}</p>`:''}
-      ${can('journal','full')&&e.group_id&&e.kind!=='trial'&&!e.future?`<div class="sc-actions"><button class="btn sm" data-att-mark="${i}|present">Был</button><button class="btn sm" data-att-mark="${i}|absent">Пропуск</button><button class="btn sm" data-att-mark="${i}|clear">Снять отметку</button></div>`:''}
-      ${can('journal','full')&&e.future&&e.kind==='subscription'?`<button class="btn sm" data-att-warn="${i}">${e.status==='warned'?'Снова придёт':'Не придёт'}</button>`:''}
+      ${can('journal','full')&&e.group_id&&e.kind!=='trial'&&!e.future?`<div class="sc-actions"><button class="btn attendance-detail-mark" data-att-mark="${i}|present">Был</button><button class="btn attendance-detail-mark" data-att-mark="${i}|absent">Пропуск</button><button class="btn attendance-detail-mark" data-att-mark="${i}|clear">Снять отметку</button></div>`:''}
+      ${can('journal','full')&&e.future&&e.kind==='subscription'?`<button class="btn attendance-detail-mark" data-att-warn="${i}">${e.status==='warned'?'Снова придёт':'Не придёт'}</button>`:''}
       ${e.makeup_id&&e.status==='planned'?`<button class="linkish small" data-att-unbook="${e.makeup_id}">Отменить запись на отработку</button>`:''}</div>`).join(''):'<p class="muted">На этот день нет занятий</p>'}`;
-    root.querySelectorAll('[data-att-mark]').forEach(b=>b.onclick=async()=>{const [i,status]=b.dataset.attMark.split('|'),e=events[+i];try{b.disabled=true;if(e.makeup_id)await api('POST',`/api/makeups/${e.makeup_id}/status`,{status:status==='present'?'done':status==='absent'?'missed':'booked'});else await api('POST','/api/attendance',{student_id:sid,group_id:e.group_id,date:day,status});toast('Отметка сохранена');refresh()}catch(err){b.disabled=false;fail(err)}});
-    root.querySelectorAll('[data-att-warn]').forEach(b=>b.onclick=async()=>{const e=events[+b.dataset.attWarn];try{await api('POST','/api/journal/warn',{student_id:sid,group_id:e.group_id,date:day,undo:e.status==='warned'});refresh()}catch(err){fail(err)}});
+    root.querySelectorAll('[data-att-mark]').forEach(b=>b.onclick=()=>{const [i,status]=b.dataset.attMark.split('|');markEvent(events[+i],status,b)});
+    root.querySelectorAll('[data-att-warn]').forEach(b=>b.onclick=()=>warnEvent(events[+b.dataset.attWarn],b));
     root.querySelectorAll('[data-att-unbook]').forEach(b=>b.onclick=async()=>{try{await api('POST',`/api/makeups/${b.dataset.attUnbook}/status`,{status:'cancelled'});slots=null;refresh()}catch(err){fail(err)}});
   };
+  const markEvent=async(e,status,b)=>{try{b.disabled=true;day=e.date;saveMonth();if(e.makeup_id)await api('POST',`/api/makeups/${e.makeup_id}/status`,{status:status==='present'?'done':status==='absent'?'missed':'booked'});else await api('POST','/api/attendance',{student_id:sid,group_id:e.group_id,date:e.date,status});toast('Отметка сохранена');refresh()}catch(err){b.disabled=false;fail(err)}};
+  const warnEvent=async(e,b)=>{try{b.disabled=true;day=e.date;saveMonth();await api('POST','/api/journal/warn',{student_id:sid,group_id:e.group_id,date:e.date,undo:e.status==='warned'});refresh()}catch(err){b.disabled=false;fail(err)}};
   const fetchSlots=async()=>{slots=await api('GET',`/api/students/${sid}/makeup-suggestions`);return slots};
   const showSlots=async()=>{
     const root=box.querySelector('#attendance-slots');root.innerHTML='<p class="muted">Подбираю подходящие группы…</p>';
