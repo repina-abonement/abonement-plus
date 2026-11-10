@@ -338,11 +338,11 @@ function sideNav(views) {
     if (!list.length) return "";
     if (list.length === 1) return item(has(list[0]));
     const open = o[title] || list.includes(S.view);
-    return `<div class="nav-fold ${open ? "open" : ""}"><button class="nav-fold-h" data-fold="${title}"><span class="nav-arrow">▸</span><span>${title}</span></button>
-      <div class="nav-fold-b">${list.map((k) => item(has(k))).join("")}</div></div>`;
+    return `<div class="nav-fold ${open ? "open" : ""}"><button class="nav-fold-h" data-fold="${title}" aria-expanded="${!!open}" aria-controls="nav-folder-${keys[0]}"><span class="nav-arrow">▸</span><span>${title}</span></button>
+      <div class="nav-fold-b" id="nav-folder-${keys[0]}">${list.map((k) => item(has(k))).join("")}</div></div>`;
   }).join("");
   const rest = views.filter(([k]) => !placed.has(k)).map(item).join("");
-  return search + top + folders + rest;
+  return search + `<div class="nav-main">${top}</div>` + folders + rest;
 }
 
 /* Поиск в меню: клиенты появляются прямо под полем, пока печатаешь. ↑↓ выбрать, Enter открыть, Esc закрыть */
@@ -447,6 +447,7 @@ function shell() {
   app.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => { $(".more-sheet").hidden = true; go(b.dataset.view); }));
   app.querySelectorAll("[data-fold]").forEach((b) => (b.onclick = () => {
     const f = b.closest(".nav-fold"), open = f.classList.toggle("open");
+    b.setAttribute("aria-expanded", String(open));
     try { const o = navOpen(); o[b.dataset.fold] = open; localStorage.setItem("crm.nav_open", JSON.stringify(o)); } catch (_) {}
   }));
   const nq = $("#nav-q");
@@ -499,7 +500,7 @@ function go(view, fromHistory = false) {
   if (!fromHistory) pushNav(true);  // переход из меню: кнопку «Назад» не показываем
   try { localStorage.setItem("crm.view", view); } catch (_) {}
   app.querySelectorAll("[data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
-  app.querySelectorAll(".nav-fold").forEach((f) => { if (f.querySelector(`[data-view="${view}"]`)) f.classList.add("open"); });
+  app.querySelectorAll(".nav-fold").forEach((f) => { if (f.querySelector(`[data-view="${view}"]`)) { f.classList.add("open"); f.querySelector(".nav-fold-h").setAttribute("aria-expanded", "true"); } });
   const more = $("[data-more]");
   if (more) more.classList.toggle("active", !visibleViews().slice(0, 4).some(([k]) => k === view));
   window.scrollTo(0, 0);
