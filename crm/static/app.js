@@ -1710,7 +1710,6 @@ async function openStudent(id) {
         <div class="enr">
           <div class="enr-head"><b>${esc(e.group_name)}</b><span class="muted small">${esc(e.group_age)} лет</span></div>
           <div class="quote muted" data-quote="${e.id}">Считаю…</div>
-          <button class="btn primary sm" data-inv="${e.id}">Выставить счёт</button>
         </div>` : `
         <div class="enr">
           <div class="enr-head"><b>${esc(e.group_name)}</b><span class="muted small">${esc(e.group_age)} лет</span>
@@ -1722,7 +1721,6 @@ async function openStudent(id) {
           <div class="chips" style="margin:6px 0 8px">${e.group_weekdays.split(",").map((wd) => { const on = !e.weekdays || e.weekdays.split(",").includes(wd); return `<button class="chip day ${on ? "on" : ""}" data-enday="${e.id}" data-wd="${wd}">${WD[+wd]}</button>`; }).join("")}
             <select data-entar="${e.id}" style="width:auto;padding:4px 8px"><option value="fixed" ${e.tariff === "fixed" ? "selected" : ""}>Негибкий</option><option value="flex" ${e.tariff === "flex" ? "selected" : ""}>Гибкий</option></select></div>
           <div class="quote muted" data-quote="${e.id}">Считаю…</div>
-          <button class="btn primary sm" data-inv="${e.id}">Выставить счёт</button>
         </div>`).join("") : `<div class="muted small">Ученик пока не ходит ни в одну группу.</div>`}
       <div class="row" style="margin-top:12px">
         <div class="field"><label>Добавить группу</label><select id="en-group"><option value="">— выберите —</option>${groups.filter((x) => !x.program_id && !d.enrollments.some((e) => e.group_id === x.id)).map((x) => `<option value="${x.id}">${esc(x.name)} · ${esc(x.age)} лет</option>`).join("")}</select></div>
@@ -1738,9 +1736,7 @@ async function openStudent(id) {
     ${d.subscriptions.length ? `<ul class="history sub-list ${d.subscriptions.length > 3 ? "folded" : ""}" style="margin-top:10px">${d.subscriptions.map((x) => { const cov = (d.balance.covered || {})[x.id] || 0; return `<li><b>${x.kind === "single" ? "Разовое занятие" : monthLabel(x.month)}</b>${x.group_name ? " · " + esc(x.group_name) : ""} · ${rub(x.price)}${x.kind === "single" ? "" : ` · ${x.lessons} зан.`}${x.credit_lessons ? ` · перерасчёт ${x.credit_lessons}` : ""}${x.excluded_dates && x.excluded_dates !== "[]" ? `<div class="small muted">Исключены по согласованию: ${JSON.parse(x.excluded_dates).map(dShort).join(", ")}</div>` : ""}${x.late_fee ? ` · наценка ${rub(x.late_fee)}` : ""}${x.discount_amount ? ` · скидка ${rub(x.discount_amount)}` : ""}
       <span class="pill ${x.status === "paid" ? "green" : x.status === "cancelled" ? "" : "yellow"}">${x.status === "invoiced" && cov ? `оплачено ${rub(cov)} из ${rub(x.price)}` : { paid: "оплачен", invoiced: "ждёт оплаты", cancelled: "отменён" }[x.status]}</span>
       ${x.corrected ? `<span class="pill">корректировка</span>` : ""}
-      ${x.status === "invoiced" ? `<button class="btn sm primary" data-pay="${x.id}" data-left="${x.price - cov}">Принять оплату</button>${can("members", "full") ? ` <button class="btn sm" data-plsub="${x.id}" data-left="${x.price - cov}" data-what="${esc("Абонемент на " + (x.month ? monthLabel(x.month) : ""))}" title="Ссылка PayKeeper: после оплаты абонемент отметится оплаченным сам">💳 Ссылкой</button>` : ""} <button class="btn sm danger" data-cancel="${x.id}">Отменить</button>` : ""}
-      ${x.status === "paid" ? `<button class="btn sm danger" data-pcanc="${x.id}" data-paid="${cov}">Отменить</button>` : ""}
-      ${x.status !== "cancelled" && x.kind === "month" && can("members", "full") ? `<button class="btn sm" data-corr="${x.id}" data-price="${x.price}" title="Исключение из правил с обязательной причиной: попадёт в отчёт">Корректировка</button>` : ""}</li>`; }).join("")}</ul>` : ""}
+</li>`; }).join("")}</ul>` : ""}
     ${d.subscriptions.length > 3 ? `<button class="linkish small" id="sub-more">Показать все абонементы (${d.subscriptions.length})</button>` : ""}
   </div>
 
