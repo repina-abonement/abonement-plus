@@ -1446,6 +1446,18 @@ def planner_week(con, h, user, body, q):
               int(q["user"]) if q.get("user") else None, rolling=q.get("rolling") == "1")
 
 
+@route("GET", "/api/planner/tasks/{tid}", role="planner")
+def planner_task_detail(con, h, user, body, q, tid):
+    return px(planner.task_detail, con, int(tid), user)
+
+
+@route("PATCH", "/api/planner/tasks/{tid}", role="planner")
+def planner_task_edit(con, h, user, body, q, tid):
+    result = px(planner.edit_task, con, int(tid), user, body)
+    sv.audit(con, user, "planner.task.edit", str(tid))
+    return result
+
+
 @route("POST", "/api/planner/tasks/{tid}/move", role="planner")
 def planner_move(con, h, user, body, q, tid):
     px(planner.move, con, int(tid), user, body.get("date") or "")

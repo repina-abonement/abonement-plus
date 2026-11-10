@@ -47,6 +47,9 @@ def main():
         code, task=senior('POST','/api/planner/tasks',{'title':'Assignment','date':today,'assignee_id':uid,'note':'Details'})
         assert code==200
         if uid==one:
+            assert trainee('GET',f'/api/planner/tasks/{task["id"]}')[0]==200
+            assert trainee('PATCH',f'/api/planner/tasks/{task["id"]}',{'title':'My edit','date':today,'assignee_id':one,'repeat':{}})[0]==200
+            assert trainee('PATCH',f'/api/planner/tasks/{task["id"]}',{'title':'Denied','date':today,'assignee_id':two,'repeat':{}})[0]!=200
             assert trainee('POST',f'/api/tasks/{task["id"]}/done',{'result':'Done'})[0]==200
         else:
             assert trainee('POST',f'/api/tasks/{task["id"]}/done',{})[0]==403

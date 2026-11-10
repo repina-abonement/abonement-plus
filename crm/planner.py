@@ -40,6 +40,9 @@ class PlanError(ValueError):
 
 def init(con):
     con.executescript(SCHEMA)
+    rcols = {r[1] for r in con.execute("PRAGMA table_info(recurring)")}
+    if "end_date" not in rcols:
+        con.execute("ALTER TABLE recurring ADD COLUMN end_date TEXT NOT NULL DEFAULT ''")
     tcols = {r[1] for r in con.execute("PRAGMA table_info(tasks)")}
     for col in ("created_by_id INTEGER", "created_by TEXT NOT NULL DEFAULT ''", "priority INTEGER NOT NULL DEFAULT 0",
                 "recur_id INTEGER", "returned_note TEXT NOT NULL DEFAULT ''"):
@@ -129,7 +132,7 @@ def add(con, user: dict, data: dict) -> int:
 
 
 def _occurs(r, d: date) -> bool:
-    if d.isoformat() < r["start_date"]:
+    if d.isoformat() < r["start_date"] or (dict(r).get("end_date") and d.isoformat() > r["end_date"]):
         return False
     if r["rule"] == "daily":
         return True
@@ -350,3 +353,83 @@ def set_birth(con, uid: int, birth: str):
         except ValueError:
             raise PlanError("Дата рождения в формате ГГГГ-ММ-ДД")
     con.execute("UPDATE users SET birth=? WHERE id=?", (birth or "", uid))
+
+
+def task_detail(con, tid: int, user: dict) -> dict:
+    row = con.execute("SELECT * FROM tasks WHERE id=? AND kind IN ('plan','bday')", (tid,)).fetchone()
+    if not row or not can_view_plan(con, user, row["assignee_id"]):
+        raise PlanError("Задача недоступна")
+    task = _out(con, row)
+    recurring = con.execute("SELECT * FROM recurring WHERE id=?", (row["recur_id"],)).fetchone() if row["recur_id"] else None
+    repeat = dict(recurring) if recurring else {}
+    if repeat:
+        repeat["weekdays"] = [int(x) for x in repeat["weekdays"].split(",") if x]
+    return {"task": task, "repeat": repeat, "staff": visible_staff(con, user),
+            "can_assign": can_manage(con, user), "can_edit": row["kind"] == "plan" and row["status"] == "open"}
+
+
+def edit_task(con, tid: int, user: dict, data: dict) -> dict:
+    detail = task_detail(con, tid, user)
+    t = detail["task"]
+    if not detail["can_edit"]:
+        raise PlanError("Настройки можно менять у открытой задачи Планера")
+    title = str(data.get("title") or "").strip()
+    if not title or len(title) > 200:
+        raise PlanError("Название: от 1 до 200 символов")
+    note = str(data.get("note") or "").strip()
+    if len(note) > 1000:
+        raise PlanError("Описание: не больше 1000 символов")
+    day = str(data.get("date") or t["due_at"][:10])
+    tm = str(data.get("time") or "").strip()
+    try:
+        date.fromisoformat(day)
+        if tm:
+            datetime.strptime(tm, "%H:%M")
+            if len(tm) != 5:
+                raise ValueError()
+        who = int(data.get("assignee_id") or t["assignee_id"])
+    except (ValueError, TypeError):
+        raise PlanError("Проверьте дату, время и исполнителя")
+    if not can_view_plan(con, user, who) or not con.execute("SELECT 1 FROM users WHERE id=? AND active=1", (who,)).fetchone():
+        raise PlanError("Нельзя назначить задачу этому сотруднику")
+    scope = data.get("scope") or "one"
+    if scope not in ("one", "future"):
+        raise PlanError("Выберите одну задачу или будущие повторы")
+    rep = data.get("repeat") or {}
+    if not isinstance(rep, dict):
+        raise PlanError("Проверьте настройки повтора")
+    rule = rep.get("rule") or ""
+    if rule and rule not in RULES:
+        raise PlanError("Неизвестный повтор")
+    try:
+        weekdays = sorted(set(int(x) for x in rep.get("weekdays") or []))
+    except (ValueError, TypeError):
+        raise PlanError("Проверьте дни недели")
+    if any(x < 0 or x > 6 for x in weekdays):
+        raise PlanError("Проверьте дни недели")
+    if rule == "weekly" and not weekdays:
+        raise PlanError("Выберите хотя бы один день недели")
+    rid = t["recur_id"]
+    if rid and scope == "one":
+        original = detail["repeat"]
+        if rule != original.get("rule", "") or (rule == "weekly" and weekdays != original.get("weekdays", [])):
+            raise PlanError("Чтобы изменить повтор, выберите «Эта и будущие задачи»")
+    prio = 1 if data.get("priority") else 0
+    due = _due(day, tm)
+    if not rid or scope == "future":
+        if rid:
+            cutoff = t["due_at"][:10]
+            end = (date.fromisoformat(cutoff) - timedelta(days=1)).isoformat()
+            previous_end = detail["repeat"].get("end_date") or "9999-12-31"
+            con.execute("UPDATE recurring SET end_date=? WHERE id=?", (min(end, previous_end), rid))
+            con.execute("UPDATE tasks SET status='cancelled' WHERE recur_id=? AND status='open' AND substr(due_at,1,10)>=? AND id!=?", (rid, cutoff, tid))
+        new_rid = None
+        if rule:
+            new_rid = con.execute("""INSERT INTO recurring(title,note,assignee_id,rule,weekdays,monthday,yearday,time,priority,start_date,created_by_id,created_by,created_at)
+                                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                  (title,note,who,rule,",".join(map(str,weekdays)),date.fromisoformat(day).day if rule == "monthly" else 0,
+                                   day[5:] if rule == "yearly" else "",tm,prio,day,user["id"],user.get("name", ""),_now().isoformat(timespec="minutes"))).lastrowid
+        con.execute("UPDATE tasks SET recur_id=?,auto_key=?,source=? WHERE id=?", (new_rid, f"recur:{new_rid}:{day}" if new_rid else None, "recurring" if new_rid else "manual",tid))
+    con.execute("UPDATE tasks SET title=?,note=?,assignee_id=?,due_at=?,priority=? WHERE id=?", (title,note,who,due,prio,tid))
+    generate(con)
+    return {"ok": True, "id": tid}

@@ -229,7 +229,69 @@ async function renderWeek(box) {
   }));
 }
 
-function showPlannerTask(t) {
+async function showPlannerTask(t) {
   if (!t) return;
-  openDrawer(`<h2>${esc(t.title)}</h2><div class="small muted">${esc(dtWhen(t.due_at))} · ${esc(t.assignee || "")}</div><h3>Описание</h3><div style="white-space:pre-wrap">${esc(t.note || "Описание не добавлено")}</div><h3>Комментарии</h3>${t.returned_note ? `<p style="white-space:pre-wrap"><b>Возврат на доработку:</b> ${esc(t.returned_note)}</p>` : ""}${t.result ? `<p style="white-space:pre-wrap"><b>Результат:</b> ${esc(t.result)}</p>` : ""}${!t.returned_note && !t.result ? `<p class="muted">Комментариев пока нет</p>` : ""}`);
+  openDrawer(`<h2>${esc(t.title)}</h2><div class="small muted">${esc(dtWhen(t.due_at))} · ${esc(t.assignee || "")}</div><h3>Описание</h3><div style="white-space:pre-wrap">${esc(t.note || "Описание не добавлено")}</div><h3>Комментарии</h3>${t.returned_note ? `<p style="white-space:pre-wrap"><b>Возврат на доработку:</b> ${esc(t.returned_note)}</p>` : ""}${t.result ? `<p style="white-space:pre-wrap"><b>Результат:</b> ${esc(t.result)}</p>` : ""}${!t.returned_note && !t.result ? `<p class="muted">Комментариев пока нет</p>` : ""}<div data-task-settings="${t.id}"></div>`);
+  loadPlannerTaskSettings(t.id);
+}
+
+
+async function loadPlannerTaskSettings(id) {
+  const host = $(`[data-task-settings="${id}"]`); if (!host) return;
+  let d;
+  try { d = await api("GET", `/api/planner/tasks/${id}`); }
+  catch (e) { if (host.isConnected) host.textContent = e.message; return; }
+  if (!host.isConnected || !d.can_edit) return;
+  const t = d.task, repeat = d.repeat || {}, weekdays = repeat.weekdays || [];
+  host.innerHTML = `<details class="planner-task-settings" style="margin-top:24px;padding-top:12px;border-top:1px solid var(--line)">
+    <summary class="small muted" style="cursor:pointer">Настройки задачи</summary>
+    <form style="margin-top:14px">
+      <div class="field"><label>Название</label><input name="title" maxlength="200" value="${esc(t.title)}" required></div>
+      <div class="field"><label>Описание</label><textarea name="note" rows="3" maxlength="1000">${esc(t.note || "")}</textarea></div>
+      ${t.recur_id ? `<div class="field"><label>Применить изменения</label><select name="scope"><option value="one">Только эта задача</option><option value="future">Эта и будущие задачи</option></select></div>` : `<input name="scope" type="hidden" value="one">`}
+      <div class="row" style="flex-wrap:wrap"><div class="field"><label>Дата</label><input name="date" type="date" value="${esc(t.due_at.slice(0,10))}" required></div>
+        <div class="field"><label>Время</label><input name="time" type="time" value="${t.due_at.slice(11,16) === "23:59" ? "" : esc(t.due_at.slice(11,16))}"></div></div>
+      <div class="field"><label>Исполнитель</label><select name="assignee_id" ${d.can_assign ? "" : "disabled"}>${d.staff.map(u => `<option value="${u.id}" ${u.id === t.assignee_id ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select></div>
+      <div class="field"><label>Повтор</label><select name="rule"><option value="">Не повторять</option>${Object.entries({daily:"Каждый день",weekly:"Каждую неделю",monthly:"Каждый месяц",yearly:"Каждый год"}).map(([k,v]) => `<option value="${k}" ${repeat.rule === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+      <div class="chips" data-edit-weekdays>${WD_SHORT.map((label,i) => `<label class="check"><input type="checkbox" data-edit-weekday="${i}" ${weekdays.includes(i) ? "checked" : ""}>${label}</label>`).join("")}</div>
+      ${t.recur_id ? `<p class="small muted" data-repeat-hint>Чтобы изменить повтор, выберите «Эта и будущие задачи».</p>` : ""}
+      <label class="check"><input name="priority" type="checkbox" ${t.priority ? "checked" : ""}>Важно</label>
+      <div class="error small" data-edit-error style="margin-top:8px"></div>
+      <button type="submit" class="btn primary" style="margin-top:12px">Сохранить изменения</button>
+    </form></details>`;
+  const form = host.querySelector("form"), rule = form.elements.rule;
+  const sync = () => {
+    const locked = !!t.recur_id && form.elements.scope.value === "one";
+    rule.disabled = locked;
+    host.querySelector("[data-edit-weekdays]").hidden = rule.value !== "weekly";
+    host.querySelectorAll("[data-edit-weekday]").forEach(x => x.disabled = locked);
+    const hint = host.querySelector("[data-repeat-hint]"); if (hint) hint.hidden = !locked;
+  };
+  form.elements.scope.onchange = () => {
+    if (form.elements.scope.value === "one") {
+      rule.value = repeat.rule || "";
+      host.querySelectorAll("[data-edit-weekday]").forEach(x => x.checked = weekdays.includes(+x.dataset.editWeekday));
+    }
+    sync();
+  };
+  rule.onchange = () => {
+    if (rule.value === "weekly" && !host.querySelector("[data-edit-weekday]:checked")) {
+      const day = (new Date(form.elements.date.value + "T12:00:00").getDay() + 6) % 7;
+      const box = host.querySelector(`[data-edit-weekday="${day}"]`); if (box) box.checked = true;
+    }
+    sync();
+  };
+  sync();
+  form.onsubmit = async e => {
+    e.preventDefault(); const button = form.querySelector("button[type=submit]"); button.disabled = true;
+    const body = {title:form.elements.title.value,note:form.elements.note.value,date:form.elements.date.value,time:form.elements.time.value,
+      assignee_id:+form.elements.assignee_id.value,priority:form.elements.priority.checked,scope:form.elements.scope.value,
+      repeat:{rule:rule.value,weekdays:[...host.querySelectorAll("[data-edit-weekday]:checked")].map(x => +x.dataset.editWeekday)}};
+    try {
+      await api("PATCH", `/api/planner/tasks/${id}`, body);
+      toast("Задача сохранена"); await render();
+      const fresh = await api("GET", `/api/planner/tasks/${id}`); showPlannerTask(fresh.task);
+    } catch (err) { if (host.isConnected) host.querySelector("[data-edit-error]").textContent = err.message; }
+    finally { button.disabled = false; }
+  };
 }
