@@ -510,13 +510,27 @@ function pushNav(menu = false) {
 }
 function step(fn) { fn(); pushNav(); window.scrollTo(0, 0); render(); }
 let drawerInHistory = false, skipPop = false;
+const mayRestoreStudent = card => card && card.userId === S.user?.id && !S.meta?.staff_docs_pending &&
+  ["admin", "operator"].includes(S.user?.role) && ["members", "sales", "search", "inbox"].some(section => can(section));
+const forgetStudentCard = () => {
+  if (!history.state?.studentCard) return;
+  const state = { ...history.state }; delete state.studentCard;
+  try { history.replaceState(state, ""); } catch (_) {}
+};
 window.addEventListener("popstate", (e) => {
   if (skipPop) { skipPop = false; return; }
-  if (drawerInHistory) { drawerInHistory = false; hideDrawer(); return; }
   const st = e.state;
+  if (drawerInHistory) {
+    drawerInHistory = false; hideDrawer();
+    if (!st?.studentCard) return;
+  }
   if (!st || !st.view) return;
   navRestore(st.sub);
   go(st.view, true);
+  if (st.drawer && mayRestoreStudent(st.studentCard)) {
+    drawerInHistory = true;
+    openStudent(st.studentCard.id, { tab: st.studentCard.tab, restoring: true });
+  }
 });
 
 function go(view, fromHistory = false) {
@@ -1392,11 +1406,16 @@ function askLeftReason(sid, done) {
 function openDrawer(html, size) {
   $("#drawer-body").innerHTML = html; $("#drawer").hidden = false; document.body.style.overflow = "hidden";
   const panel = $("#drawer .drawer-panel"); if (panel) panel.classList.toggle("wide", size === "wide");
-  if (!drawerInHistory) { try { history.pushState({ ...(history.state || {}), drawer: true }, ""); drawerInHistory = true; } catch (_) {} }
+  const state = { ...(history.state || {}), drawer: true }; delete state.studentCard;
+  try {
+    if (!drawerInHistory) { history.pushState(state, ""); drawerInHistory = true; }
+    else history.replaceState(state, "");
+  } catch (_) {}
 }
 function hideDrawer() { const d = $("#drawer"); if (d) d.hidden = true; document.body.style.overflow = ""; }
 /* закрыть карточку: крестиком, Esc, после сохранения или кнопкой/свайпом «назад» на телефоне */
 function closeDrawer() {
+  forgetStudentCard();
   hideDrawer();
   if (drawerInHistory) { drawerInHistory = false; skipPop = true; history.back(); }
 }
@@ -1431,6 +1450,9 @@ function layoutStudentCard(body, isMember) {
   if (take("arch")) info.appendChild(take("arch"));
   body.querySelectorAll("[data-sctab]").forEach((b) => (b.onclick = () => {
     grid.dataset.tab = b.dataset.sctab;
+    if (history.state?.studentCard) {
+      try { history.replaceState({ ...history.state, studentCard: { ...history.state.studentCard, tab: b.dataset.sctab } }, ""); } catch (_) {}
+    }
     body.querySelectorAll("[data-sctab]").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-selected", String(x === b)); });
   }));
 }
@@ -1589,9 +1611,12 @@ async function openSell(d, reload) {
 }
 
 const NEXT_GO = { reply: "Ответить", call: "Позвонить", offer: "Предложить дни", trial: "Записать", sell: "Продать", link: "Ссылка на оплату", makeup: "Отработка", task: "К задаче" };
-async function openStudent(id) {
+async function openStudent(id, options = {}) {
+  const previous = history.state?.studentCard;
+  const tab = options.tab || (previous?.id === +id && previous.userId === S.user?.id ? previous.tab : "feed") || "feed";
   let d;
-  try { d = await api("GET", `/api/students/${id}`); } catch (e) { return fail(e); }
+  try { d = await api("GET", `/api/students/${id}`); }
+  catch (e) { if (options.restoring) closeDrawer(); return fail(e); }
   const s = d.student, g = d.group, c = d.counters;
   const groups = S.meta.groups.filter((x) => !x.is_makeup && !x.program_id);
   const makeupGroups = S.meta.groups.filter((x) => x.is_makeup);
@@ -1798,8 +1823,10 @@ async function openStudent(id) {
   </div>
   <div style="margin-top:14px" data-sc="arch"><button class="btn sm ${s.archived ? "" : "danger"}" id="s-arch">${s.archived ? "Вернуть из архива" : "Перенести в архив"}</button></div>`;
   openDrawer(html, "wide");
+  try { history.replaceState({ ...history.state, studentCard: { id: +id, userId: S.user.id, tab } }, ""); } catch (_) {}
   const body = $("#drawer-body");
   layoutStudentCard(body, isMember);
+  scTab(tab);
   const reload = () => { openStudent(id); render(); };
   const patch = async (data) => { try { await api("PATCH", `/api/students/${id}`, data); reload(); } catch (e) { fail(e); } };
 
@@ -2677,6 +2704,7 @@ const postOf = (u) => u.role === "admin" ? "owner" : u.role === "operator" ? (u.
 
 /* ---------- старт ---------- */
 async function boot() {
+  const previousState = history.state;
   try {
     S.meta = await api("GET", "/api/meta");
     S.user = S.meta.user;
@@ -2687,12 +2715,18 @@ async function boot() {
   else try { const v = localStorage.getItem("crm.view"); if (v && visibleViews().some(([k]) => k === v)) S.view = v; } catch (_) {}
   shell();
   applyFestive();
-  try { history.replaceState({ view: S.view, sub: navSnap(), depth: 0 }, "", "#" + S.view); } catch (_) {}
-  render();
+  const restoreCard = previousState?.drawer && mayRestoreStudent(previousState.studentCard) ? previousState.studentCard : null;
+  try { history.replaceState({ view: S.view, sub: navSnap(), depth: previousState?.depth || 0,
+    ...(restoreCard ? { drawer: true, studentCard: restoreCard } : {}) }, "", "#" + S.view); } catch (_) {}
+  await render();
+  if (restoreCard) {
+    drawerInHistory = true;
+    await openStudent(restoreCard.id, { tab: restoreCard.tab, restoring: true });
+  }
   setInterval(() => { if ($("#drawer").hidden && ["members", "skips"].includes(S.view)) render(); }, 60000);
   setInterval(() => { if ($("#drawer").hidden && S.view === "sales" && !document.hidden && !document.querySelector(".task-done:not([hidden])")) render(); }, 20000);
   if (can("inbox")) { pollCounts(); setInterval(pollCounts, 10000); }
-  if (!S.meta.tour_pending) offerAlerts();
+  if (!S.meta.tour_pending && !restoreCard) offerAlerts();
   setTimeout(() => { if (typeof memoSync === "function") memoSync(); }, 4000);  // памятки для родителей: перерисовать, если поменялись цены
 }
 boot();
