@@ -44,6 +44,34 @@ def snapshot(con, day):
 def enc(x):
     return json.dumps(x,ensure_ascii=False,sort_keys=True,separators=(',',':'))
 
+def duplicate_change(con, item, row):
+    """Cancel one reviewed automatic reminder; keep its key to prevent recreation."""
+    source = str(item.get('erp_task_id', ''))
+    ref = con.execute('SELECT t.* FROM tasks t JOIN erp_full_task_links l ON l.task_id=t.id WHERE l.source_id=?', (source,)).fetchone()
+    if not ref or ref['id'] != item.get('cancel_auto_duplicate_of'):
+        raise ApiError('Основная задача ERP не подтверждена')
+    if (row['source'] != 'auto' or row['kind'] != 'trial_confirm'
+            or not str(row['auto_key'] or '').startswith('trial_confirm:')
+            or ref['source'] != 'erp' or ref['status'] != 'open'
+            or ref['title'] != 'Напоминание о ПУ (звонок)'
+            or row['student_id'] != ref['student_id']
+            or row['due_at'][:10] != ref['due_at'][:10]
+            or not in_scope(row['due_at'][:10])):
+        raise ApiError('Не подтвержден дубль напоминания в выбранном диапазоне')
+    before = {k: row[k] for k in FIELDS}
+    reference = {k: ref[k] for k in FIELDS}
+    if item.get('expected_reference') != reference:
+        raise ApiError('Основная задача изменилась после сверки')
+    reason = f'Отменен дубль задачи ERP {source}, CRM {ref["id"]}. Основная задача сохранена.'
+    after = dict(before, status='cancelled', result=reason)
+    after['note'] = row['note'] if reason in (row['note'] or '') else ((row['note'] or '').rstrip()+'\n\n'+reason).strip()
+    if row['status'] != 'cancelled':
+        after.update(done_at=datetime.now().isoformat(timespec='minutes'), done_by='Сверка ERP')
+    if before != after and item.get('expected') != before:
+        raise ApiError('Автозадача изменилась после сверки')
+    return {'erp_task_id': source, 'before': before, 'after': after,
+            'linked': False, 'skip_link': True, 'changed': before != after}
+
 def prepare(con, rows):
     if not isinstance(rows,list) or not rows or len(rows)>500:
         raise ApiError('Нужен список проверенных задач')
@@ -64,6 +92,9 @@ def prepare(con, rows):
             raise ApiError('Разрешены только даты 9-15 ноября 2026')
         r=con.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
         if not r: raise ApiError('Задача не найдена')
+        if item.get('cancel_auto_duplicate_of'):
+            changes.append(duplicate_change(con, item, r))
+            continue
         before={k:r[k] for k in FIELDS}
         link=con.execute('SELECT source_id,task_id FROM erp_full_task_links WHERE source_id=? OR task_id=?',(source,tid)).fetchall()
         if any(str(x[0])!=source or x[1]!=tid for x in link):
@@ -110,6 +141,7 @@ def apply(con,rows,token,user,backup):
         if not x['changed']:continue
         a=x['after']; cols=[k for k in FIELDS if k!='id']
         con.execute('UPDATE tasks SET '+','.join(k+'=?' for k in cols)+' WHERE id=?',tuple(a[k] for k in cols)+(a['id'],))
-        con.execute('INSERT OR IGNORE INTO erp_full_task_links(source_id,task_id) VALUES (?,?)',(x['erp_task_id'],a['id']))
+        if not x.get('skip_link'):
+            con.execute('INSERT OR IGNORE INTO erp_full_task_links(source_id,task_id) VALUES (?,?)',(x['erp_task_id'],a['id']))
     con.execute('INSERT INTO erp_task_review_audit(at,user_name,backup,report) VALUES (?,?,?,?)',(datetime.now().isoformat(),user['name'],backup,enc(plan)))
     return plan

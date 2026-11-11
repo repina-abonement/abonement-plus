@@ -57,6 +57,26 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual([r['id'] for r in rows],[1,2])
         self.assertEqual(rows[1]['erp_task_ids'],['100'])
         self.assertEqual(self.c.total_changes,before)
+    def duplicate_row(self):
+        self.c.execute("UPDATE tasks SET title='Напоминание о ПУ (звонок)'")
+        self.c.execute("INSERT INTO erp_full_task_links VALUES ('99',1)")
+        self.c.execute("INSERT INTO tasks SELECT 2,student_id,'trial_confirm','Automatic',due_at,status,'','auto','trial_confirm:2:2026-11-11',assignee_id,priority,done_at,done_by,result FROM tasks WHERE id=1")
+        return dict(erp_task_id='99',task_id=2,day='2026-11-10',cancel_auto_duplicate_of=1,
+                    expected=dict(self.c.execute('SELECT * FROM tasks WHERE id=2').fetchone()),
+                    expected_reference=dict(self.c.execute('SELECT * FROM tasks WHERE id=1').fetchone()))
+    def test_cancel_auto_duplicate_without_changing_reference_or_key(self):
+        r=self.duplicate_row();p=m.prepare(self.c,[r]);m.apply(self.c,[r],p['token'],{'name':'Owner'},'backup')
+        auto=dict(self.c.execute('SELECT * FROM tasks WHERE id=2').fetchone())
+        self.assertEqual(auto['status'],'cancelled');self.assertEqual(auto['auto_key'],r['expected']['auto_key'])
+        self.assertEqual(dict(self.c.execute('SELECT * FROM tasks WHERE id=1').fetchone()),r['expected_reference'])
+        self.assertEqual(m.prepare(self.c,[r])['updated'],0)
+        self.assertEqual([tuple(x) for x in self.c.execute('SELECT * FROM erp_full_task_links')],[('99',1)])
+    def test_duplicate_reference_stale_or_other_day_rejected(self):
+        r=self.duplicate_row();self.c.execute("UPDATE tasks SET due_at='2026-11-11T10:00' WHERE id=2")
+        with self.assertRaises(ApiError):m.prepare(self.c,[r])
+        self.c.execute("UPDATE tasks SET due_at='2026-11-10T10:00' WHERE id=2")
+        self.c.execute("UPDATE tasks SET note='Staff update' WHERE id=1")
+        with self.assertRaises(ApiError):m.prepare(self.c,[r])
     def test_snapshot_includes_all_states_and_links_without_writes(self):
         self.c.execute("INSERT INTO erp_full_task_links VALUES ('99',1)")
         for i, state in enumerate(('done','cancelled'), 2):
