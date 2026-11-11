@@ -33,3 +33,18 @@ class ReviewTests(unittest.TestCase):
     def test_outside_range(self):
         self.row['day']='2026-11-16'
         with self.assertRaises(ApiError):m.prepare(self.c,[self.row])
+    def test_snapshot_includes_all_states_and_links_without_writes(self):
+        self.c.execute("INSERT INTO erp_full_task_links VALUES ('99',1)")
+        for i, state in enumerate(('done','cancelled'), 2):
+            self.c.execute("INSERT INTO tasks SELECT ?,student_id,kind,title,due_at,?,note,source,auto_key,assignee_id,priority,done_at,done_by,result FROM tasks WHERE id=1", (i,state))
+        self.c.execute("INSERT INTO tasks SELECT 4,student_id,kind,title,'2026-11-08T10:00',status,note,source,auto_key,assignee_id,priority,done_at,done_by,result FROM tasks WHERE id=1")
+        before=self.c.total_changes
+        rows=m.snapshot(self.c,'2026-11-10')['tasks']
+        self.assertEqual([r['id'] for r in rows],[1,2,3])
+        self.assertEqual({r['status'] for r in rows},{'open','done','cancelled'})
+        self.assertEqual(rows[0]['erp_task_ids'],['99'])
+        self.assertEqual(rows[0]['erp_client_ids'],[{'namespace':'student','source_id':'42'}])
+        self.assertEqual(self.c.total_changes,before)
+    def test_snapshot_requires_scoped_date(self):
+        for day in (None,'2026-11-08','2026-11-16','2026-11-10 OR 1=1'):
+            with self.assertRaises(ApiError):m.snapshot(self.c,day)

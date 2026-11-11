@@ -844,6 +844,12 @@ def erp_full_apply(con, h, user, body, q):
         raise ApiError(str(e))
 
 
+@route("GET", "/api/erp/tasks/review-snapshot", role="admin")
+def erp_task_review_snapshot(con, h, user, body, q):
+    from . import erptaskreview
+    return erptaskreview.snapshot(con, q.get('day'))
+
+
 @route("POST", "/api/erp/tasks/review-plan", role="admin")
 def erp_task_review_plan(con, h, user, body, q):
     from . import erptaskreview

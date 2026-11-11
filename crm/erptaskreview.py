@@ -7,6 +7,21 @@ from .services import ApiError
 
 FIELDS = ('id','student_id','kind','title','due_at','status','note','source','auto_key','assignee_id','priority','done_at','done_by','result')
 
+def snapshot(con, day):
+    """Read one authorized day without invoking task generation or changing data."""
+    if not isinstance(day, str) or not re.fullmatch(r'2026-11-(09|1[0-5])', day):
+        raise ApiError('Разрешены только даты 9-15 ноября 2026')
+    result = []
+    for row in con.execute('SELECT * FROM tasks WHERE substr(due_at,1,10)=? ORDER BY id', (day,)):
+        task = dict(row)
+        task['erp_task_ids'] = [str(r[0]) for r in con.execute(
+            'SELECT source_id FROM erp_full_task_links WHERE task_id=? ORDER BY source_id', (row['id'],))]
+        task['erp_client_ids'] = [dict(r) for r in con.execute(
+            'SELECT namespace,source_id FROM erp_full_identities WHERE student_id=? ORDER BY namespace,source_id',
+            (row['student_id'],))]
+        result.append(task)
+    return {'day': day, 'tasks': result}
+
 def enc(x):
     return json.dumps(x,ensure_ascii=False,sort_keys=True,separators=(',',':'))
 
