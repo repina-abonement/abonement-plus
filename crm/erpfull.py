@@ -126,6 +126,7 @@ def _record(f, row):
         'trial_at': ['дата пробного'],
         'reviewed_sub': ['сверено по выгрузке erp'],
         'reviewed_lessons': ['сверено количество занятий erp'],
+        'reviewed_sub_id': ['проверенный id абонемента crm'],
         'lessons': ['количество занятий', 'занятий'],
         'expected_price': ['ожидаемая сумма crm'],
         'expected_lessons': ['ожидаемые занятия crm'],
@@ -456,6 +457,12 @@ def _process(con, files, now):
                 elif f['kind'] == 'subs':
                     kind = ei.sub_kind(r.get('tariff', ''))
                     ym, gid, price = ei.parse_month(r.get('month', '')), _group(con, r), _money(r.get('price', ''))
+                    # Orphaned legacy subscriptions may be reviewed by an explicit
+                    # ID, never by name or an invented group. Negative internal key
+                    # keeps separate orphan subscriptions from being aggregated.
+                    exact_id = r.get('reviewed_sub_id', '')
+                    if not gid and ym == '2026-10' and ei._norm(r.get('reviewed_lessons','')) == 'да' and exact_id.isdigit() and int(exact_id) > 0:
+                        gid = -int(exact_id)
                     if kind in ('trial', 'makeup'):
                         reason = 'Вводное занятие или отработка сохранены как исходная продажа ERP'
                     elif not ym or not gid or price is None:
@@ -483,6 +490,8 @@ def _process(con, files, now):
         sale_dates = [_date(r.get('sale_at','')) for _,_,r,_ in rows]
         # The ERP sales report has no payment date. Do not invent one.
         native = list(con.execute("SELECT x.* FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id WHERE x.student_id=? AND e.group_id=? AND x.month=? AND x.status!='cancelled'", (sid,gid,ym)))
+        if gid < 0:
+            native = list(con.execute("SELECT * FROM subscriptions WHERE id=? AND student_id=? AND month=? AND enrollment_id IS NULL AND status!='cancelled'", (-gid,sid,ym)))
         count_review = any(ei._norm(r.get('reviewed_lessons','')) == 'да' for _,_,r,_ in rows)
         if count_review and not reason:
             if ym != '2026-10' or len(native) != 1 or len(rows) != 1:

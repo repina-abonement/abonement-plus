@@ -269,6 +269,18 @@ class RecoveryTest(unittest.TestCase):
             self.assertEqual(self.run_import([self.upload(header+bad,'subs')])['issue_count'],1)
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM subscriptions').fetchone()[0],1)
 
+    def test_orphan_count_review_requires_exact_owned_subscription(self):
+        subid=self.con.execute("INSERT INTO subscriptions(student_id,month,tariff,lessons,per_lesson,price,status,created_at) VALUES (?,'2026-10','fixed',8,1120,8960,'paid','2026-10-01')",(self.sid,)).lastrowid
+        header='ID посетителя;ФИО посетителя;Тип;Группа;Дата начала;Стоимость со скидкой;Статус;Количество занятий;Сверено количество занятий ERP;Ожидаемая сумма CRM;Ожидаемые занятия CRM;Ожидаемый статус CRM;Проверенный ID абонемента CRM\n'
+        row=f'101;Тестовый Ребёнок;Абонемент;Неизвестная старая группа;01.10.2026;8960;оплачен;7;да;8960;8;paid;{subid}\n'
+        uid=self.upload(header+row,'subs')
+        self.assertEqual(self.run_import([uid])['counts']['updated_subscription_lessons'],1)
+        self.assertEqual(self.con.execute('SELECT lessons,enrollment_id FROM subscriptions WHERE id=?',(subid,)).fetchone()[:],(7,None))
+        self.assertEqual(self.run_import([uid])['counts'].get('updated_subscription_lessons',0),0)
+        bad=self.upload(header+row.replace(f';{subid}\n',';999999\n'),'subs')
+        self.assertEqual(self.run_import([bad])['issue_count'],1)
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM subscriptions').fetchone()[0],1)
+
 
 if __name__ == '__main__':
     unittest.main()
