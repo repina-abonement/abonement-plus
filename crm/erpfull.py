@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS erp_full_operations (
  signature TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS erp_full_task_links (
  source_id TEXT PRIMARY KEY, task_id INTEGER NOT NULL UNIQUE REFERENCES tasks(id));
+CREATE TABLE IF NOT EXISTS erp_full_subscription_corrections (
+ id INTEGER PRIMARY KEY, subscription_id INTEGER NOT NULL REFERENCES subscriptions(id),
+ before_json TEXT NOT NULL, after_json TEXT NOT NULL, file_id INTEGER NOT NULL,
+ row_num INTEGER NOT NULL, corrected_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS erp_full_runs (
  id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, user_name TEXT NOT NULL,
  report TEXT NOT NULL, backup TEXT NOT NULL);
@@ -120,6 +124,11 @@ def _record(f, row):
         'balance': ['баланс'], 'task_status': ['состояние задачи', 'статус выполнения'],
         'done_at': ['дата выполнения'],
         'trial_at': ['дата пробного'],
+        'reviewed_sub': ['сверено по выгрузке erp'],
+        'lessons': ['количество занятий', 'занятий'],
+        'expected_price': ['ожидаемая сумма crm'],
+        'expected_lessons': ['ожидаемые занятия crm'],
+        'expected_status': ['ожидаемый статус crm'],
     }
     for key, names in aliases.items():
         for name in names:
@@ -134,6 +143,8 @@ def _record(f, row):
     if f['kind'] == 'clients' and 'дата пробного' not in hs:
         r.pop('trial_at', None)
     if f['kind'] == 'subs':
+        if 'ожидаемые занятия crm' in hs and not any(h in hs for h in ('количество занятий','занятий')):
+            r.pop('lessons', None)
         for name in ('оплачено(руб.)', 'оплачено (руб.)', 'оплачено'):
             if name in hs:
                 r['status'] = hs[name]
@@ -471,6 +482,24 @@ def _process(con, files, now):
         sale_dates = [_date(r.get('sale_at','')) for _,_,r,_ in rows]
         # The ERP sales report has no payment date. Do not invent one.
         native = list(con.execute("SELECT x.* FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id WHERE x.student_id=? AND e.group_id=? AND x.month=? AND x.status!='cancelled'", (sid,gid,ym)))
+        if not reason and len(native) == 1 and len(rows) == 1 and ei._norm(rows[0][2].get('reviewed_sub','')) == 'да':
+            fid,index,rec,_ = rows[0]
+            old_sub = dict(native[0])
+            expected = (_money(rec.get('expected_price','')), _money(rec.get('expected_lessons','')), rec.get('expected_status',''))
+            actual = (old_sub['price'], old_sub['lessons'], old_sub['status'])
+            wanted = (price, lessons, status)
+            if actual != wanted:
+                if actual != expected or old_sub['status'] != 'invoiced' or lessons <= 0 or price < 0:
+                    reason = 'Абонемент изменился после сверки или не является проверенным неоплаченным счётом'
+                else:
+                    con.execute('UPDATE subscriptions SET price=?,lessons=?,per_lesson=?,status=?,paid_at=NULL,erp_full_managed=1 WHERE id=?',
+                                (price,lessons,price//lessons,status,old_sub['id']))
+                    after_sub = dict(con.execute('SELECT * FROM subscriptions WHERE id=?',(old_sub['id'],)).fetchone())
+                    con.execute('INSERT INTO erp_full_subscription_corrections(subscription_id,before_json,after_json,file_id,row_num,corrected_at) VALUES (?,?,?,?,?,?)',
+                                (old_sub['id'],_json(old_sub),_json(after_sub),fid,index,now))
+                    _history(con,sid,now,f"Сверка ERP, абонемент {ym}: было {old_sub['lessons']} занятий, {old_sub['price']} руб., {old_sub['status']}; стало {lessons} занятий, {price} руб., {status}. Платежи не создавались.",'erp_subscription_reconciliation')
+                    native = [after_sub]
+                    counts['updated_subscriptions'] += 1
         if not reason and not native and lessons > 0 and price >= 0:
             enrollments = list(con.execute('SELECT id FROM enrollments WHERE student_id=? AND group_id=?',(sid,gid)))
             if len(enrollments) > 1:

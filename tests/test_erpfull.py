@@ -229,6 +229,22 @@ class RecoveryTest(unittest.TestCase):
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM tasks').fetchone()[0],1)
         self.assertEqual(self.con.execute('SELECT due_at FROM tasks WHERE id=?',(tid,)).fetchone()[0],'2026-11-12T10:00')
 
+    def test_reviewed_invoice_correction_preserves_before_and_does_not_add_payment(self):
+        eid=self.con.execute("INSERT INTO enrollments(student_id,group_id,tariff,active,created_at) VALUES (?,?,'fixed',1,'2026-11-01')",(self.sid,self.gid)).lastrowid
+        subid=self.con.execute("INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,per_lesson,price,status,created_at) VALUES (?,?,'2026-11','fixed',9,1000,9000,'invoiced','2026-11-01')",(self.sid,eid)).lastrowid
+        uid=self.upload('ID посетителя;ФИО посетителя;Тип;Группа;Дата начала;Стоимость со скидкой, руб.(выручка для ПиУ);Оплачено(руб.);Сверено по выгрузке ERP;Ожидаемая сумма CRM;Ожидаемые занятия CRM;Ожидаемый статус CRM\n101;Тестовый Ребёнок;Абонемент (стандарт /8);Тестовая группа;01.11.2026;8000;8000;да;9000;9;invoiced\n','subs')
+        self.con.execute('UPDATE subscriptions SET price=9100 WHERE id=?',(subid,))
+        self.assertEqual(self.run_import([uid])['issue_count'],1)
+        self.con.execute('UPDATE subscriptions SET price=9000 WHERE id=?',(subid,))
+        r=self.run_import([uid])
+        self.assertEqual(r['counts']['updated_subscriptions'],1)
+        self.assertEqual(self.con.execute('SELECT price,lessons,status,paid_at FROM subscriptions WHERE id=?',(subid,)).fetchone()[:],(8000,8,'paid',None))
+        money.init(self.con)
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments').fetchone()[0],0)
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM erp_full_subscription_corrections').fetchone()[0],1)
+        self.assertEqual(self.run_import([uid])['issue_count'],0)
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM erp_full_subscription_corrections').fetchone()[0],1)
+
 
 if __name__ == '__main__':
     unittest.main()
