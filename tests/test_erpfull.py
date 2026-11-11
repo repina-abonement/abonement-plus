@@ -113,6 +113,16 @@ class RecoveryTest(unittest.TestCase):
         services.create_student(self.con,{'name':ei.NO_NAME,'family_id':family},self.user)
         self.assertIsNone(full.Matcher(self.con).find(rec,'clients')[0])
 
+    def test_journal_short_name_requires_verified_student_catalog(self):
+        self.con.execute("UPDATE students SET name='Тестовый Ребёнок Иванович' WHERE id=?",(self.sid,))
+        rec={'erp_id':'101','child_name':'Тестовый Ребёнок'}
+        self.assertIsNone(full.Matcher(self.con).find(rec,'visits')[0])
+        uid=self.upload('ID;ФИО посетителя;Телефон\n101;Тестовый Ребёнок Иванович;79000000001\n','clients')
+        self.run_import([uid])
+        self.assertEqual(full.Matcher(self.con).find(rec,'visits')[0],self.sid)
+        rec['phone']='79000000002'
+        self.assertIsNone(full.Matcher(self.con).find(rec,'visits')[0])
+
     def test_restore_confirmed_trial_without_message_or_overwrite(self):
         self.con.execute("UPDATE students SET name='Александр Иванов',stage='trial_booked',birth='2022-01-01',group_id=? WHERE id=?", (self.gid,self.sid))
         self.con.execute("UPDATE parents SET name='Ирина'")

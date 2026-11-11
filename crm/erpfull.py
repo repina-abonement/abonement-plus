@@ -206,7 +206,8 @@ class Matcher:
             # plus the same complete two-word name prefix in this case.
             known = ei._norm(s['name'])
             prefix = len(name.split()) >= 2 and known.startswith(name + ' ')
-            if not (prefix and phone and phone in self.phones[sid]):
+            verified_catalog = not phone and self.identities.get(('student', eid)) == sid
+            if not (prefix and ((phone and phone in self.phones[sid]) or verified_catalog)):
                 return None, 'ID ERP найден, имя отличается: ' + s['name']
         birth = _date(r.get('birth', ''))
         if birth and s['birth'] and birth[:10] != s['birth'][:10]:
