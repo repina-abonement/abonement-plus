@@ -1692,3 +1692,16 @@ textarea.nav-q { height:40px; min-height:40px; max-height:40px; resize:none; ove
 @media(max-width:600px) { .attendance-calendar { gap:5px; }.attendance-day { min-height:150px; padding:5px; }.attendance-cell-event { padding:6px; }.attendance-cell-event strong { font-size:12px; }.attendance-date { min-height:44px; }.attendance-cell-mark { min-height:48px; } }
 .attendance-calendar-hint { display:none; }
 @media(max-width:600px) { .attendance-calendar-hint { display:block; } }
+/* На доске задач видна суть; контакты и описание появляются при наведении. */
+.et-card .et-what { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
+.et-details-toggle { display:none; margin-top:8px; padding:8px 0; border:0; background:transparent; color:var(--accent); font:inherit; font-size:13px; cursor:pointer; }
+.et-details-toggle:focus-visible { display:block; }
+.et-card:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.et-details-popover { position:fixed; z-index:2000; max-height:calc(100dvh - 24px); overflow:auto; padding:16px; border:1px solid var(--line); border-radius:12px; background:var(--surface); color:var(--ink); box-shadow:0 12px 40px #102c2333; font-size:14px; line-height:1.5; user-select:text; }
+.et-details-head { display:flex; gap:12px; align-items:flex-start; margin-bottom:8px; }.et-details-head strong { flex:1; }.et-details-head .icon-btn { flex:0 0 44px; width:44px; height:44px; }
+.et-details-popover dl { margin:12px 0; }.et-details-popover dl>div { display:grid; grid-template-columns:80px 1fr; gap:10px; margin:5px 0; }.et-details-popover dt { color:var(--ink-2); }.et-details-popover dd { margin:0; overflow-wrap:anywhere; }.et-details-note { white-space:pre-wrap; overflow-wrap:anywhere; border-top:1px solid var(--line); padding-top:12px; }
+@media(hover:none) { .et-details-toggle { display:block; min-height:44px; }.et-act .btn.sm { min-height:44px; } }
+.et-board-navigation:not([hidden]) { display:flex; justify-content:flex-end; align-items:center; flex-wrap:wrap; gap:10px; margin:8px 0; }
+.et-board-navigation .btn { min-height:40px; }.et-board-navigation button:disabled { opacity:.35; cursor:default; }
+.et-board:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }.et-priority { color:#b94516; }.task-priority-control { padding:10px 0; line-height:1.5; }
+.client-task-form { max-width:680px; }.client-task-choice { display:block; width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); text-align:left; font:inherit; cursor:pointer; margin-top:4px; }.client-task-choice:hover { background:var(--surface-2); }

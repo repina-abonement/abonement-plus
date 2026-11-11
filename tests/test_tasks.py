@@ -90,20 +90,19 @@ def main():
     tid = tasks.import_erp_task(con, "Как прошло пробное", sid, "2026-11-07T10:00")
     con.execute("UPDATE tasks SET assignee_id=? WHERE id=?", (artem, tid))
     r = tasks.edit(con, tid, {"assignee_id": varya}, {"name": "Юлия"})
-    check(r["assignee_id"] == varya and r["assignee"] == "Варвара Батарева", "Задачу с Артёма (тренер) передали Варваре")
-    check(any("передана: Варвара Батарева" in h[0] for h in con.execute("SELECT text FROM history WHERE student_id=?", (sid,))),
-          "В истории карточки: «Задача … передана: Варвара Батарева»")
-    tasks.edit(con, tid, {"assignee_id": artem}, {"name": "Юлия"})
-    check(con.execute("SELECT assignee_id FROM tasks WHERE id=?", (tid,)).fetchone()[0] == artem, "Тренеру передать можно")
+    check(r["assignee_id"] is None and r["client_task"], "Клиентская задача общая для администраторов, без исполнителя")
+    personal = tasks.add_task(con, "how_was", None, "2026-11-07T10:00", title="Личное дело", assignee=artem)
+    r = tasks.edit(con, personal, {"assignee_id": varya}, {"name":"Юлия"})
+    check(r["assignee_id"] == varya, "Личную задачу можно передать")
     for bad, why in (({"assignee_id": gone}, "уволенному"), ({"assignee_id": 999}, "несуществующему"), ({"title": "  "}, "без текста")):
         try:
-            tasks.edit(con, tid, bad, {"name": "Юлия"}); ok = False
+            tasks.edit(con, personal, bad, {"name": "Юлия"}); ok = False
         except comms.CommsError:
             ok = True
         check(ok, f"Нельзя: {why}")
     tasks.edit(con, tid, {"title": "Перезвонить маме", "due_at": "2026-11-08T12:30", "note": "после работы"}, {"name": "Юлия"})
     t = con.execute("SELECT title, due_at, note FROM tasks WHERE id=?", (tid,)).fetchone()
-    check(tuple(t) == ("Перезвонить маме", "2026-11-08T12:30", "после работы"), "Правка текста, срока и заметки")
+    check(tuple(t) == ("Перезвонить маме", "2026-11-08T23:59", "после работы"), "Правка текста, срока и заметки")
     ft = tasks.for_student(con, sid)
     check(any(x["id"] == tid for x in ft["open"]) and ft["open"][0]["due_at"] <= ft["open"][-1]["due_at"], "В карточке открытые задачи, ближайшая первой")
     print("Воронка «Ручные задачи»")
@@ -122,7 +121,7 @@ def main():
     b = tasks.manual_board(con, adm, "all")
     check(len(b["columns"]) == 2 and "Сегодняшняя" not in [x["title"] for c in b["columns"] for x in c["cards"]], "Выполненная задача пропадает из воронки")
     mine = tasks.manual_board(con, {"id": olga, "name": "Ольга", "role": "operator"}, "all")
-    check(not sum((c["cards"] for c in mine["columns"]), []), "Обычный сотрудник видит только свои ручные задачи")
+    check(t_old in [t["id"] for col in mine["columns"] for t in col["cards"]], "Другой администратор видит общие клиентские задачи")
     check(tasks._task_out(con, con.execute("SELECT * FROM tasks WHERE id=?", (t_old,)).fetchone())["manual"] is True, "Метка «ручная»")
 
     # на сервере правка задач доступна только админам и операторам, тренерам нет

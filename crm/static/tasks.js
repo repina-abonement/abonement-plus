@@ -19,14 +19,14 @@ function taskRow(t, options = {}) {
       ${s.id ? `<button class="linkish" data-open="${s.id}">${esc(s.name)}</button> <span class="small muted">${esc([s.parent, s.phone, trial].filter(Boolean).join(", "))}</span>` : ""}
       ${t.note ? `<div class="small muted">${esc(t.note)}</div>` : ""}
       ${auto ? `<div class="chips" style="margin-top:6px">${auto}</div>` : ""}
-      ${t.assignee && (S.tasks.scope === "all" || t.assignee_id !== S.user.id) ? `<div class="small muted">Исполнитель: ${esc(t.assignee)}</div>` : ""}
+      ${!t.client_task && t.assignee && (S.tasks.scope === "all" || t.assignee_id !== S.user.id) ? `<div class="small muted">Исполнитель: ${esc(t.assignee)}</div>` : ""}
       <div class="task-done" hidden><input placeholder="Итог: дозвонилась, подтвердили…" data-result><button class="btn sm primary" data-finish>Готово</button></div>
     </div>
-    <span class="small muted when">${dtWhen(t.due_at)}</span>
+    <span class="small muted when">${t.client_task?dShort(t.due_at):dtWhen(t.due_at)}</span>
     <div class="now-act">
       ${s.phone ? `<button class="btn sm" data-dial="${esc(s.phone)}">📞</button>` : ""}
       ${t.kind === "rebook" ? `<button class="btn sm primary" data-rebook="${t.id}">Итог звонка</button>` : S.user.role === "coach" && !options.directComplete ? "" : `<button class="btn sm" data-done>Выполнено</button>`}
-      ${["admin", "operator"].includes(S.user.role) ? `<button class="btn sm" data-tpass title="Передать другому сотруднику">Передать</button>` : ""}
+      ${!t.client_task && ["admin", "operator"].includes(S.user.role) ? `<button class="btn sm" data-tpass title="Передать другому сотруднику">Передать</button>` : ""}
       ${t.kind === "plan" && S.user.role !== "coach" && (S.tasks.canManage || t.created_by_id === S.user.id) ? `<button class="btn sm" data-tcancel="${t.id}" title="Убрать задачу">✕</button>` : ""}
     </div>
   </div>`;
@@ -91,7 +91,7 @@ async function renderManualBoard(page) {
   S.taskById = S.taskById || {};
   d.columns.forEach((c) => c.cards.forEach((t) => (S.taskById[t.id] = t)));
   const card = (t, col) => `<article class="card mt-card ${col === "overdue" ? "red" : ""} ${col === "done" ? "done" : ""}" data-mt="${t.id}" data-col="${col}">
-    <div class="name">${esc(t.title)}</div>
+    <div class="name">${t.priority?"🔥 ":""}${esc(t.title)}</div>
     ${t.student ? `<div class="meta">${esc(t.student.name)}${t.student.parent ? ` · ${esc(t.student.parent)}` : ""}</div>` : ""}
     ${t.note ? `<div class="meta">${esc(t.note)}</div>` : ""}
     <div class="meta">👤 ${esc(t.assignee || "")}${col === "done" ? ` · сделано ${esc((t.done_at || "").slice(11, 16))}${t.result ? `: ${esc(t.result)}` : ""}` : ` · ${col === "overdue" ? "⏰ " + dShort(t.due_at) + " " : ""}${(t.due_at || "").slice(11, 16) === "23:59" ? "в течение дня" : (t.due_at || "").slice(11, 16)}`}</div>
@@ -121,16 +121,18 @@ async function renderManualBoard(page) {
 const TASK_ROLE = { admin: "руководитель", operator: "администратор", coach: "тренер" };
 function openTaskEdit(t, onDone, focus) {
   if (!t) return;
+  const client=!!(t.client_task||t.student_id||t.student?.id||t.family_id);
   const staff = ((S.meta && S.meta.staff) || []).slice().sort((a, b) => (a.role === "coach") - (b.role === "coach") || a.name.localeCompare(b.name));
   const wrap = document.createElement("div");
   wrap.className = "need-wrap";
   wrap.innerHTML = `<form class="need-card"><h3>${t.icon || "✅"} Задача</h3>
     ${t.student ? `<div class="small muted" style="margin-bottom:8px">${esc(t.student.name)}${t.student.family ? ` · семья ${esc(t.student.family)}` : ""}</div>` : ""}
     <div class="field"><label>Что сделать</label><input name="title" value="${esc(t.title)}" required maxlength="200"></div>
-    <div class="row"><div class="field"><label>Срок</label><input name="due_at" type="datetime-local" value="${esc((t.due_at || "").slice(0, 16))}" required></div>
-      <div class="field"><label>Исполнитель</label><select name="assignee_id">${staff.map((u) => `<option value="${u.id}" ${u.id === t.assignee_id ? "selected" : ""}>${esc(u.name)} (${TASK_ROLE[u.role] || u.role})</option>`).join("")}
-        ${t.assignee_id && !staff.some((u) => u.id === t.assignee_id) ? `<option value="" selected disabled>${esc(t.assignee || "Сотрудник в архиве")}: выберите нового</option>` : ""}</select></div></div>
-    <div class="field"><label>Заметка</label><textarea name="note" rows="2" maxlength="1000" placeholder="Что важно знать исполнителю">${esc(t.note || "")}</textarea></div>
+    <div class="row"><div class="field"><label>Срок</label><input name="due_at" type="${client?'date':'datetime-local'}" value="${esc((t.due_at || "").slice(0, client?10:16))}" required></div>
+      ${!client?`<div class="field"><label>Исполнитель</label><select name="assignee_id">${staff.map((u) => `<option value="${u.id}" ${u.id === t.assignee_id ? "selected" : ""}>${esc(u.name)} (${TASK_ROLE[u.role] || u.role})</option>`).join("")}
+        ${t.assignee_id && !staff.some((u) => u.id === t.assignee_id) ? `<option value="" selected disabled>${esc(t.assignee || "Сотрудник в архиве")}: выберите нового</option>` : ""}</select></div>`:""}</div>
+    ${client?`<label class="check task-priority-control"><input type="checkbox" name="priority" ${t.priority?"checked":""}> 🔥 Приоритет — первой в колонке на этот день</label><p class="small muted">Общая задача для всех администраторов.</p>`:""}
+    <div class="field"><label>Заметка</label><textarea name="note" rows="2" maxlength="1000" placeholder="Подробности задачи">${esc(t.note || "")}</textarea></div>
     <div class="need-err small"></div>
     <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap"><button class="btn primary" style="flex:1">Сохранить</button>
       ${t.kind === "rebook" ? `<button type="button" class="btn" data-rebook="${t.id}" data-tclose>Итог звонка</button>` : `<button type="button" class="btn" data-tfinish>Выполнено</button>`}
@@ -138,7 +140,7 @@ function openTaskEdit(t, onDone, focus) {
     <div class="task-done" hidden style="margin-top:8px"><input placeholder="Итог: дозвонилась, подтвердили…" data-tresult><button type="button" class="btn sm primary" data-tok>Готово</button></div></form>`;
   document.body.appendChild(wrap);
   const f = wrap.querySelector("form"), close = () => wrap.remove();
-  setTimeout(() => (focus === "assignee" ? f.elements.assignee_id : f.elements.title).focus(), 50);
+  setTimeout(() => (focus === "assignee" && f.elements.assignee_id ? f.elements.assignee_id : f.elements.title).focus(), 50);
   wrap.querySelector("[data-tcancelf]").onclick = close;
   wrap.addEventListener("click", (e) => { if (e.target === wrap) close(); });
   const cl = wrap.querySelector("[data-tclose]"); if (cl) cl.addEventListener("click", () => setTimeout(close, 0));
@@ -152,10 +154,11 @@ function openTaskEdit(t, onDone, focus) {
   f.onsubmit = async (e) => {
     e.preventDefault();
     const body = { title: f.elements.title.value, due_at: f.elements.due_at.value, note: f.elements.note.value };
-    if (f.elements.assignee_id.value) body.assignee_id = +f.elements.assignee_id.value;
+    if (f.elements.assignee_id?.value) body.assignee_id = +f.elements.assignee_id.value;
+    if(client)body.priority=f.elements.priority.checked;
     try {
       const r = await api("PATCH", `/api/tasks/${t.id}`, body);
-      toast(r.assignee_id !== t.assignee_id ? `Задача передана: ${r.assignee}` : "Задача сохранена");
+      toast(!client && r.assignee_id !== t.assignee_id ? `Задача передана: ${r.assignee}` : "Задача сохранена");
       close(); onDone && onDone();
     } catch (err) { wrap.querySelector(".need-err").textContent = err.message; }
   };
@@ -166,9 +169,10 @@ function cardTasksBlock(d) {
   const T = d.tasks || { open: [], done: [] };
   (T.open || []).concat(T.done || []).forEach((t) => { S.taskById = S.taskById || {}; S.taskById[t.id] = t; });
   const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-  const row = (t, main) => `<div class="ct-row ${main ? "main" : ""} ${t.due_at < now ? "late" : ""}" data-ctask="${t.id}" role="button" tabindex="0" title="Нажмите, чтобы изменить или передать">
+  const late=t=>t.client_task?t.due_at.slice(0,10)<S.meta.today:t.due_at<now;
+  const row = (t, main) => `<div class="ct-row ${main ? "main" : ""} ${late(t) ? "late" : ""}" data-ctask="${t.id}" role="button" tabindex="0" title="Нажмите, чтобы изменить задачу">
     <span class="ct-ico">${t.icon || "✅"}</span><div class="grow"><b>${esc(t.title)}</b> ${kindPill(t)}
-    <div class="small muted">${t.due_at < now ? "⏰ просрочено, " : ""}${dtWhen(t.due_at)}${t.assignee ? ` · ${esc(t.assignee)}` : ""}</div></div>
+    <div class="small muted">${late(t) ? "⏰ просрочено, " : ""}${dShort(t.due_at)}${t.priority?" · 🔥 Приоритет":""}</div></div>
     <span class="ct-edit">✎</span></div>`;
   const last = (d.history || []).slice(0, 2);
   return `<div class="ct-box">
@@ -199,8 +203,9 @@ function wireCardTasks(root, reload, sid) {
     const soon = new Date(Date.now() + 3600e3 - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
     box.innerHTML = `<div class="sub-form" style="margin-top:8px">
       <div class="field"><label>Что сделать</label><input data-ctt placeholder="Например: перезвонить после 18:00"></div>
-      <div class="row"><div class="field"><label>Срок</label><input type="datetime-local" data-ctd value="${soon}"></div>
-        <div class="field"><label>Исполнитель</label><select data-cta>${staff.map((u) => `<option value="${u.id}" ${u.id === S.user.id ? "selected" : ""}>${esc(u.name)} (${TASK_ROLE[u.role] || u.role})</option>`).join("")}</select></div></div>
+      <div class="field"><label>Дата</label><input type="date" data-ctd value="${S.meta.today}"></div>
+      <label class="check task-priority-control"><input type="checkbox" data-ctp> 🔥 Приоритет — первой в колонке на этот день</label>
+      <p class="small muted">Задачу видят все администраторы.</p>
       <div class="row" style="gap:8px"><button class="btn primary sm" data-cts style="flex:0 0 auto">Поставить задачу</button>
         <button class="btn sm" data-ctx style="flex:0 0 auto">Отмена</button></div></div>`;
     box.querySelector("[data-ctx]").onclick = shut;
@@ -208,7 +213,7 @@ function wireCardTasks(root, reload, sid) {
     box.querySelector("[data-cts]").onclick = async () => {
       const title = box.querySelector("[data-ctt]").value.trim();
       if (!title) return toast("Напишите, что нужно сделать", true);
-      try { await api("POST", `/api/students/${sid}/tasks`, { title, due: box.querySelector("[data-ctd]").value, assignee: +box.querySelector("[data-cta]").value }); toast("Задача поставлена"); reload(); }
+      try { await api("POST", `/api/students/${sid}/tasks`, { title, due: box.querySelector("[data-ctd]").value, priority: box.querySelector("[data-ctp]").checked }); toast("Задача поставлена"); reload(); }
       catch (e) { fail(e); }
     };
   };
@@ -394,4 +399,15 @@ function renderNeboDashboard(page, d, coachId, viewBar = "") {
     ${d.today.length ? `<div class="today-grid">${d.today.map(g => `<section class="today-card"><b>${esc(g.name)}</b><div class="small muted">${esc(g.branch)} · ${esc(g.time)} · ${esc(g.age)}</div><p>Детей: ${g.kids + g.trials} · пробных: ${g.trials}</p><button class="btn primary" data-nebo-j="${g.id}">Открыть журнал</button></section>`).join("")}</div>` : `<p class="muted">Сегодня тренировок нет</p>`}`;
   page.querySelectorAll("[data-nebo-j]").forEach(b => b.onclick = () => { S.journal.group = +b.dataset.neboJ; S.journal.date = d.date; go("journal"); });
   if (!coachId) wireTasks(page);
+}
+
+/* Общая задача по клиенту: личные поручения создаются отдельно в Планере. */
+function openClientTaskForm(box,onDone) {
+  if(box.innerHTML){box.innerHTML='';return}
+  box.innerHTML=`<form class="sub-form client-task-form"><h4>Задача клиенту</h4><div class="field"><label>Клиент</label><input data-client-search autocomplete="off" placeholder="Имя, фамилия или телефон"><div data-client-results></div><div class="small muted" data-client-selected></div></div><div class="field"><label>Что сделать</label><input name="title" maxlength="200" required></div><div class="field"><label>Дата</label><input name="due" type="date" value="${S.meta.today}" required></div><label class="check task-priority-control"><input name="priority" type="checkbox"> 🔥 Приоритет — первой в колонке на этот день</label><div class="field"><label>Заметка</label><textarea name="note" rows="3" maxlength="1000"></textarea></div><p class="small muted">Задачу видят все администраторы.</p><div class="need-err small"></div><div class="sc-actions"><button class="btn primary">Поставить задачу</button><button type="button" class="btn" data-client-cancel>Отмена</button></div></form>`;
+  const form=box.querySelector('form'),input=form.querySelector('[data-client-search]'),results=form.querySelector('[data-client-results]'),selected=form.querySelector('[data-client-selected]');let sid=null,timer,version=0;
+  form.querySelector('[data-client-cancel]').onclick=()=>{box.innerHTML=''};
+  input.oninput=()=>{sid=null;selected.textContent='';clearTimeout(timer);const request=++version,q=input.value.trim();results.innerHTML='';if(q.length<2)return;timer=setTimeout(async()=>{try{const list=await api('GET','/api/students?q='+encodeURIComponent(q));if(request!==version||!form.isConnected)return;results.innerHTML=list.length?list.slice(0,15).map(s=>`<button type="button" class="client-task-choice" data-client-id="${s.id}">${esc(s.name)}${s.parent?` · ${esc(s.parent)}`:''}</button>`).join(''):'<div class="small muted">Клиент не найден</div>';results.querySelectorAll('[data-client-id]').forEach(b=>b.onclick=()=>{sid=+b.dataset.clientId;input.value=b.textContent;selected.textContent='Клиент выбран';results.innerHTML='';version++})}catch(e){if(form.isConnected)form.querySelector('.need-err').textContent=e.message}},200)};
+  form.onsubmit=async e=>{e.preventDefault();const error=form.querySelector('.need-err');if(!sid){error.textContent='Выберите клиента из результатов поиска';return}const submit=form.querySelector('button.primary');submit.disabled=true;try{await api('POST',`/api/students/${sid}/tasks`,{title:form.elements.title.value,due:form.elements.due.value,priority:form.elements.priority.checked,note:form.elements.note.value});box.innerHTML='';toast('Задача поставлена');onDone?.()}catch(e){error.textContent=e.message;submit.disabled=false}};
+  input.focus();
 }

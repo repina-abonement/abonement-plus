@@ -950,9 +950,7 @@ def task_done(con, h, user, body, q, tid):
 @route("POST", "/api/students/{sid}/tasks", role="operator")
 def task_add(con, h, user, body, q, sid):
     sv.get_student_row(con, int(sid))
-    due = body.get("due") or db.now_iso()
-    return {"id": tasks.add_task(con, "manual", int(sid), due, title=(body.get("title") or "Задача").strip()[:200],
-                                 source="manual", assignee=int(body["assignee"]) if body.get("assignee") else user["id"])}
+    return {"id": cx(tasks.add_client_task, con, int(sid), body, user)}
 
 
 @route("PUT", "/api/auto-live", role="admin")

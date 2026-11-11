@@ -449,6 +449,7 @@ def _task_out(con, r) -> dict:
     d = dict(r)
     d["icon"] = KINDS.get(d["kind"], ("", "✅"))[1]
     d["manual"] = d["kind"] in MANUAL_KINDS
+    d["client_task"] = bool(d.get("student_id") or d.get("family_id"))
     if d["student_id"]:
         s = con.execute("""SELECT s.id, s.name, s.trial_at, s.trial_came, s.stage, s.funnel, s.converted_at, s.family_id, f.name AS family,
                            (SELECT p.phone FROM parents p WHERE p.family_id=s.family_id ORDER BY p.id LIMIT 1) AS phone,
@@ -470,7 +471,8 @@ def _planner_privacy(con, user: dict, alias: str = "") -> tuple[str, list[int]]:
         return "", []
     ids = [staff["id"] for staff in planner.visible_staff(con, user)]
     placeholders = ",".join("?" for _ in ids)
-    return f" AND ({alias}kind!='plan' OR {alias}assignee_id IN ({placeholders}))", ids
+    shared = f" OR {alias}student_id IS NOT NULL OR {alias}family_id IS NOT NULL" if user["role"] == "operator" else ""
+    return f" AND ({alias}kind!='plan'{shared} OR {alias}assignee_id IN ({placeholders}))", ids
 
 
 def my_tasks(con, user: dict, scope: str = "mine") -> dict:
@@ -483,13 +485,13 @@ def my_tasks(con, user: dict, scope: str = "mine") -> dict:
     where, args = "status='open' AND due_at <= ?", [end_tomorrow]
     if scope == "mine" or not boss:
         if user.get("role") in ("admin", "operator"):  # «Перезаписать на ПУ» видят все админы и операторы
-            where += " AND (assignee_id=? OR kind='rebook')"
+            where += " AND (assignee_id=? OR student_id IS NOT NULL OR family_id IS NOT NULL)"
         else:
             where += " AND assignee_id=?"
         args.append(user["id"])
     privacy, visible_ids = _planner_privacy(con, user)
     rows = [_task_out(con, r) for r in con.execute(
-        f"SELECT * FROM tasks WHERE {where}{privacy} ORDER BY due_at", (*args, *visible_ids))]
+        f"SELECT * FROM tasks WHERE {where}{privacy} ORDER BY substr(due_at,1,10),priority DESC,due_at,id", (*args, *visible_ids))]
     groups = {"overdue": [], "today": [], "tomorrow": []}
     for t in rows:
         if t["due_at"] < _iso(now - timedelta(minutes=30)) and t["due_at"][:10] < date.today().isoformat():
@@ -517,14 +519,17 @@ def edit(con, tid: int, data: dict, user: dict) -> dict:
     t = con.execute("SELECT * FROM tasks WHERE id=? AND status='open'", (tid,)).fetchone()
     if not t:
         raise comms.CommsError("Задача не найдена или уже закрыта")
-    if t["kind"] == "plan":
+    client = bool(t["student_id"] or t["family_id"])
+    if t["kind"] == "plan" and not client:
         from . import planner
         if not planner.can_view_plan(con, user, t["assignee_id"]):
             raise comms.CommsError("Нет доступа к задаче")
         if data.get("assignee_id") and not planner.can_view_plan(con, user, int(data["assignee_id"])):
             raise comms.CommsError("Нет доступа к планеру сотрудника")
     sets, args, notes = [], [], []
-    if "assignee_id" in data:
+    if client and t["assignee_id"] is not None:
+        sets.append("assignee_id=NULL")
+    if "assignee_id" in data and not client:
         uid = int(data.get("assignee_id") or 0)
         u = con.execute("SELECT id, name FROM users WHERE id=? AND active=1", (uid,)).fetchone()
         if not u:
@@ -541,12 +546,19 @@ def edit(con, tid: int, data: dict, user: dict) -> dict:
             notes.append(f"Задача «{t['title']}» переименована: «{title}»")
     if "due_at" in data:
         try:
-            due = datetime.fromisoformat(str(data.get("due_at"))[:16]).isoformat(timespec="minutes")
+            due = client_due(data.get("due_at")) if client else datetime.fromisoformat(str(data.get("due_at"))[:16]).isoformat(timespec="minutes")
         except ValueError:
             raise comms.CommsError("Неверный срок") from None
         if due != t["due_at"][:16]:
             sets.append("due_at=?"); args.append(due)
-            notes.append(f"Задача «{t['title']}»: срок {due[8:10]}.{due[5:7]} {due[11:16]}")
+            notes.append(f"Задача «{t['title']}»: срок {due[8:10]}.{due[5:7]}" + ("" if client else " "+due[11:16]))
+    if "priority" in data:
+        if data["priority"] not in (True,False,0,1):
+            raise comms.CommsError("Неверный приоритет")
+        priority=int(bool(data["priority"]))
+        sets.append("priority=?");args.append(priority)
+        if priority != t["priority"]:
+            notes.append(f"Задача «{t['title']}»: " + ("важная" if priority else "обычный приоритет"))
     if "note" in data:
         note = (data.get("note") or "").strip()[:1000]
         if note != (t["note"] or ""):
@@ -568,14 +580,14 @@ def manual_board(con, user: dict, scope: str = "mine") -> dict:
     from . import planner
     boss = planner.can_manage(con, user)
     today = date.today().isoformat()
-    who = "" if scope == "all" and boss else " AND assignee_id=?"
+    who = "" if scope == "all" and boss else " AND (assignee_id=? OR student_id IS NOT NULL OR family_id IS NOT NULL)" if user["role"] in ("admin","operator") else " AND assignee_id=?"
     args = [] if who == "" else [user["id"]]
     privacy, visible_ids = _planner_privacy(con, user)
     who += privacy
     args += visible_ids
     kinds = ",".join("?" * len(MANUAL_KINDS))
     rows = lambda where, extra, order: [_task_out(con, r) for r in con.execute(
-        f"SELECT * FROM tasks WHERE kind IN ({kinds}) AND {where}{who} ORDER BY {order}", (*MANUAL_KINDS, *extra, *args))]
+        f"SELECT * FROM tasks WHERE kind IN ({kinds}) AND {where}{who} ORDER BY substr(due_at,1,10),priority DESC,{order},id", (*MANUAL_KINDS, *extra, *args))]
     return {"columns": [
         {"key": "overdue", "title": "Просрочено", "cards": rows("status='open' AND substr(due_at,1,10) < ?", [today], "due_at")},
         {"key": "today", "title": "Сегодня", "cards": rows("status='open' AND substr(due_at,1,10) = ?", [today], "due_at")},
@@ -636,7 +648,7 @@ def erp_board(con, day: str = "today", user: dict | None = None) -> dict:
     tomorrow = (today + timedelta(days=1)).isoformat()
     t0 = today.isoformat()
     base = """SELECT t.* FROM tasks t LEFT JOIN users u ON u.id=t.assignee_id
-              WHERE t.status='open' AND t.kind != 'bday' AND (u.id IS NULL OR u.role != 'coach')"""
+              WHERE t.status='open' AND t.kind != 'bday' AND (t.student_id IS NOT NULL OR t.family_id IS NOT NULL OR u.id IS NULL OR u.role != 'coach')"""
     privacy, visible_ids = _planner_privacy(con, user, "t.") if user is not None else ("", [])
     base += privacy
     cond = {"overdue": ("substr(t.due_at,1,10) < ?", t0), "today": ("substr(t.due_at,1,10) = ?", t0),
@@ -645,7 +657,7 @@ def erp_board(con, day: str = "today", user: dict | None = None) -> dict:
     c, v = cond.get(day, cond["today"])
     order = [k for k, _ in ERP_COLUMNS]
     cols: dict[str, dict] = {}
-    for r in con.execute(f"{base} AND {c} ORDER BY t.due_at", (*visible_ids, v)):
+    for r in con.execute(f"{base} AND {c} ORDER BY substr(t.due_at,1,10),t.priority DESC,t.due_at,t.id", (*visible_ids, v)):
         t = _task_out(con, r)
         if t["kind"] == "rebook":
             m = con.execute("""SELECT kind FROM trial_misses WHERE (student_id=? OR student_id IN (SELECT id FROM students WHERE family_id=?))
@@ -661,14 +673,15 @@ def for_student(con, sid: int) -> dict:
     """Задачи для карточки: открытые (ближайшая первой) и несколько последних выполненных."""
     fam = (con.execute("SELECT family_id FROM students WHERE id=?", (sid,)).fetchone() or [None])[0]
     q = "SELECT * FROM tasks WHERE (student_id=? OR (kind='rebook' AND family_id=?)) AND status=? ORDER BY "
-    return {"open": [_task_out(con, r) for r in con.execute(q + "due_at", (sid, fam, "open"))], "done": []}  # выполненные не показываем
+    return {"open": [_task_out(con, r) for r in con.execute(q + "substr(due_at,1,10),priority DESC,due_at,id", (sid, fam, "open"))], "done": []}  # выполненные не показываем
 
 
 def complete(con, tid: int, user: dict, result: str = "") -> None:
     t = con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
     if not t:
         raise comms.CommsError("Задача не найдена")
-    if t["kind"] == "plan":
+    client = bool(t["student_id"] or t["family_id"])
+    if t["kind"] == "plan" and not client:
         from . import planner
         if not planner.can_view_plan(con, user, t["assignee_id"]):
             raise comms.CommsError("Нет доступа к задаче")
@@ -739,3 +752,20 @@ def seed_demo(con):
                                      ("olga", "Ольга (тест)", "operator", hash_password("olga-test-1"))).lastrowid
     if not comms.get(con, OWNER_KEY):
         comms.put(con, OWNER_KEY, str(uid))
+
+
+
+def client_due(value):
+    """Клиентская задача назначается на день, без времени."""
+    return date.fromisoformat(str(value or date.today())[:10]).isoformat()+'T23:59'
+
+
+def add_client_task(con,sid,data,user):
+    title=str(data.get('title') or '').strip()[:200]
+    if not title:raise comms.CommsError('Напишите, что нужно сделать')
+    try:due=client_due(data.get('due'))
+    except ValueError:raise comms.CommsError('Неверная дата') from None
+    if data.get('priority',False) not in (True,False,0,1):raise comms.CommsError('Неверный приоритет')
+    tid=add_task(con,'manual',sid,due,title=title,source='manual',note=str(data.get('note') or '')[:1000])
+    con.execute('UPDATE tasks SET assignee_id=NULL,priority=? WHERE id=?',(int(bool(data.get('priority'))),tid))
+    return tid
