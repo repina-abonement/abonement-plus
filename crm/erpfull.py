@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS erp_full_history_corrections (
 CREATE TABLE IF NOT EXISTS erp_full_operations (
  operation_id TEXT PRIMARY KEY, payment_id INTEGER NOT NULL REFERENCES payments(id),
  signature TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS erp_full_task_links (
+ source_id TEXT PRIMARY KEY, task_id INTEGER NOT NULL UNIQUE REFERENCES tasks(id));
 CREATE TABLE IF NOT EXISTS erp_full_runs (
  id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, user_name TEXT NOT NULL,
  report TEXT NOT NULL, backup TEXT NOT NULL);
@@ -127,6 +129,8 @@ def _record(f, row):
     if f['kind'] == 'clients' and 'id' in hs:
         r['erp_id'] = hs['id']
     r['id_namespace'] = 'lead' if f['kind'] == 'clients' and 'имя ребенка' in hs and 'фио посетителя' not in hs else 'student'
+    if hs.get('id заявки'):
+        r['id_namespace'], r['erp_id'] = 'lead', hs['id заявки']
     if f['kind'] == 'clients' and 'дата пробного' not in hs:
         r.pop('trial_at', None)
     if f['kind'] == 'subs':
@@ -401,24 +405,41 @@ def _process(con, files, now):
                         if not title or not due or not state_task or not r.get('task_id'):
                             reason = 'Нужны ID, срок и явный статус задачи; неизвестный статус не превращён в открытую задачу'
                         else:
+                            from . import tasks as task_service
                             key = 'erp-full-task:'+r['task_id']
                             t = con.execute('SELECT * FROM tasks WHERE auto_key=?', (key,)).fetchone()
+                            if not t:
+                                t = con.execute('SELECT t.* FROM tasks t JOIN erp_full_task_links l ON l.task_id=t.id WHERE l.source_id=?', (r['task_id'],)).fetchone()
+                            kind = task_service.ERP_STATUSES.get(title, 'manual')
+                            translated = task_service.KINDS[kind][0] if kind != 'manual' else title
                             if t:
-                                if t['student_id'] == sid and t['status'] == state_task and t['due_at'][:len(due)] == due and t['title'] == title:
+                                if t['student_id'] == sid and t['status'] == state_task and t['due_at'][:10] == due[:10] and t['title'] in (title,translated):
                                     state, tbl, target = 'native', 'tasks', t['id']
                                 else:
                                     reason = 'Существующая задача отличается от ERP'
                             else:
-                                legacy = con.execute('SELECT id FROM tasks WHERE student_id=? AND title=? AND substr(due_at,1,10)=?', (sid, title, due[:10])).fetchone()
-                                if legacy:
-                                    reason = 'Похожая задача уже существует без ID ERP'
+                                legacy = list(con.execute("SELECT t.* FROM tasks t LEFT JOIN erp_full_task_links l ON l.task_id=t.id WHERE t.student_id=? AND t.title IN (?,?) AND substr(t.due_at,1,10)=? AND t.status=? AND t.source='erp' AND l.task_id IS NULL AND COALESCE(t.auto_key,'') NOT LIKE 'erp-full-task:%'", (sid, title, translated, due[:10], state_task)))
+                                uncertain = con.execute("SELECT t.id FROM tasks t LEFT JOIN erp_full_task_links l ON l.task_id=t.id WHERE t.student_id=? AND ((t.source='erp' AND l.task_id IS NULL AND COALESCE(t.auto_key,'') NOT LIKE 'erp-full-task:%') OR (t.title IN (?,?) AND substr(t.due_at,1,10)=?)) LIMIT 1", (sid,title,translated,due[:10])).fetchone()
+                                if len(legacy) == 1:
+                                    target = legacy[0]['id']
+                                    con.execute('INSERT INTO erp_full_task_links(source_id,task_id) VALUES (?,?)', (r['task_id'],target))
+                                    counts['matched_tasks'] += 1
+                                    state, tbl = 'native', 'tasks'
+                                elif uncertain:
+                                    reason = 'В CRM есть задача без однозначной связи с ID ERP; повторная задача не создана'
                                 else:
                                     assignees = list(con.execute('SELECT id FROM users WHERE name=?', (r.get('assignee', ''),)))
                                     target = con.execute('INSERT INTO tasks(kind,title,student_id,assignee_id,due_at,status,note,source,auto_key,created_at,done_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-                                        ('manual', title, sid, assignees[0][0] if len(assignees)==1 else None, due if len(due)>10 else due+'T10:00', state_task,
+                                        (kind, title, sid, assignees[0][0] if len(assignees)==1 else task_service.owner(con), due if len(due)>10 else due+'T10:00', state_task,
                                          r.get('comment', '')+'\nИсполнитель ERP: '+r.get('assignee', ''), 'erp', key, now, _date(r.get('done_at', '')))).lastrowid
                                     counts['added_tasks'] += 1
                                     state, tbl = 'native', 'tasks'
+                            if state == 'native':
+                                old_note = con.execute('SELECT note FROM tasks WHERE id=?',(target,)).fetchone()[0]
+                                evidence = '[ERP задача '+r['task_id']+']\nСрок ERP: '+due+'\nИсполнители ERP: '+r.get('assignee','')+'\n'+r.get('comment','')
+                                if evidence not in old_note:
+                                    con.execute('UPDATE tasks SET note=? WHERE id=?', ((old_note+'\n\n'+evidence).strip(),target))
+                                    counts['supplemented_task_notes'] += 1
                 elif f['kind'] == 'subs':
                     kind = ei.sub_kind(r.get('tariff', ''))
                     ym, gid, price = ei.parse_month(r.get('month', '')), _group(con, r), _money(r.get('price', ''))

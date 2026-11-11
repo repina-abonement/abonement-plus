@@ -195,6 +195,30 @@ class RecoveryTest(unittest.TestCase):
         self.assertEqual(self.con.execute('SELECT price FROM subscriptions').fetchone()[0],8000)
         self.assertEqual(self.con.execute('SELECT stage FROM students WHERE id=?',(self.sid,)).fetchone()[0],'refused')
 
+    def test_current_task_adopts_exact_legacy_without_duplicate(self):
+        from crm import tasks
+        tid=tasks.import_erp_task(self.con,'Почему не купили',self.sid,'2026-11-12T10:00','Прежнее примечание')
+        uid=self.upload('ID задачи;ID посетителя;ФИО посетителя;Задача;Дедлайн;Состояние задачи;Исполнитель;Комментарий\n500;101;Тестовый Ребёнок;Почему не купили;12.11.2026 00:00;Открыта;Оператор;Полный исходный комментарий\n','tasks')
+        r=self.run_import([uid])
+        self.assertEqual(r['counts']['matched_tasks'],1)
+        self.assertEqual(r['native_rows'],1)
+        t=self.con.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
+        self.assertIn('Прежнее примечание',t['note'])
+        self.assertIn('Полный исходный комментарий',t['note'])
+        self.assertEqual(t['due_at'],'2026-11-12T10:00')
+        self.run_import([uid])
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM tasks').fetchone()[0],1)
+        self.assertEqual(self.con.execute('SELECT note FROM tasks WHERE id=?',(tid,)).fetchone()[0],t['note'])
+
+    def test_current_task_does_not_duplicate_changed_legacy_deadline(self):
+        from crm import tasks
+        tid=tasks.import_erp_task(self.con,'Почему не купили',self.sid,'2026-11-12T10:00')
+        uid=self.upload('ID задачи;ID посетителя;ФИО посетителя;Задача;Дедлайн;Состояние задачи\n500;101;Тестовый Ребёнок;Почему не купили;15.11.2026;Открыта\n','tasks')
+        r=self.run_import([uid])
+        self.assertEqual(r['issue_count'],1)
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM tasks').fetchone()[0],1)
+        self.assertEqual(self.con.execute('SELECT due_at FROM tasks WHERE id=?',(tid,)).fetchone()[0],'2026-11-12T10:00')
+
 
 if __name__ == '__main__':
     unittest.main()
