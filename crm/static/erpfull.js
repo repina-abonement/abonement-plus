@@ -17,6 +17,15 @@ function erpFullSetup(box, data) {
     <button class="btn" id="erp-full-last">Последний результат</button>
     <a class="btn" href="/api/erp/full/report?download=1" download>Скачать полный отчёт сверки</a><div id="erp-full-out"></div>`;
   box.prepend(el);
+  const review=document.createElement('details');
+  review.innerHTML='<summary>Сверка существующих задач ERP по ID (9-15 ноября 2026)</summary><textarea id="erp-task-review-input" placeholder="Проверенный JSON задач" rows="6"></textarea><button class="btn" id="erp-task-review-plan">Рассчитать исправления задач</button><button class="btn primary" id="erp-task-review-apply" disabled>Применить проверенные исправления задач</button><pre id="erp-task-review-out" style="max-height:500px;overflow:auto;white-space:pre-wrap"></pre>';
+  el.append(review);
+  let taskPlan=null;
+  const ti=review.querySelector('textarea'),tp=review.querySelector('#erp-task-review-plan'),ta=review.querySelector('#erp-task-review-apply'),to=review.querySelector('pre');
+  ti.oninput=()=>{taskPlan=null;ta.disabled=true;};
+  tp.onclick=async()=>{ta.disabled=true;taskPlan=null;try{const tasks=JSON.parse(ti.value);const r=await api('POST','/api/erp/tasks/review-plan',{tasks});taskPlan={tasks,token:r.token};to.textContent=JSON.stringify(r,null,2);ta.disabled=false;}catch(e){to.textContent=e.message;}};
+  ta.onclick=async()=>{if(!taskPlan)return;ta.disabled=true;try{const r=await api('POST','/api/erp/tasks/review-apply',taskPlan);to.textContent=JSON.stringify(r,null,2);taskPlan=null;}catch(e){to.textContent=e.message;}};
+
   const out = el.querySelector('#erp-full-out'), apply = el.querySelector('#erp-full-apply'), plan = el.querySelector('#erp-full-plan');
   let checked = null;
   el.querySelectorAll('[data-full-file]').forEach(c=>c.onchange=()=>{checked=null;apply.disabled=true;});

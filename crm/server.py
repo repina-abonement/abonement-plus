@@ -844,6 +844,22 @@ def erp_full_apply(con, h, user, body, q):
         raise ApiError(str(e))
 
 
+@route("POST", "/api/erp/tasks/review-plan", role="admin")
+def erp_task_review_plan(con, h, user, body, q):
+    from . import erptaskreview
+    return erptaskreview.prepare(con, body.get('tasks'))
+
+
+@route("POST", "/api/erp/tasks/review-apply", role="admin")
+def erp_task_review_apply(con, h, user, body, q):
+    from . import erptaskreview, backup
+    try:
+        path = backup.backup_once()
+    except Exception:
+        raise ApiError('Резервная копия не создана. Задачи не изменены')
+    return erptaskreview.apply(con, body.get('tasks'), body.get('token'), user, path)
+
+
 @route("GET", "/api/erp/full/rows", role="admin")
 def erp_full_rows(con, h, user, body, q):
     from . import erpfull
