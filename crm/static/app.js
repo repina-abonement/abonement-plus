@@ -917,6 +917,7 @@ async function renderErp(box) {
       <label class="check" style="margin-top:8px"><input type="checkbox" id="erp-rkn"> Изменения в Роскомнадзор поданы, политика обработки данных опубликована</label>
       <button class="btn primary" id="erp-run" style="margin-top:8px" disabled>Перенести</button></div>`}`;
   if (done) {
+    erpFullSetup(box, d);
     erpWireFiles(box, d);
     api("GET", "/api/erp/reinvite-old").then((r) => {
       if (!r.n) return;
@@ -1757,6 +1758,7 @@ async function openStudent(id, options = {}) {
 
   <div class="section" data-sc="hist" data-title="🕘 История и комментарии">
     <h3>История</h3>
+    ${isOwner() ? `<button class="btn" id="erp-full-client">Исходные данные ERP</button><div id="erp-full-client-out"></div>` : ''}
     <div class="row" style="margin-bottom:10px"><input id="note" placeholder="Комментарий, итог звонка…"><button class="btn sm" id="note-add" style="flex:0">Добавить</button></div>
     <ul class="history">${d.history.map((h) => `<li><div class="when">${dtShort(h.ts)} · ${esc(h.user_name)}</div>${esc(h.text)}</li>`).join("")}</ul>
   </div>
@@ -1764,6 +1766,7 @@ async function openStudent(id, options = {}) {
   openDrawer(html, "wide");
   try { history.replaceState({ ...history.state, studentCard: { ...(previous?.id === +id ? previous : {}), id: +id, userId: S.user.id, tab } }, ""); } catch (_) {}
   const body = $("#drawer-body");
+  erpFullClient(body, id);
   layoutStudentCard(body, isMember);
   scTab(tab);
   const reload = () => { openStudent(id); render(); };

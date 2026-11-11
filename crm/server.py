@@ -822,6 +822,44 @@ def erp_verify(con, h, user, body, q):
     return erpimport.verify(con)
 
 
+@route("POST", "/api/erp/full/plan", role="admin")
+def erp_full_plan(con, h, user, body, q):
+    from . import erpfull, erpimport
+    try:
+        return erpfull.plan(con, body.get('ids'))
+    except erpimport.ImportError_ as e:
+        raise ApiError(str(e))
+
+
+@route("POST", "/api/erp/full/apply", role="admin")
+def erp_full_apply(con, h, user, body, q):
+    from . import erpfull, erpimport, backup
+    try:
+        path = backup.backup_once()
+    except Exception:
+        raise ApiError('Не удалось создать резервную копию. Перенос не начат')
+    try:
+        return erpfull.apply(con, body.get('ids'), body.get('token'), user, path)
+    except erpimport.ImportError_ as e:
+        raise ApiError(str(e))
+
+
+@route("GET", "/api/erp/full/rows", role="admin")
+def erp_full_rows(con, h, user, body, q):
+    from . import erpfull
+    return erpfull.rows(con, int(q['sid']) if q.get('sid') else None,
+                        q.get('issues') == '1', max(0, int(q.get('offset') or 0)))
+
+
+@route("GET", "/api/erp/full/report", role="admin")
+def erp_full_report(con, h, user, body, q):
+    r = con.execute('SELECT report FROM erp_full_runs ORDER BY id DESC LIMIT 1').fetchone()
+    result = json.loads(r[0]) if r else {'source_rows': 0, 'issues': [], 'issue_count': 0}
+    if q.get('download') == '1':
+        return Raw(json.dumps(result,ensure_ascii=False,indent=2).encode(), 'application/json', 'erp-reconciliation.json')
+    return result
+
+
 @route("GET", "/api/duplicates", role="members:full")
 def dups_get(con, h, user, body, q):
     from . import smart
