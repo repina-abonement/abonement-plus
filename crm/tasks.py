@@ -500,9 +500,11 @@ def my_tasks(con, user: dict, scope: str = "mine") -> dict:
             groups["today"].append(t)
         else:
             groups["tomorrow"].append(t)
-    done_today = con.execute(f"""SELECT COUNT(*) FROM tasks WHERE status='done' AND done_at >= ?
-                                 {"AND assignee_id=?" if scope == "mine" or not boss else ""}""",
-                             (date.today().isoformat(), *([user["id"]] if scope == "mine" or not boss else []))).fetchone()[0]
+    done_where, done_args = "status='done' AND done_at>=?", [date.today().isoformat()]
+    if scope == "mine" or not boss:
+        done_where += " AND (assignee_id=? OR student_id IS NOT NULL OR family_id IS NOT NULL)" if user["role"] in ("admin","operator") else " AND assignee_id=?"
+        done_args.append(user["id"])
+    done_today = con.execute(f"SELECT COUNT(*) FROM tasks WHERE {done_where}{privacy}", (*done_args,*visible_ids)).fetchone()[0]
     team = []
     if boss:
         for u in con.execute("SELECT id, name FROM users WHERE active=1 ORDER BY role, id"):

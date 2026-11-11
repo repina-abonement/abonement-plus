@@ -32,6 +32,8 @@ def main():
     assert b not in [t['id'] for col in tasks.erp_board(c,'today',v)['columns'] for t in col['cards']]
     assert tasks.for_student(c,sid)['open'][0]['id']==a
     assert c.execute('SELECT due_at,assignee_id FROM tasks WHERE id=?',(personal,)).fetchone()[0]==today+'T12:00'
+    tasks.complete(c,a,v)
+    assert tasks.my_tasks(c,u)['done_today']>=1 and tasks.my_tasks(c,v)['done_today']>=1
     print('ok: client tasks shared with every operator, priority per date, date-only edit, no assignee choice, private plans stay private')
 
 if __name__=='__main__':main()
