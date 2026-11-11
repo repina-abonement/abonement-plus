@@ -156,6 +156,11 @@ class Matcher:
         ids = self.by_id.get(eid, set()) if eid else set()
         if not ids and name and phone:
             ids = self.by_np.get((name, phone), set())
+        if not ids and kind == 'clients' and not name and phone:
+            # Legacy import uses this exact placeholder for an unnamed lead.
+            # Match only another unnamed card, never a named sibling sharing
+            # the parent's phone. Multiple placeholder cards remain ambiguous.
+            ids = self.by_np.get((ei._norm(ei.NO_NAME), phone), set())
         # Task history omits phone and often ID. Unique full name is usable;
         # a first name alone must not be treated as a unique identity.
         if not ids and kind in ('tasks', 'visits') and len(name.split()) >= 2 and not eid and ';' not in name:

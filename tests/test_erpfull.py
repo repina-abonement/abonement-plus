@@ -104,6 +104,15 @@ class RecoveryTest(unittest.TestCase):
         rec['phone']='79000000001';rec['child_name']='Чужой Ребёнок'
         self.assertIsNone(matcher.find(rec,'payments')[0])
 
+    def test_unnamed_lead_matches_only_a_unique_unnamed_card(self):
+        rec={'erp_id':'102','child_name':'','phone':'79000000001'}
+        self.assertIsNone(full.Matcher(self.con).find(rec,'clients')[0])
+        self.con.execute("UPDATE students SET name=?,erp_id='' WHERE id=?",(ei.NO_NAME,self.sid))
+        self.assertEqual(full.Matcher(self.con).find(rec,'clients')[0],self.sid)
+        family=self.con.execute('SELECT family_id FROM students WHERE id=?',(self.sid,)).fetchone()[0]
+        services.create_student(self.con,{'name':ei.NO_NAME,'family_id':family},self.user)
+        self.assertIsNone(full.Matcher(self.con).find(rec,'clients')[0])
+
     def test_restore_confirmed_trial_without_message_or_overwrite(self):
         self.con.execute("UPDATE students SET name='Александр Иванов',stage='trial_booked',birth='2022-01-01',group_id=? WHERE id=?", (self.gid,self.sid))
         self.con.execute("UPDATE parents SET name='Ирина'")
