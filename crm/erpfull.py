@@ -27,6 +27,16 @@ CREATE TABLE IF NOT EXISTS erp_full_rows (
  PRIMARY KEY(file_id,row_num));
 CREATE INDEX IF NOT EXISTS erp_full_student ON erp_full_rows(student_id);
 CREATE INDEX IF NOT EXISTS erp_full_history_student ON history(student_id,kind);
+CREATE INDEX IF NOT EXISTS erp_full_event_text ON history(text) WHERE kind='erp_task_event' AND user_name='ERP';
+CREATE TABLE IF NOT EXISTS erp_full_identities (
+ namespace TEXT NOT NULL, source_id TEXT NOT NULL,
+ student_id INTEGER NOT NULL REFERENCES students(id),
+ PRIMARY KEY(namespace,source_id));
+CREATE TABLE IF NOT EXISTS erp_full_history_corrections (
+ history_id INTEGER PRIMARY KEY REFERENCES history(id),
+ previous_student_id INTEGER NOT NULL REFERENCES students(id),
+ assigned_student_id INTEGER REFERENCES students(id),
+ file_id INTEGER NOT NULL, row_num INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS erp_full_operations (
  operation_id TEXT PRIMARY KEY, payment_id INTEGER NOT NULL REFERENCES payments(id),
  signature TEXT NOT NULL);
@@ -116,6 +126,7 @@ def _record(f, row):
                 break
     if f['kind'] == 'clients' and 'id' in hs:
         r['erp_id'] = hs['id']
+    r['id_namespace'] = 'lead' if f['kind'] == 'clients' and 'имя ребенка' in hs and 'фио посетителя' not in hs else 'student'
     if f['kind'] == 'clients' and 'дата пробного' not in hs:
         r.pop('trial_at', None)
     if f['kind'] == 'subs':
@@ -131,6 +142,7 @@ def _record(f, row):
         m = re.search(r'\bID\s*:\s*(\d+)', r.get('child_name', ''), re.I)
         if m:
             r['erp_id'] = m[1]
+            r['id_namespace'] = 'lead'
     return r
 
 
@@ -139,6 +151,8 @@ class Matcher:
         self.by_id, self.by_np, self.by_name = defaultdict(set), defaultdict(set), defaultdict(set)
         self.students = {}
         self.phones = defaultdict(set)
+        self.identities = {(r['namespace'], r['source_id']): r['student_id']
+                           for r in con.execute('SELECT * FROM erp_full_identities')}
         for row in con.execute('SELECT * FROM students'):
             s = dict(row)
             self.students[s['id']] = s
@@ -153,7 +167,15 @@ class Matcher:
     def find(self, r, kind):
         eid, name = r.get('erp_id', '').strip(), ei._norm(r.get('child_name', ''))
         phone = normalize_phone(r.get('phone', ''))[-10:]
-        ids = self.by_id.get(eid, set()) if eid else set()
+        lead = r.get('id_namespace') == 'lead'
+        # ERP leads and students have independent numeric sequences. A lead
+        # must never inherit a student's identity just because IDs coincide.
+        if lead and kind != 'clients':
+            if ';' in name or len(re.findall(r'\bid\s*:', name)) != 1:
+                return None, 'Событие связано с несколькими заявками или клиентами'
+            sid = self.identities.get(('lead', eid))
+            return (sid, '') if sid else (None, 'ID заявки ERP не сопоставлен с карточкой; ID ученика не используется')
+        ids = self.by_id.get(eid, set()) if eid and not lead else set()
         if not ids and name and phone:
             ids = self.by_np.get((name, phone), set())
         if not ids and kind == 'clients' and not name and phone:
@@ -169,10 +191,12 @@ class Matcher:
             return None, 'Несколько карточек: ' + ', '.join(map(str, sorted(ids))) if ids else 'Не найдено однозначное совпадение'
         sid = next(iter(ids))
         s = self.students[sid]
-        if eid and s.get('erp_id') and s['erp_id'] != eid:
+        if lead and eid and self.identities.get(('lead', eid), sid) != sid:
+            return None, 'ID заявки ERP связан с другой карточкой'
+        if not lead and eid and s.get('erp_id') and s['erp_id'] != eid:
             return None, 'Совпали имя и телефон, но различаются ID ERP'
         # Reusing an ERP ID cannot silently change a known person's identity.
-        if eid and name and not name.startswith('id:') and name != ei._norm(s['name']):
+        if not lead and eid and name and name != ei._norm(s['name']):
             # A source payment may omit a patronymic or the appended parent's
             # name. Require both the exact ERP ID and the family's exact phone,
             # plus the same complete two-word name prefix in this case.
@@ -206,9 +230,29 @@ def _history(con, sid, ts, text, kind='erp_source'):
                                         (sid, ts, 'ERP', kind, text)).lastrowid
 
 
+def _event_history(con, sid, ts, text, fid, index, counts, corrections):
+    # Repair exact previously imported events in place. Unresolved identities
+    # retain their original record and source evidence, but are quarantined
+    # from the former client's timeline until an identity is established.
+    old = list(con.execute("SELECT * FROM history WHERE kind='erp_task_event' AND user_name='ERP' AND text=?", (text,)))
+    for h in old:
+        correction = con.execute('SELECT * FROM erp_full_history_corrections WHERE history_id=?', (h['id'],)).fetchone()
+        current_sid = correction['assigned_student_id'] if correction else h['student_id']
+        if current_sid != sid:
+            con.execute('INSERT INTO erp_full_history_corrections(history_id,previous_student_id,assigned_student_id,file_id,row_num) VALUES (?,?,?,?,?) ON CONFLICT(history_id) DO UPDATE SET assigned_student_id=excluded.assigned_student_id,file_id=excluded.file_id,row_num=excluded.row_num',
+                        (h['id'], h['student_id'], sid, fid, index))
+            if sid:
+                con.execute('UPDATE history SET student_id=? WHERE id=?', (sid, h['id']))
+            counts['corrected_task_links' if sid else 'quarantined_task_events'] += 1
+            corrections.append({'history_id':h['id'], 'previous_student_id':current_sid, 'student_id':sid, 'file_id':fid, 'row_num':index})
+    if old:
+        return old[0]['id']
+    return _history(con, sid, ts, text, 'erp_task_event') if sid else None
+
+
 def _process(con, files, now):
     matcher = Matcher(con)
-    report = {'files': [], 'counts': {}, 'issues': [], 'source_rows': 0, 'linked_rows': 0, 'native_rows': 0}
+    report = {'files': [], 'counts': {}, 'issues': [], 'history_corrections': [], 'source_rows': 0, 'linked_rows': 0, 'native_rows': 0}
     counts = Counter()
     subs = defaultdict(list)
     used_legacy = set(r[0] for r in con.execute('SELECT payment_id FROM erp_full_operations'))
@@ -226,6 +270,12 @@ def _process(con, files, now):
             if f['kind'] in ('payments','subs') and not any(str(v).strip() for v in row[:17]):
                 state, reason = 'summary', 'Итоговая строка отчёта, не отдельная операция'
                 counts['summary_rows'] += 1
+            event_target = None
+            if f['kind'] == 'tasks' and r.get('event') and _date(r.get('event_at', '')):
+                event_text = 'ERP, задача '+r.get('task_id', '')+'\n'+'\n'.join(f'{h}: {v}' for h, v in zip(f['headers'], row) if v)
+                event_target = _event_history(con, sid, _date(r['event_at']), event_text, fid, index, counts, report['history_corrections'])
+                if event_target and not sid:
+                    tbl, target = 'history_quarantine', event_target
             if sid:
                 report['linked_rows'] += 1
                 state = 'source'
@@ -233,7 +283,13 @@ def _process(con, files, now):
                 if f['kind'] == 'clients':
                     s = matcher.students[sid]
                     eid = r.get('erp_id', '').strip()
-                    if eid and not s.get('erp_id'):
+                    if eid:
+                        key = (r['id_namespace'], eid)
+                        if key not in matcher.identities:
+                            con.execute('INSERT INTO erp_full_identities(namespace,source_id,student_id) VALUES (?,?,?)', (*key,sid))
+                            matcher.identities[key] = sid
+                            counts['linked_source_identities'] += 1
+                    if eid and r['id_namespace'] == 'student' and not s.get('erp_id'):
                         con.execute('UPDATE students SET erp_id=? WHERE id=?', (eid, sid))
                         s['erp_id'] = eid
                         matcher.by_id[eid].add(sid)
@@ -334,8 +390,7 @@ def _process(con, files, now):
                         # Event log is history, not a new open task for every event.
                         ts = _date(r.get('event_at', ''))
                         if ts:
-                            text = 'ERP, задача '+r.get('task_id', '')+'\n'+'\n'.join(f'{h}: {v}' for h, v in zip(f['headers'], row) if v)
-                            target = _history(con, sid, ts, text, 'erp_task_event')
+                            target = event_target
                             state, tbl = 'native', 'history'
                         else:
                             reason = 'Не определена дата события задачи'
@@ -420,7 +475,7 @@ def _process(con, files, now):
             f[key] = json.loads(f[key])
         for row in con.execute("SELECT * FROM erp_full_rows WHERE file_id=? AND state NOT IN ('native','linked','summary')", (fid,)):
             rec = _record(f, f['rows'][row['row_num']-2])
-            identity = {k: rec.get(k, '') for k in ('child_name','erp_id','phone','group','event_at','date','month','amount','price','task_id')}
+            identity = {k: rec.get(k, '') for k in ('child_name','erp_id','id_namespace','phone','group','event_at','date','month','amount','price','task_id')}
             report['issues'].append({'file': f['filename'], 'kind': f['kind'], **dict(row), 'source_identity': identity})
     report['counts'] = dict(counts)
     report['issue_count'] = len(report['issues'])

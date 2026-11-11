@@ -128,6 +128,46 @@ class RecoveryTest(unittest.TestCase):
         self.assertEqual(self.run_import([uid])['issue_count'],1)
         self.assertEqual(self.con.execute('SELECT trial_at FROM students WHERE id=?',(self.sid,)).fetchone()[0],'2099-01-12T10:00')
 
+    def test_lead_and_student_same_number_are_separate(self):
+        other = services.create_student(self.con, {'name':'Другой Ребёнок','parent_name':'Мама лида','phone':'79000000002'}, self.user)
+        self.con.execute("UPDATE students SET erp_id='999' WHERE id=?", (other,))
+        client = self.upload('ID;Имя ребенка;Телефон;Имя родителя\n101;Другой Ребёнок;79000000002;Мама лида\n','clients')
+        task = self.upload('ID;Дата события;Событие;Фимилия и имя\n500;05.11.2026 12:00;Выполнена;"ID:101 Мама лида;"\n','tasks')
+        f = full._files(self.con, [task])[0]
+        row = f['rows'][0]
+        text = 'ERP, задача 500\n'+'\n'.join(f'{h}: {v}' for h,v in zip(f['headers'],row) if v)
+        hid = full._history(self.con, self.sid, '2026-11-05T12:00', text, 'erp_task_event')
+        before = {t:self.con.execute('SELECT COUNT(*) FROM '+t).fetchone()[0] for t in ('tasks','payments','attendance')}
+        r = self.run_import([client, task])
+        self.assertEqual(r['counts']['corrected_task_links'],1)
+        self.assertEqual(self.con.execute('SELECT student_id FROM history WHERE id=?',(hid,)).fetchone()[0],other)
+        self.assertEqual(self.con.execute('SELECT erp_id FROM students WHERE id=?',(other,)).fetchone()[0],'999')
+        self.assertEqual(full.Matcher(self.con).find({'erp_id':'101','child_name':'Тестовый Ребёнок'},'visits')[0],self.sid)
+        self.assertEqual(self.run_import([client,task])['history_corrections'],[])
+        self.assertIsNone(full.Matcher(self.con).find({'id_namespace':'lead','erp_id':'101','child_name':'ID:101 Мама; ID:102 Папа'},'tasks')[0])
+        self.assertEqual(before,{t:self.con.execute('SELECT COUNT(*) FROM '+t).fetchone()[0] for t in before})
+
+    def test_unresolved_lead_event_quarantined_and_later_recovered(self):
+        task = self.upload('ID;Дата события;Событие;Фимилия и имя\n500;05.11.2026 12:00;Выполнена;"ID:101 Мама лида;"\n','tasks')
+        f = full._files(self.con,[task])[0];row=f['rows'][0]
+        text = 'ERP, задача 500\n'+'\n'.join(f'{h}: {v}' for h,v in zip(f['headers'],row) if v)
+        hid = full._history(self.con,self.sid,'2026-11-05T12:00',text,'erp_task_event')
+        r=self.run_import([task])
+        self.assertEqual(r['counts']['quarantined_task_events'],1)
+        self.assertEqual(r['linked_rows'],0)
+        self.assertEqual(self.con.execute('SELECT text FROM history WHERE id=?',(hid,)).fetchone()[0],text)
+        self.assertIsNone(self.con.execute('SELECT assigned_student_id FROM erp_full_history_corrections WHERE history_id=?',(hid,)).fetchone()[0])
+        self.assertFalse(any(h['text']==text for h in services.student_detail(self.con,self.sid)['history']))
+        self.assertEqual(self.run_import([task])['history_corrections'],[])
+        other=services.create_student(self.con,{'name':ei.NO_NAME,'parent_name':'Мама лида','phone':'79000000002'},self.user)
+        client=self.upload('ID;Имя ребенка;Телефон;Имя родителя\n101;;79000000002;Мама лида\n','clients')
+        r=self.run_import([client,task])
+        self.assertEqual(r['counts']['corrected_task_links'],1)
+        self.assertEqual(self.con.execute('SELECT student_id FROM history WHERE id=?',(hid,)).fetchone()[0],other)
+        self.assertEqual(self.con.execute('SELECT assigned_student_id FROM erp_full_history_corrections WHERE history_id=?',(hid,)).fetchone()[0],other)
+        self.assertFalse(self.con.execute('SELECT erp_id FROM students WHERE id=?',(other,)).fetchone()[0])
+        self.assertTrue(any(h['text']==text for h in services.student_detail(self.con,other)['history']))
+
     def test_layout_classification(self):
         self.assertEqual(ei.guess_kind(['ID','ФИО посетителя','Имя родителя','Посещение']),'clients')
         self.assertEqual(ei.guess_kind(['ID','Имя ребенка','Имя родителя','Задача']),'clients')

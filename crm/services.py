@@ -819,7 +819,7 @@ def student_detail(con, sid: int) -> dict:
         """SELECT m.*, g.name AS group_name, a.date AS absence_date FROM makeups m
            JOIN groups g ON g.id = m.group_id JOIN attendance a ON a.id = m.absence_id
            WHERE m.student_id=? ORDER BY m.date DESC LIMIT 20""", (sid,)))
-    hist = _rows(con.execute("SELECT ts, user_name, kind, text FROM history WHERE student_id=? ORDER BY id DESC LIMIT 100",
+    hist = _rows(con.execute("SELECT ts, user_name, kind, text FROM history WHERE student_id=? AND NOT EXISTS (SELECT 1 FROM erp_full_history_corrections c WHERE c.history_id=history.id AND c.assigned_student_id IS NULL) ORDER BY id DESC LIMIT 100",
                              (sid,)))
     stage_label = SALES_LABELS.get(s["stage"], s["stage"])
     if s["funnel"] == "sales":
