@@ -55,6 +55,8 @@ CREATE INDEX IF NOT EXISTS idx_erp_rows ON erp_rows(batch_id, tbl);
 
 def init(con):
     con.executescript(SCHEMA)
+    from . import erpfull
+    erpfull.init(con)
     cols = [c[1] for c in con.execute("PRAGMA table_info(students)")]
     if "erp_id" not in cols:
         con.execute("ALTER TABLE students ADD COLUMN erp_id TEXT NOT NULL DEFAULT ''")
@@ -231,6 +233,16 @@ def guess_mapping(kind: str, headers: list[str]) -> dict:
 
 
 def guess_kind(headers: list[str]) -> str:
+    names = {_norm(h) for h in headers}
+    # Concrete ERP layouts before loose words such as visits in a client list.
+    if 'id операции' in names:
+        return 'payments'
+    if 'задача (end)' in names or 'задача (new)' in names:
+        return 'tasks'
+    if any(h.startswith('стоимость со скидкой') for h in names) and 'тип' in names:
+        return 'subs'
+    if 'имя родителя' in names and ('фио посетителя' in names or 'имя ребенка' in names):
+        return 'clients'
     hs = " | ".join(_norm(h) for h in headers)
     if "задач" in hs:
         return "tasks"

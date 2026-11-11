@@ -73,11 +73,15 @@ def init(con):
         con.execute("INSERT INTO discounts(name, percent, rule, created_at) VALUES (?,?,?,?)",
                     ("Второй и следующий ребёнок в семье", 20, "sibling", _now()))
     # оплаченные раньше абонементы без записи о платеже — переносим в реестр, чтобы баланс сходился
-    con.execute("""INSERT INTO payments(student_id, amount, method, paid_at, comment, user_name, confirmed, subscription_id,
+    # ERP recovery imports the real payment register separately. Its historical
+    # subscription status must never manufacture a second payment on restart.
+    erp_guard = 'AND s.erp_full_managed=0' if 'erp_full_managed' in {r[1] for r in con.execute('PRAGMA table_info(subscriptions)')} else ''
+    con.execute(f"""INSERT INTO payments(student_id, amount, method, paid_at, comment, user_name, confirmed, subscription_id,
                    created_at)
                    SELECT s.student_id, s.price, 'unknown', COALESCE(s.paid_at, s.created_at), 'Оплата до реестра платежей',
                           'Система', 1, s.id, COALESCE(s.paid_at, s.created_at) FROM subscriptions s
                    WHERE s.status='paid' AND s.price > 0
+                     {erp_guard}
                      AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.subscription_id = s.id)""")
 
 
