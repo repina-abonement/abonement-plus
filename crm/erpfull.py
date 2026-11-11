@@ -107,6 +107,7 @@ def _record(f, row):
         'discount': ['размер скидки'], 'phone2': ['второй телефон', 'телефон 2'],
         'balance': ['баланс'], 'task_status': ['состояние задачи', 'статус выполнения'],
         'done_at': ['дата выполнения'],
+        'trial_at': ['дата пробного'],
     }
     for key, names in aliases.items():
         for name in names:
@@ -115,11 +116,16 @@ def _record(f, row):
                 break
     if f['kind'] == 'clients' and 'id' in hs:
         r['erp_id'] = hs['id']
+    if f['kind'] == 'clients' and 'дата пробного' not in hs:
+        r.pop('trial_at', None)
     if f['kind'] == 'subs':
         for name in ('оплачено(руб.)', 'оплачено (руб.)', 'оплачено'):
             if name in hs:
                 r['status'] = hs[name]
     if f['kind'] == 'tasks' and 'событие' in hs:
+        # ERP appends a list separator even when there is only one visitor.
+        # Keep internal separators: a multi-person event must not be guessed.
+        r['child_name'] = r.get('child_name', '').rstrip('; ').strip()
         r['erp_id'] = ''
         r['task_id'] = hs.get('id', '')
         m = re.search(r'\bID\s*:\s*(\d+)', r.get('child_name', ''), re.I)
@@ -132,6 +138,7 @@ class Matcher:
     def __init__(self, con):
         self.by_id, self.by_np, self.by_name = defaultdict(set), defaultdict(set), defaultdict(set)
         self.students = {}
+        self.phones = defaultdict(set)
         for row in con.execute('SELECT * FROM students'):
             s = dict(row)
             self.students[s['id']] = s
@@ -141,6 +148,7 @@ class Matcher:
         for s in con.execute('SELECT s.id,s.name,p.phone_norm FROM students s JOIN parents p ON p.family_id=s.family_id'):
             if s['phone_norm']:
                 self.by_np[(ei._norm(s['name']), s['phone_norm'][-10:])].add(s['id'])
+                self.phones[s['id']].add(s['phone_norm'][-10:])
 
     def find(self, r, kind):
         eid, name = r.get('erp_id', '').strip(), ei._norm(r.get('child_name', ''))
@@ -150,7 +158,7 @@ class Matcher:
             ids = self.by_np.get((name, phone), set())
         # Task history omits phone and often ID. Unique full name is usable;
         # a first name alone must not be treated as a unique identity.
-        if not ids and kind == 'tasks' and len(name.split()) >= 2 and not eid:
+        if not ids and kind in ('tasks', 'visits') and len(name.split()) >= 2 and not eid and ';' not in name:
             ids = self.by_name.get(name, set())
         if len(ids) != 1:
             return None, 'Несколько карточек: ' + ', '.join(map(str, sorted(ids))) if ids else 'Не найдено однозначное совпадение'
@@ -160,7 +168,13 @@ class Matcher:
             return None, 'Совпали имя и телефон, но различаются ID ERP'
         # Reusing an ERP ID cannot silently change a known person's identity.
         if eid and name and not name.startswith('id:') and name != ei._norm(s['name']):
-            return None, 'ID ERP найден, имя отличается: ' + s['name']
+            # A source payment may omit a patronymic or the appended parent's
+            # name. Require both the exact ERP ID and the family's exact phone,
+            # plus the same complete two-word name prefix in this case.
+            known = ei._norm(s['name'])
+            prefix = len(name.split()) >= 2 and known.startswith(name + ' ')
+            if not (prefix and phone and phone in self.phones[sid]):
+                return None, 'ID ERP найден, имя отличается: ' + s['name']
         birth = _date(r.get('birth', ''))
         if birth and s['birth'] and birth[:10] != s['birth'][:10]:
             return None, 'Дата рождения не совпадает'
@@ -238,6 +252,26 @@ def _process(con, files, now):
                     if comment:
                         _history(con, sid, _date(r.get('created', '')) or now, comment)
                     state, tbl, target = 'linked', 'students', sid
+                    trial = _date(r.get('trial_at', ''))
+                    if r.get('trial_at') and trial != (s.get('trial_at') or ''):
+                        from . import smart, capacity
+                        from .services import ApiError
+                        try:
+                            if s.get('trial_at') or not trial or len(trial) < 16:
+                                raise ApiError('Дата пробного уже задана или в источнике нет точного времени')
+                            if s['stage'] != 'trial_booked' or s['funnel'] != 'sales':
+                                raise ApiError('В CRM нет подтверждённого этапа записи на пробное')
+                            if not s['group_id'] or _group(con, r) != s['group_id']:
+                                raise ApiError('Группа источника не совпадает с группой записи')
+                            smart.require(con, sid, 'trial')
+                            capacity.check_trial_group(con, s['group_id'])
+                            capacity.ensure(con, s['group_id'], trial[:10], 'восстановить дату пробного')
+                            con.execute('UPDATE students SET trial_at=?,trial_booked_at=COALESCE(trial_booked_at,?) WHERE id=?', (trial,now,sid))
+                            _history(con, sid, now, 'Восстановлена дата подтверждённого пробного из источника: '+trial+'\n'+comment)
+                            s['trial_at'] = trial
+                            counts['restored_trial_dates'] += 1
+                        except ApiError as exc:
+                            state, reason = 'source', str(exc)
                 elif f['kind'] == 'visits':
                     d, status, gid = _date(r.get('date', '')), ei.visit_status(r.get('status', '')), _group(con, r)
                     if not d or not status or not gid:

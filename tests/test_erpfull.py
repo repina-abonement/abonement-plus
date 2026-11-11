@@ -2,6 +2,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from crm import db, erpfull as full, erpimport as ei, services, money
 
@@ -82,6 +83,41 @@ class RecoveryTest(unittest.TestCase):
         self.con.execute("INSERT INTO attendance(student_id,group_id,date,status) VALUES (?,?,'2026-11-01','absent')",(self.sid,self.gid))
         with self.assertRaises(ei.ImportError_):full.apply(self.con,[uid],p['token'],self.user,'backup')
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM erp_full_files').fetchone()[0],0)
+
+    def test_export_name_separators_and_unique_visit_names(self):
+        uid=self.upload('ID;Дата события;Событие;Фимилия и имя\n600;05.11.2026 12:00;Выполнена;"Тестовый Ребёнок;"\n601;05.11.2026 12:01;Выполнена;"Тестовый Ребёнок; Другой Ребёнок;"\n','tasks')
+        r=self.run_import([uid])
+        self.assertEqual(r['native_rows'],1)
+        self.assertEqual(r['issue_count'],1)
+        visits=self.upload('ФИО;Дата занятия;Группа;Отметка\nТестовый Ребёнок;01.11.2026;Тестовая группа;был\n','visits')
+        self.assertEqual(self.run_import([visits])['native_rows'],1)
+        services.create_student(self.con, {'name':'Тестовый Ребёнок','parent_name':'Другой родитель','phone':'79000000002'}, self.user)
+        self.assertEqual(self.run_import([visits])['linked_rows'],0)
+
+    def test_short_payment_name_requires_id_and_phone(self):
+        self.con.execute("UPDATE students SET name='Тестовый Ребёнок Иванович' WHERE id=?", (self.sid,))
+        matcher=full.Matcher(self.con)
+        rec={'erp_id':'101','child_name':'Тестовый Ребёнок','phone':'79000000001'}
+        self.assertEqual(matcher.find(rec,'payments')[0],self.sid)
+        rec['phone']='79000000002'
+        self.assertIsNone(matcher.find(rec,'payments')[0])
+        rec['phone']='79000000001';rec['child_name']='Чужой Ребёнок'
+        self.assertIsNone(matcher.find(rec,'payments')[0])
+
+    def test_restore_confirmed_trial_without_message_or_overwrite(self):
+        self.con.execute("UPDATE students SET name='Александр Иванов',stage='trial_booked',birth='2022-01-01',group_id=? WHERE id=?", (self.gid,self.sid))
+        self.con.execute("UPDATE parents SET name='Ирина'")
+        uid=self.upload('ID;ФИО;Телефон;Имя родителя;Группа;Дата пробного;Комментарий\n101;Александр Иванов;79000000001;Ирина;Тестовая группа;2099-01-05T10:00;Подтверждённая запись из переписки\n','clients')
+        with patch('crm.tasks.send_booked') as send:
+            r=self.run_import([uid])
+            self.assertEqual(r['counts']['restored_trial_dates'],1)
+            self.assertFalse(send.called)
+            self.assertEqual(self.con.execute('SELECT trial_at FROM students WHERE id=?',(self.sid,)).fetchone()[0],'2099-01-05T10:00')
+            self.run_import([uid])
+            self.assertFalse(send.called)
+        self.con.execute("UPDATE students SET trial_at='2099-01-12T10:00' WHERE id=?", (self.sid,))
+        self.assertEqual(self.run_import([uid])['issue_count'],1)
+        self.assertEqual(self.con.execute('SELECT trial_at FROM students WHERE id=?',(self.sid,)).fetchone()[0],'2099-01-12T10:00')
 
     def test_layout_classification(self):
         self.assertEqual(ei.guess_kind(['ID','ФИО посетителя','Имя родителя','Посещение']),'clients')
