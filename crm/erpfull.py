@@ -410,9 +410,13 @@ def _process(con, files, now):
                 con.execute('UPDATE erp_full_rows SET reason=? WHERE file_id=? AND row_num=?', (reason,fid,index))
     file_ids = sorted(set(f['id'] for f in report['files']))
     for fid in file_ids:
-        f = con.execute('SELECT filename,kind FROM erp_full_files WHERE id=?', (fid,)).fetchone()
+        f = dict(con.execute('SELECT filename,kind,headers,rows,mapping FROM erp_full_files WHERE id=?', (fid,)).fetchone())
+        for key in ('headers', 'rows', 'mapping'):
+            f[key] = json.loads(f[key])
         for row in con.execute("SELECT * FROM erp_full_rows WHERE file_id=? AND state NOT IN ('native','linked','summary')", (fid,)):
-            report['issues'].append({'file': f['filename'], 'kind': f['kind'], **dict(row)})
+            rec = _record(f, f['rows'][row['row_num']-2])
+            identity = {k: rec.get(k, '') for k in ('child_name','erp_id','phone','group','event_at','date','month','amount','price','task_id')}
+            report['issues'].append({'file': f['filename'], 'kind': f['kind'], **dict(row), 'source_identity': identity})
     report['counts'] = dict(counts)
     report['issue_count'] = len(report['issues'])
     report['complete'] = not report['issues']
