@@ -7,6 +7,25 @@ from .services import ApiError
 
 FIELDS = ('id','student_id','kind','title','due_at','status','note','source','auto_key','assignee_id','priority','done_at','done_by','result')
 
+def in_scope(day):
+    return isinstance(day, str) and bool(re.fullmatch(r'2026-11-(09|1[0-5])', day))
+
+def candidates(con, namespace, source_id):
+    """Read all states for one ERP client, including older imported candidates."""
+    if namespace not in ('student', 'lead') or not str(source_id or '').isdigit():
+        raise ApiError('Нужен точный идентификатор клиента ERP')
+    identity = con.execute('SELECT student_id FROM erp_full_identities WHERE namespace=? AND source_id=?',
+                           (namespace, str(source_id))).fetchone()
+    if not identity:
+        raise ApiError('Связь клиента ERP не найдена')
+    result = []
+    for row in con.execute('SELECT * FROM tasks WHERE student_id=? ORDER BY id', (identity[0],)):
+        task = dict(row)
+        task['erp_task_ids'] = [str(r[0]) for r in con.execute(
+            'SELECT source_id FROM erp_full_task_links WHERE task_id=? ORDER BY source_id', (row['id'],))]
+        result.append(task)
+    return {'namespace': namespace, 'source_id': str(source_id), 'student_id': identity[0], 'tasks': result}
+
 def snapshot(con, day):
     """Read one authorized day without invoking task generation or changing data."""
     if not isinstance(day, str) or not re.fullmatch(r'2026-11-(09|1[0-5])', day):
@@ -35,7 +54,13 @@ def prepare(con, rows):
         if not source.isdigit() or source in ids or type(tid)!=int or tid in targets:
             raise ApiError('Повторный или неверный ID задачи')
         ids.add(source); targets.add(tid)
-        if not re.fullmatch(r'2026-11-(09|1[0-5])',day):
+        edge = item.get('range_edge_correction') is True
+        try:
+            if datetime.strptime(day, '%Y-%m-%d').strftime('%Y-%m-%d') != day:
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise ApiError('Неверная дата задачи')
+        if not in_scope(day) and not edge:
             raise ApiError('Разрешены только даты 9-15 ноября 2026')
         r=con.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
         if not r: raise ApiError('Задача не найдена')
@@ -46,7 +71,8 @@ def prepare(con, rows):
         identity=con.execute('SELECT student_id FROM erp_full_identities WHERE namespace=? AND source_id=?',(item.get('namespace'),str(item.get('client_erp_id')))).fetchone()
         if not identity or identity[0]!=sid or r['student_id']!=sid or r['source']!='erp':
             raise ApiError('Связь клиента не подтверждена или задача ручная')
-        if not '2026-11-09'<=r['due_at'][:10]<='2026-11-15':
+        old_day = (r['due_at'] or '')[:10]
+        if not in_scope(old_day) and not edge:
             raise ApiError('Исходная задача вне разрешённого диапазона')
         title=item.get('title'); state=item.get('status')
         if not isinstance(title,str) or not title.strip() or state not in ('open','done','cancelled'):
@@ -58,6 +84,12 @@ def prepare(con, rows):
         after=dict(before,title=title,due_at=day+'T23:59',status=state,assignee_id=None)
         after['note']=r['note'] if block in (r['note'] or '') else ((r['note'] or '').rstrip()+'\n\n'+block).strip()
         if state=='open': after.update(done_at=None,done_by='',result='')
+        # An explicitly reviewed edge correction must enter or leave this week.
+        # A linked, already-applied outgoing correction may be replayed as a no-op.
+        if edge and not (in_scope(old_day) or in_scope(day)):
+            prior_day = str((item.get('expected') or {}).get('due_at') or '')[:10]
+            if not (in_scope(prior_day) and link and before == after):
+                raise ApiError('Исправление не относится к диапазону 9-15 ноября')
         # Preserve the existing unique key and all staff notes. The link table is authoritative.
         if before!=after or not link:
             expected=item.get('expected')

@@ -33,6 +33,30 @@ class ReviewTests(unittest.TestCase):
     def test_outside_range(self):
         self.row['day']='2026-11-16'
         with self.assertRaises(ApiError):m.prepare(self.c,[self.row])
+    def test_reviewed_outgoing_move_and_repeat(self):
+        self.row.update(day='2027-01-09', range_edge_correction=True)
+        p=m.prepare(self.c,[self.row]);m.apply(self.c,[self.row],p['token'],{'name':'Owner'},'backup')
+        self.assertEqual(m.prepare(self.c,[self.row])['updated'],0)
+        self.assertEqual(self.c.execute('SELECT due_at FROM tasks').fetchone()[0],'2027-01-09T23:59')
+    def test_reviewed_incoming_move(self):
+        self.c.execute("UPDATE tasks SET due_at='2026-11-01T10:00'")
+        self.row['expected']=dict(self.c.execute('SELECT * FROM tasks').fetchone())
+        with self.assertRaises(ApiError):m.prepare(self.c,[self.row])
+        self.row['range_edge_correction']=True
+        self.assertEqual(m.prepare(self.c,[self.row])['updated'],1)
+    def test_unrelated_outside_move_rejected(self):
+        self.c.execute("UPDATE tasks SET due_at='2026-11-01T10:00'")
+        self.row.update(day='2026-11-20',range_edge_correction=True)
+        self.row['expected']=dict(self.c.execute('SELECT * FROM tasks').fetchone())
+        with self.assertRaises(ApiError):m.prepare(self.c,[self.row])
+    def test_candidates_all_states_without_writes(self):
+        self.c.execute("INSERT INTO tasks SELECT 2,student_id,kind,title,'2026-11-01T10:00','done',note,source,auto_key,assignee_id,priority,done_at,done_by,result FROM tasks WHERE id=1")
+        self.c.execute("INSERT INTO erp_full_task_links VALUES ('100',2)")
+        before=self.c.total_changes
+        rows=m.candidates(self.c,'student','42')['tasks']
+        self.assertEqual([r['id'] for r in rows],[1,2])
+        self.assertEqual(rows[1]['erp_task_ids'],['100'])
+        self.assertEqual(self.c.total_changes,before)
     def test_snapshot_includes_all_states_and_links_without_writes(self):
         self.c.execute("INSERT INTO erp_full_task_links VALUES ('99',1)")
         for i, state in enumerate(('done','cancelled'), 2):

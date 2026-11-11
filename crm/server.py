@@ -850,6 +850,12 @@ def erp_task_review_snapshot(con, h, user, body, q):
     return erptaskreview.snapshot(con, q.get('day'))
 
 
+@route("GET", "/api/erp/tasks/review-candidates", role="admin")
+def erp_task_review_candidates(con, h, user, body, q):
+    from . import erptaskreview
+    return erptaskreview.candidates(con, q.get('namespace'), q.get('source_id'))
+
+
 @route("POST", "/api/erp/tasks/review-plan", role="admin")
 def erp_task_review_plan(con, h, user, body, q):
     from . import erptaskreview
