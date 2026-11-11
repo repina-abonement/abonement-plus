@@ -125,6 +125,7 @@ def _record(f, row):
         'done_at': ['дата выполнения'],
         'trial_at': ['дата пробного'],
         'reviewed_sub': ['сверено по выгрузке erp'],
+        'reviewed_lessons': ['сверено количество занятий erp'],
         'lessons': ['количество занятий', 'занятий'],
         'expected_price': ['ожидаемая сумма crm'],
         'expected_lessons': ['ожидаемые занятия crm'],
@@ -482,6 +483,30 @@ def _process(con, files, now):
         sale_dates = [_date(r.get('sale_at','')) for _,_,r,_ in rows]
         # The ERP sales report has no payment date. Do not invent one.
         native = list(con.execute("SELECT x.* FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id WHERE x.student_id=? AND e.group_id=? AND x.month=? AND x.status!='cancelled'", (sid,gid,ym)))
+        count_review = any(ei._norm(r.get('reviewed_lessons','')) == 'да' for _,_,r,_ in rows)
+        if count_review and not reason:
+            if ym != '2026-10' or len(native) != 1 or len(rows) != 1:
+                reason = 'Сверка количества требует одной существующей записи октября 2026'
+            else:
+                fid,index,rec,_ = rows[0]
+                old_sub = dict(native[0])
+                expected = (_money(rec.get('expected_price','')), _money(rec.get('expected_lessons','')), rec.get('expected_status',''))
+                actual = (old_sub['price'], old_sub['lessons'], old_sub['status'])
+                wanted = (price, lessons, status)
+                if price != old_sub['price'] or status != old_sub['status'] or lessons <= 0:
+                    reason = 'Сверка количества не может менять сумму или статус оплаты'
+                elif actual != wanted:
+                    if actual != expected:
+                        reason = 'Абонемент изменился после сверки количества занятий'
+                    else:
+                        con.execute('UPDATE subscriptions SET lessons=?,per_lesson=? WHERE id=?',
+                                    (lessons,price//lessons,old_sub['id']))
+                        after_sub = dict(con.execute('SELECT * FROM subscriptions WHERE id=?',(old_sub['id'],)).fetchone())
+                        con.execute('INSERT INTO erp_full_subscription_corrections(subscription_id,before_json,after_json,file_id,row_num,corrected_at) VALUES (?,?,?,?,?,?)',
+                                    (old_sub['id'],_json(old_sub),_json(after_sub),fid,index,now))
+                        _history(con,sid,now,f"Сверка ERP, октябрь 2026: количество занятий {old_sub['lessons']} -> {lessons}. Сумма, статус, дата оплаты и платежи сохранены.",'erp_subscription_reconciliation')
+                        native = [after_sub]
+                        counts['updated_subscription_lessons'] += 1
         if not reason and len(native) == 1 and len(rows) == 1 and ei._norm(rows[0][2].get('reviewed_sub','')) == 'да':
             fid,index,rec,_ = rows[0]
             old_sub = dict(native[0])

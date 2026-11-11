@@ -245,6 +245,30 @@ class RecoveryTest(unittest.TestCase):
         self.assertEqual(self.run_import([uid])['issue_count'],0)
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM erp_full_subscription_corrections').fetchone()[0],1)
 
+    def test_october_lesson_review_guards_and_idempotence(self):
+        eid=self.con.execute("INSERT INTO enrollments(student_id,group_id,tariff,active,created_at) VALUES (?,?,'fixed',1,'2026-10-01')",(self.sid,self.gid)).lastrowid
+        subid=self.con.execute("INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,per_lesson,price,status,created_at,paid_at) VALUES (?,?,'2026-10','fixed',8,1518,12150,'paid','2026-10-01','2026-09-28')",(self.sid,eid)).lastrowid
+        header='ID посетителя;ФИО посетителя;Тип;Группа;Дата начала;Стоимость со скидкой;Статус;Количество занятий;Сверено количество занятий ERP;Ожидаемая сумма CRM;Ожидаемые занятия CRM;Ожидаемый статус CRM\n'
+        row='101;Тестовый Ребёнок;Абонемент;Тестовая группа;01.10.2026;12150;оплачен;9;да;12150;8;paid\n'
+        uid=self.upload(header+row,'subs')
+        before=dict(self.con.execute('SELECT * FROM subscriptions WHERE id=?',(subid,)).fetchone())
+        p=full.plan(self.con,[uid])
+        self.assertEqual(p['counts']['updated_subscription_lessons'],1)
+        self.assertEqual(dict(self.con.execute('SELECT * FROM subscriptions WHERE id=?',(subid,)).fetchone()),before)
+        self.con.execute('UPDATE subscriptions SET lessons=7 WHERE id=?',(subid,))
+        with self.assertRaises(ei.ImportError_):full.apply(self.con,[uid],p['token'],self.user,'backup')
+        self.assertEqual(self.run_import([uid])['issue_count'],1)
+        self.con.execute('UPDATE subscriptions SET lessons=8 WHERE id=?',(subid,))
+        self.assertEqual(self.run_import([uid])['counts']['updated_subscription_lessons'],1)
+        after=dict(self.con.execute('SELECT * FROM subscriptions WHERE id=?',(subid,)).fetchone())
+        self.assertEqual({k:v for k,v in after.items() if k not in ('lessons','per_lesson')},{k:v for k,v in before.items() if k not in ('lessons','per_lesson')})
+        self.assertEqual((after['lessons'],after['per_lesson']),(9,1350))
+        self.assertEqual(self.run_import([uid])['counts'].get('updated_subscription_lessons',0),0)
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments').fetchone()[0],0)
+        for bad in (row.replace('12150;оплачен','12000;оплачен'),row.replace('оплачен;9','не оплачен;9'),row.replace('01.10.2026','01.11.2026')):
+            self.assertEqual(self.run_import([self.upload(header+bad,'subs')])['issue_count'],1)
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM subscriptions').fetchone()[0],1)
+
 
 if __name__ == '__main__':
     unittest.main()
