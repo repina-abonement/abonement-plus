@@ -2154,7 +2154,7 @@ async function renderJournal(page) {
     ${j.has_lesson ? `<div class="row" style="gap:8px;margin:0 0 12px;flex-wrap:wrap"><button class="btn sm" id="j-copy" style="flex:0 0 auto">📋 Скопировать списки смены</button><button class="btn sm" id="j-print" style="flex:0 0 auto">🖨 Лист для печати</button><span class="small muted" style="align-self:center">все группы ${esc(g.branch)} на ${dShort(S.journal.date)}</span></div>` : ""}
     ${j.overdue_marks ? `<div class="alert">🔴 Тренировка закончилась ${j.overdue_marks.minutes} мин назад, не отмечено детей: ${j.overdue_marks.missing}</div>` : ""}
     ${st ? `<div class="panel" style="padding:12px 14px;margin-bottom:12px">${staffPicker(st, st.coaches, "j", S.journal.date === S.meta.today && new Date().toTimeString().slice(0, 5) < g.time)}</div>` : ""}
-    <div class="list">${j.rows.length ? j.rows.map((r) => g.is_makeup ? makeupRow(r) : journalRow(r, before)).join("") : `<div class="list-row muted">${g.is_makeup ? "На эту дату никто не записан на отработку" : "В группе пока нет учеников"}</div>`}</div>
+    <div class="list">${j.rows.length ? j.rows.map((r) => g.is_makeup && r.makeup_id ? makeupRow(r) : journalRow(r, before)).join("") : `<div class="list-row muted">${g.is_makeup ? "На эту дату никто не записан на отработку" : "В группе пока нет учеников"}</div>`}</div>
     ${(j.hidden_unpaid || []).length ? `<details class="small muted" style="margin-top:10px"><summary>Не оплатили: ${j.hidden_unpaid.length}. В журнал не попадают</summary>
       <div style="margin-top:6px">${j.hidden_unpaid.map((x) => `<span class="${isCoach() ? "" : "click"}" data-who="${x.id}" style="cursor:pointer">${esc(x.name)}</span>`).join(", ")}</div></details>` : ""}`;
   if (st) wireStaffPicker(page, "j", g.id, S.journal.date, render);
@@ -2202,7 +2202,7 @@ function ageYM(birth, on) {
 const jAge = (r) => r.birth ? ` <span class="small muted">· ${ageYM(r.birth, S.journal.date)}</span>` : "";
 
 function journalRow(r, before) {
-  if (r.status === "makeup") return makeupRow({ ...r, status: r.mk_status, home_group: "отработка" + (r.home_group ? ", из группы " + r.home_group : "") });
+  if (r.status === "makeup" || r.makeup_id) return makeupRow({ ...r, status: r.attendance_id ? r.status : r.mk_status, home_group: "отработка" + (r.home_group ? ", из группы " + r.home_group : "") });
   if (r.warned) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(r.name)}${jAge(r)} <span class="pill yellow">предупредил, не придёт</span>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ""}</div>
     <div class="mark">${before ? `<button data-unwarn="${r.id}">Отменить, придёт</button>` : `<button data-att="present" data-sid="${r.id}">Всё-таки был</button>`}</div></div>`;
   if (r.status === "vacation") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(r.name)}${jAge(r)}</div><span class="pill yellow">Отпуск</span></div>`;
@@ -2220,11 +2220,12 @@ function journalRow(r, before) {
 }
 
 function makeupRow(r) {
+  const mark=r.status==='present'?'done':r.status==='absent'?'missed':r.status;
   return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(r.name)}${jAge(r)} <span class="pill jt-makeup">отработка</span>
       <div class="small muted">${esc(r.home_group || "")} · за пропуск ${dShort(r.absence_date)}</div></div>
     <div class="mark">
-      <button data-mk="${r.makeup_id}" data-st="done" class="${r.status === "done" ? "on-present" : ""}">Пришёл</button>
-      <button data-mk="${r.makeup_id}" data-st="missed" class="${r.status === "missed" ? "on-absent" : ""}">Не пришёл</button>
+      <button data-mk="${r.makeup_id}" data-st="done" class="${mark === "done" ? "on-present" : ""}">Пришёл</button>
+      <button data-mk="${r.makeup_id}" data-st="missed" class="${mark === "missed" ? "on-absent" : ""}">Не пришёл</button>
     </div></div>`;
 }
 

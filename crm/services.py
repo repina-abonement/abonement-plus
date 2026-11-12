@@ -1092,16 +1092,44 @@ def journal(con, group_id: int, day: str, paid_only: bool = False) -> dict:
                                 AND substr(trial_at,1,10)=?""", (group_id, day)):
             came = con.execute("SELECT trial_came FROM students WHERE id=?", (s["id"],)).fetchone()[0]
             rows.append({"id": s["id"], "name": s["name"], "birth": s["birth"] or "", "status": "trial", "trial_at": s["trial_at"], "trial_came": came})
+    # Факт посещения принадлежит группе и дате, а не её сегодняшнему составу.
+    marks = {a["student_id"]: dict(a) for a in con.execute(
+        """SELECT a.*,s.name,s.birth FROM attendance a JOIN students s ON s.id=a.student_id
+           WHERE a.group_id=? AND a.date=? ORDER BY s.name,a.id""", (group_id,day))}
+    makeup_rows = {r["id"]:r for r in rows if r.get("makeup_id")}
+    marked_rows, seen_marks = [], set()
+    for row in rows:
+        mark = marks.get(row["id"])
+        if mark:
+            if row["id"] in seen_marks:
+                continue
+            seen_marks.add(row["id"])
+            row = row | makeup_rows.get(row["id"], {}) | {"status": mark["status"], "resolved": mark["resolved"], "warned": bool(mark["warned"]),
+                         "note": mark["note"], "attendance_id": mark["id"], "group_id": group_id, "date": day}
+        marked_rows.append(row)
+    for sid, mark in marks.items():
+        if sid in seen_marks:
+            continue
+        paid = paid_for_month(con,sid,day[:7])
+        marked_rows.append({"id":sid,"name":mark["name"],"birth":mark["birth"] or "", "unpaid":not paid,
+                            "tag":"paid" if paid else "unpaid", "status":mark["status"],"resolved":mark["resolved"],
+                            "warned":bool(mark["warned"]),"note":mark["note"],"attendance_id":mark["id"],
+                            "group_id":group_id,"date":day})
+    rows = marked_rows
+    hidden = [r for r in hidden if r["id"] not in marks]
     return {"group": dict(g), "date": day, "has_lesson": has_lesson, "closed": closed, "rows": rows, "hidden_unpaid": hidden}
 
 
 def journal_month(con, group_id: int, ym: str) -> dict:
     """Журнал группы за месяц (Юлия, 04.11): сколько детей в каждую дату и сколько в группе на обычном абонементе."""
     start, end = logic.month_bounds(ym)
+    marked_dates = {r[0] for r in con.execute(
+        "SELECT DISTINCT date FROM attendance WHERE group_id=? AND date BETWEEN ? AND ?",
+        (group_id,start.isoformat(),end.isoformat()))}
     days, d = [], start
     while d <= end:
         j = journal(con, group_id, d.isoformat(), paid_only=True)
-        if j["has_lesson"] or j["closed"]:
+        if j["has_lesson"] or j["closed"] or d.isoformat() in marked_dates:
             rows = j["rows"]
             kids = [r for r in rows if r.get("status") not in ("trial", "makeup") and "makeup_id" not in r]
             come = [r for r in kids if r.get("status") != "vacation" and not r.get("warned")]
@@ -1111,7 +1139,7 @@ def journal_month(con, group_id: int, ym: str) -> dict:
                          "vacation": sum(r.get("status") == "vacation" for r in kids),
                          "trials": sum(r.get("status") == "trial" for r in rows),
                          "trials_came": sum(r.get("status") == "trial" and r.get("trial_came") == 1 for r in rows),
-                         "makeups": sum(r.get("status") == "makeup" or ("makeup_id" in r and "mk_status" not in r) for r in rows)})
+                         "makeups": sum(r.get("status") == "makeup" or "makeup_id" in r for r in rows)})
         d += timedelta(days=1)
     # кто в группе в этом месяце и на чём занимается
     kids = con.execute("""SELECT DISTINCT s.id FROM enrollments e JOIN students s ON s.id=e.student_id
