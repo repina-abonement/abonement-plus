@@ -1114,7 +1114,7 @@ def journal(con, group_id: int, day: str, paid_only: bool = False) -> dict:
         marked_rows.append({"id":sid,"name":mark["name"],"birth":mark["birth"] or "", "unpaid":not paid,
                             "tag":"paid" if paid else "unpaid", "status":mark["status"],"resolved":mark["resolved"],
                             "warned":bool(mark["warned"]),"note":mark["note"],"attendance_id":mark["id"],
-                            "group_id":group_id,"date":day})
+                            "group_id":group_id,"date":day,"historical_attendance":True})
     rows = marked_rows
     hidden = [r for r in hidden if r["id"] not in marks]
     return {"group": dict(g), "date": day, "has_lesson": has_lesson, "closed": closed, "rows": rows, "hidden_unpaid": hidden}
@@ -1126,11 +1126,15 @@ def journal_month(con, group_id: int, ym: str) -> dict:
     marked_dates = {r[0] for r in con.execute(
         "SELECT DISTINCT date FROM attendance WHERE group_id=? AND date BETWEEN ? AND ?",
         (group_id,start.isoformat(),end.isoformat()))}
-    days, d = [], start
+    days, attendance, d = [], [], start
     while d <= end:
         j = journal(con, group_id, d.isoformat(), paid_only=True)
         if j["has_lesson"] or j["closed"] or d.isoformat() in marked_dates:
             rows = j["rows"]
+            attendance.extend({"attendance_id":r["attendance_id"],"student_id":r["id"],"name":r["name"],
+                               "group_id":group_id,"date":d.isoformat(),"status":r["status"],
+                               "historical_attendance":bool(r.get("historical_attendance"))}
+                              for r in rows if r.get("attendance_id"))
             kids = [r for r in rows if r.get("status") not in ("trial", "makeup") and "makeup_id" not in r]
             come = [r for r in kids if r.get("status") != "vacation" and not r.get("warned")]
             days.append({"date": d.isoformat(), "closed": j["closed"], "list": len(come),
@@ -1157,7 +1161,7 @@ def journal_month(con, group_id: int, ym: str) -> dict:
             subs["single"] += 1
         else:
             subs["none"] += 1
-    return {"month": ym, "days": days, "kids": len(kids), "subs": subs}
+    return {"month": ym, "days": days, "kids": len(kids), "subs": subs, "attendance": attendance}
 
 
 def clear_trial_mark(con, sid: int, user) -> None:

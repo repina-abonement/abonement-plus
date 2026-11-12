@@ -71,6 +71,9 @@ def historical_marks(con, user, branch):
                 assert row['group_id']==group and row['date']==d['date']
                 assert row['note']=='Из ERP'
                 actual.append((row['id'],d['date'],row['status']))
+    assert {(r['student_id'],r['date'],r['status']) for r in month['attendance']}==expected
+    assert len(month['attendance'])==43
+    assert sum(r['historical_attendance'] for r in month['attendance'])==8
     assert len(actual)==43 and len(actual)==len(set(actual)) and set(actual)==expected,(len(actual),expected-set(actual))
     assert sum(d['present']+d['absent'] for d in month['days'])==43
     assert con.total_changes==before,'Чтение журнала изменило данные'
