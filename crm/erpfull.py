@@ -494,8 +494,8 @@ def _process(con, files, now):
             native = list(con.execute("SELECT * FROM subscriptions WHERE id=? AND student_id=? AND month=? AND enrollment_id IS NULL AND status!='cancelled'", (-gid,sid,ym)))
         count_review = any(ei._norm(r.get('reviewed_lessons','')) == 'да' for _,_,r,_ in rows)
         if count_review and not reason:
-            if ym != '2026-10' or len(native) != 1 or len(rows) != 1:
-                reason = 'Сверка количества требует одной существующей записи октября 2026'
+            if ym not in ('2026-10', '2026-11') or len(native) != 1 or len(rows) != 1:
+                reason = 'Сверка количества требует одной существующей записи октября или ноября 2026'
             else:
                 fid,index,rec,_ = rows[0]
                 old_sub = dict(native[0])
@@ -513,7 +513,7 @@ def _process(con, files, now):
                         after_sub = dict(con.execute('SELECT * FROM subscriptions WHERE id=?',(old_sub['id'],)).fetchone())
                         con.execute('INSERT INTO erp_full_subscription_corrections(subscription_id,before_json,after_json,file_id,row_num,corrected_at) VALUES (?,?,?,?,?,?)',
                                     (old_sub['id'],_json(old_sub),_json(after_sub),fid,index,now))
-                        _history(con,sid,now,f"Сверка ERP, октябрь 2026: количество занятий {old_sub['lessons']} -> {lessons}. Сумма, статус, дата оплаты и платежи сохранены.",'erp_subscription_reconciliation')
+                        _history(con,sid,now,f"Сверка ERP, {ym}: количество занятий {old_sub['lessons']} -> {lessons}. Сумма, статус, дата оплаты и платежи сохранены.",'erp_subscription_reconciliation')
                         native = [after_sub]
                         counts['updated_subscription_lessons'] += 1
         if not reason and len(native) == 1 and len(rows) == 1 and ei._norm(rows[0][2].get('reviewed_sub','')) == 'да':
