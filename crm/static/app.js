@@ -2306,6 +2306,10 @@ const jAge = (r) => r.birth ? ` <span class="small muted">· ${ageYM(r.birth, S.
 
 function journalRow(r, before) {
   if (r.status === "makeup" || r.makeup_id) return makeupRow({ ...r, status: r.attendance_id ? r.status : r.mk_status, home_group: "отработка" + (r.home_group ? ", из группы " + r.home_group : "") });
+  if (r.erp_visit_kind) {
+    const kind = r.erp_visit_kind === "makeup" ? "Отработка" : "Разовое занятие";
+    return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(r.name)}${jAge(r)} <span class="pill">${kind}</span></div><span>${r.status === "present" ? "Был" : "Пропуск"}</span></div>`;
+  }
   if (r.warned) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(r.name)}${jAge(r)} <span class="pill yellow">предупредил, не придёт</span>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ""}</div>
     <div class="mark">${before ? `<button data-unwarn="${r.id}">Отменить, придёт</button>` : `<button data-att="present" data-sid="${r.id}">Всё-таки был</button>`}</div></div>`;
   if (r.status === "vacation") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(r.name)}${jAge(r)}</div><span class="pill yellow">Отпуск</span></div>`;

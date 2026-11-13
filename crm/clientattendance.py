@@ -38,7 +38,9 @@ def calendar(con, sid, ym):
                 add(day,component['group_id'],'subscription')
     for (day,gid),a in marks.items():
         g=groups.get(gid,{})
-        kind='makeup' if (day,gid) in mk or g.get('is_makeup') else 'single' if (day,gid) in singles else 'subscription'
+        kind='makeup' if (day,gid) in mk or g.get('is_makeup') else 'single' if (day,gid) in singles else a['erp_visit_kind'] or 'subscription'
+        if kind != 'subscription':
+            events.pop((day,gid,'subscription'),None)
         add(day,gid,kind,'warned' if a['warned'] and day>sv.today().isoformat() else a['status'],attendance_id=a['id'],warned=bool(a['warned']),note=a['note'] or '',resolved=a['resolved'])
     for m in makeups:
         a=marks.get((m['date'],m['group_id']))

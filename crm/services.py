@@ -1134,7 +1134,7 @@ def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpai
                 continue
             seen_marks.add(row["id"])
             row = row | makeup_rows.get(row["id"], {}) | {"status": mark["status"], "resolved": mark["resolved"], "warned": bool(mark["warned"]),
-                         "note": mark["note"], "attendance_id": mark["id"], "group_id": group_id, "date": day}
+                         "note": mark["note"], "attendance_id": mark["id"], "erp_visit_kind": mark["erp_visit_kind"], "group_id": group_id, "date": day}
         marked_rows.append(row)
     for sid, mark in marks.items():
         if sid in seen_marks:
@@ -1142,7 +1142,7 @@ def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpai
         paid = paid_for_month(con,sid,day[:7])
         marked_rows.append({"id":sid,"name":mark["name"],"birth":mark["birth"] or "", "unpaid":not paid,
                             "tag":"paid" if paid else "unpaid", "status":mark["status"],"resolved":mark["resolved"],
-                            "warned":bool(mark["warned"]),"note":mark["note"],"attendance_id":mark["id"],
+                            "warned":bool(mark["warned"]),"note":mark["note"],"attendance_id":mark["id"],"erp_visit_kind":mark["erp_visit_kind"],
                             "group_id":group_id,"date":day,"historical_attendance":True})
     historical_trials = con.execute("""SELECT v.id AS historical_trial_id,s.id,s.name,s.birth,v.visit_at AS trial_at,
                                       v.came AS trial_came FROM erp_trial_visits v JOIN students s ON s.id=v.student_id
@@ -1182,7 +1182,7 @@ def journal_month(con, group_id: int, ym: str) -> dict:
                                "group_id":group_id,"date":d.isoformat(),"status":r["status"],
                                "historical_attendance":bool(r.get("historical_attendance"))}
                               for r in rows if r.get("attendance_id"))
-            kids = [r for r in rows if r.get("status") not in ("trial", "makeup") and "makeup_id" not in r]
+            kids = [r for r in rows if r.get("status") not in ("trial", "makeup") and "makeup_id" not in r and r.get("erp_visit_kind") != "makeup"]
             come = [r for r in kids if r.get("status") != "vacation" and not r.get("warned")]
             days.append({"date": d.isoformat(), "closed": j["closed"], "list": len(come),
                          "present": sum(r.get("status") == "present" for r in kids),
@@ -1190,7 +1190,7 @@ def journal_month(con, group_id: int, ym: str) -> dict:
                          "vacation": sum(r.get("status") == "vacation" for r in kids),
                          "trials": sum(r.get("status") == "trial" for r in rows),
                          "trials_came": sum(r.get("status") == "trial" and r.get("trial_came") == 1 for r in rows),
-                         "makeups": sum(r.get("status") == "makeup" or "makeup_id" in r for r in rows)})
+                         "makeups": sum(r.get("status") == "makeup" or "makeup_id" in r or r.get("erp_visit_kind") == "makeup" for r in rows)})
         d += timedelta(days=1)
     # кто в группе в этом месяце и на чём занимается
     kids = con.execute("""SELECT DISTINCT s.id FROM enrollments e JOIN students s ON s.id=e.student_id

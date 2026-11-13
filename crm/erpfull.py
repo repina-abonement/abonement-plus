@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS erp_full_runs (
 
 def init(con):
     con.executescript(SCHEMA)
+    if 'erp_visit_kind' not in {r[1] for r in con.execute('PRAGMA table_info(attendance)')}:
+        con.execute("ALTER TABLE attendance ADD COLUMN erp_visit_kind TEXT NOT NULL DEFAULT ''")
     cols = {r[1] for r in con.execute('PRAGMA table_info(subscriptions)')}
     if 'erp_full_managed' not in cols:
         con.execute('ALTER TABLE subscriptions ADD COLUMN erp_full_managed INTEGER NOT NULL DEFAULT 0')
@@ -412,7 +414,17 @@ def _process(con, files, now):
                                 (sid, gid, d[:10], status, r.get('comment', ''))).lastrowid
                             if not a:
                                 counts['added_visits'] += 1
-                            state, tbl = 'native', 'attendance'
+                            kind = ei.sub_kind(r.get('visit_type', ''))
+                            if kind in ('single', 'makeup'):
+                                previous_kind = a['erp_visit_kind'] if a else ''
+                                if previous_kind and previous_kind != kind:
+                                    reason = 'Вид занятия ERP расходится с ранее сохранённым видом'
+                                    target = None
+                                elif previous_kind != kind:
+                                    con.execute('UPDATE attendance SET erp_visit_kind=? WHERE id=?', (kind, target))
+                                    counts['updated_visit_kinds'] += 1
+                            if target is not None:
+                                state, tbl = 'native', 'attendance'
                 elif f['kind'] == 'payments':
                     d = _date(r.get('date', '')) or _date(r.get('date_alt', ''))
                     amount, op = _money(r.get('amount', '')), r.get('operation_id', '').strip()
