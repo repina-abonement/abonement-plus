@@ -1756,9 +1756,7 @@ async function openStudent(id, options = {}) {
   const makeupGroups = S.meta.groups.filter((x) => x.is_makeup);
   const isMember = s.funnel === "members";
 
-  const stageOpts = isMember
-    ? [["active", "Занимается"], ["left", "Ушёл"]]
-    : S.meta.sales_stages.filter((x) => !x.auto).map((x) => [x.key, x.title]);
+
 
   const regular = d.enrollments.filter((e) => e.lesson_kind !== "ofp");
   const full = can("members", "full");
@@ -1781,7 +1779,7 @@ async function openStudent(id, options = {}) {
   const html = `
   <div class="sc-head">
     <div class="sc-title"><h2>${full?`<button type="button" class="profile-text-edit" data-profile-edit="name" title="Изменить имя">${esc(displayChildName(s.name))}</button>`:esc(displayChildName(s.name))}</h2></div>
-    <div class="sc-status" ${full?'data-profile-open tabindex="0" role="button" title="Изменить дату рождения или статус"':''}>${s.birth?esc(ageText(s.birth))+' · ':''}${esc(s.erp_status||'Статус ERP не перенесён')}${s.archived?' · в архиве':''}${d.lead_score?` · ${esc(d.lead_score.label)}`:''}</div>
+    <div class="sc-status" ${full?'data-profile-open tabindex="0" role="button" title="Изменить данные клиента"':''}>${s.birth?esc(ageText(s.birth))+' · ':''}${esc((s.erp_status||'').trim()||'Статус ERP не перенесён')}${s.archived?' · в архиве':''}${d.lead_score?` · ${esc(d.lead_score.label)}`:''}</div>
     ${d.siblings.length ? `<div class="chips sc-kids"><span class="chip on">${esc(displayChildName(s.name))}</span>${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join("")}</div>` : ""}
     <div class="sc-meta" ${full?'data-head-group tabindex="0" role="button" title="Изменить группу"':''}>${isMember ? (regular.length ? regular.map((e) => `<span class="pill">${esc(e.group_name)}</span>`).join(" ") : `<span class="muted small">Группа не выбрана</span>`)
       : `${s.trial_at ? `<span class="pill">Пробное ${dtShort(s.trial_at)}</span>` : ""}`}</div>
@@ -1808,9 +1806,8 @@ async function openStudent(id, options = {}) {
   <div class="sc-grid" data-tab="feed"><div class="sc-left"></div><div class="sc-right"><div id="sell-box"></div></div><div class="sc-info"></div><div class="sc-attendance"></div></div>
 
   <div class="section" data-sc="stage">
-    ${s.erp_status ? `<p class="small muted">Статус при переносе из ERP: ${esc(s.erp_status)}</p>` : ""}
     <div class="row">
-      <div class="field"><label>Внутренний этап CRM</label><select id="f-stage">${stageOpts.map(([k, t]) => `<option value="${k}" ${k === s.stage ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
+      <div class="field"><label>Статус ERP</label><input readonly value="${esc((s.erp_status||'').trim()||'Статус ERP не перенесён')}"></div>
       ${!isMember ? `<div class="field"><label>Тариф</label><select id="f-tariff"><option value="fixed" ${s.tariff === "fixed" ? "selected" : ""}>Негибкий</option><option value="flex" ${s.tariff === "flex" ? "selected" : ""}>Гибкий</option></select></div>` : ""}
     </div>
     ${!isMember ? `<div class="field"><label>Филиал</label><select id="f-branch"><option value="">— не выбран —</option>${S.meta.branches.filter((b) => b.active).map((b) => `<option value="${b.id}" ${b.id === s.branch_id ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : ""}
@@ -1873,12 +1870,6 @@ async function openStudent(id, options = {}) {
   });
   const patch = async (data) => { try { await api("PATCH", `/api/students/${id}`, data); reload(); } catch (e) { fail(e); } };
 
-  $("#f-stage").onchange = async (e) => {
-    if (s.funnel === "sales" && e.target.value === "refused") return askRefusal(id, reload);
-    if (s.funnel === "sales" && e.target.value === "reinvite_pu") return askReinvite(id, reload);
-    if (s.funnel === "members" && e.target.value === "left") return askLeftReason(id, reload);
-    try { await api("POST", `/api/students/${id}/move`, { funnel: s.funnel, stage: e.target.value }); reload(); } catch (err) { fail(err); }
-  };
   if ($("#f-tariff")) $("#f-tariff").onchange = (e) => patch({ tariff: e.target.value });
   if ($("#f-branch")) $("#f-branch").onchange = (e) => patch({ branch_id: e.target.value ? +e.target.value : "" });
   if ($("#f-group")) $("#f-group").onchange = (e) => patch({ group_id: e.target.value ? +e.target.value : "" });
@@ -2388,30 +2379,26 @@ function wireCardMark(sid, reload) {
 }
 
 /* ---------- поиск ---------- */
-/* «Клиенты и лиды» (Юлия, 04.11): один раздел. Лид: ни одной покупки. У клиентов фильтр по статусам карточки и ERP */
+/* «Клиенты и лиды»: исходный статус ERP; внутренние этапы не подменяют его. */
 S.pf = S.pf || { kind: "all", status: "", erp: "" };
 async function renderSearch(page) {
   const f = S.pf;
-  const d = await api("GET", `/api/people?kind=${f.kind}&status=${encodeURIComponent(f.status)}&erp=${encodeURIComponent(f.erp)}&q=${encodeURIComponent(S.search)}${S.searchArch ? "&archived=1" : ""}`);
+  const d = await api("GET", `/api/people?kind=${f.kind}&erp=${encodeURIComponent(f.erp)}&q=${encodeURIComponent(S.search)}${S.searchArch ? "&archived=1" : ""}`);
   const kinds = [["all", "Все", d.counts.leads + d.counts.clients], ["leads", "Лиды", d.counts.leads], ["clients", "Клиенты", d.counts.clients]];
-  const sts = f.kind === "leads" ? d.statuses.leads : f.kind === "clients" ? d.statuses.clients : [];
-  const pillCls = { active: "green", single: "", unpaid: "red", left: "", promo: "yellow" };
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Клиенты и лиды</h2>
       <input class="search" id="q" placeholder="Имя, фамилия или телефон" value="${esc(S.search)}">
       <button class="btn sm ${S.searchArch ? "primary" : ""}" id="q-arch">Архив</button></div>
     <div class="seg" style="margin-bottom:10px">${kinds.map(([k, t, n]) => `<button data-pk="${k}" class="${f.kind === k ? "active" : ""}">${t} <b>${n}</b></button>`).join("")}</div>
-    ${sts.length ? `<div class="chips" style="margin-bottom:10px"><button class="chip ${f.status ? "" : "on"}" data-ps="">Все статусы</button>${sts.filter(([k]) => d.counts[k] || f.status === k).map(([k, t]) => `<button class="chip ${f.status === k ? "on" : ""}" data-ps="${k}">${esc(t)} <span class="muted">${d.counts[k] || 0}</span></button>`).join("")}</div>` : ""}
-    ${d.erp.length ? `<div class="row" style="max-width:420px;margin-bottom:10px"><div class="field"><label>Статус в ERP</label><select id="p-erp"><option value="">Любой</option>${d.erp.map(([e, n]) => `<option value="${esc(e)}" ${f.erp === e ? "selected" : ""}>${esc(e)} (${n})</option>`).join("")}</select></div></div>` : ""}
+    ${d.erp.length ? `<div class="row" style="max-width:420px;margin-bottom:10px"><div class="field"><label>Статус ERP</label><select id="p-erp"><option value="">Все статусы</option>${d.erp.map(([e, n]) => `<option value="${esc(e)}" ${f.erp === e ? "selected" : ""}>${esc(e==='__erp_missing__'?'Статус ERP не перенесён':e)} (${n})</option>`).join("")}</select></div></div>` : ""}
     <div class="small muted" style="margin-bottom:6px">Найдено: ${d.total}${d.total > d.limit ? `, показаны первые ${d.limit}. Уточните поиск или фильтр` : ""}</div>
     <div id="results" class="list">${d.rows.length ? d.rows.map((r) => `
       <div class="list-row click" data-who="${r.id}"><div class="grow"><b>${esc(displayChildName(r.name))}</b>
-        <div class="small muted">${esc([r.parent, r.phone, r.group].filter(Boolean).join(" · "))}${r.erp_status ? ` · ERP: ${esc(r.erp_status)}` : ""}</div></div>
-        <span class="pill ${r.status.startsWith("lead:") ? "" : pillCls[r.status] || ""}">${r.status.startsWith("lead:") ? "Лид: " : ""}${esc(r.status_label)}</span></div>`).join("")
+        <div class="small muted">${esc([r.parent, r.phone, r.group].filter(Boolean).join(" · "))}</div></div>
+        <span class="small muted">${esc(r.status_label)}</span></div>`).join("")
       : `<div class="list-row muted">Никого не нашли</div>`}</div>`;
   page.querySelectorAll("[data-who]").forEach((el) => (el.onclick = () => openStudent(+el.dataset.who)));
   page.querySelectorAll("[data-pk]").forEach((b) => (b.onclick = () => { f.kind = b.dataset.pk; f.status = ""; render(); }));
-  page.querySelectorAll("[data-ps]").forEach((b) => (b.onclick = () => { f.status = b.dataset.ps; render(); }));
   if ($("#p-erp")) $("#p-erp").onchange = (e) => { f.erp = e.target.value; render(); };
   let t; $("#q").oninput = (e) => { S.search = e.target.value; clearTimeout(t); t = setTimeout(async () => { await render(); const q = $("#q"); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }, 350); };
   $("#q-arch").onclick = () => { S.searchArch = !S.searchArch; render(); };

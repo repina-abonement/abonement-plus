@@ -25,13 +25,20 @@ def main():
     con.execute("UPDATE students SET erp_status='Постоянный посетитель' WHERE id=?", (act,))
     d = people.listing(con)
     check(d["counts"]["leads"] == 1 and d["counts"]["clients"] == 3, "Лид: ни одной покупки; клиенты: была оплата")
-    st = {r["id"]: r["status"] for r in d["rows"]}
-    check(st[act] == "active" and st[unp] == "unpaid" and st[gone] == "promo" and st[lead] == "lead:lead",
-          "Статусы: занимается, не оплачен месяц, ждут акцию, лид «Новый лид»")
-    check([r["id"] for r in people.listing(con, "clients", "unpaid")["rows"]] == [unp], "Фильтр клиентов по статусу")
+    st = {r["id"]: r["status_label"] for r in d["rows"]}
+    check(st[act] == "Постоянный посетитель" and all(st[sid] == people.ERP_MISSING_LABEL for sid in (unp,gone,lead)),
+          "Только статусы ERP; нет подстановки внутренних этапов и оплаты")
+    check([r["id"] for r in people.listing(con, "clients", "Постоянный посетитель")["rows"]] == [act], "Фильтр клиентов по статусу ERP")
+    check({r["id"] for r in people.listing(con, "clients", people.ERP_MISSING)["rows"]} == {unp,gone}, "Фильтр отсутствующего статуса ERP")
+    check(people.listing(con, "clients", "unpaid")["total"] == 0, "Внутренний статус больше не является фильтром")
+    con.execute("UPDATE students SET erp_status='  Пробное занятие  ' WHERE id=?",(lead,))
+    check(people.listing(con, "leads", "Пробное занятие")["rows"][0]['status_label']=='Пробное занятие', "Статус ERP лида без лишних пробелов")
     check([r["id"] for r in people.listing(con, "leads")["rows"]] == [lead], "Только лиды")
     check([r["id"] for r in people.listing(con, "clients", "", "Постоянный посетитель")["rows"]] == [act], "Фильтр по статусу ERP")
     check([r["id"] for r in people.listing(con, "all", "", "", "500-00-03")["rows"]] == [unp], "Поиск по телефону")
+    con.execute("UPDATE students SET archived=1 WHERE id=?",(gone,))
+    check(not any(r['id']==gone for r in people.listing(con)['rows']), "Архив скрыт по умолчанию")
+    check(people.listing(con,erp=people.ERP_MISSING,archived=True)['rows'][0]['id']==gone, "Архив и фильтр ERP совместимы")
     print("ok")
 
 

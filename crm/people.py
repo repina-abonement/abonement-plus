@@ -1,11 +1,13 @@
 """Раздел «Клиенты и лиды» (Юлия, 04.11): один список всех карточек.
 Лид: ни одной покупки (ни одного оплаченного абонемента или разового). Клиент: была хоть одна оплата.
-Фильтры: Лиды / Клиенты, статус карточки, статус из ERP, поиск по имени и телефону.
+Фильтры: Лиды / Клиенты, только исходный статус ERP, поиск по имени и телефону.
 """
 from __future__ import annotations
 
 CLIENT_STATUSES = [("active", "Занимается"), ("single", "Разовые занятия"), ("unpaid", "Не оплачен месяц"),
                    ("left", "Ушёл, бывший клиент"), ("promo", "Ждут акцию")]
+ERP_MISSING = "__erp_missing__"
+ERP_MISSING_LABEL = "Статус ERP не перенесён"
 LIMIT = 300
 
 
@@ -47,25 +49,25 @@ def listing(con, kind: str = "all", status: str = "", erp: str = "", q: str = ""
 
     items, counts, erp_counts = [], {"leads": 0, "clients": 0}, {}
     for r in rows:
-        key, label = status_of(r)
-        is_lead = key.startswith("lead:")
+        internal_key, _ = status_of(r)
+        is_lead = internal_key.startswith("lead:")
         counts["leads" if is_lead else "clients"] += 1
         if (kind == "leads" and not is_lead) or (kind == "clients" and is_lead):
             continue
-        counts[key] = counts.get(key, 0) + 1
         e = (r["erp_status"] or "").strip()
-        if e:
-            erp_counts[e] = erp_counts.get(e, 0) + 1
+        key,label = (e,e) if e else (ERP_MISSING,ERP_MISSING_LABEL)
+        counts[key] = counts.get(key, 0) + 1
+        erp_counts[key] = erp_counts.get(key, 0) + 1
         if status and key != status:
             continue
-        if erp and e != erp:
+        if erp and key != erp:
             continue
         items.append((r, key, label))
     out = []
     for r, key, label in items[:LIMIT]:
         s = dict(con.execute("SELECT * FROM students WHERE id=?", (r["id"],)).fetchone())
         out.append(sv.card_summary(con, s, st) | {"funnel": r["funnel"], "status": key, "status_label": label, "erp_status": r["erp_status"] or ""})
-    lead_statuses = [("lead:" + k, t) for k, t in sv.SALES_STAGES if k != "bought"]
+    erp_statuses = [(key,ERP_MISSING_LABEL if key==ERP_MISSING else key) for key in erp_counts]
     return {"rows": out, "total": len(items), "limit": LIMIT, "counts": counts,
-            "statuses": {"clients": CLIENT_STATUSES, "leads": lead_statuses},
+            "statuses": {"clients": erp_statuses, "leads": erp_statuses},
             "erp": sorted(erp_counts.items(), key=lambda x: -x[1])}
