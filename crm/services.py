@@ -81,12 +81,12 @@ def absence_counters(con, sid: int, ref: date | None = None) -> dict:
     prev = logic.shift_month(cur, -1)
     w_start, w_end = logic.makeup_window(ref)
     rows = _rows(con.execute(
-        """SELECT a.id, a.date, a.group_id, a.resolved, a.cert,
+        """SELECT a.id, a.date, a.group_id, a.resolved, a.cert, a.warned,
                   (SELECT m.id FROM makeups m WHERE m.absence_id = a.id AND m.status = 'booked') AS booked_id
            FROM attendance a WHERE a.student_id = ? AND a.status = 'absent' AND a.date BETWEEN ? AND ?
            ORDER BY a.date""", (sid, w_start.isoformat(), w_end.isoformat())))
     c = {"absent_cur": 0, "absent_prev": 0, "made_up": 0, "credited": 0, "booked": 0, "available": 0,
-         "available_ids": [], "month_cur": cur, "month_prev": prev}
+         "available_ids": [], "available_cur":0,"available_prev":0,"available_future":0,"month_cur": cur, "month_prev": prev}
     from . import subscriptiondates
     for r in rows:
         if subscriptiondates.excluded(con, sid, r["group_id"], r["date"]):
@@ -100,6 +100,8 @@ def absence_counters(con, sid: int, ref: date | None = None) -> dict:
             c["booked"] += 1
         else:
             c["available"] += 1
+            c["available_cur" if r["date"].startswith(cur) else "available_prev"] += 1
+            if r["date"]>ref.isoformat():c["available_future"] += 1
             c["available_ids"].append({"id": r["id"], "date": r["date"], "cert": r["cert"]})
     return c
 

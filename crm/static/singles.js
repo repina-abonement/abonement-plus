@@ -63,7 +63,7 @@ function singleTaskDialog(t, done) {
   const y = +S.meta.today.slice(0, 4);
   const intake = [`${y}-01-05`, `${y}-08-01`, `${y + 1}-01-05`, `${y + 1}-08-01`].find((d) => d > S.meta.today);
   openDrawer(`<h2>1️⃣ ${esc(t.title)}</h2>
-    <div class="small muted">${esc((t.student && t.student.name) || "")}${t.student && t.student.phone ? ", " + esc(t.student.phone) : ""}</div>
+    <div class="small muted">${esc(displayChildName((t.student && t.student.name) || ""))}${t.student && t.student.phone ? ", " + esc(t.student.phone) : ""}</div>
     ${remind && t.note ? `<div class="section"><div class="small"><b>Текст для родителя</b> (ссылку на оплату создайте в карточке: «💳 Ссылка на оплату»)</div>
       <textarea id="sd-msg" rows="6" style="width:100%;margin-top:6px">${esc(t.note)}</textarea>
       <div class="row" style="gap:8px;margin-top:6px"><button class="btn sm" id="sd-copy" style="flex:0 0 auto">📋 Скопировать текст</button>

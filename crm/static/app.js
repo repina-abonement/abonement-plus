@@ -51,7 +51,8 @@ function askRequired(need) {
       <button type="button" class="btn ghost" data-nask style="width:100%;margin-top:8px">💬 Данных нет: попросить у родителя</button></form>`;
     document.body.appendChild(wrap);
     const f = wrap.querySelector("form");
-    const first = f.querySelector(".need-miss input") || f.querySelector("input"); if (first) setTimeout(() => first.focus(), 50);
+    splitChildNameFields(f,"child_name",true);
+    const first = f.querySelector(".need-miss input:not([type=hidden])") || f.querySelector("input:not([type=hidden])"); if (first) setTimeout(() => first.focus(), 50);
     const done = (v) => { wrap.remove(); resolve(v); };
     wrap.querySelector("[data-ncancel]").onclick = () => done(false);
     // данных нет: готовим вежливый запрос родителю ровно о том, чего не хватает, и вставляем его в поле ответа
@@ -358,7 +359,7 @@ function wireNavSearch(nq) {
   let t, rows = [], cur = -1, historyMode = false, generation = 0;
   const close = () => { box.hidden = true; cur = -1; };
   const paint = () => {
-    box.innerHTML = (historyMode ? `<div class="nav-recent-head"><b>Недавно открывали</b>${rows.length ? `<button type="button" data-clear-recent>Очистить</button>` : ""}</div>` : "") + (rows.length ? rows.slice(0, 8).map((r, i) => `<button class="${i === cur ? "on" : ""}" data-nr="${r.id}"><b>${esc(r.name)}</b>
+    box.innerHTML = (historyMode ? `<div class="nav-recent-head"><b>Недавно открывали</b>${rows.length ? `<button type="button" data-clear-recent>Очистить</button>` : ""}</div>` : "") + (rows.length ? rows.slice(0, 8).map((r, i) => `<button class="${i === cur ? "on" : ""}" data-nr="${r.id}"><b>${esc(displayChildName(r.name))}</b>
       <small>${esc([r.parent, r.phone].filter(Boolean).join(" · "))}${r.funnel === "members" ? "" : " · лид"}</small></button>`).join("")
       + (rows.length > 8 ? `<button data-nall><small>Все результаты: ${rows.length} →</small></button>` : "")
       : `<div class="small" style="padding:8px 10px;opacity:.7">${historyMode ? "Здесь появятся последние карточки клиентов" : "Никого не нашли"}</div>`);
@@ -802,7 +803,7 @@ function renderMembersList(page, data) {
   const rows = base.filter((k) => (f.status ? k.status === f.status : k.status !== "left"));
   const pill = { single: "", unpaid_cur: "red", renew: "", invoiced: "", paid: "green", left: "" };
   const row = (k, g) => `<div class="m-row ${k.color === "red" ? "m-red" : k.color === "yellow" ? "m-yellow" : ""}" data-open="${k.id}" role="button" tabindex="0">
-    <span class="m-name"><b>${esc(k.name)}</b></span>
+    <span class="m-name"><b>${esc(displayChildName(k.name))}</b></span>
     <span class="small muted m-parent">${esc(k.parent)}${k.phone ? ", " + esc(k.phone) : ""}</span>
     ${g ? "" : `<span class="small m-group">${esc(k.groups.map((x) => x.branch + " · " + x.name).join(", ") || k.group)}</span>`}
     <span class="m-st"><span class="pill ${pill[k.status]}">${esc(k.badge || cols[k.status] || "")}</span></span></div>`;
@@ -1079,7 +1080,7 @@ async function membersDups(btn) {
 }
 function openDups(items) {
   const fam = (x) => `<div class="dup-fam"><b>${esc(x.name || "Семья")}</b>
-    <div class="small">${x.kids.map((k) => esc(k.name) + (k.birth ? ` (${dShort(k.birth)})` : "") + (k.funnel === "sales" ? " · лид" : "")).join(", ") || "детей нет"}</div>
+    <div class="small">${x.kids.map((k) => esc(displayChildName(k.name)) + (k.birth ? ` (${dShort(k.birth)})` : "") + (k.funnel === "sales" ? " · лид" : "")).join(", ") || "детей нет"}</div>
     <div class="small muted">${x.parents.map((p) => esc(p.name) + (p.phone ? " " + esc(p.phone) : "")).join(", ")}</div>
     <div class="small muted">оплат: ${x.payments}</div></div>`;
   openDrawer(`<h2>👯 Похоже на одну семью</h2>
@@ -1111,7 +1112,7 @@ async function membersArchive(page) {
   const draw = (q = "") => {
     const n = q.toLowerCase().replace(/\D/g, "") ? q.replace(/\D/g, "") : "";
     const rows = list.filter((x) => !q || (x.name + " " + x.family).toLowerCase().includes(q.toLowerCase()) || (n && (x.phone || "").replace(/\D/g, "").includes(n)));
-    $("#arch-rows").innerHTML = rows.length ? rows.map((x) => `<div class="arch-row"><button class="linkish grow" data-aopen="${x.id}"><b>${esc(x.name)}</b> <span class="muted small">${esc(x.family)}${x.funnel === "sales" ? " · лид" : ""}</span></button>
+    $("#arch-rows").innerHTML = rows.length ? rows.map((x) => `<div class="arch-row"><button class="linkish grow" data-aopen="${x.id}"><b>${esc(displayChildName(x.name))}</b> <span class="muted small">${esc(x.family)}${x.funnel === "sales" ? " · лид" : ""}</span></button>
       <button class="btn sm" data-aback="${x.id}">Вернуть</button></div>`).join("") : `<div class="small muted">${list.length ? "Никого не нашли" : "В архиве пусто"}</div>`;
     box.querySelectorAll("[data-aopen]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.aopen)));
     box.querySelectorAll("[data-aback]").forEach((b) => (b.onclick = async () => {
@@ -1287,7 +1288,7 @@ function cardHtml(k, draggable) {
   const meta2 = [k.group || (k.branch ? "📍 " + k.branch : ""), k.tariff === "flex" ? "гибкий" : (k.group ? "негибкий" : ""), k.siblings ? `братьев и сестёр: ${k.siblings}` : ""].filter(Boolean).join(" · ");
   return `<article class="card ${k.color || ""}" data-id="${k.id}" ${draggable ? 'draggable="true"' : ""}>
     ${k.color ? `<span class="ref-card ${k.color}" title="${k.color === "red" ? "Срочно" : "Пора связаться"}"></span>` : ""}
-    <div class="name">${esc(k.name)}</div>
+    <div class="name">${esc(displayChildName(k.name))}</div>
     <div class="meta">${esc(sub)}</div>
     ${meta2 ? `<div class="meta">${esc(meta2)}</div>` : ""}
     ${k.badge ? `<span class="badge">${esc(k.badge)}</span>` : ""}
@@ -1601,8 +1602,8 @@ async function openSell(d, reload) {
       const r=await invoice(order);if(!isCurrent())return;if(r.quote.total<=0){toast('Счёт уже оплачен с баланса');reload();return}
       const title=order.single?`Разовое занятие${order.date?' '+dShort(order.date):''}`:`Абонемент на ${monthLabel(order.month)}`;
       const previousLink=(st.links||[]).find(l=>l.status==='open'&&l.subscription_id===r.id&&l.amount===r.quote.total);
-      const l=previousLink||await api('POST',`/api/students/${id}/paylinks`,{amount:r.quote.total,purpose:`${title}: ${d.student.name}`,subscription_id:r.id,full_payment:true});if(!isCurrent())return;
-      const msg=`${title}\n${d.student.name}\n\n${order.group?'Группа: '+order.group+'\n':''}Тариф: ${order.tariffLabel}\n\nК оплате: ${rub(l.amount)}\n\nСсылка для оплаты:\n${l.url}`;
+      const l=previousLink||await api('POST',`/api/students/${id}/paylinks`,{amount:r.quote.total,purpose:`${title}: ${displayChildName(d.student.name)}`,subscription_id:r.id,full_payment:true});if(!isCurrent())return;
+      const msg=`${title}\n${displayChildName(d.student.name)}\n\n${order.group?'Группа: '+order.group+'\n':''}Тариф: ${order.tariffLabel}\n\nК оплате: ${rub(l.amount)}\n\nСсылка для оплаты:\n${l.url}`;
       $('#sl-res').innerHTML=`<label style="margin-top:14px">Сообщение родителю</label><textarea id="sl-msg" rows="9">${esc(msg)}</textarea><div class="sc-actions" style="margin-top:10px"><button class="btn primary" id="sl-send">Вставить в чат с семьёй</button><button class="btn" id="sl-copy">Скопировать</button><button class="btn" id="sl-done">Готово</button></div>`;
       resizeMessageInput($('#sl-msg'));
       $('#sl-copy').onclick=()=>copyTextWithNotice($('#sl-msg').value,'Текст скопирован');
@@ -1779,9 +1780,9 @@ async function openStudent(id, options = {}) {
   ].filter(Boolean).join("");
   const html = `
   <div class="sc-head">
-    <div class="sc-title"><h2>${full?`<button type="button" class="profile-text-edit" data-profile-edit="name" title="Изменить имя">${esc(s.name)}</button>`:esc(s.name)}</h2></div>
-    <div class="sc-status" ${full?'data-profile-open tabindex="0" role="button" title="Изменить дату рождения или статус"':''}>${s.birth?esc(ageText(s.birth))+' · ':''}${esc(d.stage_label)}${s.archived?' · в архиве':''}${d.lead_score?` · ${esc(d.lead_score.label)}`:''}</div>
-    ${d.siblings.length ? `<div class="chips sc-kids"><span class="chip on">${esc(s.name.split(" ")[0])}</span>${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}</div>` : ""}
+    <div class="sc-title"><h2>${full?`<button type="button" class="profile-text-edit" data-profile-edit="name" title="Изменить имя">${esc(displayChildName(s.name))}</button>`:esc(displayChildName(s.name))}</h2></div>
+    <div class="sc-status" ${full?'data-profile-open tabindex="0" role="button" title="Изменить дату рождения или статус"':''}>${s.birth?esc(ageText(s.birth))+' · ':''}${esc(s.erp_status||'Статус ERP не перенесён')}${s.archived?' · в архиве':''}${d.lead_score?` · ${esc(d.lead_score.label)}`:''}</div>
+    ${d.siblings.length ? `<div class="chips sc-kids"><span class="chip on">${esc(displayChildName(s.name))}</span>${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join("")}</div>` : ""}
     <div class="sc-meta" ${full?'data-head-group tabindex="0" role="button" title="Изменить группу"':''}>${isMember ? (regular.length ? regular.map((e) => `<span class="pill">${esc(e.group_name)}</span>`).join(" ") : `<span class="muted small">Группа не выбрана</span>`)
       : `${s.trial_at ? `<span class="pill">Пробное ${dtShort(s.trial_at)}</span>` : ""}`}</div>
     <div class="sc-parents">${d.parents.map((p) => `<div class="sc-parent"><button type="button" class="profile-text-edit" data-profile-edit="name">${esc(p.name)}</button>${p.is_primary?'<span class="small muted">основной</span>':''}<span class="muted" aria-hidden="true">·</span><button class="rel-chip ${p.relation?'':'empty'}" data-profile-edit="name" title="Изменить родство">${p.relation?esc(p.relation):'Указать родство'}</button>${p.phone?`<span class="muted" aria-hidden="true">·</span><button class="linkish" data-profile-edit="name" title="Изменить телефон">${esc(p.phone)}</button>`:''}${p.messenger?`<span class="muted">${esc(p.messenger)}</span>`:''}${p.email?`<button type="button" class="profile-text-edit muted sc-parent-email" data-profile-edit="name">${esc(p.email)}</button>`:''}</div>`).join('')}</div>
@@ -1795,7 +1796,7 @@ async function openStudent(id, options = {}) {
       ${full?`<button type="button" class="btn sc-tool primary" id="act-sell" title="Продать абонемент или разовое занятие" aria-label="Продать абонемент или разовое занятие"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l3 12h11l2-8H6M9 20h.01M18 20h.01"/></svg></button>`:''}
       ${!isMember?'<button type="button" class="btn sc-tool" id="act-trial" title="Записать на пробное" aria-label="Записать на пробное">ПУ</button>':''}
       ${d.parents.some(p=>p.phone)?'<button type="button" class="btn sc-tool" id="act-call" title="Позвонить основному родителю" aria-label="Позвонить основному родителю"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3 4 5c-2 3 7 14 12 15l4-3-4-4-3 2-4-4 2-3Z"/></svg></button>':''}
-      ${full?'<button type="button" class="btn sc-tool" data-profile-edit="name" title="Изменить данные клиента" aria-label="Изменить данные клиента"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16 12-12 4 4L8 20H4Zm10-10 4 4"/></svg></button><button type="button" class="btn sc-tool" data-profile-add-parent title="Добавить родителя" aria-label="Добавить родителя"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7" r="3"/><path d="M3 20v-3c0-5 12-5 12 0v3M19 7v8M15 11h8"/></svg></button>':''}
+      ${full?'<button type="button" class="btn sc-tool" data-profile-edit="name" title="Изменить данные клиента" aria-label="Изменить данные клиента"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16 12-12 4 4L8 20H4Zm10-10 4 4"/></svg></button><button type="button" class="btn sc-tool" data-client-add title="Добавить члена семьи" aria-label="Добавить родителя или ребёнка"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7" r="3"/><path d="M3 20v-3c0-5 12-5 12 0v3M19 7v8M15 11h8"/></svg></button>':''}
       <details class="sc-extra-actions sc-tool-menu"><summary class="btn sc-tool" aria-label="Другие действия" title="Другие действия">⋯</summary><div>${full?'<button class="btn sm" id="act-past-entry">Внести прошедшее ПУ / покупку</button>':''}${isMember?'<button class="btn sm" id="act-vac">Отпуск</button>':''}</div></details>
     </div>
     <div id="sc-profile-edit" hidden></div>
@@ -1808,11 +1809,8 @@ async function openStudent(id, options = {}) {
 
   <div class="section" data-sc="stage">
     ${s.erp_status ? `<p class="small muted">Статус при переносе из ERP: ${esc(s.erp_status)}</p>` : ""}
-    ${(d.nodeadline || []).length ? d.nodeadline.map((n) => `<div class="nd-in">⏸ В воронке без дедлайнов <b>«${esc(n.title)}»</b> с ${dShort(n.added_at)}${n.note ? `<div class="small muted">${esc(n.note)}</div>` : ""}
-      <button class="btn sm" id="nd-out" type="button">Убрать из воронки</button></div>`).join("")
-      : `<button class="btn sm" id="nd-in" type="button" style="margin-bottom:10px" title="Без задач по сроку: позвоним, когда появится акция">⏸ В «Ждут акцию»</button>`}
     <div class="row">
-      <div class="field"><label>Этап</label><select id="f-stage">${stageOpts.map(([k, t]) => `<option value="${k}" ${k === s.stage ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
+      <div class="field"><label>Внутренний этап CRM</label><select id="f-stage">${stageOpts.map(([k, t]) => `<option value="${k}" ${k === s.stage ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
       ${!isMember ? `<div class="field"><label>Тариф</label><select id="f-tariff"><option value="fixed" ${s.tariff === "fixed" ? "selected" : ""}>Негибкий</option><option value="flex" ${s.tariff === "flex" ? "selected" : ""}>Гибкий</option></select></div>` : ""}
     </div>
     ${!isMember ? `<div class="field"><label>Филиал</label><select id="f-branch"><option value="">— не выбран —</option>${S.meta.branches.filter((b) => b.active).map((b) => `<option value="${b.id}" ${b.id === s.branch_id ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : ""}
@@ -1824,14 +1822,14 @@ async function openStudent(id, options = {}) {
 
   <div class="section" data-sc="family" data-title="Данные ребёнка и семьи">
     <h3>Данные ребёнка</h3>
-    <div class="row"><div class="field"><label>Имя и фамилия</label><div>${esc(s.name)}</div></div><div class="field"><label>Дата рождения</label><div>${s.birth?esc(s.birth.slice(0,10).split('-').reverse().join('.')):'Не указана'}</div></div></div>
+    <div class="row"><div class="field"><label>Имя и фамилия</label><div>${esc(displayChildName(s.name))}</div></div><div class="field"><label>Дата рождения</label><div>${s.birth?esc(s.birth.slice(0,10).split('-').reverse().join('.')):'Не указана'}</div></div></div>
     <div class="field"><label>Рекламный источник</label>${sourceSelect("f-source", s.source_id, s.source)}</div>
     <div data-client-stage></div>
     <h3>Семья ${esc(d.family.name)}</h3>
     <div class="field"><label>Заметка для персонала (видна в шапке карточки)</label><textarea id="fam-note" rows="2" placeholder="Например: аллергия, звонить только маме">${esc(d.family.note || "")}</textarea></div>
     ${consentHtml(d.family)}
     <dl class="sc-family-contacts">${d.parents.map((p) => `<div class="sc-contact-line"><dt>${esc(p.name)}</dt><dd>${p.phone ? `<button class="linkish" data-copy-phone="${esc(p.phone)}" title="Скопировать номер">${esc(p.phone)}</button>` : `<span class="muted">Телефон не указан</span>`}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}</dd></div>`).join("")}</dl>
-    ${d.siblings.length ? `<div style="margin-top:10px" class="chips">${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}</div>` : ""}
+    ${d.siblings.length ? `<div style="margin-top:10px" class="chips">${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join("")}</div>` : ""}
     <button class="btn sm" style="margin-top:10px" id="add-sibling">+ Брат или сестра</button>
   </div>
 
@@ -1919,7 +1917,7 @@ async function openStudent(id, options = {}) {
   body.querySelectorAll('[data-profile-edit]').forEach(b=>b.onclick=()=>profile(false,b.dataset.profileEdit));
   const bindEdit=(selector,callback)=>body.querySelectorAll(selector).forEach(el=>{el.onclick=callback;el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();callback()}}});
   bindEdit('[data-profile-open]',()=>profile(false,'birth'));bindEdit('[data-profile-note]',()=>profile(false,'note'));
-  body.querySelectorAll('[data-profile-add-parent]').forEach(b=>b.onclick=()=>profile(true));
+  body.querySelectorAll('[data-client-add]').forEach(b=>b.onclick=()=>{const root=body.querySelector('#sc-profile-edit');root.hidden=false;root.innerHTML='<div class="client-profile-form"><h4>Кого добавить в семью?</h4><div class="sc-actions"><button type="button" class="btn" data-add-contact>Родителя</button><button type="button" class="btn" data-add-family-child>Брата или сестру — клиента</button><button type="button" class="btn" data-add-close>Отмена</button></div></div>';root.querySelector('[data-add-contact]').onclick=()=>profile(true);root.querySelector('[data-add-family-child]').onclick=()=>$('#add-sibling').click();root.querySelector('[data-add-close]').onclick=()=>{root.hidden=true;root.replaceChildren()}});
   bindEdit('[data-head-group]',()=>{if(isMember){scTab('abon');const move=body.querySelector('[data-sub-transfer]');if(move){move.click();move.scrollIntoView({block:'center'})}else toast('Сначала выберите действующий абонемент для перевода',true)}else{scTab('info');openFold(body,'family');$('#f-group')?.focus()}});
   const firstPhone = (d.parents.find(p=>p.is_primary&&p.phone)||d.parents.find(p=>p.phone)||{}).phone;
   if ($("#act-call")) $("#act-call").onclick = () => dial(firstPhone);
@@ -2081,7 +2079,7 @@ async function renderCoachKids(page) {
   const n = d.groups.reduce((a, g) => a + g.kids.length, 0);
   page.innerHTML = `<div class="page-head"><h2 class="grow">Мои ученики</h2><span class="muted small">${n} ${n % 10 === 1 && n % 100 !== 11 ? "ребёнок" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "ребёнка" : "детей"}</span></div>
     ${d.groups.length ? d.groups.map((g) => `<div class="section"><h3>${esc(g.name)} <span class="muted small">${esc(g.branch)} · ${esc(g.age || "")}${/\d$/.test(g.age || "") ? " лет" : ""} · ${g.main ? "ты главный тренер" : "ты помощник"}</span></h3>
-      <div class="list" style="box-shadow:none">${g.kids.map((k) => `<div class="list-row"><div class="grow"><b>${esc(k.name)}</b>${k.birth ? ` <span class="muted small">${ageText(k.birth)}</span>` : ""}</div>
+      <div class="list" style="box-shadow:none">${g.kids.map((k) => `<div class="list-row"><div class="grow"><b>${esc(displayChildName(k.name))}</b>${k.birth ? ` <span class="muted small">${ageText(k.birth)}</span>` : ""}</div>
         <div class="small" style="text-align:right">${k.parents.map((p) => `${esc(p.name || "Родитель")}${p.phone ? ` <a href="tel:${esc(p.phone)}">${esc(fmtPhone(p.phone))}</a>` : ""}`).join("<br>") || `<span class="muted">телефона нет</span>`}</div></div>`).join("")
         || `<div class="list-row muted small">В группе пока нет детей</div>`}</div></div>`).join("")
       : `<div class="panel center" style="padding:40px">За тобой пока не закреплено ни одной группы. Спроси у старшего администратора</div>`}`;
@@ -2124,6 +2122,7 @@ function openNewClient(preset = {}) {
   </form>`);
   let familyId = preset.family_id || null;
   const form = $("#nc");
+  splitChildNameFields(form,"name");
   const phone = form.elements.phone;
   if (phone) phone.onblur = async () => {
     const r = await api("GET", "/api/check-phone?phone=" + encodeURIComponent(phone.value)).catch(() => []);
@@ -2308,19 +2307,19 @@ function journalRow(r, before) {
   if (r.status === "makeup" || r.makeup_id) return makeupRow({ ...r, status: r.attendance_id ? r.status : r.mk_status, home_group: "отработка" + (r.home_group ? ", из группы " + r.home_group : "") });
   if (r.erp_visit_kind) {
     const kind = r.erp_visit_kind === "makeup" ? "Отработка" : "Разовое занятие";
-    return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(r.name)}${jAge(r)} <span class="pill">${kind}</span></div><span>${r.status === "present" ? "Был" : "Пропуск"}</span></div>`;
+    return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill">${kind}</span></div><span>${r.status === "present" ? "Был" : "Пропуск"}</span></div>`;
   }
-  if (r.warned) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(r.name)}${jAge(r)} <span class="pill yellow">предупредил, не придёт</span>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ""}</div>
+  if (r.warned) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill yellow">предупредил, не придёт</span>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ""}</div>
     <div class="mark">${before ? `<button data-unwarn="${r.id}">Отменить, придёт</button>` : `<button data-att="present" data-sid="${r.id}">Всё-таки был</button>`}</div></div>`;
-  if (r.status === "vacation") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(r.name)}${jAge(r)}</div><span class="pill yellow">Отпуск</span></div>`;
-  if (r.historical_trial_id) return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(r.name)}${jAge(r)} <span class="pill jt-trial">ПУ ${esc(r.trial_at.slice(11,16))}</span></div><span>${r.trial_came ? 'Пришёл' : 'Не пришёл'}</span></div>`;
-  if (r.status === "trial") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(r.name)}${jAge(r)} <span class="pill jt-trial">ПУ ${r.trial_at.slice(11, 16)}</span></div>
+  if (r.status === "vacation") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)}</div><span class="pill yellow">Отпуск</span></div>`;
+  if (r.historical_trial_id) return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill jt-trial">ПУ ${esc(r.trial_at.slice(11,16))}</span></div><span>${r.trial_came ? 'Пришёл' : 'Не пришёл'}</span></div>`;
+  if (r.status === "trial") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill jt-trial">ПУ ${r.trial_at.slice(11, 16)}</span></div>
     <div class="mark"><button data-trial="1" data-sid="${r.id}" class="${r.trial_came === 1 ? "on-present" : ""}">Пришёл</button><button data-trial="0" data-sid="${r.id}" class="${r.trial_came === 0 ? "on-absent" : ""}">Не пришёл</button></div></div>`;
   const unpaidPill = r.unpaid ? ` <span class="pill unpaid-flag">не оплачен, не допускать</span>` : "";
   const locked = r.resolved ? `<span class="pill">${r.resolved === "credit" ? "в перерасчёте" : "отработан"}</span>` : "";
-  if (before) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(r.name)}${jAge(r)} ${jTag(r)} ${unpaidPill}</div>
+  if (before) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} ${jTag(r)} ${unpaidPill}</div>
     <div class="mark"><button data-warn="${r.id}" title="Родители заранее сказали, что не придёт">🙅 Не придёт</button></div></div>`;
-  return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(r.name)}${jAge(r)} ${jTag(r)} ${locked}${unpaidPill}</div>
+  return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} ${jTag(r)} ${locked}${unpaidPill}</div>
     <div class="mark">
       <button data-att="present" data-sid="${r.id}" class="${r.status === "present" ? "on-present" : ""}">Был</button>
       <button data-att="absent" data-sid="${r.id}" class="${r.status === "absent" ? "on-absent" : ""}">Пропуск</button>
@@ -2329,7 +2328,7 @@ function journalRow(r, before) {
 
 function makeupRow(r) {
   const mark=r.status==='present'?'done':r.status==='absent'?'missed':r.status;
-  return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(r.name)}${jAge(r)} <span class="pill jt-makeup">отработка</span>
+  return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill jt-makeup">отработка</span>
       <div class="small muted">${esc(r.home_group || "")} · за пропуск ${dShort(r.absence_date)}</div></div>
     <div class="mark">
       <button data-mk="${r.makeup_id}" data-st="done" class="${mark === "done" ? "on-present" : ""}">Пришёл</button>
@@ -2402,7 +2401,7 @@ async function renderSearch(page) {
     ${d.erp.length ? `<div class="row" style="max-width:420px;margin-bottom:10px"><div class="field"><label>Статус в ERP</label><select id="p-erp"><option value="">Любой</option>${d.erp.map(([e, n]) => `<option value="${esc(e)}" ${f.erp === e ? "selected" : ""}>${esc(e)} (${n})</option>`).join("")}</select></div></div>` : ""}
     <div class="small muted" style="margin-bottom:6px">Найдено: ${d.total}${d.total > d.limit ? `, показаны первые ${d.limit}. Уточните поиск или фильтр` : ""}</div>
     <div id="results" class="list">${d.rows.length ? d.rows.map((r) => `
-      <div class="list-row click" data-who="${r.id}"><div class="grow"><b>${esc(r.name)}</b>
+      <div class="list-row click" data-who="${r.id}"><div class="grow"><b>${esc(displayChildName(r.name))}</b>
         <div class="small muted">${esc([r.parent, r.phone, r.group].filter(Boolean).join(" · "))}${r.erp_status ? ` · ERP: ${esc(r.erp_status)}` : ""}</div></div>
         <span class="pill ${r.status.startsWith("lead:") ? "" : pillCls[r.status] || ""}">${r.status.startsWith("lead:") ? "Лид: " : ""}${esc(r.status_label)}</span></div>`).join("")
       : `<div class="list-row muted">Никого не нашли</div>`}</div>`;

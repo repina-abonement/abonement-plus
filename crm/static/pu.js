@@ -11,7 +11,7 @@ async function openRebook(tid) {
   const t = d.task, groups = S.meta.groups.filter((g) => !g.is_makeup && !g.program_id && g.trial_ok !== 0);
   const kidHtml = (k) => {
     const n = k.misses.length, last = k.misses[0];
-    return `<div class="rb-kid"><b>${esc(k.name)}</b> <button class="linkish small" data-open="${k.id}">карточка</button>
+    return `<div class="rb-kid"><b>${esc(displayChildName(k.name))}</b> <button class="linkish small" data-open="${k.id}">карточка</button>
       ${last ? `<div class="small muted">Пропущено ПУ ${dShort(last.trial_at.slice(0, 10))} ${last.trial_at.slice(11, 16)}, ${esc(last.group_name || "")}: ${esc(last.kind_label)}${last.reason ? ", " + esc(last.reason) : ""}</div>` : ""}
       ${n >= 3 ? `<div class="alert" style="margin-top:6px">Не доходит уже ${n}-й раз. Перед новой записью подтвердите звонком, что точно придут</div>` : n ? `<div class="small muted">Всего не доходил: ${n}</div>` : ""}
       <div class="row rb-new" data-kid="${k.id}" style="margin-top:6px;flex-wrap:wrap">
@@ -131,7 +131,7 @@ async function anPu(box, month) {
         <div class="panel-head" style="margin-top:12px">По группам</div>${Object.entries(d.by_group).map(([r, n]) => `<div class="an-kv"><span>${esc(r)}</span><b>${n}</b></div>`).join("") || `<div class="small muted">Нет</div>`}
         <div class="panel-head" style="margin-top:12px">По ответственным</div>${Object.entries(d.by_resp).map(([r, x]) => `<div class="an-kv"><span>${esc(r)}</span><b>${x.tasks} задач${x.overdue ? `, просрочено ${x.overdue}` : ""}</b></div>`).join("") || `<div class="small muted">Нет</div>`}</section>
       <section class="panel"><div class="panel-head">Без задачи или задача просрочена · ${d.stuck.length}</div>
-        <div class="list" style="box-shadow:none">${d.stuck.map((x) => `<div class="list-row click" data-sid="${x.id}"><div class="grow">${esc(x.name)}<div class="small" style="color:#b42318">${esc(x.problem)}${x.assignee ? " · " + esc(x.assignee) : ""}</div></div></div>`).join("") || `<div class="empty">Все дети под контролем</div>`}</div></section>
+        <div class="list" style="box-shadow:none">${d.stuck.map((x) => `<div class="list-row click" data-sid="${x.id}"><div class="grow">${esc(displayChildName(x.name))}<div class="small" style="color:#b42318">${esc(x.problem)}${x.assignee ? " · " + esc(x.assignee) : ""}</div></div></div>`).join("") || `<div class="empty">Все дети под контролем</div>`}</div></section>
     </div>
     <section class="panel" style="margin-top:14px"><div class="panel-head">Отметки в журнале: тренеры и филиалы</div>
       <div class="an-scroll"><table class="tbl an-tbl"><thead><tr><th>Тренер</th><th>Филиал</th><th>Вовремя (до 30 мин)</th><th>С опозданием</th><th>Не отмечено</th></tr></thead>

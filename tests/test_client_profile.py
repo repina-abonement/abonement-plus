@@ -21,6 +21,13 @@ class ProfileTest(unittest.TestCase):
         self.assertEqual(tasks.best_conversation(self.con,self.fid),dad)
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM messages').fetchone()[0],0)
         with self.assertRaises(sv.ApiError):clientprofile.save(self.con,self.sid,self.body,self.user)
+    def test_imported_erp_status_is_preserved(self):
+        self.con.execute("UPDATE students SET erp_status='Постоянный посетитель' WHERE id=?",(self.sid,))
+        body={**self.body,'expected':clientprofile.signature(self.con,self.sid),'stage':'no_answer'}
+        with self.assertRaises(sv.ApiError):clientprofile.save(self.con,self.sid,body,self.user)
+        self.assertEqual(sv.get_student_row(self.con,self.sid)['erp_status'],'Постоянный посетитель')
+        self.assertEqual(sv.get_student_row(self.con,self.sid)['name'],'Матвей')
+
     def test_reject_foreign_contact_and_roll_back(self):
         other=sv.create_student(self.con,{'name':'Другой','parent_name':'Мария','phone':'+79001119988'},self.user)
         pid=self.con.execute('SELECT id FROM parents WHERE family_id=(SELECT family_id FROM students WHERE id=?)',(other,)).fetchone()[0]

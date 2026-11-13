@@ -23,9 +23,9 @@ function repPayForm(v, trial) {
   const chip = (attr, val, label, on) => `<button class="rep-big sm ${on ? "on" : ""}" ${attr}="${val}">${label}</button>`;
   const abon = f.what === "month" || f.what === "month2";
   return `<div class="rep-form rep-pay">
-    ${trial ? `<div class="small"><b>💰 Оплата: ${esc(trial.name)}</b></div>` : `<div class="rep-search">
+    ${trial ? `<div class="small"><b>💰 Оплата: ${esc(displayChildName(trial.name))}</b></div>` : `<div class="rep-search">
       <input id="rp-name" placeholder="Фамилия или имя ребёнка" value="${esc(f.name || "")}" autocomplete="off">
-      ${f.student_id ? `<div class="small rep-found">✅ Нашли в CRM: ${esc(f.name)} · ${esc(f.label || "")} <button class="linkish small" id="rp-unpick">другой</button></div>`
+      ${f.student_id ? `<div class="small rep-found">✅ Нашли в CRM: ${esc(displayChildName(f.name))} · ${esc(f.label || "")} <button class="linkish small" id="rp-unpick">другой</button></div>`
         : f.manual ? `<div class="small rep-found warn">⚠️ Нет в CRM, администратор разберёт вручную <button class="linkish small" id="rp-unpick">искать</button></div>` : `<div id="rp-hits"></div>`}</div>`}
     <input id="rp-sum" type="number" inputmode="numeric" placeholder="Сумма, ₽" value="${f.amount || ""}">
     <div class="rep-btns">${Object.entries(v.pay_methods).filter(([k])=>!['card','qr'].includes(k)||f.method===k).map(([k, t]) => chip("data-rpm", k, t, f.method === k)).join("")}</div>
@@ -68,7 +68,7 @@ function repPayWire(box, v) {
       const q = inp.value.trim(); f.name = inp.value;
       if (q.length < 2) { hits.innerHTML = ""; return; }
       const r = await api("GET", "/api/report-search?q=" + encodeURIComponent(q)).catch(() => ({ items: [] }));
-      hits.innerHTML = r.items.map((x) => `<button class="rep-hit" data-hit="${x.id}" data-n="${esc(x.name)}" data-l="${esc(x.label)}"><b>${esc(x.name)}</b> <small>${esc(x.label)}</small></button>`).join("")
+      hits.innerHTML = r.items.map((x) => `<button class="rep-hit" data-hit="${x.id}" data-n="${esc(x.name)}" data-l="${esc(x.label)}"><b>${esc(displayChildName(x.name))}</b> <small>${esc(x.label)}</small></button>`).join("")
         + `<button class="rep-hit manual" data-hitman="1">Нет в списке, записать как есть: «${esc(q)}»</button>`;
       hits.querySelectorAll("[data-hit]").forEach((b) => (b.onclick = () => pick({ student_id: +b.dataset.hit, name: b.dataset.n, label: b.dataset.l, manual: false })));
       hits.querySelector("[data-hitman]").onclick = () => pick({ student_id: null, manual: true, name: q });
@@ -167,10 +167,10 @@ function repStepHtml(st, v) {
   if (st.key === "marks") return v.groups.map((g) => `<div class="rep-row ${g.unmarked ? "bad" : "ok"}"><span class="grow"><b>${esc(g.name.includes(g.time || "-") ? g.name : `${g.time || ""} ${g.name}`)}</b>
       <small>${g.unmarked ? `не отмечено: ${g.unmarked}` : `пришли ${g.came} из ${g.plan}`}</small></span>
       ${g.unmarked && !ro ? `<button class="btn primary" data-rmeet="${g.id}">Отметить</button>` : `<span class="rep-ok">✅</span>`}</div>`).join("");
-  if (st.key === "absent") return v.absent.length ? v.absent.map((a) => `<div class="rep-item"><b>${esc(a.name)}</b><small>${esc(a.group)}</small>
+  if (st.key === "absent") return v.absent.length ? v.absent.map((a) => `<div class="rep-item"><b>${esc(displayChildName(a.name))}</b><small>${esc(a.group)}</small>
       <div class="rep-btns">${Object.entries(v.absent_reasons).map(([k, t]) => big(`data-rabs="${a.id}" data-k="${k}"`, t, (D.absent || {})[a.id] === k)).join("")}</div></div>`).join("")
     : `<div class="rep-empty">Все пришли! Сегодня без прогульщиков 🎉</div>`;
-  if (st.key === "trials") return v.trials.length ? v.trials.map((t) => `<div class="rep-item"><b>${esc(t.name)}</b><small>${esc(t.group)}</small>
+  if (st.key === "trials") return v.trials.length ? v.trials.map((t) => `<div class="rep-item"><b>${esc(displayChildName(t.name))}</b><small>${esc(t.group)}</small>
       <div class="rep-btns">${big(`data-rtc="${t.id}" data-came="1"`, "Пришёл", t.came === 1)}${big(`data-rtc="${t.id}" data-came="0"`, "Не пришёл", t.came === 0)}</div>
       ${t.came === 1 ? `<div class="rep-btns">${Object.entries(v.trial_outcomes).map(([k, x]) => big(`data-rtr="${t.id}" data-k="${k}"`, x, (D.trials || {})[t.id] === k)).join("")}</div>` : ""}
       ${t.came === 1 && (D.trials || {})[t.id] === "bought" ? (() => { const p = (D.pays || []).find((x) => x.trial_id === t.id);
@@ -179,15 +179,15 @@ function repStepHtml(st, v) {
     : `<div class="rep-empty">Пробных сегодня не было</div>`;
   if (st.key === "unlisted") {
     const list = D.unlisted || [];
-    return `${list.map((u, i) => `<div class="rep-row"><span class="grow"><b>${esc(u.name)}</b><small>${esc(u.group || "")}</small></span>${ro ? "" : `<button class="icon-btn" data-runl="${i}">✕</button>`}</div>`).join("")}
-      ${ro ? "" : `<div class="rep-form"><input id="ru-name" placeholder="Имя и фамилия ребёнка"><select id="ru-group">${v.groups.map((g) => `<option>${esc(g.name)}</option>`).join("")}</select>
-        <button class="rep-big" id="ru-add">+ Добавить ребёнка</button></div>
+    return `${list.map((u, i) => `<div class="rep-row"><span class="grow"><b>${esc(displayChildName(u.name))}</b><small>${esc(u.group || "")}</small></span>${ro ? "" : `<button class="icon-btn" data-runl="${i}">✕</button>`}</div>`).join("")}
+      ${ro ? "" : `<form class="rep-form" data-unlisted-child><div class="field"><label>Фамилия и имя ребёнка</label><input id="ru-name" name="child_name" required></div><select id="ru-group">${v.groups.map((g) => `<option>${esc(g.name)}</option>`).join("")}</select>
+        <button type="button" class="rep-big" id="ru-add">+ Добавить ребёнка</button></form>
         ${list.length ? "" : big('id="ru-none"', "Таких нет, все по записи", D.unlisted_none)}`}`;
   }
   if (st.key === "pays") {
     const list = D.pays || [];
     const prev = v.env_prev, need = prev ? prev.amount + v.cash_sum : null, env = D.envelope;
-    return `${list.map((p, i) => `<div class="rep-row ${p.student_id ? "" : "warn"}"><span class="grow"><b>${esc(p.name)} · ${rub(p.amount)}</b>
+    return `${list.map((p, i) => `<div class="rep-row ${p.student_id ? "" : "warn"}"><span class="grow"><b>${esc(displayChildName(p.name))} · ${rub(p.amount)}</b>
         <small>${esc(v.pay_methods[p.method] || "")}${p.method === "cash" ? " (чек ✅, конверт ✅)" : ""} · ${esc(repPayWhat(v, p))}${p.trial_id ? " · пробное" : ""}${p.student_id ? "" : " · ⚠️ нет в CRM, админ разберёт"}</small></span>
         ${ro || p.trial_id ? "" : `<button class="icon-btn" data-rpay="${i}">✕</button>`}</div>`).join("")}
       ${v.cash_sum ? `<div class="rep-item rep-env"><b>✉️ Остаток в конверте</b>

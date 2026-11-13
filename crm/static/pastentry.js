@@ -74,7 +74,7 @@ async function openPastEntry(d,root,reload) {
       try{const r=await api('POST',`/api/students/${s.id}/past-entry`,payload);toast(r.subscription_id?`Прошедшее событие и абонемент сохранены. Осталось оплатить: ${rub(r.remaining)}`:'Прошедшее ПУ сохранено');reload()}
       catch(e){error.textContent=e.message;busy=false;form.querySelectorAll('input,select,button').forEach(x=>x.disabled=false);lock()}
     };
-    tariffs();mode();['trial_group_id','group_id','ofp_group_id'].forEach(name=>pastGroupSearch(f[name]));root.scrollIntoView({block:'nearest',behavior:'smooth'});
+    splitChildNameFields(form,'child_name',true);tariffs();mode();['trial_group_id','group_id','ofp_group_id'].forEach(name=>pastGroupSearch(f[name]));root.scrollIntoView({block:'nearest',behavior:'smooth'});
   }catch(e){root.textContent=e.message}
 }
 

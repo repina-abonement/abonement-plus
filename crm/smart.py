@@ -328,7 +328,7 @@ def merge_families(con, keep: int, drop: int, user: dict) -> dict:
 import re as _re
 
 EMAIL_RE = _re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
-FIELD_LABELS = {"child_name": "Имя и фамилия ребёнка", "birth": "Дата рождения ребёнка", "parent_name": "Как зовут родителя",
+FIELD_LABELS = {"child_name": "Фамилия и имя ребёнка", "birth": "Дата рождения ребёнка", "parent_name": "Как зовут родителя",
                 "phone": "Телефон родителя", "email": "Почта родителя (для чека)"}
 _PLACEHOLDER = ("заявка", "лид", "без имени", "ребёнок", "ребенок", "клиент")
 

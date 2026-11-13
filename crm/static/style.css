@@ -1795,3 +1795,8 @@ textarea.nav-q { height:40px; min-height:40px; max-height:40px; resize:none; ove
 .source-edit-row .need-err,.sources-add .need-err,.sources-channel-edit .need-err { flex-basis:100%; }
 [data-source-destination] { padding:12px 0; }
 @media(max-width:700px) { .sources-editor { grid-template-columns:1fr; gap:16px; } .sources-nav nav { flex-direction:row; flex-wrap:wrap; } .source-channel { border:1px solid var(--line); } }
+
+.split-client-name { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; min-width:0; }
+.split-client-name > label { display:block; min-width:0; }
+.split-client-name input { margin-top:5px; }
+.inline-trial-grid > .split-client-name { grid-column:1/-1; }

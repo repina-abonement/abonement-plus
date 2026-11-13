@@ -37,5 +37,5 @@ function openInlineTrialBooking(d, root, reload) {
     try{const r=await api('POST',`/api/students/${s.id}/trial-booking`,payload);toast(`Записан на пробное: ${dShort(r.slot.date)} в ${r.slot.time}, ${r.slot.group}`);reload()}
     catch(e){busy=false;form.querySelectorAll('input,select,button').forEach(el=>el.disabled=false);error.textContent=e.message;submit.disabled=false}
   };
-  load();root.scrollIntoView({block:'nearest',behavior:'smooth'});f.child_name.focus({preventScroll:true});
+  splitChildNameFields(form,'child_name',true);load();root.scrollIntoView({block:'nearest',behavior:'smooth'});f.child_name_last.focus({preventScroll:true});
 }

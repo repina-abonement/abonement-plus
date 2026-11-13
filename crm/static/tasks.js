@@ -16,7 +16,7 @@ function taskRow(t, options = {}) {
         ${t.created_by_id && t.created_by_id !== t.assignee_id && t.created_by ? ` <span class="pill blue">от ${esc(firstName(t.created_by))}</span>` : ""}
         ${t.recur_id ? ` <span class="pill" title="Повторяющееся дело">🔁</span>` : ""}</div>
       ${t.returned_note ? `<div class="small" style="color:var(--red)">↩ Вернули: ${esc(t.returned_note)}</div>` : ""}
-      ${s.id ? `<button class="linkish" data-open="${s.id}">${esc(s.name)}</button> <span class="small muted">${esc([s.parent, s.phone, trial].filter(Boolean).join(", "))}</span>` : ""}
+      ${s.id ? `<button class="linkish" data-open="${s.id}">${esc(displayChildName(s.name))}</button> <span class="small muted">${esc([s.parent, s.phone, trial].filter(Boolean).join(", "))}</span>` : ""}
       ${t.note ? `<div class="small muted">${esc(t.note)}</div>` : ""}
       ${auto ? `<div class="chips" style="margin-top:6px">${auto}</div>` : ""}
       ${!t.client_task && t.assignee && (S.tasks.scope === "all" || t.assignee_id !== S.user.id) ? `<div class="small muted">Исполнитель: ${esc(t.assignee)}</div>` : ""}
@@ -92,7 +92,7 @@ async function renderManualBoard(page) {
   d.columns.forEach((c) => c.cards.forEach((t) => (S.taskById[t.id] = t)));
   const card = (t, col) => `<article class="card mt-card ${col === "overdue" ? "red" : ""} ${col === "done" ? "done" : ""}" data-mt="${t.id}" data-col="${col}">
     <div class="name">${t.priority?"🔥 ":""}${esc(t.title)}</div>
-    ${t.student ? `<div class="meta">${esc(t.student.name)}${t.student.parent ? ` · ${esc(t.student.parent)}` : ""}</div>` : ""}
+    ${t.student ? `<div class="meta">${esc(displayChildName(t.student.name))}${t.student.parent ? ` · ${esc(t.student.parent)}` : ""}</div>` : ""}
     ${t.note ? `<div class="meta">${esc(t.note)}</div>` : ""}
     <div class="meta">👤 ${esc(t.assignee || "")}${col === "done" ? ` · сделано ${esc((t.done_at || "").slice(11, 16))}${t.result ? `: ${esc(t.result)}` : ""}` : ` · ${col === "overdue" ? "⏰ " + dShort(t.due_at) + " " : ""}${(t.due_at || "").slice(11, 16) === "23:59" ? "в течение дня" : (t.due_at || "").slice(11, 16)}`}</div>
     ${col !== "done" ? `<div class="mt-act"><button class="btn sm" data-mtdone="${t.id}">Выполнено</button></div>` : ""}
@@ -126,7 +126,7 @@ function openTaskEdit(t, onDone, focus) {
   const wrap = document.createElement("div");
   wrap.className = "need-wrap";
   wrap.innerHTML = `<form class="need-card task-copyable"><h3>${t.icon || "✅"} Задача</h3>
-    ${t.student ? `<div class="small muted" style="margin-bottom:8px">${esc(t.student.name)}${t.student.family ? ` · семья ${esc(t.student.family)}` : ""}</div>` : ""}
+    ${t.student ? `<div class="small muted" style="margin-bottom:8px">${esc(displayChildName(t.student.name))}${t.student.family ? ` · семья ${esc(t.student.family)}` : ""}</div>` : ""}
     <div class="field"><label>Что сделать</label><input name="title" value="${esc(t.title)}" required maxlength="200"></div>
     <div class="row"><div class="field"><label>Срок</label><input name="due_at" type="${client?'date':'datetime-local'}" value="${esc((t.due_at || "").slice(0, client?10:16))}" required></div>
       ${!client?`<div class="field"><label>Исполнитель</label><select name="assignee_id">${staff.map((u) => `<option value="${u.id}" ${u.id === t.assignee_id ? "selected" : ""}>${esc(u.name)} (${TASK_ROLE[u.role] || u.role})</option>`).join("")}
@@ -287,7 +287,7 @@ async function renderCoachToday(page, coachId, viewBar = "") {
         <div class="chips" style="margin:6px 0">${[["paid", c.paid], ["trial", c.trials], ["single", c.single], ["makeup", c.makeups], ["unpaid", c.unpaid], ["vacation", c.vacation], ["warned", c.warned]]
           .filter(([, n]) => n).map(([k, n]) => `<span class="pill ${KID_TAG[k][0]}">${KID_TAG[k][1]}: ${n}</span>`).join("")}</div>
         ${(g.birthdays || []).map((b) => `<div class="bday">🎂 <b>${esc(b.name)}</b>: ${b.when === "today" ? "сегодня" : "вчера был"} день рождения, ${b.age} ${yearsWord(b.age)}. Поздравь всей командой!</div>`).join("")}
-        ${g.list.length ? `<details class="kid-list"><summary class="small">Кто придёт</summary>${g.list.map((k) => `<div class="kid-row"><span class="grow">${esc(k.name)}</span>${k.note ? `<span class="small muted">${esc(k.note)}</span>` : ""}<span class="pill ${KID_TAG[k.tag][0]}">${KID_TAG[k.tag][1]}</span></div>`).join("")}</details>` : ""}
+        ${g.list.length ? `<details class="kid-list"><summary class="small">Кто придёт</summary>${g.list.map((k) => `<div class="kid-row"><span class="grow">${esc(displayChildName(k.name))}</span>${k.note ? `<span class="small muted">${esc(k.note)}</span>` : ""}<span class="pill ${KID_TAG[k.tag][0]}">${KID_TAG[k.tag][1]}</span></div>`).join("")}</details>` : ""}
         ${g.staff && g.time && (d.date < S.meta.today || (new Date().toTimeString().slice(0, 5) >= g.time)) ? staffPicker(g.staff, d.coaches, "c" + g.id) : ""}
         <div class="bar"><i style="width:${all ? Math.round(100 * done / all) : 0}%"></i></div>
         <div class="row" style="align-items:center;margin-top:6px"><div class="small grow">${all ? (done >= all ? "Все отмечены 👍" : `Отмечено ${done} из ${all}`) : "В группе пока нет детей"}</div>
@@ -407,7 +407,7 @@ function openClientTaskForm(box,onDone) {
   box.innerHTML=`<form class="sub-form client-task-form"><h4>Задача клиенту</h4><div class="field"><label>Клиент</label><input data-client-search autocomplete="off" placeholder="Имя, фамилия или телефон"><div data-client-results></div><div class="small muted" data-client-selected></div></div><div class="field"><label>Что сделать</label><input name="title" maxlength="200" required></div><div class="field"><label>Дата</label><input name="due" type="date" value="${S.meta.today}" required></div><label class="check task-priority-control"><input name="priority" type="checkbox"> 🔥 Приоритет — первой в колонке на этот день</label><div class="field"><label>Заметка</label><textarea name="note" rows="3" maxlength="1000"></textarea></div><p class="small muted">Задачу видят все администраторы.</p><div class="need-err small"></div><div class="sc-actions"><button class="btn primary">Поставить задачу</button><button type="button" class="btn" data-client-cancel>Отмена</button></div></form>`;
   const form=box.querySelector('form'),input=form.querySelector('[data-client-search]'),results=form.querySelector('[data-client-results]'),selected=form.querySelector('[data-client-selected]');let sid=null,timer,version=0;
   form.querySelector('[data-client-cancel]').onclick=()=>{box.innerHTML=''};
-  input.oninput=()=>{sid=null;selected.textContent='';clearTimeout(timer);const request=++version,q=input.value.trim();results.innerHTML='';if(q.length<2)return;timer=setTimeout(async()=>{try{const list=await api('GET','/api/students?q='+encodeURIComponent(q));if(request!==version||!form.isConnected)return;results.innerHTML=list.length?list.slice(0,15).map(s=>`<button type="button" class="client-task-choice" data-client-id="${s.id}">${esc(s.name)}${s.parent?` · ${esc(s.parent)}`:''}</button>`).join(''):'<div class="small muted">Клиент не найден</div>';results.querySelectorAll('[data-client-id]').forEach(b=>b.onclick=()=>{sid=+b.dataset.clientId;input.value=b.textContent;selected.textContent='Клиент выбран';results.innerHTML='';version++})}catch(e){if(form.isConnected)form.querySelector('.need-err').textContent=e.message}},200)};
+  input.oninput=()=>{sid=null;selected.textContent='';clearTimeout(timer);const request=++version,q=input.value.trim();results.innerHTML='';if(q.length<2)return;timer=setTimeout(async()=>{try{const list=await api('GET','/api/students?q='+encodeURIComponent(q));if(request!==version||!form.isConnected)return;results.innerHTML=list.length?list.slice(0,15).map(s=>`<button type="button" class="client-task-choice" data-client-id="${s.id}">${esc(displayChildName(s.name))}${s.parent?` · ${esc(s.parent)}`:''}</button>`).join(''):'<div class="small muted">Клиент не найден</div>';results.querySelectorAll('[data-client-id]').forEach(b=>b.onclick=()=>{sid=+b.dataset.clientId;input.value=b.textContent;selected.textContent='Клиент выбран';results.innerHTML='';version++})}catch(e){if(form.isConnected)form.querySelector('.need-err').textContent=e.message}},200)};
   form.onsubmit=async e=>{e.preventDefault();const error=form.querySelector('.need-err');if(!sid){error.textContent='Выберите клиента из результатов поиска';return}const submit=form.querySelector('button.primary');submit.disabled=true;try{await api('POST',`/api/students/${sid}/tasks`,{title:form.elements.title.value,due:form.elements.due.value,priority:form.elements.priority.checked,note:form.elements.note.value});box.innerHTML='';toast('Задача поставлена');onDone?.()}catch(e){error.textContent=e.message;submit.disabled=false}};
   input.focus();
 }

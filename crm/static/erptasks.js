@@ -17,9 +17,9 @@ async function erpTasksSection() {
   };
   const card = (t, col) => {
     const s = t.student || {};
-    return `<article class="et-card ${d.day === "overdue" ? "late" : ""}" data-et="${t.id}" ${s.id ? `data-etopen="${s.id}" role="button" tabindex="0" aria-label="Открыть карточку ${esc(s.name)}"` : ""}>
+    return `<article class="et-card ${d.day === "overdue" ? "late" : ""}" data-et="${t.id}" ${s.id ? `data-etopen="${s.id}" role="button" tabindex="0" aria-label="Открыть карточку ${esc(displayChildName(s.name))}"` : ""}>
       ${t.priority || ["other", "manual"].includes(col) || col.startsWith("erp:") ? `<div class="et-what">${t.priority?'<span class="et-priority" title="Приоритет">🔥</span>':t.icon || "✅"} ${esc(t.title)}</div>` : ""}
-      ${s.name ? `<div class="et-name">${esc(s.name)}</div>` : ""}
+      ${s.name ? `<div class="et-name">${esc(displayChildName(s.name))}</div>` : ""}
       <div class="et-meta ${d.day === "overdue" ? "et-late" : ""}">${when(t)}</div>
       <div class="et-act">
         <button class="btn sm primary" data-etdone="${t.id}">✓ Готово</button>
@@ -91,7 +91,7 @@ function wireErpTaskDetails(box) {
   const show=(card,pin=false)=>{
     clearTimeout(timer);if(current!==card)hide();current=card;pinned=pin||pinned;
     const t=S.taskById[card.dataset.et];if(!t)return hide();const s=t.student||{};
-    popup.innerHTML=`<div class="et-details-head"><strong>${esc(t.title||'Задача')}</strong><button type="button" class="icon-btn" data-etclose aria-label="Закрыть подробности">×</button></div>${s.name?`<b>${esc(s.name)}</b>`:''}<dl>${s.parent?`<div><dt>Родитель</dt><dd>${esc(s.parent)}</dd></div>`:''}${s.phone?`<div><dt>Телефон</dt><dd>${esc(s.phone)}</dd></div>`:''}${t.due_at?`<div><dt>Срок</dt><dd>${dShort(t.due_at)}${t.client_task||t.student_id||t.student?.id||t.family_id?'':' · '+esc(t.due_at.slice(11,16)==='23:59'?'в течение дня':t.due_at.slice(11,16))}</dd></div>`:''}</dl>${t.note?`<div class="et-details-note">${esc(t.note)}</div>`:'<p class="muted small">Дополнительного описания нет</p>'}`;
+    popup.innerHTML=`<div class="et-details-head"><strong>${esc(t.title||'Задача')}</strong><button type="button" class="icon-btn" data-etclose aria-label="Закрыть подробности">×</button></div>${s.name?`<b>${esc(displayChildName(s.name))}</b>`:''}<dl>${s.parent?`<div><dt>Родитель</dt><dd>${esc(s.parent)}</dd></div>`:''}${s.phone?`<div><dt>Телефон</dt><dd>${esc(s.phone)}</dd></div>`:''}${t.due_at?`<div><dt>Срок</dt><dd>${dShort(t.due_at)}${t.client_task||t.student_id||t.student?.id||t.family_id?'':' · '+esc(t.due_at.slice(11,16)==='23:59'?'в течение дня':t.due_at.slice(11,16))}</dd></div>`:''}</dl>${t.note?`<div class="et-details-note">${esc(t.note)}</div>`:'<p class="muted small">Дополнительного описания нет</p>'}`;
     popup.hidden=false;card.setAttribute('aria-describedby',popup.id);card.querySelector('[data-etdetails]')?.setAttribute('aria-expanded','true');popup.querySelector('[data-etclose]').onclick=hide;position();
   };
   const later=()=>{if(!pinned){clearTimeout(timer);timer=setTimeout(()=>{if(!current?.matches(':focus-within'))hide()},180)}};

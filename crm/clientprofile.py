@@ -59,6 +59,7 @@ def save(con,sid,data,user):
         if s['funnel']=='sales' and 'trial_at' in data and data['trial_at']!=(s['trial_at'] or ''):
             sv.update_student(con,sid,{'trial_at':data['trial_at']},user)
         stage=str(data.get('stage') or s['stage'])
+        if s.get('erp_status') and stage!=s['stage']:raise sv.ApiError('У клиента сохранён статус ERP. Изменение этапа CRM не заменяет исходный статус ERP; выполните сверку источника')
         if stage!=s['stage']:sv.move_card(con,sid,s['funnel'],stage,user,reason=str(data.get('stage_reason') or ''),comment=str(data.get('stage_comment') or ''),due=str(data.get('stage_due') or ''))
         sv.log(con,sid,'Изменены данные ребёнка и контакты семьи в шапке карточки; основной контакт для общения обновлён',user,'system')
         sv.audit(con,user,'client.profile',str(sid))

@@ -3,6 +3,7 @@ import re
 import secrets
 from urllib.parse import quote
 from urllib.request import urlopen
+from urllib.error import HTTPError
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sticker_packs(name TEXT PRIMARY KEY, title TEXT NOT NULL);
@@ -28,7 +29,20 @@ def pack_name(value):
 def import_pack(con, value):
     from . import comms
     name = pack_name(value)
-    result = comms.tg_call(con, 'getStickerSet', {'name': name})
+    direct=False
+    def call(method,payload):
+        nonlocal direct
+        if not direct:
+            try:return comms.tg_call(con,method,payload)
+            except comms.CommsError as error:
+                # Только чтение публичного набора: сетевой 403 моста без Telegram-description.
+                if str(error)!='Telegram: ошибка 403' or not comms.get(con,'tg_relay'):raise
+                direct=True
+        code,result=comms.http('POST',f"{comms.TG_API}/bot{comms.get(con,'tg_token')}/{method}",data=payload)
+        if not isinstance(result,dict) or not result.get('ok'):
+            raise comms.CommsError('Не удалось прочитать набор: Telegram-мост вернул 403, прямое чтение Telegram также недоступно. Проверьте подключение Telegram на сервере CRM')
+        return result['result']
+    result = call('getStickerSet', {'name': name})
     stickers = result.get('stickers') or []
     if not stickers or len(stickers) > 120:
         raise comms.CommsError('Набор пуст или содержит больше 120 стикеров')
@@ -41,14 +55,22 @@ def import_pack(con, value):
         media = (sticker.get('thumbnail') or sticker.get('thumb')) if animated else sticker
         if not media:
             continue
-        info = comms.tg_call(con, 'getFile', {'file_id': media['file_id']})
+        info = call('getFile', {'file_id': media['file_id']})
         path = info.get('file_path') or ''
         if not path or '..' in path or not path.lower().endswith(('.webp', '.png', '.jpg', '.jpeg')):
             continue
-        url = f"{comms.tg_api(con)}/file/bot{comms.get(con, 'tg_token')}/{quote(path, safe='/')}"
+        url = f"{comms.TG_API if direct else comms.tg_api(con)}/file/bot{comms.get(con, 'tg_token')}/{quote(path, safe='/')}"
         try:
             with urlopen(url, timeout=20) as response:
                 raw = response.read(1_000_001)
+        except HTTPError as error:
+            if error.code!=403 or direct or not comms.get(con,'tg_relay'):
+                raise comms.CommsError('Не удалось скачать изображение стикера из Telegram') from None
+            direct=True
+            try:
+                with urlopen(f"{comms.TG_API}/file/bot{comms.get(con,'tg_token')}/{quote(path,safe='/')}",timeout=20) as response:
+                    raw=response.read(1_000_001)
+            except Exception:raise comms.CommsError('Telegram-мост запретил скачивание (403), прямое скачивание также недоступно') from None
         except Exception:
             raise comms.CommsError('Не удалось скачать стикеры из Telegram. Попробуйте ещё раз') from None
         if len(raw) > 1_000_000:

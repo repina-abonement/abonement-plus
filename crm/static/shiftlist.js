@@ -18,14 +18,14 @@ function shiftText(d) {
   const L = [`📋 ${d.branch}, ${dShort(d.date)} (${shiftWd(d.date)})`];
   if (d.trials.length) {
     L.push("", `🆕 ВВОДНИКИ: ${d.trials.length}`);
-    d.trials.forEach((t, i) => L.push(`${i + 1}. ${t.name}${t.age ? ", " + t.age : ""}, группа ${shiftTitle({ name: t.group, time: t.time }, d.branch)}${t.parent ? ", родитель: " + t.parent : ""}`));
+    d.trials.forEach((t, i) => L.push(`${i + 1}. ${displayChildName(t.name)}${t.age ? ", " + t.age : ""}, группа ${shiftTitle({ name: t.group, time: t.time }, d.branch)}${t.parent ? ", родитель: " + t.parent : ""}`));
   }
   d.groups.forEach((g) => {
     const away = g.kids.filter((k) => ["warned", "vacation"].includes(k.tag));
     const come = g.kids.filter((k) => !["warned", "vacation"].includes(k.tag));
     L.push("", `⚽ ${shiftTitle(g, d.branch)}${shiftAge(g, d.branch) ? " (" + shiftAge(g, d.branch) + ")" : ""}${g.coach ? ", тренер " + g.coach : ""}`, `Ждём: ${come.length}`);
-    come.forEach((k, i) => L.push(`${i + 1}. ${k.name}${k.age ? ", " + k.age : ""}: ${k.label}${k.note ? " (" + k.note + ")" : ""}`));
-    if (away.length) L.push(`Не придут: ${away.map((k) => k.name + (k.tag === "vacation" ? " (отпуск)" : k.note ? " (" + k.note + ")" : "")).join(", ")}`);
+    come.forEach((k, i) => L.push(`${i + 1}. ${displayChildName(k.name)}${k.age ? ", " + k.age : ""}: ${k.label}${k.note ? " (" + k.note + ")" : ""}`));
+    if (away.length) L.push(`Не придут: ${away.map((k) => displayChildName(k.name) + (k.tag === "vacation" ? " (отпуск)" : k.note ? " (" + k.note + ")" : "")).join(", ")}`);
   });
   if (!d.groups.length) L.push("", "В этот день тренировок нет");
   return L.join("\n");
@@ -52,7 +52,7 @@ function shiftPrintBranch(d) {
   const tagCls = { paid: "t-paid", single: "t-single", unpaid: "t-unpaid", makeup: "t-makeup", trial: "t-trial" };
   const trials = d.trials.length ? `<section class="trials"><h2>🆕 Вводники: ${d.trials.length}</h2>
     <table><thead><tr><th>№</th><th>Фамилия, имя</th><th>Возраст</th><th>Группа</th><th>Родитель</th></tr></thead><tbody>
-    ${d.trials.map((t, i) => `<tr><td class="n">${i + 1}</td><td><b>${esc(t.name)}</b></td><td>${esc(t.age)}</td><td>${esc(shiftTitle({ name: t.group, time: t.time }, d.branch))}</td><td>${esc(t.parent)}</td></tr>`).join("")}
+    ${d.trials.map((t, i) => `<tr><td class="n">${i + 1}</td><td><b>${esc(displayChildName(t.name))}</b></td><td>${esc(t.age)}</td><td>${esc(shiftTitle({ name: t.group, time: t.time }, d.branch))}</td><td>${esc(t.parent)}</td></tr>`).join("")}
     </tbody></table></section>` : "";
   const groups = d.groups.map((g) => {
     const come = g.kids.filter((k) => !["warned", "vacation"].includes(k.tag));
@@ -60,9 +60,9 @@ function shiftPrintBranch(d) {
     return `<section class="grp"><div class="gh"><div><span class="tm">${esc(g.time)}</span> ${esc(shiftGroupName(g, d.branch).replace(g.time, "").replace(/\s+/g, " ").trim())}${shiftAge(g, d.branch) ? ` <span class="mut">${esc(shiftAge(g, d.branch))}</span>` : ""}</div>
       <div class="mut">${g.coach ? "Тренер: " + esc(g.coach) + " · " : ""}ждём <b>${come.length}</b></div></div>
       <table><thead><tr><th>№</th><th>Ребёнок</th><th>Возраст</th><th>Пометка</th><th class="mk">Был</th></tr></thead><tbody>
-      ${come.map((k, i) => `<tr><td class="n">${i + 1}</td><td>${esc(k.name)}${k.note ? `<div class="mut sm">${esc(k.note)}</div>` : ""}</td><td>${esc(k.age)}</td><td><span class="tag ${tagCls[k.tag] || ""}">${esc(k.label)}</span></td><td class="mk"><span class="box"></span></td></tr>`).join("") || `<tr><td colspan="5" class="mut">Никого не ждём</td></tr>`}
+      ${come.map((k, i) => `<tr><td class="n">${i + 1}</td><td>${esc(displayChildName(k.name))}${k.note ? `<div class="mut sm">${esc(k.note)}</div>` : ""}</td><td>${esc(k.age)}</td><td><span class="tag ${tagCls[k.tag] || ""}">${esc(k.label)}</span></td><td class="mk"><span class="box"></span></td></tr>`).join("") || `<tr><td colspan="5" class="mut">Никого не ждём</td></tr>`}
       </tbody></table>
-      ${away.length ? `<div class="away">Не придут: ${away.map((k) => esc(k.name) + (k.tag === "vacation" ? " (отпуск)" : k.note ? ` (${esc(k.note)})` : "")).join(", ")}</div>` : ""}</section>`;
+      ${away.length ? `<div class="away">Не придут: ${away.map((k) => esc(displayChildName(k.name)) + (k.tag === "vacation" ? " (отпуск)" : k.note ? ` (${esc(k.note)})` : "")).join(", ")}</div>` : ""}</section>`;
   }).join("");
   return `<div class="sheet"><div class="fit"><header><h1>${esc(d.branch)}</h1><div style="font-size:15px;font-weight:700">${dShort(d.date)}, ${shiftWd(d.date)}</div></header>
 ${trials}<div class="cols">${groups}</div></div></div>`;
@@ -128,7 +128,7 @@ async function renderJournalDay(page, groups) {
   const bid = S.journal.dayBranch || 0;
   const all = await shiftData(bid, S.journal.date);
   const tagCls = { paid: "jt-paid", single: "jt-single", unpaid: "jt-unpaid", makeup: "jt-makeup", trial: "jt-trial" };
-  const kidRow = (k, n) => `<div class="list-row"><div class="grow"><span class="jn">${n ? n + "." : ""}</span>${esc(k.name)}${k.age ? ` <span class="small muted">· ${esc(k.age)}</span>` : ""}
+  const kidRow = (k, n) => `<div class="list-row"><div class="grow"><span class="jn">${n ? n + "." : ""}</span>${esc(displayChildName(k.name))}${k.age ? ` <span class="small muted">· ${esc(k.age)}</span>` : ""}
     <span class="pill ${tagCls[k.tag] || "yellow"}">${esc(k.label)}</span>${k.note ? ` <span class="small muted">${esc(k.note)}</span>` : ""}</div></div>`;
   const totalCome = all.branches.reduce((a, b) => a + b.groups.reduce((x, g) => x + g.come, 0), 0);
   const totalAll = all.branches.reduce((a, b) => a + b.groups.reduce((x, g) => x + g.kids.length, 0), 0);
@@ -139,7 +139,7 @@ async function renderJournalDay(page, groups) {
     <div class="journal-meta small muted">В списках: ${totalAll}${totalCome!==totalAll?` · ожидаются ${totalCome}`:''}</div>
     ${all.branches.map((b) => `<h3 style="margin:18px 0 8px">${esc(b.branch)}</h3>
       ${b.trials.length ? `<div class="panel" style="background:var(--yellow-soft);padding:10px 14px;margin-bottom:10px"><b>🆕 Вводники: ${b.trials.length}</b>
-        ${b.trials.map((t, i) => `<div class="small">${i + 1}. ${esc(t.name)}${t.age ? ", " + esc(t.age) : ""}, ${esc(shiftTitle({ name: t.group, time: t.time }, b.branch))}${t.parent ? ", родитель: " + esc(t.parent) : ""}</div>`).join("")}</div>` : ""}
+        ${b.trials.map((t, i) => `<div class="small">${i + 1}. ${esc(displayChildName(t.name))}${t.age ? ", " + esc(t.age) : ""}, ${esc(shiftTitle({ name: t.group, time: t.time }, b.branch))}${t.parent ? ", родитель: " + esc(t.parent) : ""}</div>`).join("")}</div>` : ""}
       ${b.groups.map((g) => { const come = g.kids.filter((k) => !["warned", "vacation"].includes(k.tag)), away = g.kids.filter((k) => ["warned", "vacation"].includes(k.tag));
         return `<div class="panel" style="padding:0;margin-bottom:10px"><div class="list-row" style="background:var(--surface-2)"><div class="grow"><b>${esc(shiftTitle(g, b.branch))}</b>${shiftAge(g, b.branch) ? ` <span class="small muted">${esc(shiftAge(g, b.branch))}</span>` : ""}${g.coach ? ` <span class="small muted">· ${esc(g.coach)}</span>` : ""}</div><span class="pill green">ждём ${come.length}</span></div>
           ${come.map((k, i) => kidRow(k, i + 1)).join("")}${away.map((k) => kidRow(k, 0)).join("")}</div>`; }).join("")}`).join("") || `<div class="muted">В этот день тренировок нет</div>`}`;

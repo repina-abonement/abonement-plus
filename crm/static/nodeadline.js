@@ -10,7 +10,7 @@ async function renderNoDeadline(page) {
         ${f.cards.length ? `<button class="btn sm primary" data-ndtask="${f.key}" style="margin-left:auto">📣 Появилась акция: задача всем</button>` : ""}</div>
       <div data-ndbox="${f.key}"></div>
       ${f.cards.length ? `<div class="list">${f.cards.map((c) => `<div class="list-row"><div class="grow click" data-open="${c.id}" style="cursor:pointer">
-          <b>${esc(c.name)}</b> <span class="small muted">${esc(c.parent)}${c.phone ? ", " + esc(c.phone) : ""}</span>
+          <b>${esc(displayChildName(c.name))}</b> <span class="small muted">${esc(c.parent)}${c.phone ? ", " + esc(c.phone) : ""}</span>
           <div class="small muted">${esc(c.note || "")}${c.note ? " · " : ""}с ${dShort(c.since)}${c.has_task ? " · <b>задача уже стоит</b>" : ""}</div></div>
           <button class="btn sm" data-ndout="${c.id}" title="Убрать из воронки">Убрать</button></div>`).join("")}</div>`
         : `<div class="muted small">Пока никого. Сюда сами попадают ушедшие и отказавшиеся с причиной «Дорого», а ещё можно добавить из карточки клиента: «⚙️ Этап и источник» → «⏸ В «Ждут акцию»»</div>`}

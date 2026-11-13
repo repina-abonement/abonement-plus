@@ -361,7 +361,7 @@ async function renderCalls(body) {
           <div class="small muted">${dtWhen(k.started_at)} · ${esc(CALL_ST[k.status] || k.status)}${k.talk ? " · " + secs(k.talk) : ""}${k.operator ? " · " + esc(k.operator) : ""}</div>
           ${k.has_record ? `<audio controls preload="none" src="/api/calls/${k.id}/record"></audio>` : ""}
           ${aiChip(k)}
-          <div class="chips" style="margin-top:6px">${k.students.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}
+          <div class="chips" style="margin-top:6px">${k.students.map((x) => `<button class="chip" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join("")}
             ${k.family_name ? "" : `<button class="chip" data-newlead="${esc(k.phone)}">+ Создать лид</button>`}</div></div>
         <button class="btn sm" data-dial="${esc(k.phone)}">📞 ${missed ? "Перезвонить" : "Позвонить"}</button>
       </div>`;
@@ -390,7 +390,7 @@ async function openChat(cid, keepScroll = false) {
       <div class="small muted">${[c.username ? "@" + c.username : "", c.phone].filter(Boolean).map(esc).join(" · ")}</div>
       <div class="section">
         ${c.family_id ? `<div class="small muted">Семья ${esc(c.family_name)}</div>
-          <div class="chips" style="margin-top:6px">${c.students.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}
+          <div class="chips" style="margin-top:6px">${c.students.map((x) => `<button class="chip" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join("")}
           <button class="chip" id="unlink">Отвязать</button></div><div id="warn-box"></div>`
         : `<div class="small">Переписка не привязана к карточке</div>
           <div class="row" style="margin-top:8px"><input id="link-q" placeholder="Найти ученика или родителя"><button class="btn sm" id="new-lead" style="flex:0">+ Новый лид</button></div>
@@ -424,7 +424,7 @@ async function openChat(cid, keepScroll = false) {
       clearTimeout(t);
       t = setTimeout(async () => {
         const rows = e.target.value.trim().length < 2 ? [] : await api("GET", "/api/students?q=" + encodeURIComponent(e.target.value)).catch(() => []);
-        $("#link-res").innerHTML = rows.slice(0, 8).map((r) => `<button class="chip" data-link="${r.id}">${esc(r.name)} · ${esc(r.family)}</button>`).join("");
+        $("#link-res").innerHTML = rows.slice(0, 8).map((r) => `<button class="chip" data-link="${r.id}">${esc(displayChildName(r.name))} · ${esc(r.family)}</button>`).join("");
         $("#link-res").querySelectorAll("[data-link]").forEach((b) => (b.onclick = async () => {
           const st = await api("GET", `/api/students/${b.dataset.link}`);
           await api("POST", `/api/conversations/${cid}/link`, { family_id: st.family.id }).catch(fail);
