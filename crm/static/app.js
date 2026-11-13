@@ -1450,7 +1450,9 @@ function layoutStudentCard(body, isMember) {
   ["subs", "balance"].forEach(k => { if (take(k)) right.appendChild(take(k)); });
   ["vac"].forEach(k => fold(k, right));
   if(take("visits")) grid.querySelector(".sc-attendance").appendChild(take("visits"));
-  ["family", "stage", "hist"].forEach(k => fold(k, info, k === "family"));
+  const stage=take("stage"),stagePlace=take("family")?.querySelector('[data-client-stage]');
+  if(stage&&stagePlace){while(stage.firstChild)stagePlace.appendChild(stage.firstChild);stage.remove();}
+  ["family", "hist"].forEach(k => fold(k, info, k === "family"));
   if (take("arch")) info.appendChild(take("arch"));
   body.querySelectorAll("[data-sctab]").forEach((b) => (b.onclick = () => {
     grid.dataset.tab = b.dataset.sctab;
@@ -1775,13 +1777,12 @@ async function openStudent(id, options = {}) {
   ].filter(Boolean).join("");
   const html = `
   <div class="sc-head">
-    <div class="sc-title"><h2>${esc(s.name)}</h2>
-      <span class="muted">${esc(d.stage_label)}${s.birth ? " · " + esc(ageText(s.birth)) : ""}${s.archived ? " · в архиве" : ""}</span>
-      ${d.lead_score ? `<span class="score ${d.lead_score.level}" title="${esc(d.lead_score.why.join(", ") || "")}">${d.lead_score.label}</span>` : ""}</div>
+    <div class="sc-title"><h2>${esc(s.name)}</h2></div>
+    <div class="sc-status">${s.birth?esc(ageText(s.birth))+' · ':''}${esc(d.stage_label)}${s.archived?' · в архиве':''}${d.lead_score?` · ${esc(d.lead_score.label)}`:''}</div>
     ${d.siblings.length ? `<div class="chips sc-kids"><span class="chip on">${esc(s.name.split(" ")[0])}</span>${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}</div>` : ""}
     <div class="sc-meta">${isMember ? (regular.length ? regular.map((e) => `<span class="pill">${esc(e.group_name)}</span>`).join(" ") : `<span class="muted small">Группа не выбрана</span>`)
       : `${s.trial_at ? `<span class="pill">Пробное ${dtShort(s.trial_at)}</span>` : ""}`}</div>
-    <div class="sc-parents">${d.parents.map((p) => `<span class="sc-parent"><b>${esc(p.name)}</b> <button class="rel-chip ${p.relation ? "" : "empty"}" data-rel="${p.id}" title="Кем приходится ребёнку">${p.relation ? esc(p.relation) : "кем приходится?"}</button>${p.phone ? ` <button class="linkish" data-copy-phone="${esc(p.phone)}" title="Скопировать номер">${esc(p.phone)}</button> <button class="icon-btn" data-dial="${esc(p.phone)}" title="Позвонить через Sipuni">📞</button>` : ""}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}${p.email ? ` <span class="small muted">✉ ${esc(p.email)}</span>` : ""}</span>`).join("")}</div>
+    <div class="sc-parents">${d.parents.map((p) => `<div class="sc-parent"><span>${esc(p.name)}</span><span class="muted" aria-hidden="true">·</span><button class="rel-chip ${p.relation?'':'empty'}" data-rel="${p.id}" title="Изменить родство">${p.relation?esc(p.relation):'Указать родство'}</button>${p.phone?`<span class="muted" aria-hidden="true">·</span><button class="linkish" data-copy-phone="${esc(p.phone)}" title="Скопировать номер">${esc(p.phone)}</button>`:''}${p.messenger?`<span class="muted">${esc(p.messenger)}</span>`:''}${p.email?`<span class="muted sc-parent-email">${esc(p.email)}</span>`:''}</div>`).join('')}</div>
     ${isMember && d.balance.debt ? `<div class="sc-debt-summary">Задолженность <b>${rub(d.balance.debt)}</b></div>` : ""}
     ${d.family.note ? `<div class="sc-staff-note"><b>Заметка для команды</b><div>${esc(d.family.note)}</div></div>` : ""}
     ${alerts ? `<div class="sc-alerts">${alerts}</div>` : ""}
@@ -1789,10 +1790,10 @@ async function openStudent(id, options = {}) {
     ${!isMember && d.stage_tip ? `<details class="stage-tip" ${S.tipsOpen === true ? "open" : ""}><summary>💡 Подсказка на этапе «${esc(d.stage_label)}»</summary>
       <div><b>Что сказать.</b> ${esc(d.stage_tip.say)}</div><div style="margin-top:4px"><b>Чтобы перейти дальше:</b> ${esc(d.stage_tip.next)}</div></details>` : ""}
     <div class="sc-actions">
-      ${isMember && full ? `<button class="btn primary" id="act-sell">🛒 Продать абонемент</button>` : ""}
-      ${!isMember ? `<button class="btn primary" id="act-trial">📅 Записать на пробное</button>` : ""}
+      ${isMember && full ? `<button class="btn primary" id="act-sell">Продать абонемент</button>` : ""}
+      ${!isMember ? `<button class="btn primary" id="act-trial">Записать на пробное</button>` : ""}
       ${full?'<button class="btn" id="act-past-entry">Внести прошедшее ПУ / покупку</button>':""}
-      ${d.parents.some((p) => p.phone) ? `<button class="btn" id="act-call">📞 Позвонить</button>` : ""}
+      ${d.parents.some((p) => p.phone) ? `<button class="btn" id="act-call">Позвонить</button>` : ""}
       ${isMember ? `<details class="sc-extra-actions"><summary class="btn">Ещё</summary><div><button class="btn" id="act-vac">Отпуск</button></div></details>` : ""}
     </div>
     ${!isMember ? '<div id="sc-trial-booking" hidden></div>' : ""}
@@ -1816,10 +1817,13 @@ async function openStudent(id, options = {}) {
     ${d.trial_age_warn ? `<div class="alert" style="margin-bottom:8px">⚠️ Группа для пробного ${esc(d.trial_age_warn)}. Проверьте, точно ли сюда</div>` : ""}
     <div class="field"><label>Пробное занятие</label><input id="f-trial" type="datetime-local" value="${esc(s.trial_at || "")}"></div>
     <div id="trial-occ" class="small"></div><div id="trial-slots"></div>` : ""}
-    <div class="field"><label>Откуда узнали</label>${sourceSelect("f-source", s.source_id, s.source)}</div>
   </div>
 
-  <div class="section" data-sc="family" data-title="👪 Семья и заметка">
+  <div class="section" data-sc="family" data-title="Данные ребёнка и семьи">
+    <h3>Данные ребёнка</h3>
+    <div class="row"><div class="field"><label>Имя и фамилия</label><div>${esc(s.name)}</div></div><div class="field"><label>Дата рождения</label><div>${s.birth?esc(s.birth.slice(0,10).split('-').reverse().join('.')):'Не указана'}</div></div></div>
+    <div class="field"><label>Рекламный источник</label>${sourceSelect("f-source", s.source_id, s.source)}</div>
+    <div data-client-stage></div>
     <h3>Семья ${esc(d.family.name)}</h3>
     <div class="field"><label>Заметка для персонала (видна в шапке карточки)</label><textarea id="fam-note" rows="2" placeholder="Например: аллергия, звонить только маме">${esc(d.family.note || "")}</textarea></div>
     ${consentHtml(d.family)}
@@ -1934,7 +1938,7 @@ async function openStudent(id, options = {}) {
     else if (a === "call") dial(firstPhone);
     else if (a === "offer") { scTab("feed"); click("#to-open"); }
     else if (a === "trial") click("#act-trial");
-    else if (a === "sell") { if (!click("#act-sell")) { openFold(body, "stage"); const f = $("#f-stage"); if (f) { f.scrollIntoView({ block: "center", behavior: "smooth" }); f.focus(); } } }
+    else if (a === "sell") { if (!click("#act-sell")) { openFold(body, "family"); const f = $("#f-stage"); if (f) { f.scrollIntoView({ block: "center", behavior: "smooth" }); f.focus(); } } }
     else if (a === "link") { click("#act-sell"); }
     else if (a === "makeup") openFold(body, "skips");
     else if (a === "task") { closeDrawer(); go("planner"); }

@@ -1748,3 +1748,17 @@ textarea.nav-q { height:40px; min-height:40px; max-height:40px; resize:none; ove
 
 .past-balance { margin-top:16px; padding:14px; border:1px solid var(--accent); border-radius:12px; }
 .past-balance p { margin:6px 0 10px; }
+
+/* Единая спокойная типографика шапки клиентской карточки. */
+.sc-head { gap:10px; }
+.sc-head .sc-status,.sc-head .sc-meta,.sc-head .sc-parents,.sc-head .sc-staff-note { font-size:16px; line-height:1.5; font-weight:400; }
+.sc-head .sc-status,.sc-head .sc-meta { color:var(--ink-2); }
+.sc-head .sc-meta .pill { font:inherit; }
+.sc-head .sc-parents { padding-top:4px; border-top:0; gap:8px 24px; }
+.sc-head .sc-parent { padding:0; border:0; border-radius:0; gap:8px; }
+.sc-head .sc-parent button,.sc-head .sc-parent span { font:inherit; }
+.sc-head .sc-parent .rel-chip { border:0; border-radius:0; background:none; color:var(--ink-2); padding:0; }
+.sc-head .sc-parent .rel-chip.empty { color:var(--ink-2); }
+.sc-head .sc-parent-email { overflow-wrap:anywhere; }
+.sc-head .sc-staff-note { background:var(--bg); border:0; padding:10px 12px; }
+.sc-head .sc-staff-note b { font-size:inherit; font-weight:500; color:inherit; }
