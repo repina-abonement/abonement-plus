@@ -1765,6 +1765,7 @@ async function openStudent(id, options = {}) {
       ${d.parents.some((p) => p.phone) ? `<button class="btn" id="act-call">📞 Позвонить</button>` : ""}
       ${isMember ? `<details class="sc-extra-actions"><summary class="btn">Ещё</summary><div><button class="btn" id="act-vac">Отпуск</button></div></details>` : ""}
     </div>
+    ${!isMember ? '<div id="sc-trial-booking" hidden></div>' : ""}
   </div>
   <div class="sc-tasks">${cardTasksBlock(d)}</div>
   <div class="sc-tabs" role="tablist" aria-label="Разделы карточки"><button class="on" role="tab" aria-selected="true" data-sctab="feed">Общение</button><button role="tab" aria-selected="false" data-sctab="abon">Абонементы и оплаты</button><button role="tab" aria-selected="false" data-sctab="visits">Посещения</button><button role="tab" aria-selected="false" data-sctab="info">Данные клиента</button></div>
@@ -1881,7 +1882,7 @@ async function openStudent(id, options = {}) {
   if ($("#act-sell")) $("#act-sell").onclick = () => openSell(d, reload);
   if ($("#act-vac")) $("#act-vac").onclick = () => openFold(body, "vac");
   if ($("#act-move")) $("#act-move").onclick = () => { openFold(body, "abon"); const b = body.querySelector("[data-entr]"); if (b) { b.click(); b.scrollIntoView({ block: "center", behavior: "smooth" }); } };
-  if ($("#act-trial")) $("#act-trial").onclick = () => { scTab("feed"); const b = $("#to-book"); if (b) { b.click(); b.scrollIntoView({ block: "center", behavior: "smooth" }); } else { const f = $("#f-trial"); if (f) f.scrollIntoView({ block: "center", behavior: "smooth" }); } };
+  if ($("#act-trial")) $("#act-trial").onclick = () => openInlineTrialBooking(d, body.querySelector("#sc-trial-booking"), reload);
   body.querySelectorAll("[data-chstop]").forEach((b) => (b.onclick = async () => {
     if (!confirm("Остановить автоцепочку для этого клиента? Больше сообщений по ней не уйдёт")) return;
     try { await api("POST", `/api/chain-runs/${b.dataset.chstop}/stop`, {}); toast("Цепочка остановлена"); reload(); } catch (e) { fail(e); }

@@ -2510,6 +2510,19 @@ def waitlist_funnel(con, h, user, body, q):
     return waitlist.funnel(con, force=bool(q.get("force"))) or {}
 
 
+@route("GET", "/api/students/{sid}/trial-options", role="operator")
+def inline_trial_options(con,h,user,body,q,sid):
+    from . import trialoffer
+    bid=int(q['branch_id']) if str(q.get('branch_id') or '').isdigit() else None
+    return trialoffer.booking_options(con,int(sid),q.get('birth') or '',q.get('date') or '',bid)
+
+
+@route("POST", "/api/students/{sid}/trial-booking", role="operator")
+def inline_trial_book(con,h,user,body,q,sid):
+    from . import trialoffer
+    return trialoffer.book_inline(con,int(sid),body,user)
+
+
 @route("GET", "/api/trial-offer", role="operator")
 def trial_offer(con, h, user, body, q):
     from . import trialoffer

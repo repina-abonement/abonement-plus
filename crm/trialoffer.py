@@ -98,3 +98,91 @@ def offer(con, age: int | None, child: str = "", branch_id: int | None = None, n
     text = tpl.replace("{child}", child_txt).replace("{slots}", "\n".join(lines)).replace("{age}", str(age))
     return {"slots": sl, "text": text if sl else "", "age": age,
             "error": "" if sl else "Нет свободных мест для этого возраста на ближайшие 2 недели"}
+
+
+def booking_options(con, sid: int, birth: str = '', day: str = '', branch_id: int | None = None) -> dict:
+    """Scheduled, age-appropriate trial slots for the inline booking form."""
+    from . import smart, schedule, closures, capacity
+    from .services import ApiError
+    info = smart.required_info(con, sid, 'trial')
+    birth = birth or info['values']['birth']
+    if not birth:
+        return {'slots': [], 'error': 'Укажите дату рождения ребёнка, чтобы выбрать подходящие группы'}
+    try:
+        born = date.fromisoformat(birth)
+        start = date.fromisoformat(day) if day else date.today()
+    except (ValueError,TypeError):
+        raise ApiError('Проверьте дату рождения и дату занятия')
+    now = datetime.now()
+    if born >= now.date() or born <= date(2000,1,1):
+        raise ApiError('Проверьте дату рождения ребёнка')
+    if start < now.date():
+        raise ApiError('Для пробного выберите сегодня или будущую дату')
+    student=con.execute('SELECT group_id,trial_at FROM students WHERE id=?',(sid,)).fetchone()
+    slots = []
+    for group in con.execute('''SELECT g.*,b.name AS branch,b.address FROM groups g JOIN branches b ON b.id=g.branch_id
+        WHERE g.active=1 AND b.active=1 AND g.is_makeup=0 AND g.program_id IS NULL AND g.trial_ok=1'''
+        + (' AND g.branch_id=?' if branch_id else ''),(branch_id,) if branch_id else ()):
+        ages = age_range(group['age'])
+        if not ages or 'взросл' in group['age'].lower() or 'пап' in group['name'].lower() or 'ОФП' in group['name']:
+            continue
+        for offset in range(1 if day else 28):
+            d = start + timedelta(days=offset)
+            age = years(birth,d)
+            actual = schedule.on(con,group,d)
+            if not ages[0] <= age <= ages[1] or d.weekday() not in logic.parse_weekdays(actual['weekdays']):
+                continue
+            if closures.is_closed(con,group['id'],d):
+                continue
+            time = logic.group_time(actual,d.weekday())
+            if not time:
+                continue
+            at = datetime.combine(d,datetime.strptime(time,'%H:%M').time())
+            if at < now + timedelta(hours=2):
+                continue
+            occupancy = capacity.occupancy(con,group['id'],d.isoformat())
+            limit = occupancy['limit'] or group['capacity']
+            own_booking=student['group_id']==group['id'] and (student['trial_at'] or '')[:10]==d.isoformat()
+            own_hold=any(h['student_id']==sid for h in capacity.active_holds(con,group['id'],d.isoformat()))
+            free = limit - occupancy['count'] + int(own_booking or own_hold)
+            if free <= 0:
+                continue
+            slots.append({'group_id':group['id'],'group':group['name'],'branch_id':group['branch_id'],
+                          'branch':group['branch'],'date':d.isoformat(),'time':time,'free':free})
+    slots.sort(key=lambda s:(s['date'],s['time'],s['branch'],s['group'],s['group_id']))
+    return {'slots':slots,'error':'' if slots else 'На выбранные даты нет подходящих свободных мест. Выберите другой день или филиал'}
+
+
+def book_inline(con,sid: int,data: dict,user: dict) -> dict:
+    """Save required data and the selected slot together; failed bookings leave no partial edits."""
+    from . import smart, services as sv
+    s = con.execute('SELECT * FROM students WHERE id=?',(sid,)).fetchone()
+    if not s or s['archived'] or s['funnel']!='sales':
+        raise sv.ApiError('Для записи выберите действующую карточку лида')
+    try:
+        gid = int(data.get('group_id') or 0)
+    except (ValueError,TypeError):
+        raise sv.ApiError('Выберите группу и время занятия')
+    day = str(data.get('date') or '')
+    time = str(data.get('time') or '')
+    if not day or not time or not gid:
+        raise sv.ApiError('Выберите дату, группу и время занятия')
+    options = booking_options(con,sid,str(data.get('birth') or ''),day)
+    chosen = next((x for x in options['slots'] if x['group_id']==gid and x['time']==time),None)
+    if not chosen:
+        raise sv.ApiError('Выбранное время недоступно. Обновите варианты и выберите свободное занятие')
+    con.execute('SAVEPOINT inline_trial_booking')
+    try:
+        fields = {k:data[k] for k in ('child_name','birth','parent_name','phone') if k in data}
+        if str(data.get('email') or '').strip():
+            fields['email'] = data['email']
+        smart.fill_required(con,sid,fields,user)
+        smart.require(con,sid,'trial')
+        sv.update_student(con,sid,{'group_id':gid,'trial_at':day+'T'+time},user)
+        con.execute('RELEASE inline_trial_booking')
+    except BaseException as error:
+        con.execute('ROLLBACK TO inline_trial_booking');con.execute('RELEASE inline_trial_booking')
+        if isinstance(error,sv.ApiError) and getattr(error,'extra',{}).get('need'):
+            raise sv.ApiError(error.message,422)
+        raise
+    return {'ok':True,'slot':chosen}

@@ -1713,3 +1713,8 @@ textarea.nav-q { height:40px; min-height:40px; max-height:40px; resize:none; ove
 .cancel-approval-warning { padding:12px; border-radius:8px; background:#fff3cd; color:#714d00; font-weight:700; }
 .subscription-refunds { display:grid; gap:12px; margin-top:12px; }
 .subscription-refund { padding:16px; border:1px solid var(--line); border-radius:12px; }
+
+.inline-trial-form { border:1px solid var(--line); border-radius:12px; padding:18px; background:var(--bg); margin-top:8px; }
+.inline-trial-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:14px 0; }
+.inline-trial-grid .field { min-width:0; margin:0; }
+@media(max-width:600px) { .inline-trial-grid { grid-template-columns:minmax(0,1fr); } .inline-trial-form { padding:12px; } }
