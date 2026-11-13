@@ -2185,31 +2185,20 @@ async function renderJournal(page) {
   j.rows.sort((a, b) => away(a) - away(b));
   j.rows.forEach((r, i) => (r.n = i + 1));
   const jTotal = j.rows.length, jAway = j.rows.filter(away).length;
-  const jCnt = (f) => j.rows.filter(f).length;
-  const jSum = j.has_lesson && jTotal ? `<div class="jm-sub" style="max-width:none">
-      <div class="jm-sub-n">${jTotal - jAway}</div>
-      <div><b>ждём на тренировке</b> из ${jTotal} по списку${jAway ? `: ${jAway} ${plural(jAway, "предупредил", "предупредили", "предупредили")} или в отпуске` : ""}
-        <div class="small muted">${[[jCnt((r) => r.tag === "paid" && !away(r)), "абонемент"], [jCnt((r) => r.tag === "single" && !away(r)), "разовое"], [jCnt((r) => r.tag === "unpaid" && !away(r)), "не оплачен"],
-          [jCnt((r) => r.status === "trial"), "ПУ"], [jCnt((r) => r.status === "makeup" || r.makeup_id), "отработка"]].filter(([n]) => n).map(([n, t]) => `${t}: ${n}`).join(" · ")}</div></div></div>` : "";
   const st = j.has_lesson && S.journal.date <= S.meta.today ? await api("GET", `/api/lessons/staff?group_id=${g.id}&date=${S.journal.date}`).catch(() => null) : null;
   page.innerHTML = `
-    ${journalDayHead()}
+    ${journalDayHead()}${j.has_lesson?journalActionsHtml():''}
     <div class="row" style="max-width:640px;margin-bottom:14px">
       ${jBranches.length > 1 ? `<div class="field" style="flex:0 0 200px"><label>Филиал</label><select id="j-branch">${jBranches.map((b) => `<option value="${b.id}" ${b.id === g.branch_id ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : ""}
       <div class="field"><label>Группа</label><select id="j-group">${dayGroups.filter((x) => x.branch_id === g.branch_id).map((x) => `<option value="${x.id}" ${x.id === S.journal.group ? "selected" : ""}>${esc(groupNoBranch(x))}</option>`).join("")}</select></div>
       <div class="field" style="flex:0 0 170px"><label>Дата</label><input id="j-date" type="date" value="${S.journal.date}"></div>
     </div>
-    <div class="note">${esc(g.branch)} · ${g.weekdays.split(",").map((x) => WD[+x]).join(", ")} ${esc(g.time)} · ${esc(g.age)} лет${j.closed ? " · <b>праздник, занятия нет</b>" : j.has_lesson ? "" : " · <b>в этот день у группы нет занятия</b>"}</div>
-    ${j.has_lesson && !g.is_makeup && S.journal.date <= S.meta.today ? `<button class="btn primary meet-open ${j.overdue_marks ? "late" : ""}" id="j-meet">${meetLabel(S.journal.date, g.time, j.overdue_marks)}${lessonOver(S.journal.date, g.time) ? "" : ": отметить крупными кнопками"}</button>` : ""}
-    ${jSum}
-    ${j.has_lesson ? `<div class="row" style="gap:8px;margin:0 0 12px;flex-wrap:wrap"><button class="btn sm" id="j-copy" style="flex:0 0 auto">📋 Скопировать списки смены</button><button class="btn sm" id="j-print" style="flex:0 0 auto">🖨 Лист для печати</button><span class="small muted" style="align-self:center">все группы ${esc(g.branch)} на ${dShort(S.journal.date)}</span></div>` : ""}
-    ${j.overdue_marks ? `<div class="alert">🔴 Тренировка закончилась ${j.overdue_marks.minutes} мин назад, не отмечено детей: ${j.overdue_marks.missing}</div>` : ""}
-    ${st ? `<div class="panel" style="padding:12px 14px;margin-bottom:12px">${staffPicker(st, st.coaches, "j", S.journal.date === S.meta.today && new Date().toTimeString().slice(0, 5) < g.time)}</div>` : ""}
+    <div class="journal-meta small muted"><span>В списке: ${jTotal}${jAway?` · не придут ${jAway}`:''}${j.overdue_marks?` · не отмечено ${j.overdue_marks.missing}`:''}${j.closed?' · занятие отменено':j.has_lesson?'':' · занятия нет'}</span>
+      ${st?staffPicker(st,st.coaches,"j",before,true):''}</div>
     <div class="list">${j.rows.length ? j.rows.map((r) => g.is_makeup && r.makeup_id ? makeupRow(r) : journalRow(r, before)).join("") : `<div class="list-row muted">${g.is_makeup ? "На эту дату никто не записан на отработку" : "В группе пока нет учеников"}</div>`}</div>
     ${(j.hidden_unpaid || []).length ? `<details class="small muted" style="margin-top:10px"><summary>Не оплатили: ${j.hidden_unpaid.length}. В журнал не попадают</summary>
       <div style="margin-top:6px">${j.hidden_unpaid.map((x) => `<span class="${isCoach() ? "" : "click"}" data-who="${x.id}" style="cursor:pointer">${esc(x.name)}</span>`).join(", ")}</div></details>` : ""}`;
   if (st) wireStaffPicker(page, "j", g.id, S.journal.date, render);
-  if ($("#j-meet")) $("#j-meet").onclick = () => openMeet(g.id, S.journal.date);
   wireJournalDayHead(page);
   if ($("#j-copy")) $("#j-copy").onclick = () => shiftCopy(g.branch_id, S.journal.date);
   if ($("#j-print")) $("#j-print").onclick = () => shiftPrint(g.branch_id, S.journal.date);

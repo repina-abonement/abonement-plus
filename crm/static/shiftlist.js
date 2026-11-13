@@ -132,13 +132,11 @@ async function renderJournalDay(page, groups) {
     <span class="pill ${tagCls[k.tag] || "yellow"}">${esc(k.label)}</span>${k.note ? ` <span class="small muted">${esc(k.note)}</span>` : ""}</div></div>`;
   const totalCome = all.branches.reduce((a, b) => a + b.groups.reduce((x, g) => x + g.come, 0), 0);
   const totalAll = all.branches.reduce((a, b) => a + b.groups.reduce((x, g) => x + g.kids.length, 0), 0);
-  page.innerHTML = `${journalDayHead()}
+  page.innerHTML = `${journalDayHead()}${journalActionsHtml()}
     <div class="row" style="max-width:640px;margin-bottom:14px">
       <div class="field"><label>Филиал</label><select id="jd-branch"><option value="0">Все филиалы</option>${brs.map((b) => `<option value="${b.id}" ${b.id === bid ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>
       <div class="field" style="flex:0 0 170px"><label>Дата</label><input id="j-date" type="date" value="${S.journal.date}"></div></div>
-    ${all.branches.length ? `<div class="jm-sub" style="max-width:none"><div class="jm-sub-n">${totalCome}</div><div><b>ждём за день</b> из ${totalAll} по списку
-      <div class="small muted">${all.branches.map((b) => `${esc(b.branch)}: ${b.groups.reduce((x, g) => x + g.come, 0)}`).join(" · ")}</div></div></div>` : ""}
-    <div class="row" style="gap:8px;margin:0 0 12px;flex-wrap:wrap"><button class="btn sm" id="j-copy" style="flex:0 0 auto">📋 Скопировать списки</button><button class="btn sm" id="j-print" style="flex:0 0 auto">🖨 Лист для печати</button></div>
+    <div class="journal-meta small muted">В списках: ${totalAll}${totalCome!==totalAll?` · ожидаются ${totalCome}`:''}</div>
     ${all.branches.map((b) => `<h3 style="margin:18px 0 8px">${esc(b.branch)}</h3>
       ${b.trials.length ? `<div class="panel" style="background:var(--yellow-soft);padding:10px 14px;margin-bottom:10px"><b>🆕 Вводники: ${b.trials.length}</b>
         ${b.trials.map((t, i) => `<div class="small">${i + 1}. ${esc(t.name)}${t.age ? ", " + esc(t.age) : ""}, ${esc(shiftTitle({ name: t.group, time: t.time }, b.branch))}${t.parent ? ", родитель: " + esc(t.parent) : ""}</div>`).join("")}</div>` : ""}
@@ -150,6 +148,10 @@ async function renderJournalDay(page, groups) {
   page.querySelector("#j-date").onchange = (e) => step(() => { S.journal.date = e.target.value; });
   page.querySelector("#j-copy").onclick = () => shiftCopy(bid, S.journal.date);
   page.querySelector("#j-print").onclick = () => shiftPrint(bid, S.journal.date);
+}
+
+function journalActionsHtml() {
+  return '<div class="journal-actions"><button class="btn sm" id="j-copy">Скопировать списки</button><button class="btn sm" id="j-print">Печать</button></div>';
 }
 
 function journalDayHead() {

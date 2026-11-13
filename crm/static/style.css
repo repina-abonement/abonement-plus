@@ -1718,3 +1718,13 @@ textarea.nav-q { height:40px; min-height:40px; max-height:40px; resize:none; ove
 .inline-trial-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:14px 0; }
 .inline-trial-grid .field { min-width:0; margin:0; }
 @media(max-width:600px) { .inline-trial-grid { grid-template-columns:minmax(0,1fr); } .inline-trial-form { padding:12px; } }
+
+/* Компактная шапка дневного журнала: действия, одна строка состояния, тренеры. */
+.journal-actions { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 14px; }
+.journal-meta { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px 20px; margin:0 0 12px; line-height:1.5; }
+.staff-pick.journal-staff { margin:0; padding:0; background:none; border-radius:0; }
+.journal-staff summary { display:flex; align-items:baseline; gap:12px; cursor:pointer; list-style:none; }
+.journal-staff summary::-webkit-details-marker { display:none; }
+.journal-staff-edit { color:var(--accent); font-size:13px; }
+.journal-staff[open] { flex-basis:100%; }
+.journal-staff[open] summary { margin-bottom:8px; }
