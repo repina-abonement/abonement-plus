@@ -286,7 +286,7 @@ async function renderLogin(force = false) {
 /* ---------- каркас ---------- */
 const VIEWS = [
   ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Действующие клиенты"], ["nodeadline", "Без дедлайнов"],
-  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["posts", "Посты в каналы"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Клиенты и лиды"], ["docs", "Документы"], ["settings", "Настройки"],
+  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["posts", "Посты в каналы"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Клиенты"], ["docs", "Документы"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
   team: '<circle cx="12" cy="6" r="2.5"/><circle cx="5.5" cy="17.5" r="2.5"/><circle cx="18.5" cy="17.5" r="2.5"/><path d="M12 8.5v3.5M5.5 15v-3h13v3"/>',
@@ -885,6 +885,54 @@ function erpWireFiles(box, d) {
   box.querySelectorAll("[data-udel]").forEach((b) => (b.onclick = async () => { if (!confirm("Убрать этот файл?")) return; await api("DELETE", `/api/erp/uploads/${b.dataset.udel}`).catch(fail); renderErp(box); }));
 }
 
+function erpPeopleSetup(box, data) {
+  const options = data.uploads.map((file) => `<option value="${file.id}">${esc(file.filename)} (${file.count})</option>`).join("");
+  box.insertAdjacentHTML("beforeend", `
+    <div class="erp-step" id="erp-people">
+      <b>Статусы клиентов и перенос лидов</b>
+      <p class="small muted">Загрузите свежие выгрузки ERP. Для посетителей используется колонка «Статус», для лидов применяется «Новый лид». Можно выбрать несколько файлов.</p>
+      <div class="field"><label for="erp-people-visitors">Посетители, включая архив</label><select id="erp-people-visitors" multiple>${options}</select></div>
+      <div class="field"><label for="erp-people-leads">Лиды</label><select id="erp-people-leads" multiple>${options}</select></div>
+      <button class="btn" id="erp-people-plan" ${options ? "" : "disabled"}>Проверить</button>
+      <button class="btn primary" id="erp-people-apply" disabled>Перенести</button>
+      <div id="erp-people-out" aria-live="polite"></div>
+    </div>`);
+  const root = box.querySelector("#erp-people");
+  const visitors = root.querySelector("#erp-people-visitors"), leads = root.querySelector("#erp-people-leads");
+  const check = root.querySelector("#erp-people-plan"), apply = root.querySelector("#erp-people-apply");
+  const out = root.querySelector("#erp-people-out");
+  const selected = (select) => Array.from(select.selectedOptions, (option) => +option.value);
+  let approved = null;
+  function show(report, applied) {
+    const n = report.counts;
+    out.innerHTML = `<p>${applied ? "Перенос выполнен. " : ""}Строк посетителей ${n.visitors || 0}, лидов ${n.leads || 0}. Совпадают ${n.same || 0}, обновление статуса ${n.updated || 0}, новые карточки ${n.new || 0}, повторные строки ${n.repeated_rows || 0}.</p>
+      ${report.issues.length ? `<details><summary>Требуют сверки: ${report.issues.length}</summary><ul>${report.issues.map(([row, reason]) => `<li>${esc(row)}: ${esc(reason)}</li>`).join("")}</ul></details>` : ""}`;
+  }
+  visitors.onchange = leads.onchange = () => { approved = null; apply.disabled = true; out.replaceChildren(); };
+  async function run(applyChanges) {
+    const files = { visitors: selected(visitors), leads: selected(leads) };
+    if (applyChanges && !approved) return;
+    if (applyChanges) files.token = approved;
+    approved = null;
+    check.disabled = apply.disabled = visitors.disabled = leads.disabled = true;
+    out.textContent = applyChanges ? "Переношу…" : "Проверяю…";
+    try {
+      const report = await api("POST", `/api/erp/people/${applyChanges ? "apply" : "plan"}`, files);
+      show(report, applyChanges);
+      if (!applyChanges && (report.counts.same || report.counts.updated || report.counts.new)) {
+        approved = report.token;
+        apply.disabled = false;
+      }
+    } catch (error) {
+      out.textContent = error.message;
+    } finally {
+      check.disabled = visitors.disabled = leads.disabled = false;
+    }
+  }
+  check.onclick = () => run(false);
+  apply.onclick = () => run(true);
+}
+
 /* Настройки → Перенос из ERP: файлы, колонки, группы, пробный прогон, перенос, сверка, отмена */
 async function renderErp(box) {
   const d = await api("GET", "/api/erp");
@@ -917,6 +965,7 @@ async function renderErp(box) {
     <div class="erp-step"><b>4. Перенос</b><div class="small muted">Перед переносом CRM сделает резервную копию и удалит всех выдуманных клиентов. Сотрудники, группы, настройки и переписки останутся. Перенос можно отменить целиком</div>
       <label class="check" style="margin-top:8px"><input type="checkbox" id="erp-rkn"> Изменения в Роскомнадзор поданы, политика обработки данных опубликована</label>
       <button class="btn primary" id="erp-run" style="margin-top:8px" disabled>Перенести</button></div>`}`;
+  erpPeopleSetup(box, d);
   erpTaskTransferSetup(box,d);
   if (done) {
     erpFullSetup(box, d);
@@ -2379,17 +2428,15 @@ function wireCardMark(sid, reload) {
 }
 
 /* ---------- поиск ---------- */
-/* «Клиенты и лиды»: исходный статус ERP; внутренние этапы не подменяют его. */
-S.pf = S.pf || { kind: "all", status: "", erp: "" };
+/* Единый список клиентов с фильтром по статусу ERP. */
+S.pf = S.pf || { erp: "" };
 async function renderSearch(page) {
   const f = S.pf;
-  const d = await api("GET", `/api/people?kind=${f.kind}&erp=${encodeURIComponent(f.erp)}&q=${encodeURIComponent(S.search)}${S.searchArch ? "&archived=1" : ""}`);
-  const kinds = [["all", "Все", d.counts.leads + d.counts.clients], ["leads", "Лиды", d.counts.leads], ["clients", "Клиенты", d.counts.clients]];
+  const d = await api("GET", `/api/people?erp=${encodeURIComponent(f.erp)}&q=${encodeURIComponent(S.search)}${S.searchArch ? "&archived=1" : ""}`);
   page.innerHTML = `
-    <div class="page-head"><h2 class="grow">Клиенты и лиды</h2>
+    <div class="page-head"><h2 class="grow">Клиенты</h2>
       <input class="search" id="q" placeholder="Имя, фамилия или телефон" value="${esc(S.search)}">
       <button class="btn sm ${S.searchArch ? "primary" : ""}" id="q-arch">Архив</button></div>
-    <div class="seg" style="margin-bottom:10px">${kinds.map(([k, t, n]) => `<button data-pk="${k}" class="${f.kind === k ? "active" : ""}">${t} <b>${n}</b></button>`).join("")}</div>
     ${d.erp.length ? `<div class="row" style="max-width:420px;margin-bottom:10px"><div class="field"><label>Статус ERP</label><select id="p-erp"><option value="">Все статусы</option>${d.erp.map(([e, n]) => `<option value="${esc(e)}" ${f.erp === e ? "selected" : ""}>${esc(e==='__erp_missing__'?'Статус ERP не перенесён':e)} (${n})</option>`).join("")}</select></div></div>` : ""}
     <div class="small muted" style="margin-bottom:6px">Найдено: ${d.total}${d.total > d.limit ? `, показаны первые ${d.limit}. Уточните поиск или фильтр` : ""}</div>
     <div id="results" class="list">${d.rows.length ? d.rows.map((r) => `
@@ -2398,10 +2445,9 @@ async function renderSearch(page) {
         <span class="small muted">${esc(r.status_label)}</span></div>`).join("")
       : `<div class="list-row muted">Никого не нашли</div>`}</div>`;
   page.querySelectorAll("[data-who]").forEach((el) => (el.onclick = () => openStudent(+el.dataset.who)));
-  page.querySelectorAll("[data-pk]").forEach((b) => (b.onclick = () => { f.kind = b.dataset.pk; f.status = ""; render(); }));
   if ($("#p-erp")) $("#p-erp").onchange = (e) => { f.erp = e.target.value; render(); };
   let t; $("#q").oninput = (e) => { S.search = e.target.value; clearTimeout(t); t = setTimeout(async () => { await render(); const q = $("#q"); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }, 350); };
-  $("#q-arch").onclick = () => { S.searchArch = !S.searchArch; render(); };
+  $("#q-arch").onclick = () => { S.searchArch = !S.searchArch; f.erp = ""; render(); };
 }
 
 /* ---------- настройки ---------- */
