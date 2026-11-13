@@ -59,6 +59,17 @@ class HistoricalEntryTest(unittest.TestCase):
         from crm import tasks
         tasks.run(self.con,datetime(2026,11,13,15),send=False)
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM tasks WHERE student_id=? AND kind IN ('trial_confirm','trial_today','how_was')",(self.sid,)).fetchone()[0],0)
+    def test_select_discount_and_keep_it_in_subscription(self):
+        did=self.con.execute("INSERT INTO discounts(name,percent,rule,created_at) VALUES ('Согласованная 20%',20,'manual','2026-11-01')").lastrowid
+        q=historyentry.options(self.con,self.sid,self.gid,'2026-11','fixed',paid_date='2026-11-12',trial_date='2026-11-08',discount_id=did)
+        chosen={(x['group_id'],x['date']) for x in self.data['lessons']}
+        self.assertEqual(historyentry.calculated_total(q,chosen),5000)
+        r=historyentry.record(self.con,self.sid,{**self.data,'discount_id':did},self.user)
+        sub=self.con.execute('SELECT discount_name,discount_amount FROM subscriptions WHERE id=?',(r['subscription_id'],)).fetchone()
+        self.assertEqual(tuple(sub),('Согласованная 20%',1250))
+        with self.assertRaises(sv.ApiError):
+            historyentry.options(self.con,self.sid,self.gid,'2026-10','fixed',paid_date='2026-11-12',discount_id=did)
+
     def test_balance_covers_purchase_without_duplicate_payment(self):
         for deposit in (2000,7000):
             with self.subTest(deposit=deposit):
