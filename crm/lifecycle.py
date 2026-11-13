@@ -176,7 +176,9 @@ def tick(con, now: datetime | None = None) -> int:
     for s in _people(con, "s.funnel='members' AND s.stage!='left'"):
         if s["family_id"] in seen or singles.is_single(con, s["id"], cur):
             continue  # разовики не должники (Юлия, 03.11)
-        if now.day >= 20 and sv.unpaid_groups(con, s["id"], nxt):
+        if now.day >= 20 and sv.unpaid_groups(con, s["id"], nxt) and not con.execute(
+                "SELECT 1 FROM tasks WHERE student_id=? AND auto_key=? AND status='open'",
+                (s["id"], f"subscription-renew:{s['id']}")).fetchone():
             seen.add(s["family_id"])
             made += bool(_add(con, "renew", s["id"], now.replace(hour=max(now.hour, 11), minute=0) if now.day == 20 else now,
                               f"renew:{s['family_id']}:{nxt}", title=f"Продлить абонемент на {logic.month_label(nxt)} (до {dl} числа)",

@@ -155,6 +155,35 @@ def add_task(con, kind: str, student_id: int | None, due: datetime | str, *, aut
     return cur.lastrowid if cur.rowcount else None
 
 
+def schedule_renewal(con, student_id: int) -> int | None:
+    """После продажи: одна общая задача на 20-е последнего месяца абонемента."""
+    month = con.execute("""SELECT MAX(month) FROM subscriptions
+        WHERE student_id=? AND status!='cancelled' AND kind!='single'""", (student_id,)).fetchone()[0]
+    if not month:
+        return None
+    due = f"{month}-20T23:59"
+    key = f"subscription-renew:{student_id}"
+    existing = con.execute("SELECT id FROM tasks WHERE auto_key=?", (key,)).fetchone()
+    # Закрываем прежние задачи продажи/продления, сохраняя историю и ручные поручения.
+    sale_kinds = {'renew', 'why_not_bought', 'close_sale', 'first_pay'}
+    erp_titles = {'проверить оплату абонемента', 'проверить продление', 'думает'}
+    for task in con.execute("SELECT * FROM tasks WHERE student_id=? AND status='open'", (student_id,)).fetchall():
+        if task['auto_key'] == key:
+            continue
+        if task['kind'] in sale_kinds or (task['source'] == 'erp' and task['title'].strip().casefold() in erp_titles):
+            con.execute("""UPDATE tasks SET status='cancelled', done_at=?,
+                result='Внесён абонемент: запланирована проверка продления' WHERE id=?""", (_iso(_now()), task['id']))
+    if existing:
+        tid = existing[0]
+        con.execute("""UPDATE tasks SET kind='renew', title='Проверить продление', due_at=?,
+            assignee_id=NULL, status='open', done_at=NULL, done_by='', result='' WHERE id=?""", (due, tid))
+    else:
+        tid = add_task(con, 'renew', student_id, due, title='Проверить продление',
+                       auto_key=key, source='subscription')
+        con.execute("UPDATE tasks SET assignee_id=NULL WHERE id=?", (tid,))
+    return tid
+
+
 def import_erp_task(con, erp_status: str, student_id: int, due: str, note: str = "") -> int | None:
     """Для переноса из ERP: задача со статусом ERP встаёт на ответственного за пробные."""
     kind = ERP_STATUSES.get(erp_status.strip(), "manual")
@@ -611,6 +640,7 @@ ERP_COLUMNS = [
     ("no_show", "Не пришли на ПУ"),
     ("why_not_bought", "Почему не купили"),
     ("think", "Думает"),
+    ("renew", "Проверить продление"),
     ("reinvite_pu", "Приглашение на ПУ повторно"),
     ("single", "Разовые занятия"),
 ]

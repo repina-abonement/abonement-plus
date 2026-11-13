@@ -456,6 +456,8 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
         extra += f", скидка «{d['name']}» −{d['amount']} ₽"
     log(con, sid, f"Выставлен счёт на {q['month_label']}, {e['group_name']}: {q['total']} ₽ ({q['lessons_paid']} занятий{extra})",
         user, "payment")
+    from . import tasks
+    tasks.schedule_renewal(con, sid)
     return {"id": sub_id, "quote": q}
 
 

@@ -125,7 +125,7 @@ function openTaskEdit(t, onDone, focus) {
   const staff = ((S.meta && S.meta.staff) || []).slice().sort((a, b) => (a.role === "coach") - (b.role === "coach") || a.name.localeCompare(b.name));
   const wrap = document.createElement("div");
   wrap.className = "need-wrap";
-  wrap.innerHTML = `<form class="need-card"><h3>${t.icon || "✅"} Задача</h3>
+  wrap.innerHTML = `<form class="need-card task-copyable"><h3>${t.icon || "✅"} Задача</h3>
     ${t.student ? `<div class="small muted" style="margin-bottom:8px">${esc(t.student.name)}${t.student.family ? ` · семья ${esc(t.student.family)}` : ""}</div>` : ""}
     <div class="field"><label>Что сделать</label><input name="title" value="${esc(t.title)}" required maxlength="200"></div>
     <div class="row"><div class="field"><label>Срок</label><input name="due_at" type="${client?'date':'datetime-local'}" value="${esc((t.due_at || "").slice(0, client?10:16))}" required></div>

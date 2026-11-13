@@ -84,7 +84,7 @@ function reinviteDone(t) {
 
 /* Подробности вынесены из карточек: окно не обрезается горизонтальными колонками. */
 function wireErpTaskDetails(box) {
-  const popup=document.createElement('aside');popup.id='et-details-popover';popup.className='et-details-popover';popup.hidden=true;popup.setAttribute('role','region');popup.setAttribute('aria-label','Подробности задачи');document.body.appendChild(popup);
+  const popup=document.createElement('aside');popup.id='et-details-popover';popup.className='et-details-popover task-copyable';popup.hidden=true;popup.setAttribute('role','region');popup.setAttribute('aria-label','Подробности задачи');document.body.appendChild(popup);
   let current=null,pinned=false,timer;
   const hide=()=>{clearTimeout(timer);popup.hidden=true;current?.querySelector('[data-etdetails]')?.setAttribute('aria-expanded','false');current?.removeAttribute('aria-describedby');current=null;pinned=false};
   const position=()=>{if(!current?.isConnected)return hide();const r=current.getBoundingClientRect(),w=Math.min(360,innerWidth-24);popup.style.width=w+'px';popup.style.left=Math.max(12,Math.min(innerWidth-w-12,r.right+8))+'px';const h=popup.getBoundingClientRect().height;popup.style.top=Math.max(12,Math.min(innerHeight-h-12,r.top))+'px'};

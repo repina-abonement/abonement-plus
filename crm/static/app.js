@@ -2683,6 +2683,9 @@ document.addEventListener("copy", (e) => {
   if (!S.user || can("export")) return;
   const t = document.activeElement;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+  const selection = window.getSelection();
+  const region = selection?.anchorNode?.parentElement?.closest(".task-copyable");
+  if (region && selection.rangeCount && region.contains(selection.focusNode)) return;
   e.preventDefault();
   toast("Копировать данные из CRM может только руководитель", true);
 });

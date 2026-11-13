@@ -1705,3 +1705,6 @@ textarea.nav-q { height:40px; min-height:40px; max-height:40px; resize:none; ove
 .et-board-navigation .btn { min-height:40px; }.et-board-navigation button:disabled { opacity:.35; cursor:default; }
 .et-board:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }.et-priority { color:#b94516; }.task-priority-control { padding:10px 0; line-height:1.5; }
 .client-task-form { max-width:680px; }.client-task-choice { display:block; width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); text-align:left; font:inherit; cursor:pointer; margin-top:4px; }.client-task-choice:hover { background:var(--surface-2); }
+
+/* Текст задач можно выделять и копировать, в том числе администраторам. */
+.no-copy .task-copyable, .no-copy .task-copyable * { -webkit-user-select: text; user-select: text; }
