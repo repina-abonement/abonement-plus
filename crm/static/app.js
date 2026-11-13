@@ -916,6 +916,7 @@ async function renderErp(box) {
     <div class="erp-step"><b>4. Перенос</b><div class="small muted">Перед переносом CRM сделает резервную копию и удалит всех выдуманных клиентов. Сотрудники, группы, настройки и переписки останутся. Перенос можно отменить целиком</div>
       <label class="check" style="margin-top:8px"><input type="checkbox" id="erp-rkn"> Изменения в Роскомнадзор поданы, политика обработки данных опубликована</label>
       <button class="btn primary" id="erp-run" style="margin-top:8px" disabled>Перенести</button></div>`}`;
+  erpTaskTransferSetup(box,d);
   if (done) {
     erpFullSetup(box, d);
     erpWireFiles(box, d);

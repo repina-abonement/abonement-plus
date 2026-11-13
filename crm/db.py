@@ -321,6 +321,8 @@ def init_db(con: sqlite3.Connection):
     paylinks.init(con)
     from . import subcancel
     subcancel.init(con)
+    from . import erptasktransfer
+    erptasktransfer.init(con)
     old_index = con.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_sub_enr_month'").fetchone()
     if old_index and "WHERE" not in old_index[0].upper():
         con.execute("DROP INDEX idx_sub_enr_month")

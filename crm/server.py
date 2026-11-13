@@ -844,6 +844,32 @@ def erp_full_apply(con, h, user, body, q):
         raise ApiError(str(e))
 
 
+@route("POST", "/api/erp/tasks/transfer-plan", role="admin")
+def task_transfer_plan(con,h,user,body,q):
+    from . import erptasktransfer
+    return erptasktransfer.prepare(con,body.get('ids'))
+
+
+@route("POST", "/api/erp/tasks/transfer-apply", role="admin")
+def task_transfer_apply(con,h,user,body,q):
+    from . import erptasktransfer, backup
+    try:
+        path=backup.backup_once()
+    except Exception:
+        raise ApiError('Резервная копия не создана. Задачи не изменены')
+    return erptasktransfer.apply(con,body.get('ids'),body.get('token'),user,path)
+
+
+@route("GET", "/api/erp/tasks/transfer-report", role="admin")
+def task_transfer_report(con,h,user,body,q):
+    from . import erptasktransfer
+    report=erptasktransfer.latest(con)
+    if q.get('download'):
+        return Raw(json.dumps(report,ensure_ascii=False,indent=2).encode(),"application/json; charset=utf-8",
+                   "erp-task-transfer-report.json")
+    return report
+
+
 @route("GET", "/api/erp/tasks/review-snapshot", role="admin")
 def erp_task_review_snapshot(con, h, user, body, q):
     from . import erptaskreview
