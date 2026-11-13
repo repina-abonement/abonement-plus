@@ -288,6 +288,8 @@ def init_db(con: sqlite3.Connection):
     reviews.init(con)
     ownerbot.init(con)
     smart.init(con)
+    from . import clientprofile
+    clientprofile.init(con)
     chains.init(con)
     erpimport.init(con)
     memos.init(con)

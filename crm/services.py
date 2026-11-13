@@ -531,7 +531,7 @@ def fmt_date(iso: str) -> str:
 
 def card_summary(con, s: dict, st: dict) -> dict:
     fam = con.execute("SELECT name FROM families WHERE id=?", (s["family_id"],)).fetchone()
-    parent = con.execute("SELECT name, phone FROM parents WHERE family_id=? ORDER BY id LIMIT 1",
+    parent = con.execute("SELECT name, phone FROM parents WHERE family_id=? ORDER BY is_primary DESC,id LIMIT 1",
                          (s["family_id"],)).fetchone()
     ens = con.execute("""SELECT g.name FROM enrollments e JOIN groups g ON g.id=e.group_id
                          WHERE e.student_id=? AND e.active=1 ORDER BY e.id""", (s["id"],)).fetchall()
@@ -820,7 +820,7 @@ def student_detail(con, sid: int) -> dict:
     s = get_student_row(con, sid)
     st = settings(con)
     fam = dict(con.execute("SELECT * FROM families WHERE id=?", (s["family_id"],)).fetchone())
-    parents = _rows(con.execute("SELECT id, name, phone, messenger, email, relation FROM parents WHERE family_id=?", (s["family_id"],)))
+    parents = _rows(con.execute("SELECT id, name, phone, messenger, email, relation, is_primary FROM parents WHERE family_id=? ORDER BY is_primary DESC,id", (s["family_id"],)))
     siblings = _rows(con.execute("SELECT id, name, birth FROM students WHERE family_id=? AND id != ?",
                                  (s["family_id"], sid)))
     grp = dict(con.execute("SELECT * FROM groups WHERE id=?", (s["group_id"],)).fetchone()) if s["group_id"] else None
@@ -854,6 +854,8 @@ def student_detail(con, sid: int) -> dict:
     cur = logic.month_of(today())
     out = {
         "student": s, "family": fam, "parents": parents, "siblings": siblings, "group": grp,
+        "profile_stage_reasons": {"left": __import__("crm.lifecycle",fromlist=["LEFT_REASONS"]).LEFT_REASONS, "refused": TRIAL_REFUSALS},
+        "profile_token": __import__("crm.clientprofile",fromlist=["signature"]).signature(con,sid),
         "subscriptions": subs, "subscription_refunds": __import__("crm.subcancel",fromlist=["listing"]).listing(con,sid), "subscription_cancellations": __import__("crm.subcancel",fromlist=["cancellations"]).cancellations(con,sid), "vacations": vacs,
         "enrollments": [e | {"age_warn": "" if e["program_id"] else logic.age_warning(s["birth"], e["group_age"], e["branch_name"])} for e in enrollments_of(con, sid)],
         "trial_age_warn": logic.age_warning(s["birth"], grp["age"], _branch_name(con, grp["branch_id"])) if grp and not grp["program_id"] and s["funnel"] == "sales" else "", "makeups": makeups, "history": hist,

@@ -1779,25 +1779,26 @@ async function openStudent(id, options = {}) {
   ].filter(Boolean).join("");
   const html = `
   <div class="sc-head">
-    <div class="sc-title"><h2>${esc(s.name)}</h2></div>
-    <div class="sc-status">${s.birth?esc(ageText(s.birth))+' · ':''}${esc(d.stage_label)}${s.archived?' · в архиве':''}${d.lead_score?` · ${esc(d.lead_score.label)}`:''}</div>
+    <div class="sc-title"><h2>${full?`<button type="button" class="profile-text-edit" data-profile-edit="name" title="Изменить имя">${esc(s.name)}</button>`:esc(s.name)}</h2></div>
+    <div class="sc-status" ${full?'data-profile-open tabindex="0" role="button" title="Изменить дату рождения или статус"':''}>${s.birth?esc(ageText(s.birth))+' · ':''}${esc(d.stage_label)}${s.archived?' · в архиве':''}${d.lead_score?` · ${esc(d.lead_score.label)}`:''}</div>
     ${d.siblings.length ? `<div class="chips sc-kids"><span class="chip on">${esc(s.name.split(" ")[0])}</span>${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)}</button>`).join("")}</div>` : ""}
-    <div class="sc-meta">${isMember ? (regular.length ? regular.map((e) => `<span class="pill">${esc(e.group_name)}</span>`).join(" ") : `<span class="muted small">Группа не выбрана</span>`)
+    <div class="sc-meta" ${full?'data-head-group tabindex="0" role="button" title="Изменить группу"':''}>${isMember ? (regular.length ? regular.map((e) => `<span class="pill">${esc(e.group_name)}</span>`).join(" ") : `<span class="muted small">Группа не выбрана</span>`)
       : `${s.trial_at ? `<span class="pill">Пробное ${dtShort(s.trial_at)}</span>` : ""}`}</div>
-    <div class="sc-parents">${d.parents.map((p) => `<div class="sc-parent"><span>${esc(p.name)}</span><span class="muted" aria-hidden="true">·</span><button class="rel-chip ${p.relation?'':'empty'}" data-rel="${p.id}" title="Изменить родство">${p.relation?esc(p.relation):'Указать родство'}</button>${p.phone?`<span class="muted" aria-hidden="true">·</span><button class="linkish" data-copy-phone="${esc(p.phone)}" title="Скопировать номер">${esc(p.phone)}</button>`:''}${p.messenger?`<span class="muted">${esc(p.messenger)}</span>`:''}${p.email?`<span class="muted sc-parent-email">${esc(p.email)}</span>`:''}</div>`).join('')}</div>
+    <div class="sc-parents">${d.parents.map((p) => `<div class="sc-parent"><button type="button" class="profile-text-edit" data-profile-edit="name">${esc(p.name)}</button>${p.is_primary?'<span class="small muted">основной</span>':''}<span class="muted" aria-hidden="true">·</span><button class="rel-chip ${p.relation?'':'empty'}" data-profile-edit="name" title="Изменить родство">${p.relation?esc(p.relation):'Указать родство'}</button>${p.phone?`<span class="muted" aria-hidden="true">·</span><button class="linkish" data-profile-edit="name" title="Изменить телефон">${esc(p.phone)}</button>`:''}${p.messenger?`<span class="muted">${esc(p.messenger)}</span>`:''}${p.email?`<button type="button" class="profile-text-edit muted sc-parent-email" data-profile-edit="name">${esc(p.email)}</button>`:''}</div>`).join('')}</div>
     ${isMember && d.balance.debt ? `<div class="sc-debt-summary">Задолженность <b>${rub(d.balance.debt)}</b></div>` : ""}
-    ${d.family.note ? `<div class="sc-staff-note"><b>Заметка для команды</b><div>${esc(d.family.note)}</div></div>` : ""}
+    ${d.family.note ? `<div class="sc-staff-note" ${full?'data-profile-note tabindex="0" role="button" title="Изменить заметку"':''}><b>Заметка для команды</b><div>${esc(d.family.note)}</div></div>` : ""}
     ${alerts ? `<div class="sc-alerts">${alerts}</div>` : ""}
     ${d.next_step && !(d.next_step.action === "task" && d.tasks?.open?.length) ? `<div class="next-step"><span><b>Задача:</b> ${esc(d.next_step.text)}</span><button class="btn sm primary" id="ns-go">${NEXT_GO[d.next_step.action] || "Сделать"}</button></div>` : ""}
     ${!isMember && d.stage_tip ? `<details class="stage-tip" ${S.tipsOpen === true ? "open" : ""}><summary>💡 Подсказка на этапе «${esc(d.stage_label)}»</summary>
       <div><b>Что сказать.</b> ${esc(d.stage_tip.say)}</div><div style="margin-top:4px"><b>Чтобы перейти дальше:</b> ${esc(d.stage_tip.next)}</div></details>` : ""}
-    <div class="sc-actions">
-      ${isMember && full ? `<button class="btn primary" id="act-sell">Продать абонемент</button>` : ""}
-      ${!isMember ? `<button class="btn primary" id="act-trial">Записать на пробное</button>` : ""}
-      ${full?'<button class="btn" id="act-past-entry">Внести прошедшее ПУ / покупку</button>':""}
-      ${d.parents.some((p) => p.phone) ? `<button class="btn" id="act-call">Позвонить</button>` : ""}
-      ${isMember ? `<details class="sc-extra-actions"><summary class="btn">Ещё</summary><div><button class="btn" id="act-vac">Отпуск</button></div></details>` : ""}
+    <div class="sc-header-tools" role="toolbar" aria-label="Действия клиента">
+      ${full?`<button type="button" class="btn sc-tool primary" id="act-sell" title="Продать абонемент или разовое занятие" aria-label="Продать абонемент или разовое занятие"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l3 12h11l2-8H6M9 20h.01M18 20h.01"/></svg></button>`:''}
+      ${!isMember?'<button type="button" class="btn sc-tool" id="act-trial" title="Записать на пробное" aria-label="Записать на пробное">ПУ</button>':''}
+      ${d.parents.some(p=>p.phone)?'<button type="button" class="btn sc-tool" id="act-call" title="Позвонить основному родителю" aria-label="Позвонить основному родителю"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3 4 5c-2 3 7 14 12 15l4-3-4-4-3 2-4-4 2-3Z"/></svg></button>':''}
+      ${full?'<button type="button" class="btn sc-tool" data-profile-edit="name" title="Изменить данные клиента" aria-label="Изменить данные клиента"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16 12-12 4 4L8 20H4Zm10-10 4 4"/></svg></button><button type="button" class="btn sc-tool" data-profile-add-parent title="Добавить родителя" aria-label="Добавить родителя"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7" r="3"/><path d="M3 20v-3c0-5 12-5 12 0v3M19 7v8M15 11h8"/></svg></button>':''}
+      <details class="sc-extra-actions sc-tool-menu"><summary class="btn sc-tool" aria-label="Другие действия" title="Другие действия">⋯</summary><div>${full?'<button class="btn sm" id="act-past-entry">Внести прошедшее ПУ / покупку</button>':''}${isMember?'<button class="btn sm" id="act-vac">Отпуск</button>':''}</div></details>
     </div>
+    <div id="sc-profile-edit" hidden></div>
     ${!isMember ? '<div id="sc-trial-booking" hidden></div>' : ""}
     <div id="sc-past-entry" hidden></div>
   </div>
@@ -1914,7 +1915,13 @@ async function openStudent(id, options = {}) {
   }));
   wireConsent(d.family, reload);
   body.querySelectorAll(".sc-head [data-dial]").forEach((b) => (b.onclick = () => dial(b.dataset.dial)));
-  const firstPhone = (d.parents.find((p) => p.phone) || {}).phone;
+  const profile=(add=false,focus='name')=>{if(full)openClientProfile(d,body.querySelector('#sc-profile-edit'),reload,add,focus)};
+  body.querySelectorAll('[data-profile-edit]').forEach(b=>b.onclick=()=>profile(false,b.dataset.profileEdit));
+  const bindEdit=(selector,callback)=>body.querySelectorAll(selector).forEach(el=>{el.onclick=callback;el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();callback()}}});
+  bindEdit('[data-profile-open]',()=>profile(false,'birth'));bindEdit('[data-profile-note]',()=>profile(false,'note'));
+  body.querySelectorAll('[data-profile-add-parent]').forEach(b=>b.onclick=()=>profile(true));
+  bindEdit('[data-head-group]',()=>{if(isMember){scTab('abon');const move=body.querySelector('[data-sub-transfer]');if(move){move.click();move.scrollIntoView({block:'center'})}else toast('Сначала выберите действующий абонемент для перевода',true)}else{scTab('info');openFold(body,'family');$('#f-group')?.focus()}});
+  const firstPhone = (d.parents.find(p=>p.is_primary&&p.phone)||d.parents.find(p=>p.phone)||{}).phone;
   if ($("#act-call")) $("#act-call").onclick = () => dial(firstPhone);
   if ($("#act-sell")) $("#act-sell").onclick = () => openSell(d, reload);
   if ($("#act-vac")) $("#act-vac").onclick = () => openFold(body, "vac");

@@ -334,7 +334,7 @@ _PLACEHOLDER = ("заявка", "лид", "без имени", "ребёнок",
 
 
 def _first_parent(con, family_id: int):
-    return con.execute("SELECT id, name, phone, phone_norm, email FROM parents WHERE family_id=? ORDER BY id LIMIT 1", (family_id,)).fetchone()
+    return con.execute("SELECT id, name, phone, phone_norm, email FROM parents WHERE family_id=? ORDER BY is_primary DESC,id LIMIT 1", (family_id,)).fetchone()
 
 
 def required_info(con, sid: int, kind: str) -> dict:

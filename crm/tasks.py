@@ -217,13 +217,20 @@ def best_conversation(con, family_id: int) -> int | None:
     fam = con.execute("SELECT * FROM families WHERE id=?", (family_id or 0,)).fetchone()
     if not fam or ("fake" in fam.keys() and fam["fake"]):
         return None
-    r = con.execute("""SELECT id FROM conversations WHERE family_id=? AND external_id NOT LIKE 'demo-%'
+    primary=con.execute('SELECT * FROM parents WHERE family_id=? AND is_primary=1 LIMIT 1',(family_id,)).fetchone()
+    if primary:
+        username=(primary['messenger'] or '').strip().lstrip('@').casefold()
+        r=con.execute("""SELECT id FROM conversations WHERE family_id=? AND external_id NOT LIKE 'demo-%'
+            AND ((phone_norm!='' AND phone_norm=?) OR (username!='' AND lower(ltrim(username,'@'))=?))
+            ORDER BY last_at IS NULL,last_at DESC LIMIT 1""",(family_id,primary['phone_norm'],username)).fetchone()
+    else:
+        r = con.execute("""SELECT id FROM conversations WHERE family_id=? AND external_id NOT LIKE 'demo-%'
                        ORDER BY last_at IS NULL, last_at DESC LIMIT 1""", (family_id,)).fetchone()
     if r:
         return r[0]
     if comms.status(con)["whatsapp"]:
-        p = con.execute("SELECT phone FROM parents WHERE family_id=? AND phone != '' ORDER BY id LIMIT 1", (family_id,)).fetchone()
-        if p:
+        p = con.execute("SELECT phone FROM parents WHERE family_id=? AND phone != '' ORDER BY is_primary DESC,id LIMIT 1", (family_id,)).fetchone()
+        if p and (not primary or primary['phone']==p[0]):
             cid = comms.start_whatsapp(con, p[0])
             comms.link(con, cid, family_id)
             return cid
@@ -511,8 +518,8 @@ def _task_out(con, r) -> dict:
     d["client_task"] = bool(d.get("student_id") or d.get("family_id"))
     if d["student_id"]:
         s = con.execute("""SELECT s.id, s.name, s.trial_at, s.trial_came, s.stage, s.funnel, s.converted_at, s.family_id, f.name AS family,
-                           (SELECT p.phone FROM parents p WHERE p.family_id=s.family_id ORDER BY p.id LIMIT 1) AS phone,
-                           (SELECT p.name FROM parents p WHERE p.family_id=s.family_id ORDER BY p.id LIMIT 1) AS parent
+                           (SELECT p.phone FROM parents p WHERE p.family_id=s.family_id ORDER BY p.is_primary DESC,p.id LIMIT 1) AS phone,
+                           (SELECT p.name FROM parents p WHERE p.family_id=s.family_id ORDER BY p.is_primary DESC,p.id LIMIT 1) AS parent
                            FROM students s JOIN families f ON f.id=s.family_id WHERE s.id=?""", (d["student_id"],)).fetchone()
         d["student"] = dict(s) if s else None
         if s and s["trial_at"]:

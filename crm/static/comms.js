@@ -228,8 +228,13 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   if (st.wazzup_max) parents.filter(p => p.phone && !d.conversations.some(c => c.channel === "wazzup_max" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
     .forEach(p => targets.push({v:"m" + p.id,t:`MAX · ${p.name} (новый чат)`}));
   S.familySendTargets = S.familySendTargets || {};
-  const targetKey = `${S.user.id}:${familyId}`;
-  const selectedTarget = targets.some(x => x.v === S.familySendTargets[targetKey]) ? S.familySendTargets[targetKey] : (targets.length === 1 ? targets[0].v : "");
+  const primary=parents.find(p=>p.is_primary);
+  const targetKey = `${S.user.id}:${familyId}:${primary?.id||0}`;
+  const primaryPhone=(primary?.phone||'').replace(/\D/g,'').replace(/^8(?=\d{10}$)/,'7');
+  const primaryUsername=(primary?.messenger||'').trim().replace(/^@/,'').toLowerCase();
+  const primaryConversation=primary&&d.conversations.find(c=>c.channel!=='tg_archive'&&((primaryPhone&&c.phone_norm===primaryPhone)||(primaryUsername&&(c.username||'').replace(/^@/,'').toLowerCase()===primaryUsername)));
+  const primaryTarget=primaryConversation?'c'+primaryConversation.id:primary?targets.find(t=>['w','t','m'].some(prefix=>t.v===prefix+primary.id))?.v:'';
+  const selectedTarget = targets.some(x => x.v === S.familySendTargets[targetKey]) ? S.familySendTargets[targetKey] : (primaryTarget || (!primary&&targets.length === 1 ? targets[0].v : ""));
   const oq = d.conversations.filter((c) => c.open_q);
   box.innerHTML = `
     <h3>Связь с семьёй</h3>

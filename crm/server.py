@@ -1186,6 +1186,12 @@ def student_get(con, h, user, body, q, sid):
     return sv.student_detail(con, int(sid))
 
 
+@route("PATCH", "/api/students/{sid}/profile", role="members:full")
+def client_profile_patch(con,h,user,body,q,sid):
+    from . import clientprofile
+    return clientprofile.save(con,int(sid),body,user)
+
+
 @route("PATCH", "/api/students/{sid}", role="operator")
 def student_patch(con, h, user, body, q, sid):
     sv.update_student(con, int(sid), body, user)
@@ -1851,6 +1857,26 @@ def sources_add(con, h, user, body, q):
     if not (body.get("name") or "").strip():
         raise ApiError("Укажите название источника")
     return {"id": sources.ensure_source(con, body.get("channel") or "Другое", body["name"])}
+
+
+@route("POST", "/api/ad-channels", role="admin")
+def ad_channel_add(con,h,user,body,q):
+    return {"id":sources.save_channel(con,body)}
+
+
+@route("PATCH", "/api/ad-channels/{cid}", role="admin")
+def ad_channel_edit(con,h,user,body,q,cid):
+    return {"id":sources.save_channel(con,body,int(cid))}
+
+
+@route("POST", "/api/ad-channels/{cid}/sources", role="admin")
+def ad_source_add(con,h,user,body,q,cid):
+    return {"id":sources.save_source(con,{**body,"channel_id":int(cid)})}
+
+
+@route("PATCH", "/api/sources/{sid}", role="admin")
+def ad_source_edit(con,h,user,body,q,sid):
+    return {"id":sources.save_source(con,body,int(sid))}
 
 
 @route("POST", "/api/sources/import", role="admin")

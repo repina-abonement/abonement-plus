@@ -7,30 +7,36 @@ function sourceSelect(name, value, legacy) {
     const list = ad.sources.filter((x) => x.channel_id === c.id);
     return list.length ? `<optgroup label="${esc(c.name)}">${list.map((x) => `<option value="${x.id}" ${x.id === value ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</optgroup>` : "";
   }).join("");
-  return `<select ${name.startsWith("f-") ? `id="${name}"` : `name="${name}"`}><option value="">${legacy && !value ? esc(legacy) : "— не указано —"}</option>${groups}</select>`;
+  const previous=value&&!ad.sources.some(x=>x.id===value)?`<option value="${value}" selected>${esc(legacy||'Ранее выбранный источник (архив)')}</option>`:'';
+  return `<select ${name.startsWith("f-") ? `id="${name}"` : `name="${name}"`}><option value="">${legacy && !value ? esc(legacy) : "— не указано —"}</option>${previous}${groups}</select>`;
 }
 
 async function renderSourceSettings(box) {
-  const d = await api("GET", "/api/sources?all=1");
-  const byCh = d.channels.map((c) => ({ c, list: d.sources.filter((x) => x.channel_id === c.id) }));
-  box.innerHTML = `
-    <h3>Рекламные каналы и источники</h3>
-    <div class="small muted" style="margin-bottom:10px">Источник выбирают при создании клиента. По ним строится отчёт на дашборде: сколько лидов, пробных и покупок дал каждый</div>
-    ${byCh.map(({ c, list }) => `<details class="src-ch" ${list.length && list.length < 6 ? "open" : ""}><summary><b>${esc(c.name)}</b> <span class="muted small">${list.filter((x) => x.active).length}</span></summary>
-      <div class="chips" style="margin:8px 0 4px">${list.map((x) => `<button class="chip ${x.active ? "" : "struck"}" data-src="${x.id}" data-active="${x.active ? 0 : 1}" title="${x.active ? "Нажмите, чтобы убрать в архив" : "Нажмите, чтобы вернуть"}">${esc(x.name)}${x.active ? "" : " · архив"}</button>`).join("") || `<span class="small muted">Пока нет источников</span>`}</div></details>`).join("")}
-    <div class="row" style="margin-top:12px">
-      <div class="field" style="flex:0 0 160px"><label>Канал</label><select id="s-ch">${d.channels.map((c) => `<option>${esc(c.name)}</option>`).join("")}</select></div>
-      <div class="field"><label>Новый источник</label><input id="s-name" placeholder="Например, Промоутер Аня ноябрь 2026"></div>
-      <div class="field" style="flex:0 0 auto"><label>&nbsp;</label><button class="btn primary" id="s-add">Добавить</button></div>
-    </div>
-    <details><summary class="small muted">Перенести список из ERP</summary>
-      <div class="small muted" style="margin:8px 0">Вставьте строки вида «Канал;Источник», по одной на строку. Дубли пропустятся</div>
-      <textarea id="s-imp" rows="5" placeholder="Сайт;Заявка через форму с сайта Футболики"></textarea>
-      <button class="btn sm" id="s-impbtn" style="margin-top:8px">Загрузить</button></details>`;
-  const refresh = async () => { S.meta = await api("GET", "/api/meta"); renderSourceSettings(box); };
-  box.querySelectorAll("[data-src]").forEach((b) => (b.onclick = async () => { await api("POST", `/api/sources/${b.dataset.src}/archive`, { active: b.dataset.active === "1" }).catch(fail); refresh(); }));
-  $("#s-add").onclick = async () => { try { await api("POST", "/api/sources", { channel: $("#s-ch").value, name: $("#s-name").value }); toast("Источник добавлен"); refresh(); } catch (e) { fail(e); } };
-  $("#s-impbtn").onclick = async () => { try { const r = await api("POST", "/api/sources/import", { text: $("#s-imp").value }); toast(`Добавлено источников: ${r.added}`); refresh(); } catch (e) { fail(e); } };
+  const d=await api('GET','/api/sources?all=1');
+  const archived=box.dataset.showArchived==='1',channels=d.channels.filter(c=>archived||c.active);
+  const channel=channels.find(c=>c.id===+box.dataset.sourceChannel)||channels[0];
+  if(channel)box.dataset.sourceChannel=channel.id;
+  const list=channel?d.sources.filter(x=>x.channel_id===channel.id&&(archived||x.active)):[];
+  box.innerHTML=`<h3>Рекламные каналы и источники</h3><div class="sources-topline"><span class="small muted">Выберите канал и измените его источники.</span><label class="check small"><input type="checkbox" data-show-archived ${archived?'checked':''}> Показать архив</label></div><div class="sources-editor"><aside class="sources-nav"><h4>Каналы</h4><nav aria-label="Рекламные каналы">${channels.map(c=>`<button type="button" class="source-channel ${c.id===channel?.id?'on':''}" data-channel="${c.id}" aria-pressed="${c.id===channel?.id}">${esc(c.name)}${c.active?'':' · архив'}</button>`).join('')}</nav><form data-channel-add class="sources-add"><label>Новый канал<input name="name" required placeholder="Название"></label><button class="btn sm" type="submit">Добавить канал</button><span class="need-err" role="alert"></span></form></aside><div class="sources-content">${channel?`<form data-channel-edit class="sources-channel-edit"><label>Название канала<input name="name" value="${esc(channel.name)}" required></label><button class="btn sm" type="submit">Сохранить название</button><button class="btn sm" type="button" data-channel-active>${channel.active?'Убрать канал':'Вернуть канал'}</button><span class="need-err" role="alert"></span></form><h4>Источники</h4><div class="sources-rows">${list.map(x=>`<form data-source-row="${x.id}" class="source-edit-row"><input name="name" value="${esc(x.name)}" required aria-label="Название источника"><span class="small muted">${x.active?'':'В архиве'}</span><div class="sources-row-actions"><button class="btn sm" type="submit">Сохранить</button><button class="btn sm" type="button" data-source-move>Перенести</button><button class="btn sm" type="button" data-source-active>${x.active?'Убрать':'Вернуть'}</button></div><div data-source-destination hidden><span class="small muted">В какой канал перенести?</span>${d.channels.filter(c=>c.active&&c.id!==channel.id).map(c=>`<label class="check"><input type="radio" name="destination" value="${c.id}"> ${esc(c.name)}</label>`).join('')}<button class="btn sm" type="button" data-source-transfer>Перенести в выбранный канал</button></div><div class="need-err" role="alert"></div></form>`).join('')||'<p class="small muted">Пока нет источников.</p>'}</div>${channel.active?'<form data-source-add class="sources-add"><label>Новый источник<input name="name" required placeholder="Название источника"></label><button class="btn sm" type="submit">Добавить источник</button><span class="need-err" role="alert"></span></form>':''}`:'<p>Добавьте первый канал.</p>'}</div></div><button type="button" class="linkish" data-source-import-toggle>Вставить список из ERP</button><form data-source-import hidden><label>По строке «Канал;Источник»<textarea name="text" rows="5" required></textarea></label><button class="btn sm" type="submit">Добавить список</button><span class="need-err" role="alert"></span></form>`;
+  const refresh=async()=>{S.meta.ad=await api('GET','/api/sources');await renderSourceSettings(box)};
+  const action=async(form,method,url,payload)=>{const buttons=[...form.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);form.querySelector('.need-err').textContent='';try{const r=await api(method,url,payload);await refresh();return r}catch(e){form.querySelector('.need-err').textContent=e.message;buttons.forEach(b=>b.disabled=false)}};
+  box.querySelectorAll('[data-channel]').forEach(b=>b.onclick=()=>{box.dataset.sourceChannel=b.dataset.channel;renderSourceSettings(box).catch(fail)});
+  box.querySelector('[data-show-archived]').onchange=e=>{box.dataset.showArchived=e.target.checked?'1':'0';renderSourceSettings(box).catch(fail)};
+  const addChannel=box.querySelector('[data-channel-add]');addChannel.onsubmit=async e=>{e.preventDefault();if(addChannel.reportValidity())await action(addChannel,'POST','/api/ad-channels',{name:addChannel.elements.name.value})};
+  if(channel){
+    const form=box.querySelector('[data-channel-edit]'),expected={name:channel.name,active:channel.active};
+    form.onsubmit=e=>{e.preventDefault();if(form.reportValidity())action(form,'PATCH',`/api/ad-channels/${channel.id}`,{name:form.elements.name.value,expected})};
+    form.querySelector('[data-channel-active]').onclick=()=>action(form,'PATCH',`/api/ad-channels/${channel.id}`,{active:!channel.active,expected});
+    box.querySelectorAll('[data-source-row]').forEach(row=>{const source=d.sources.find(x=>x.id===+row.dataset.sourceRow),expected={name:source.name,channel_id:source.channel_id,active:source.active};const save=extra=>action(row,'PATCH',`/api/sources/${source.id}`,{name:row.elements.name.value,expected,...extra});
+      row.onsubmit=e=>{e.preventDefault();if(row.reportValidity())save({})};
+      row.querySelector('[data-source-active]').onclick=()=>save({active:!source.active});
+      row.querySelector('[data-source-move]').onclick=()=>{row.querySelector('[data-source-destination]').hidden=!row.querySelector('[data-source-destination]').hidden};
+      row.querySelector('[data-source-transfer]').onclick=()=>{const selected=row.querySelector('[name=destination]:checked');if(!selected){row.querySelector('.need-err').textContent='Выберите канал';return}save({channel_id:+selected.value})};
+    });
+    const add=box.querySelector('[data-source-add]');if(add)add.onsubmit=e=>{e.preventDefault();if(add.reportValidity())action(add,'POST',`/api/ad-channels/${channel.id}/sources`,{name:add.elements.name.value})};
+  }
+  const imp=box.querySelector('[data-source-import]');box.querySelector('[data-source-import-toggle]').onclick=()=>imp.hidden=!imp.hidden;
+  imp.onsubmit=e=>{e.preventDefault();if(imp.reportValidity())action(imp,'POST','/api/sources/import',{text:imp.elements.text.value})};
 }
 
 async function renderSourceReport(box, month) {
