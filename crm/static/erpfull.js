@@ -11,6 +11,12 @@ function erpFullSetup(box, data) {
   el.className = 'erp-step'; el.id = 'erp-full';
   el.innerHTML = `<h3>Полная сверка и сохранение исходных данных</h3>
     <p class="small">Выберите нужные выгрузки. Все колонки останутся в CRM вместе с файлом и номером строки. Однозначные посещения, оплаты и история задач будут перенесены, расхождения попадут в список. Этапы клиентов и отметки тренеров не перезаписываются</p>
+    <details>
+      <summary>Вставить CSV посещений</summary>
+      <label>Данные CSV<textarea data-visit-csv rows="5"></textarea></label>
+      <button class="btn" data-visit-upload>Добавить CSV посещений</button>
+      <div class="small" data-visit-upload-status role="status"></div>
+    </details>
     <div style="max-height:230px;overflow:auto">${data.uploads.map(u=>`<label class="check"><input type="checkbox" data-full-file="${u.id}">${esc(u.filename)} (${u.count} строк)</label>`).join('')}</div>
     <button class="btn" id="erp-full-plan">Проверить выбранные файлы</button>
     <button class="btn primary" id="erp-full-apply" disabled>Сохранить и перенести проверенное</button>
@@ -26,6 +32,29 @@ function erpFullSetup(box, data) {
   ti.oninput=()=>{taskPlan=null;ta.disabled=true;};
   tp.onclick=async()=>{ta.disabled=true;taskPlan=null;try{const tasks=JSON.parse(ti.value);const r=await api('POST','/api/erp/tasks/review-plan',{tasks});taskPlan={tasks,token:r.token};to.textContent=JSON.stringify(r,null,2);ta.disabled=false;}catch(e){to.textContent=e.message;}};
   ta.onclick=async()=>{if(!taskPlan)return;ta.disabled=true;try{const r=await api('POST','/api/erp/tasks/review-apply',taskPlan);to.textContent=JSON.stringify(r,null,2);taskPlan=null;}catch(e){to.textContent=e.message;}};
+
+  const csv = el.querySelector('[data-visit-csv]');
+  const upload = el.querySelector('[data-visit-upload]');
+  const uploadStatus = el.querySelector('[data-visit-upload-status]');
+  upload.onclick = async () => {
+    const content = csv.value.trim();
+    if (!content) { uploadStatus.textContent = 'Вставьте CSV с заголовками'; return; }
+    upload.disabled = true;
+    try {
+      const data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(new Blob([content], {type: 'text/csv;charset=utf-8'}));
+      });
+      await api('POST', '/api/erp/upload', {filename: 'erp-visits-' + Date.now() + '.csv', data, kind: 'visits'});
+      await renderErp(box);
+    } catch (e) {
+      uploadStatus.textContent = e.message;
+    } finally {
+      upload.disabled = false;
+    }
+  };
 
   const out = el.querySelector('#erp-full-out'), apply = el.querySelector('#erp-full-apply'), plan = el.querySelector('#erp-full-plan');
   let checked = null;
