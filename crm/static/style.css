@@ -1741,3 +1741,7 @@ textarea.nav-q { height:40px; min-height:40px; max-height:40px; resize:none; ove
 .group-search-list { position:absolute; top:100%; left:0; right:0; z-index:30; max-height:260px; overflow:auto; border:1px solid var(--line,#dce3dc); border-radius:10px; background:var(--card,#fff); box-shadow:0 6px 18px #0002; padding:6px; }
 .group-search-option { display:block; width:100%; text-align:left; border:0; border-radius:6px; background:transparent; color:inherit; padding:10px; cursor:pointer; font:inherit; }
 .group-search-option:hover,.group-search-option.active { background:var(--green-soft,#e3f4eb); }
+
+.past-payment-grid { margin-top:20px; padding-top:16px; border-top:1px solid var(--line); }
+[data-past-total], [data-past-price-lines] { display:block; }
+[data-past-price-lines] { margin-top:4px; }
