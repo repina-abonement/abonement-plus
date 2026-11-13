@@ -95,7 +95,14 @@ def cancel(con, subid, user, data):
     if sub['status'] == 'cancelled':
         raise sv.ApiError('Абонемент уже отменён')
     if data.get('approved_by_yulia') is not True or not str(data.get('approval') or '').strip():
-        raise sv.ApiError('ПЕРЕД ЭТИМ ДЕЙСТВИЕМ СОГЛАСОВАТЬ С ЮЛИЕЙ. Подтвердите согласование и укажите, когда и где оно получено')
+        raise sv.ApiError('ПЕРЕД ЭТИМ ДЕЙСТВИЕМ СОГЛАСОВАТЬ С ЮЛИЕЙ. Подтвердите согласование и укажите дату')
+    from datetime import date
+    approval = str(data['approval']).strip()
+    try:
+        if date.fromisoformat(approval).isoformat() != approval:
+            raise ValueError()
+    except ValueError:
+        raise sv.ApiError('Укажите дату согласования в формате ГГГГ-ММ-ДД')
     mode = data.get('mode')
     if mode not in ('balance','refund'):
         raise sv.ApiError('Выберите: оставить средства на балансе или вернуть клиенту')

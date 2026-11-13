@@ -4,7 +4,7 @@ from pathlib import Path
 from crm import db, money, services as sv, subcancel, fiscal
 
 ADMIN={'id':1,'name':'Тест','role':'admin'}
-APPROVAL={'approved_by_yulia':True,'approval':'Тестовое согласование','reason':'Тестовая отмена'}
+APPROVAL={'approved_by_yulia':True,'approval':'2026-11-13','reason':'Тестовая отмена'}
 
 
 def main():
