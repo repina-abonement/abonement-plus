@@ -42,6 +42,10 @@ sv.update_student(con, lead, {"group_id": g, "trial_at": day + "T17:45"}, U)
 assert capacity.occupancy(con, g, day)["free"] == 0
 # отработка в обычную группу: ребёнок из другой группы с пропуском
 other = sv.create_student(con, {"name": "Из другой", "parent_name": "Мама", "phone": "+7 900 000-22-22", "funnel": "members", "group_id": g2}, U)
+# Два оплаченных занятия недели необходимы для отработки.
+con.execute("UPDATE groups SET weekdays='0,1,2,3,4,5,6' WHERE id=?",(g2,))
+eid=sv.enrollments_of(con,other)[0]['id']
+con.execute("INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,price,per_lesson,status,created_at) VALUES (?,?,?,'fixed',30,30000,1000,'paid',?)",(other,eid,day[:7],day))
 past = date.today() - timedelta(days=1)
 con.execute("INSERT INTO attendance(student_id, group_id, date, status) VALUES (?,?,?,'absent')", (other, g2, past.isoformat()))
 fails(lambda: sv.book_makeup(con, other, g, day, None, U), "мест нет — отработка не должна записаться")

@@ -57,6 +57,10 @@ def test_flow():
     c = sv.absence_counters(con, sid)
     check(c["absent_cur"] == 4 and c["available"] == 4, "4 пропуска в октябре, все можно отработать")
 
+    eid = sv.enrollments_of(con, sid)[0]["id"]
+    con.execute("""INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,per_lesson,price,status,created_at)
+                   VALUES (?,?,'2026-10','flex',9,1550,13950,'paid','2026-09-20')""", (sid,eid))
+
     sv.book_makeup(con, sid, mk, "2026-10-24", None, USER)
     c = sv.absence_counters(con, sid)
     check(c["booked"] == 1 and c["available"] == 3, "Записан на отработку: доступно 3")
@@ -65,9 +69,6 @@ def test_flow():
     c = sv.absence_counters(con, sid)
     check(c["made_up"] == 1 and c["available"] == 3, "Отработал: 1 отработан, 3 остались")
 
-    eid = sv.enrollments_of(con, sid)[0]["id"]
-    con.execute("""INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,per_lesson,price,status,created_at)
-                   VALUES (?,?,'2026-10','flex',9,1550,13950,'paid','2026-09-20')""", (sid,eid))
     q = sv.quote_for(con, sid, "2026-11", credit_requested=True)
     check(q["credit_lessons"] == 3 and q["lessons_paid"] == 9, "Ноябрь: перерасчёт 3 неотработанных пропусков")
     check(q["total"] == 9 * 1550 - 3 * 1550, "Ноябрь: 13 950 − 4 650 = 9 300 ₽")

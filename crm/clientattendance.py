@@ -84,14 +84,15 @@ def calendar(con, sid, ym):
 
 
 def suggestions(con,sid,days=21):
-    from . import services as sv, capacity, logic, schedule, closures, program
+    from . import services as sv, capacity, logic, schedule, closures, program, makeuppolicy
     student=sv.get_student_row(con,sid);counters=sv.absence_counters(con,sid)
+    policy_cache={}
     out=[];today=sv.today();now=datetime.now(ZoneInfo('Europe/Moscow')).strftime('%H:%M')
     own={e['group_id'] for e in sv.enrollments_of(con,sid)}
     sp=program.student_program(con,sid)
     commitments=set()
     if counters['available']:
-        months={today.isoformat()[:7],(today+timedelta(days=20)).isoformat()[:7]}
+        months={today.isoformat()[:7],(today+timedelta(days=min(max(int(days),1),31)-1)).isoformat()[:7]}
         for month in months:
             commitments.update((e['date'],e['time']) for e in calendar(con,sid,month)['events'] if e['time'] and e['status'] not in ('absent','warned') and e['date']>=today.isoformat())
     if counters['available']:
@@ -107,14 +108,19 @@ def suggestions(con,sid,days=21):
                 time=logic.group_time(version,day.weekday())
                 if not time or (iso,time) in commitments:continue
                 if i==0 and time and time<=now:continue
-                try:program.check_makeup(con,sid,g['id'],iso)
+                try:
+                    program.check_makeup(con,sid,g['id'],iso)
+                    makeuppolicy.check(con,sid,iso,policy_cache)
+                    available=makeuppolicy.absences(con,sid,iso,policy_cache)
+                    if not available:continue
                 except sv.ApiError:continue
                 occupancy=capacity.occupancy(con,g['id'],iso);limit=occupancy['limit']
                 if limit and occupancy['count']>=limit:continue
                 if con.execute("SELECT 1 FROM makeups WHERE student_id=? AND date=? AND group_id=? AND status='booked'",(sid,iso,g['id'])).fetchone():continue
                 out.append({'group_id':g['id'],'group':g['name'],'branch':g['branch'],'date':iso,'time':time,
                             'count':occupancy['count'],'limit':limit,'free':max(0,limit-occupancy['count']) if limit else None,
-                            'age_warning':warning,'approval_required':bool(sp and day.weekday()==0)})
+                            'age_warning':warning,'approval_required':bool(sp and day.weekday()==0),
+                            'eligible_absence_ids':[a['id'] for a in available]})
     out.sort(key=lambda x:(x['count'],x['date'],x['time'],x['group']))
     out=out[:60]
     n=counters['available'];name=student['name'].split()[0]

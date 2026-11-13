@@ -10,12 +10,14 @@ def main():
     sv.today=lambda:date(2026,11,10)
     u={'id':1,'role':'admin','name':'Пример'}
     b=schedule.save_branch(con,{'name':'Небо Демо'})
-    own=schedule.save_group(con,{'name':'Своя Вт','branch_id':b,'weekdays':[1],'time':'18:30','age':'5-6','capacity':10})
+    own=schedule.save_group(con,{'name':'Своя Вт','branch_id':b,'weekdays':[1,4],'time':'18:30','age':'5-6','capacity':10})
     quiet=schedule.save_group(con,{'name':'Тихая Сб','branch_id':b,'weekdays':[5],'time':'11:00','age':'5-6','capacity':10})
     busy=schedule.save_group(con,{'name':'Загруженная Сб','branch_id':b,'weekdays':[5],'time':'12:00','age':'5-6','capacity':10})
     full=schedule.save_group(con,{'name':'Полная Сб','branch_id':b,'weekdays':[5],'time':'13:00','age':'5-6','capacity':10})
     makeup=schedule.save_group(con,{'name':'Отработки Сб','branch_id':b,'weekdays':[5],'time':'15:00','age':'5-6','is_makeup':1,'capacity':10})
     sid=sv.create_student(con,{'name':'Иван Примеров','birth':'2021-01-01','parent_name':'Анна','phone':'+79000000501','funnel':'members','group_id':own},u)
+    eid=con.execute('SELECT id FROM enrollments WHERE student_id=? AND group_id=?',(sid,own)).fetchone()[0]
+    con.execute("INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,price,per_lesson,status,created_at) VALUES (?,?,'2026-11','fixed',8,8000,1000,'paid','2026-11-01')",(sid,eid))
     con.execute("UPDATE students SET trial_at='2026-11-01T10:00',trial_came=1 WHERE id=?",(sid,))
     for day,status in [('2026-11-03','present'),('2026-11-06','absent'),('2026-11-10','absent')]:con.execute('INSERT INTO attendance(student_id,group_id,date,status) VALUES (?,?,?,?)',(sid,own,day,status))
     aid=con.execute("SELECT id FROM attendance WHERE date='2026-11-06'").fetchone()[0]

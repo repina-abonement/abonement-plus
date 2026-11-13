@@ -218,8 +218,9 @@ def book_makeup(con, sid: int, group_id: int, day: str, absence_id: int | None, 
         raise ApiError("Ребёнок и так ходит в эту группу")
     from . import program
     program.check_makeup(con, sid, group_id, day)
-    counters = absence_counters(con, sid)
-    ids = [a["id"] for a in counters["available_ids"]]
+    from . import makeuppolicy
+    makeuppolicy.check(con,sid,day)
+    ids = [a["id"] for a in makeuppolicy.absences(con,sid,day)]
     if not ids:
         raise ApiError("Нет пропусков, которые можно отработать")
     if absence_id is None:
