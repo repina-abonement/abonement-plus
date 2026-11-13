@@ -75,7 +75,8 @@ def period_quote(con, sub, effective=None):
     entries=[]
     try:
         for component in saved:
-            rate=int(component['rate'])
+            from .subcomposition import unit_rate
+            rate=unit_rate(component)
             gid=int(component['group_id']) if component.get('group_id') else None
             if rate<=0 and component['dates']:
                 raise ValueError()

@@ -51,6 +51,47 @@ def main():
     review=con.execute('SELECT before_json,after_json FROM subscription_composition_reviews WHERE subscription_id=?',(subid,)).fetchone()
     assert json.loads(review[0])['lessons']==16 and json.loads(review[1])['lessons']==13
     assert not program.reprice(con,subid)
+    # Individual seven-date fixture is synthetic, NOT retrieved Ivan ERP dates.
+    for total,arena_amount,ofp_amount,arena_days,ofp_days in (
+        (14640,10800,3840,q['components'][0]['dates'],q['components'][1]['dates']),
+        (12600,9000,3600,q['components'][0]['dates'][2:],['2026-11-14','2026-11-21','2026-11-28'])):
+        con.execute('UPDATE subscriptions SET price=? WHERE id=?',(total,subid))
+        parts=[{'group_id':arena,'dates':arena_days,'amount':arena_amount,'erp_subscription_id':'825986'},
+               {'group_id':sat,'dates':ofp_days,'amount':ofp_amount,'erp_subscription_id':'825983'}]
+        before=dict(con.execute('SELECT * FROM subscriptions WHERE id=?',(subid,)).fetchone())
+        changes=con.total_changes
+        checked=subcomposition.preview(con,subid,components=parts)
+        assert con.total_changes==changes and checked['price']==total
+        for bad in ([{**parts[0],'amount':arena_amount+1},parts[1]],
+                    [{**parts[0],'dates':['2026-10-31']},parts[1]],
+                    [{**parts[0],'dates':[arena_days[0],arena_days[0]]},parts[1]],
+                    [{**parts[0],'erp_subscription_id':''},parts[1]]):
+            try:subcomposition.preview(con,subid,components=bad);raise AssertionError('invalid accepted')
+            except sv.ApiError:pass
+        subcomposition.apply(con,subid,{'components':parts,'token':checked['token'],'reason':'Synthetic ERP reconciliation fixture'},user)
+        after=dict(con.execute('SELECT * FROM subscriptions WHERE id=?',(subid,)).fetchone())
+        for key in ('price','status','paid_at','discount_amount'):
+            if key in before:assert before[key]==after[key],key
+        assert [tuple(r) for r in con.execute('SELECT * FROM payments')]==payments
+        assert [tuple(r) for r in con.execute('SELECT * FROM attendance')]==marks
+        assert after['lessons']==len(arena_days)+len(ofp_days)
+        stored=json.loads(after['lesson_schedule']);assert stored[0]['amount']==arena_amount
+        assert stored[0]['erp_subscription_id']=='825986'
+        with patch('crm.services.today',return_value=date(2026,11,13)):
+            events=clientattendance.calendar(con,sid,'2026-11')['events']
+        assert {e['date'] for e in events if e['group_id']==sat}==set(ofp_days)
+        for day in ('2026-11-07','2026-11-14','2026-11-21','2026-11-28'):
+            assert any(r['id']==sid for r in sv.journal(con,sat,day,True)['rows'])==(day in ofp_days)
+        assert sum(day['list'] for day in sv.journal_month(con,sat,'2026-11')['days'])==len(ofp_days)
+        if total==12600:
+            try:subcomposition.unit_rate(stored[0]);raise AssertionError('invented rounded date price')
+            except sv.ApiError:pass
+    # An explicit off-schedule date is still planned in calendar/day/month journals.
+    parts[1]['dates']=['2026-11-13','2026-11-21','2026-11-28']
+    checked=subcomposition.preview(con,subid,components=parts)
+    subcomposition.apply(con,subid,{'components':parts,'token':checked['token'],'reason':'Confirmed off-schedule fixture'},user)
+    assert any(r['id']==sid for r in sv.journal(con,sat,'2026-11-13',True)['rows'])
+    assert any(day['date']=='2026-11-13' and day['list']==1 for day in sv.journal_month(con,sat,'2026-11')['days'])
     print('PASS 16→13; 9 arena + 4 Saturday OFP 17:00; no Thursdays, invented marks or finance changes; preview/stale guard/month bounds')
 
 if __name__=='__main__':main()

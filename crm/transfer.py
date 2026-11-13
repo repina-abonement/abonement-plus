@@ -139,14 +139,15 @@ def _program_plan(con,e,g,d0,new_days,tariff):
     source=con.execute("SELECT * FROM subscriptions WHERE enrollment_id=? AND month>=? AND status!='cancelled' AND kind='month' ORDER BY month",(e['id'],logic.month_of(d0))).fetchall()
     months=[];covered=money.balance(con,sid)['covered']
     for row in source:
-        x=dict(row);saved=json.loads(x['program_selection'] or '{}');components=saved.get('contract',{}).get('components')
+        x=dict(row);saved=json.loads(x['program_selection'] or '{}');components=json.loads(x['lesson_schedule']) if x.get('composition_corrected') and x.get('lesson_schedule') else saved.get('contract',{}).get('components')
         if not components:
             quote=program.quote(con,sid,x['month'],e,excluded_dates=json.loads(x['excluded_dates']),selection=saved or {'tariff':x['tariff']})
             components=quote['components']
         if sum(len(c['dates']) for c in components)!=x['lessons']:
             raise ApiError(f"Для старого абонемента на {logic.month_label(x['month'])} нужно уточнить проданные даты Арктики и ОФП перед переводом")
-        weight=sum(c['rate']*len(c['dates']) for c in components)
-        remaining={kind:sum(c['rate']*sum(day>=start for day in c['dates']) for c in components if c['kind']==kind) for kind in ('arena','ofp')}
+        from .subcomposition import unit_rate
+        weight=sum(unit_rate(c)*len(c['dates']) for c in components)
+        remaining={kind:sum(unit_rate(c)*sum(day>=start for day in c['dates']) for c in components if c['kind']==kind) for kind in ('arena','ofp')}
         credit=round(x['price']*sum(remaining.values())/weight) if weight else 0
         arena=round(x['price']*remaining['arena']/weight) if weight else 0
         keep=x['price']-credit
@@ -165,7 +166,7 @@ def _program_plan(con,e,g,d0,new_days,tariff):
             'keep_lessons':sum(day<start for c in components for day in c['dates']),'keep_price':keep,
             'new_lessons':q['lessons_paid'],'new_price':q['total'],'new_dates':q['dates'],
             'arena_credit':arena,'ofp_credit':credit-arena,'credit':credit,'paid_credit':max(0,covered.get(x['id'],0)-keep),'quote':q,
-            'components':[{**c,'dates':[day for day in c['dates'] if day<start]} for c in components]})
+            'components':[{**c,'dates':[day for day in c['dates'] if day<start],**({'amount':unit_rate(c)*sum(day<start for day in c['dates'])} if 'amount' in c else {})} for c in components]})
     b=money.balance(con,sid);net=b['debt']+b['upcoming']-b['deposit']+sum(m['new_price']-m['credit'] for m in months)
     return {'projected_due':max(0,net),'projected_deposit':max(0,-net),'program_transfer':True,'student_id':sid,'from_group':'Сборная Арктика','to_group':g['name'],'start':start,'months':months,
             'diff':sum(m['new_price']-m['credit'] for m in months),'credit_total':sum(m['credit'] for m in months),
@@ -185,6 +186,7 @@ def _program_apply(con,e,g,d0,new_days,p,user,tariff):
         snap=json.loads(old['program_selection'] or '{}');snap['contract']={'components':m['components']}
         con.execute('''UPDATE subscriptions SET lessons=?,price=?,corrected=1,program_selection=?,late_fee=0,discount_amount=0 WHERE id=?''',
                     (m['keep_lessons'],m['keep_price'],json.dumps(snap),m['sub_id']))
+        if old['composition_corrected']:con.execute('UPDATE subscriptions SET lesson_schedule=? WHERE id=?',(json.dumps(m['components']),m['sub_id']))
         q=m['quote'];disc=q.get('discount') or {}
         con.execute('''INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,per_lesson,price,late_fee,
             discount_name,discount_amount,excluded_dates,corrected,status,created_at)

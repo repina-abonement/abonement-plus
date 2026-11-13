@@ -1058,6 +1058,9 @@ def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpai
     from . import closures, schedule
     closed = closures.is_closed(con, group_id, d)
     has_lesson = d.weekday() in logic.parse_weekdays(schedule.on(con, g, d)["weekdays"]) and not closed  # с учётом версий расписания
+    from . import subcomposition
+    confirmed=subcomposition.planned(con,group_id,day)
+    has_lesson=has_lesson or bool(confirmed)
     rows, hidden = [], []
     if g["is_makeup"]:
         for m in con.execute(
@@ -1097,6 +1100,16 @@ def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpai
                          "tag": "paid" if paid_month else "single" if paid_single else "unpaid", "status": "vacation" if vac else (a["status"] if a else None),
                          "resolved": a["resolved"] if a else None, "warned": bool(a and a["warned"]) and not vac,
                          "note": a["note"] if a else ""})
+        # Снимок подтверждённого состава не зависит от сегодняшней записи в группу.
+        have={row['id'] for row in rows}
+        for sub in confirmed:
+            sid=sub['student_id']
+            if sid in have:continue
+            paid=sub['status']=='paid'
+            if paid_only and not paid:
+                hidden.append({'id':sid,'name':sub['name']});continue
+            have.add(sid)
+            rows.append({'id':sid,'name':sub['name'],'birth':sub['birth'] or '', 'unpaid':not paid,'tag':'paid' if paid else 'unpaid','status':None,'warned':False,'note':'','resolved':None})
         # разовые занятия на эту дату (Юлия, 03.11): в журнале с пометкой «разовое», отмечаются как все
         from . import singles as _sg
         have = {r["id"] for r in rows}
@@ -1171,6 +1184,8 @@ def journal_month(con, group_id: int, ym: str) -> dict:
     marked_dates = {r[0] for r in con.execute(
         "SELECT DISTINCT date FROM attendance WHERE group_id=? AND date BETWEEN ? AND ?",
         (group_id,start.isoformat(),end.isoformat()))}
+    from . import subcomposition
+    marked_dates.update(subcomposition.group_dates(con,group_id,ym))
     marked_dates.update(r[0] for r in con.execute("SELECT substr(trial_at,1,10) FROM students WHERE historical_trial=1 AND trial_group_id=? AND substr(trial_at,1,10) BETWEEN ? AND ?",(group_id,start.isoformat(),end.isoformat())))
     marked_dates.update(r[0] for r in con.execute(
         "SELECT substr(visit_at,1,10) FROM erp_trial_visits WHERE group_id=? AND visit_at>=? AND visit_at<?",

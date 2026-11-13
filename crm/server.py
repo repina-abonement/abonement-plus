@@ -1939,7 +1939,7 @@ def prices_save(con, h, user, body, q):
 @route("POST", "/api/subscriptions/{subid}/composition-preview", role="admin")
 def sub_composition_preview(con,h,user,body,q,subid):
     from . import subcomposition
-    return subcomposition.preview(con,int(subid),int(body.get('ofp_group_id') or 0))
+    return subcomposition.preview(con,int(subid),body.get('ofp_group_id'),body.get('components'))
 
 
 @route("POST", "/api/subscriptions/{subid}/composition", role="admin")
@@ -2038,6 +2038,21 @@ def makeup_status(con, h, user, body, q, mid):
         coach_guard(con, user, m["group_id"])
     sv.set_makeup_status(con, int(mid), body.get("status"), user)
     return {"ok": True}
+
+
+@route("GET", "/api/journal/lesson-groups", role="journal")
+def journal_lesson_groups(con,h,user,body,q):
+    from . import subcomposition
+    day=q.get('date') or sv.today().isoformat()
+    try:d=sv.date.fromisoformat(day)
+    except ValueError:raise ApiError('Неверная дата')
+    result=[]
+    for row in con.execute('SELECT * FROM groups WHERE active=1'):
+        try:coach_guard(con,user,row['id'])
+        except ApiError:continue
+        current=schedule.on(con,row,d)
+        if (d.weekday() in logic.parse_weekdays(current['weekdays'])) or day in subcomposition.group_dates(con,row['id'],day[:7]):result.append(row['id'])
+    return {'group_ids':result}
 
 
 @route("GET", "/api/journal", role="journal")
