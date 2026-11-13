@@ -1638,6 +1638,33 @@ function clientSubscriptionsHtml(d) {
   };
   return `<h3>Абонементы</h3><p class="small muted">Условия и состояние оплаты каждого абонемента.</p>${d.subscriptions.length?`<ul class="sub-list ${d.subscriptions.length>3?'folded':''}">${d.subscriptions.map(card).join('')}</ul>`:'<p class="muted">Абонементов пока нет. Оформите первый кнопкой «Продать абонемент».</p>'}${d.subscriptions.length>3?`<button class="linkish" id="sub-more">Показать историю (${d.subscriptions.length})</button>`:''}${subscriptionRefundsHtml(d)}`;
 }
+function openSubscriptionPeriod(sub, box, reload) {
+  const display=value=>value?value.split('-').reverse().join('.'):'';
+  box.innerHTML=`<form class="subscription-period-form"><h4>Срок действия по ERP</h4><div class="row">${[['from','Дата начала',sub.valid_from],['until','Дата окончания',sub.valid_until]].map(([key,label,value])=>`<div class="field"><label for="period-${key}">${label}</label><div class="period-date-control"><input id="period-${key}" data-date-text="${key}" type="text" inputmode="numeric" autocomplete="off" placeholder="ДД.ММ.ГГГГ" maxlength="10" value="${esc(display(value))}" ${key==='from'?'required':''}><label class="btn period-calendar" title="Выбрать дату в календаре" aria-label="Выбрать дату в календаре">📅<input data-date-picker="${key}" type="date" value="${esc(value||'')}" aria-label="${label}: календарь"></label></div></div>`).join('')}</div><div class="small need-err" role="alert"></div><div class="sc-actions"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-period-close>Отмена</button></div></form>`;
+  const form=box.querySelector('form');
+  for(const key of ['from','until']) {
+    const text=form.querySelector(`[data-date-text="${key}"]`),picker=form.querySelector(`[data-date-picker="${key}"]`);
+    text.oninput=()=>{const digits=text.value.replace(/\D/g,'').slice(0,8);const caret=text.selectionStart;const count=text.value.slice(0,caret).replace(/\D/g,'').length;text.value=[digits.slice(0,2),digits.slice(2,4),digits.slice(4,8)].filter(Boolean).join('.');let at=count+(count>2?1:0)+(count>4?1:0);text.setSelectionRange(at,at);text.setCustomValidity('');picker.value=parse(text.value)||'';};
+    picker.onchange=()=>{text.value=display(picker.value);text.setCustomValidity('');};
+  }
+  function parse(value) {
+    if(!/^\d{2}\.\d{2}\.\d{4}$/.test(value))return null;
+    const [day,month,year]=value.split('.'),iso=`${year}-${month}-${day}`,date=new Date(iso+'T12:00:00Z');
+    return +year>=1&&!isNaN(date)&&date.toISOString().slice(0,10)===iso?iso:null;
+  }
+  form.querySelector('[data-period-close]').onclick=()=>box.remove();
+  form.onsubmit=async event=>{
+    event.preventDefault();const start=form.querySelector('[data-date-text="from"]'),end=form.querySelector('[data-date-text="until"]');
+    const from=parse(start.value),until=end.value?parse(end.value):'';
+    if(!from||(end.value&&!until)){const field=!from?start:end;field.setCustomValidity('Введите существующую дату: ДД.ММ.ГГГГ');field.reportValidity();return;}
+    if(until&&until<from){end.setCustomValidity('Дата окончания не может быть раньше начала');end.reportValidity();return;}
+    const save=form.querySelector('[type=submit]');save.disabled=true;
+    try{await api('POST',`/api/subscriptions/${sub.id}/period`,{valid_from:from,valid_until:until,expected_from:sub.valid_from,expected_until:sub.valid_until});toast('Срок абонемента сохранён');reload();}
+    catch(e){form.querySelector('.need-err').textContent=e.message||'Не удалось сохранить';save.disabled=false;}
+  };
+  form.querySelector('[data-date-text]').focus();
+}
+
 function subscriptionCancellationsHtml(d) {
   const rows=d.subscription_cancellations||[];if(!rows.length)return '';
   return `<h4>Расчёты после отмены</h4>${rows.map(c=>`<article class="subscription-refund"><b>Абонемент №${c.subscription_id} · ${c.mode==='balance'?'Средства оставлены на балансе':'Возврат клиенту'}</b>${!c.period_verified?'<p class="pill yellow">Требуется сверка будущего периода: отмена оформлена по старому расчёту. Сумму пока нельзя считать проверенной.</p>':`<p>Занятия прекращены с ${esc(c.effective_date)}.</p><div class="finance-numbers"><div><small>Прошедший период</small><b>${rub(c.retained_amount)}</b></div><div><small>${c.mode==='balance'?'Средства оставлены на балансе':'Сумма к возврату'}</small><b>${rub(c.amount)}</b></div></div>${c.mode==='balance'?`<p>В момент отмены: ${rub(c.balance_available)} осталось свободно, ${rub(c.applied_to_invoices)} зачтено в другие абонементы.</p>`:''}`}<p class="small muted">Свободный баланс сейчас: <b>${rub(d.balance.deposit)}</b>. Деньги, зачтённые в другие счета, уже отражены в их оплате.</p></article>`).join('')}`;
@@ -1891,15 +1918,9 @@ async function openStudent(id, options = {}) {
   body.querySelectorAll("[data-sub-period]").forEach(button => {
     button.onclick = async () => {
       const sub = d.subscriptions.find(item => item.id === +button.dataset.subPeriod);
-      const start = prompt("Дата начала по ERP (ГГГГ-ММ-ДД)", sub.valid_from || "");
-      if (!start) return;
-      const end = prompt("Дата окончания по ERP (ГГГГ-ММ-ДД)", sub.valid_until || "");
-      if (end === null) return;
-      try {
-        await api("POST", `/api/subscriptions/${sub.id}/period`, {valid_from:start,valid_until:end,expected_from:sub.valid_from,expected_until:sub.valid_until});
-        toast("Срок абонемента сохранён");
-        reload();
-      } catch (e) { fail(e); }
+      body.querySelectorAll('[data-period-editor]').forEach(el=>el.remove());
+      const box=document.createElement('div');box.dataset.periodEditor='';button.after(box);
+      openSubscriptionPeriod(sub,box,reload);
     };
   });
   body.querySelectorAll("[data-chstop]").forEach((b) => (b.onclick = async () => {
