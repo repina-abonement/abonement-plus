@@ -126,7 +126,9 @@ def record(con,sid,data,user):
     try:
         fields={k:data[k] for k in ('child_name','birth','parent_name','phone') if k in data}
         if data.get('email'):fields['email']=data['email']
-        smart.fill_required(con,sid,fields,user);smart.require(con,sid,'sale' if sold else 'trial')
+        smart.fill_required(con,sid,fields,user)
+        # Внесение уже состоявшегося события не блокируется отсутствующей почтой.
+        smart.require(con,sid,'trial')
         if trial:
             con.execute('''UPDATE students SET trial_at=?,trial_group_id=?,trial_came=1,historical_trial=1,
                 trial_marked_at=?,

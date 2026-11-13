@@ -59,6 +59,19 @@ class HistoricalEntryTest(unittest.TestCase):
         from crm import tasks
         tasks.run(self.con,datetime(2026,11,13,15),send=False)
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM tasks WHERE student_id=? AND kind IN ('trial_confirm','trial_today','how_was')",(self.sid,)).fetchone()[0],0)
+    def test_historical_sale_without_email_keeps_data_request(self):
+        from crm import smart, tasks
+        with patch.object(smart,'REQUIRE',True):
+            r=historyentry.record(self.con,self.sid,{**self.data,'email':''},self.user)
+            self.assertEqual(r['remaining'],0)
+            self.assertIn('email',smart.required_info(self.con,self.sid,'sale')['missing'])
+            with self.assertRaises(sv.ApiError):smart.require(self.con,self.sid,'sale')
+        tasks.request_missing_data(self.con,historyentry.now().date())
+        task=self.con.execute("SELECT * FROM tasks WHERE student_id=? AND kind='request_data' AND status='open'",(self.sid,)).fetchone()
+        self.assertIsNotNone(task)
+        self.assertIn('Почта',task['note'])
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM subscriptions WHERE student_id=?',(self.sid,)).fetchone()[0],1)
+
     def test_select_discount_and_keep_it_in_subscription(self):
         did=self.con.execute("INSERT INTO discounts(name,percent,rule,created_at) VALUES ('Согласованная 20%',20,'manual','2026-11-01')").lastrowid
         q=historyentry.options(self.con,self.sid,self.gid,'2026-11','fixed',paid_date='2026-11-12',trial_date='2026-11-08',discount_id=did)
