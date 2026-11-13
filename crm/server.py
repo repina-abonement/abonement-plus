@@ -1884,6 +1884,18 @@ def sources_import(con, h, user, body, q):
     return {"added": sources.import_text(con, body.get("text") or "")}
 
 
+@route("POST", "/api/erp/sources/plan", role="admin")
+def erp_sources_plan(con, h, user, body, q):
+    from . import erpsources
+    return erpsources.plan(con, body.get("text") or "")
+
+
+@route("POST", "/api/erp/sources/apply", role="admin")
+def erp_sources_apply(con, h, user, body, q):
+    from . import erpsources
+    return erpsources.apply(con, body.get("text") or "", body.get("token"), user)
+
+
 @route("POST", "/api/sources/{sid}/archive", role="admin")
 def sources_archive(con, h, user, body, q, sid):
     sources.set_active(con, int(sid), bool(body.get("active")))
