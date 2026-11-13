@@ -2170,7 +2170,7 @@ async function renderJournalMonth(page, groups) {
 
 function jBranchSel(groups, branchId) {
   const br = [...new Map(groups.map((x) => [x.branch_id, { id: x.branch_id, name: x.branch }])).values()];
-  return br.length > 1 ? `<div class="field" style="flex:0 0 200px"><label>Филиал</label><select id="j-branch">${br.map((b) => `<option value="${b.id}" ${b.id === branchId ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : "";
+  return br.length ? `<div class="field" style="flex:0 0 200px"><label>Филиал</label><select id="j-branch">${br.map((b) => `<option value="${b.id}" ${b.id === branchId ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : "";
 }
 
 async function renderJournal(page) {
@@ -2184,11 +2184,14 @@ async function renderJournal(page) {
   // в списке только группы, у которых в выбранный день есть занятие (Юлия, 04.11)
   const wdSel = (new Date(S.journal.date + "T12:00").getDay() + 6) % 7;
   const dayGroups = groups.filter((x) => String(x.weekdays || "").split(",").map(Number).includes(wdSel));
+  if (!groups.some(x=>x.branch_id===S.journal.branch)) S.journal.branch=groups[0].branch_id;
   if (!dayGroups.length) {
     page.innerHTML = `${journalDayHead()}<div class="row" style="max-width:640px;margin-bottom:14px">
+      ${jBranchSel(groups,S.journal.branch)}
       <div class="field" style="flex:0 0 170px"><label>Дата</label><input id="j-date" type="date" value="${S.journal.date}"></div></div>
       <div class="muted">${dShort(S.journal.date)} занятий нет ни в одном филиале. Выберите другую дату</div>`;
     wireJournalDayHead(page);
+    $("#j-branch").onchange=e=>step(()=>{S.journal.branch=+e.target.value;S.journal.group=null;});
     $("#j-date").onchange = (e) => { step(() => { S.journal.date = e.target.value; }); };
     return;
   }
@@ -2197,24 +2200,24 @@ async function renderJournal(page) {
     const was = groups.find((x) => x.id === S.journal.group);
     if (was) S.journal.branch = was.branch_id;
     S.journal.group = null;
-    const brs = [...new Map(dayGroups.map((x) => [x.branch_id, { id: x.branch_id, name: x.branch }])).values()];
+    const brs = [...new Map(groups.map((x) => [x.branch_id, { id: x.branch_id, name: x.branch }])).values()];
     const bid = brs.some((b) => b.id === S.journal.branch) ? S.journal.branch : brs[0].id;
     const inBr = dayGroups.filter((x) => x.branch_id === bid);
     page.innerHTML = `${journalDayHead()}<div class="row" style="max-width:640px;margin-bottom:14px">
-      ${brs.length > 1 ? `<div class="field" style="flex:0 0 200px"><label>Филиал</label><select id="j-branch">${brs.map((b) => `<option value="${b.id}" ${b.id === bid ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : ""}
+      ${brs.length ? `<div class="field" style="flex:0 0 200px"><label>Филиал</label><select id="j-branch">${brs.map((b) => `<option value="${b.id}" ${b.id === bid ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : ""}
       <div class="field"><label>Группа</label><select id="j-group"><option value="">Выберите группу</option>${inBr.map((x) => `<option value="${x.id}">${esc(groupNoBranch(x))}</option>`).join("")}</select></div>
       <div class="field" style="flex:0 0 170px"><label>Дата</label><input id="j-date" type="date" value="${S.journal.date}"></div></div>
-      <div class="muted">${was ? `У группы ${esc(groupNoBranch(was))} ${dShort(S.journal.date)} занятия нет. ` : ""}Выберите группу</div>`;
+      <div class="muted">${was ? `У группы ${esc(groupNoBranch(was))} ${dShort(S.journal.date)} занятия нет. ` : ""}${inBr.length ? "Выберите группу" : "В выбранном филиале на эту дату занятий нет. Выберите другую дату или филиал."}</div>`;
     wireJournalDayHead(page);
     $("#j-group").onchange = (e) => { if (e.target.value) step(() => { S.journal.group = +e.target.value; }); };
-    if ($("#j-branch")) $("#j-branch").onchange = (e) => step(() => { S.journal.branch = +e.target.value; });
+    if ($("#j-branch")) $("#j-branch").onchange = (e) => step(() => { S.journal.branch = +e.target.value; S.journal.group = null; });
     $("#j-date").onchange = (e) => { step(() => { S.journal.date = e.target.value; }); };
     return;
   }
   const j = await api("GET", `/api/journal?group_id=${S.journal.group}&date=${S.journal.date}`);
   const g = j.group;
   if (g.branch_id == null) g.branch_id = (groups.find((x) => x.id === g.id) || {}).branch_id;
-  const jBranches = [...new Map(dayGroups.map((x) => [x.branch_id, { id: x.branch_id, name: x.branch }])).values()];
+  const jBranches = [...new Map(groups.map((x) => [x.branch_id, { id: x.branch_id, name: x.branch }])).values()];
   // до начала тренировки вместо «Был / Пропуск» кнопка «Не придёт» (Юлия, 04.11)
   const before = j.has_lesson && (S.journal.date > S.meta.today || (S.journal.date === S.meta.today && new Date().toTimeString().slice(0, 5) < g.time));
   // нумерация: сначала те, кого ждём, потом предупредившие и отпуск; плашка «всего / ждём» (Юлия, 04.11)
@@ -2226,7 +2229,7 @@ async function renderJournal(page) {
   page.innerHTML = `
     ${journalDayHead()}${j.has_lesson?journalActionsHtml():''}
     <div class="row" style="max-width:640px;margin-bottom:14px">
-      ${jBranches.length > 1 ? `<div class="field" style="flex:0 0 200px"><label>Филиал</label><select id="j-branch">${jBranches.map((b) => `<option value="${b.id}" ${b.id === g.branch_id ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : ""}
+      ${jBranches.length ? `<div class="field" style="flex:0 0 200px"><label>Филиал</label><select id="j-branch">${jBranches.map((b) => `<option value="${b.id}" ${b.id === g.branch_id ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : ""}
       <div class="field"><label>Группа</label><select id="j-group">${dayGroups.filter((x) => x.branch_id === g.branch_id).map((x) => `<option value="${x.id}" ${x.id === S.journal.group ? "selected" : ""}>${esc(groupNoBranch(x))}</option>`).join("")}</select></div>
       <div class="field" style="flex:0 0 170px"><label>Дата</label><input id="j-date" type="date" value="${S.journal.date}"></div>
     </div>
