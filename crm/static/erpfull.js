@@ -14,10 +14,10 @@ function erpFullSetup(box, data) {
     <details>
       <summary>Вставить CSV посещений</summary>
       <label>Данные CSV<textarea data-visit-csv rows="5"></textarea></label>
-      <button class="btn" data-visit-upload>Добавить CSV посещений</button>
+      <button type="button" class="btn" data-visit-upload>Добавить CSV посещений</button>
       <div class="small" data-visit-upload-status role="status"></div>
     </details>
-    <div style="max-height:230px;overflow:auto">${data.uploads.map(u=>`<label class="check"><input type="checkbox" data-full-file="${u.id}">${esc(u.filename)} (${u.count} строк)</label>`).join('')}</div>
+    <div style="max-height:230px;overflow:auto">${data.uploads.map(u=>`<label class="check"><input type="checkbox" data-full-file="${u.id}">${esc(u.filename)} · ${esc(u.kind_label || ({visits:'Посещения',tasks:'Задачи',clients:'Клиенты',subs:'Абонементы',payments:'Оплаты'}[u.kind] || u.kind || ''))} (${u.count} строк)</label>`).join('')}</div>
     <button class="btn" id="erp-full-plan">Проверить выбранные файлы</button>
     <button class="btn primary" id="erp-full-apply" disabled>Сохранить и перенести проверенное</button>
     <button class="btn" id="erp-full-last">Последний результат</button>
@@ -37,9 +37,10 @@ function erpFullSetup(box, data) {
   const upload = el.querySelector('[data-visit-upload]');
   const uploadStatus = el.querySelector('[data-visit-upload-status]');
   upload.onclick = async () => {
-    const content = csv.value.trim();
-    if (!content) { uploadStatus.textContent = 'Вставьте CSV с заголовками'; return; }
+    const content = csv.value;
+    if (!content.trim()) { uploadStatus.textContent = 'Вставьте CSV с заголовками'; return; }
     upload.disabled = true;
+    uploadStatus.textContent = 'Добавляю CSV посещений…';
     try {
       const data = await new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -47,10 +48,16 @@ function erpFullSetup(box, data) {
         reader.onerror = () => reject(reader.error);
         reader.readAsDataURL(new Blob([content], {type: 'text/csv;charset=utf-8'}));
       });
-      await api('POST', '/api/erp/upload', {filename: 'erp-visits-' + Date.now() + '.csv', data, kind: 'visits'});
+      const added = await api('POST', '/api/erp/upload', {filename: 'erp-visits-' + Date.now() + '.csv', data, kind: 'visits'});
       await renderErp(box);
+      const status=box.querySelector('[data-visit-upload-status]');
+      if(status){status.textContent='CSV добавлен как «Посещения». Выберите файл ниже и нажмите «Проверить выбранные файлы».';status.closest('details').open=true;}
+      const item=box.querySelector(`[data-full-file="${added.id}"]`);
+      if(item)item.closest('label').scrollIntoView({block:'nearest'});
     } catch (e) {
-      uploadStatus.textContent = e.message;
+      const input=box.querySelector('[data-visit-csv]')||csv;input.value=content;
+      const status=box.querySelector('[data-visit-upload-status]')||uploadStatus;
+      status.textContent=e.message||'Не удалось добавить CSV';status.closest('details').open=true;
     } finally {
       upload.disabled = false;
     }

@@ -31,6 +31,22 @@ class RecoveryTest(unittest.TestCase):
         p=full.plan(self.con,ids)
         return full.apply(self.con,ids,p['token'],self.user,'test-backup')
 
+    def test_pasted_csv_explicit_visits_and_readonly_plan(self):
+        import base64
+        from crm import server
+        text='ID клиента;ФИО;Дата занятия;Группа;Отметка;Задача (end)\n101;Тестовый Ребёнок;01.11.2026;Тестовая группа;был;только примечание\n'
+        self.assertEqual(ei.guess_kind(text.splitlines()[0].split(';')),'tasks')
+        upload=server.erp_upload(self.con,None,self.user,{'filename':'pasted-visits.csv','data':base64.b64encode(text.encode()).decode(),'kind':'visits'},{})
+        item=next(x for x in ei.uploads(self.con) if x['id']==upload['id'])
+        self.assertEqual((item['kind'],item['kind_label'],item['count']),('visits','Посещения',1))
+        before=self.con.total_changes
+        report=full.plan(self.con,[upload['id']])
+        self.assertEqual(report['counts']['added_visits'],1)
+        self.assertTrue(report['token'])
+        self.assertEqual(self.con.total_changes,before)
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM attendance').fetchone()[0],0)
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM tasks').fetchone()[0],0)
+
     def test_visits_source_and_conflict(self):
         uid=self.upload('ID клиента;ФИО;Дата занятия;Группа;Отметка;Дополнительное поле\n101;Тестовый Ребёнок;01.11.2026;Тестовая группа;был;сохранить точно\n101;Тестовый Ребёнок;02.11.2026;Тестовая группа;не был;конфликт\n999;Неизвестный Ребёнок;01.11.2026;Тестовая группа;был;не потерять\n','visits')
         self.con.execute("INSERT INTO attendance(student_id,group_id,date,status) VALUES (?,?,'2026-11-02','present')",(self.sid,self.gid))
