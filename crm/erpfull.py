@@ -487,12 +487,31 @@ def _process(con, files, now):
         paid = all(ei.sub_status(r.get('status',''),p) == 'paid' for _,_,r,p in rows)
         status = 'paid' if paid else 'invoiced'
         tariff = 'flex' if any('гибк' in ei._norm(r.get('tariff','')) for _,_,r,_ in rows) else 'fixed'
+        period_start = period_end = None
+        if len(rows) == 1:
+            record = rows[0][2]
+            start, end = (_date(record.get(key, '')) for key in ('start', 'end'))
+            period_start, period_end = (value[:10] if value else None for value in (start, end))
+            if ((record.get('start') and not period_start) or (record.get('end') and not period_end)
+                    or (period_start and period_start[:7] != ym)
+                    or (period_start and period_end and period_end < period_start)):
+                reason = 'Некорректный срок действия абонемента ERP'
+        elif any(r.get('start') or r.get('end') for _, _, r, _ in rows):
+            reason = reason or 'Несколько продаж ERP за месяц: сроки действия нужно сверить по каждой записи'
         sale_dates = [_date(r.get('sale_at','')) for _,_,r,_ in rows]
         # The ERP sales report has no payment date. Do not invent one.
         native = list(con.execute("SELECT x.* FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id WHERE x.student_id=? AND e.group_id=? AND x.month=? AND x.status!='cancelled'", (sid,gid,ym)))
         if gid < 0:
             native = list(con.execute("SELECT * FROM subscriptions WHERE id=? AND student_id=? AND month=? AND enrollment_id IS NULL AND status!='cancelled'", (-gid,sid,ym)))
+        if not reason and len(native) == 1:
+            old_sub = native[0]
+            if any(incoming and old_sub[key] and incoming != old_sub[key]
+                   for key, incoming in (('valid_from', period_start), ('valid_until', period_end))):
+                reason = 'Срок действия ERP отличается от сохранённого срока CRM'
         count_review = any(ei._norm(r.get('reviewed_lessons','')) == 'да' for _,_,r,_ in rows)
+        if count_review or any(ei._norm(r.get('reviewed_sub','')) == 'да' for _, _, r, _ in rows):
+            # A reviewed correction only changes the fields approved in that file.
+            period_start = period_end = None
         if count_review and not reason:
             if ym not in ('2026-10', '2026-11') or len(native) != 1 or len(rows) != 1:
                 reason = 'Сверка количества требует одной существующей записи октября или ноября 2026'
@@ -545,6 +564,22 @@ def _process(con, files, now):
                 native = [con.execute('SELECT * FROM subscriptions WHERE id=?',(subid,)).fetchone()]
                 counts['added_subscriptions'] += 1
         if not reason and len(native) == 1 and native[0]['price'] == price and native[0]['lessons'] == lessons and native[0]['status'] == status:
+            old_sub = native[0]
+            start = old_sub['valid_from'] or period_start
+            end = old_sub['valid_until'] or period_end
+            if start and end and end < start:
+                for fid, index, _, _ in rows:
+                    con.execute('UPDATE erp_full_rows SET reason=? WHERE file_id=? AND row_num=?',
+                                ('Срок ERP противоречит сохранённой границе периода CRM', fid, index))
+                continue
+            if (start, end) != (old_sub['valid_from'], old_sub['valid_until']):
+                fid, index, _, _ = rows[0]
+                con.execute('UPDATE subscriptions SET valid_from=?,valid_until=? WHERE id=?',
+                            (start, end, old_sub['id']))
+                after_sub = dict(con.execute('SELECT * FROM subscriptions WHERE id=?', (old_sub['id'],)).fetchone())
+                con.execute('INSERT INTO erp_full_subscription_corrections(subscription_id,before_json,after_json,file_id,row_num,corrected_at) VALUES (?,?,?,?,?,?)',
+                            (old_sub['id'], _json(dict(old_sub)), _json(after_sub), fid, index, now))
+                counts['updated_subscription_dates'] += 1
             for fid,index,_,_ in rows:
                 con.execute("UPDATE erp_full_rows SET state='native',reason=?,target_table='subscriptions',target_id=? WHERE file_id=? AND row_num=?",
                     ('Сумма и число занятий сверены; остальные поля сохранены в исходных продажах',native[0]['id'],fid,index))

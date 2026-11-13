@@ -28,6 +28,7 @@ def calendar(con, sid, ym):
             effective_start=e['start_date'] or (start.isoformat() if e['id'] in billed else e['created_at'][:10])
             if iso<effective_start or e['end_date'] and iso>=e['end_date']:continue
             if closures.is_closed(con,g['id'],day) or subscriptiondates.excluded(con,sid,g['id'],iso):continue
+            if (iso,g['id']) not in singles and subscriptiondates.outside_period(con,sid,g['id'],iso):continue
             if logic.in_vacation(day,sv.vacations_of(con,sid)):continue
             add(iso,g['id'],'single' if (iso,g['id']) in singles else 'subscription')
     for (day,gid),a in marks.items():

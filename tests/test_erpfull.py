@@ -195,6 +195,26 @@ class RecoveryTest(unittest.TestCase):
         self.run_import([uid])
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM subscriptions').fetchone()[0],1)
 
+    def test_exact_period_backfill_preserves_payment_and_subscription_id(self):
+        from crm import subscriptiondates
+        header = ('ID посетителя;ФИО посетителя;Тип;Группа;Дата начала;Дата окончания;'
+                  'Стоимость со скидкой;Статус;Количество занятий\n')
+        original = self.upload(header.replace('Дата начала;Дата окончания', 'Месяц') +
+                               '101;Тестовый Ребёнок;Абонемент;Тестовая группа;2026-10;5000;Оплачен;5\n', 'subs')
+        self.run_import([original])
+        before = dict(self.con.execute('SELECT * FROM subscriptions').fetchone())
+        exact = self.upload(header +
+                            '101;Тестовый Ребёнок;Абонемент;Тестовая группа;13.10.2026;27.10.2026;5000;Оплачен;5\n', 'subs')
+        report = self.run_import([exact])
+        self.assertEqual(report['counts']['updated_subscription_dates'], 1)
+        self.assertEqual(dict(self.con.execute('SELECT * FROM subscriptions').fetchone()),
+                         before | {'valid_from': '2026-10-13', 'valid_until': '2026-10-27'})
+        self.assertTrue(subscriptiondates.outside_period(self.con, self.sid, self.gid, '2026-10-12'))
+        self.assertFalse(subscriptiondates.outside_period(self.con, self.sid, self.gid, '2026-10-13'))
+        self.assertFalse(subscriptiondates.outside_period(self.con, self.sid, self.gid, '2026-10-27'))
+        self.assertTrue(subscriptiondates.outside_period(self.con, self.sid, self.gid, '2026-10-28'))
+        self.assertEqual(self.run_import([exact])['counts'].get('updated_subscription_dates', 0), 0)
+
     def test_existing_crm_subscription_and_stage_preserved(self):
         eid=self.con.execute("INSERT INTO enrollments(student_id,group_id,tariff,active,created_at) VALUES (?,?,'fixed',1,'2026-11-01')",(self.sid,self.gid)).lastrowid
         self.con.execute("INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,per_lesson,price,status,created_at) VALUES (?,?,'2026-11','fixed',8,1000,8000,'invoiced','2026-11-01')",(self.sid,eid))

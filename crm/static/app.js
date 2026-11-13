@@ -1629,9 +1629,11 @@ function clientSubscriptionsHtml(d) {
     const own=d.enrollments.find(e=>e.id===x.enrollment_id),active=own&&x.kind!=='single'&&!cancelled&&x.month>=d.cur_month;
     return `<li class="subscription-card ${cancelled?'is-cancelled':''}"><div class="finance-card-head"><div><h4>${x.kind==='single'?`Разовое занятие${x.single_date?' · '+dShort(x.single_date):''}`:monthLabel(x.month)}</h4><div class="muted">${esc(clientGroupLabel(x))}</div></div><span class="pill ${!left&&!cancelled?'green':cancelled?'':'yellow'}">${status}</span></div>
       <div class="small muted subscription-meta">${esc(tariffs[x.tariff]||'Абонемент')} · ${x.lessons} ${plural(x.lessons,'занятие','занятия','занятий')}</div>
+      ${x.valid_from||x.valid_until?`<div class="small muted">Действует ${x.valid_from?'с '+dShort(x.valid_from):''}${x.valid_until?' по '+dShort(x.valid_until):''}</div>`:''}
       <div class="finance-numbers"><div><small>Стоимость</small><b>${rub(x.price)}</b></div><div><small>Оплачено</small><b>${rub(paid)}</b></div><div><small>${cancelled?'Статус':'Осталось оплатить'}</small><b class="${left&&!cancelled?'finance-due':''}">${cancelled?'Отменён':rub(left)}</b></div></div>
       ${x.credit_lessons||x.late_fee||x.discount_amount||x.corrected||x.excluded_dates&&x.excluded_dates!=='[]'?`<details class="finance-detail"><summary>Расчёт и условия</summary>${x.credit_lessons?`<div>Перерасчёт пропусков: ${x.credit_lessons}</div>`:''}${x.late_fee?`<div>Надбавка: ${rub(x.late_fee)}</div>`:''}${x.discount_amount?`<div>Скидка: ${rub(x.discount_amount)}</div>`:''}${x.corrected?'<div>Сумма скорректирована</div>':''}${x.excluded_dates&&x.excluded_dates!=='[]'?`<div>Исключены: ${JSON.parse(x.excluded_dates).map(dShort).join(', ')}</div>`:''}</details>`:''}
       ${!cancelled&&can('members','full')?`<div class="sc-actions"><button type="button" class="btn sm danger" data-pcanc="${x.id}">Удалить абонемент</button></div><div data-sub-cancel-box="${x.id}"></div>`:''}
+      ${S.user.role==='admin'&&x.kind!=='single'?`<button type="button" class="btn sm" data-sub-period="${x.id}">Уточнить срок действия</button>`:''}
       ${active?`<button type="button" class="btn sm" data-sub-transfer="${x.id}">Поменять группу</button><div class="subscription-transfer" data-sub-transfer-box="${x.id}" hidden></div>`:''}</li>`;
   };
   return `<h3>Абонементы</h3><p class="small muted">Условия и состояние оплаты каждого абонемента.</p>${d.subscriptions.length?`<ul class="sub-list ${d.subscriptions.length>3?'folded':''}">${d.subscriptions.map(card).join('')}</ul>`:'<p class="muted">Абонементов пока нет. Оформите первый кнопкой «Продать абонемент».</p>'}${d.subscriptions.length>3?`<button class="linkish" id="sub-more">Показать историю (${d.subscriptions.length})</button>`:''}${subscriptionRefundsHtml(d)}`;
@@ -1886,6 +1888,20 @@ async function openStudent(id, options = {}) {
   if ($("#act-move")) $("#act-move").onclick = () => { openFold(body, "abon"); const b = body.querySelector("[data-entr]"); if (b) { b.click(); b.scrollIntoView({ block: "center", behavior: "smooth" }); } };
   if ($('#act-past-entry')) $('#act-past-entry').onclick=()=>openPastEntry(d,body.querySelector('#sc-past-entry'),reload);
   if ($("#act-trial")) $("#act-trial").onclick = () => openInlineTrialBooking(d, body.querySelector("#sc-trial-booking"), reload);
+  body.querySelectorAll("[data-sub-period]").forEach(button => {
+    button.onclick = async () => {
+      const sub = d.subscriptions.find(item => item.id === +button.dataset.subPeriod);
+      const start = prompt("Дата начала по ERP (ГГГГ-ММ-ДД)", sub.valid_from || "");
+      if (!start) return;
+      const end = prompt("Дата окончания по ERP (ГГГГ-ММ-ДД)", sub.valid_until || "");
+      if (end === null) return;
+      try {
+        await api("POST", `/api/subscriptions/${sub.id}/period`, {valid_from:start,valid_until:end,expected_from:sub.valid_from,expected_until:sub.valid_until});
+        toast("Срок абонемента сохранён");
+        reload();
+      } catch (e) { fail(e); }
+    };
+  });
   body.querySelectorAll("[data-chstop]").forEach((b) => (b.onclick = async () => {
     if (!confirm("Остановить автоцепочку для этого клиента? Больше сообщений по ней не уйдёт")) return;
     try { await api("POST", `/api/chain-runs/${b.dataset.chstop}/stop`, {}); toast("Цепочка остановлена"); reload(); } catch (e) { fail(e); }

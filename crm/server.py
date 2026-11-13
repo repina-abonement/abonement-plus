@@ -1917,6 +1917,13 @@ def subscription_correct(con, h, user, body, q, sub):
     return {"ok": True}
 
 
+@route("POST", "/api/subscriptions/{sub}/period", role="admin")
+def subscription_period(con, h, user, body, q, sub):
+    from . import subscriptiondates
+    subscriptiondates.correct_period(con, int(sub), body, user)
+    return {"ok": True}
+
+
 @route("POST", "/api/attendance/{aid}/cert", role="operator")
 def attendance_cert(con, h, user, body, q, aid):
     """Отметка «есть медсправка» на пропуске: только такие пропуски идут в перерасчёт на «Гибком»."""

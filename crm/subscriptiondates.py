@@ -39,3 +39,40 @@ def excluded(con, sid, gid, day):
         else:
             excluded_flags.append(day in json.loads(row['excluded_dates']))
     return bool(excluded_flags) and all(excluded_flags)
+
+
+def outside_period(con, sid, gid, day):
+    """Учитываем точный срок, если для этой группы он перенесён из ERP."""
+    periods = con.execute("""SELECT x.valid_from, x.valid_until
+        FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id
+        WHERE x.student_id=? AND e.group_id=? AND x.kind='month' AND x.status!='cancelled'
+          AND (x.month=? OR (x.valid_from<=? AND x.valid_until>=?))""",
+        (sid, gid, day[:7], day, day)).fetchall()
+    return bool(periods) and all(
+        (start and day < start) or (end and day > end)
+        for start, end in periods
+    )
+
+
+def correct_period(con, sub_id, data, user):
+    from . import services as sv
+    row = con.execute("SELECT * FROM subscriptions WHERE id=? AND kind='month'", (sub_id,)).fetchone()
+    if not row:
+        raise sv.ApiError("Абонемент не найден", 404)
+    start, end = data.get("valid_from"), data.get("valid_until")
+    try:
+        if date.fromisoformat(start).isoformat() != start or (end and date.fromisoformat(end).isoformat() != end):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise sv.ApiError("Укажите даты действия абонемента")
+    if start[:7] != row["month"] or (end and end < start):
+        raise sv.ApiError("Дата начала должна быть в месяце абонемента, окончание не раньше начала")
+    end = end or None
+    previous = row["valid_from"], row["valid_until"]
+    if previous == (start, end):
+        return
+    if previous != (data.get("expected_from"), data.get("expected_until")):
+        raise sv.ApiError("Срок уже изменился. Обновите карточку", 409)
+    con.execute("UPDATE subscriptions SET valid_from=?,valid_until=? WHERE id=?", (start, end, sub_id))
+    sv.log(con, row["student_id"], f"Срок абонемента #{sub_id}: {previous[0] or 'не указан'} / {previous[1] or 'не указан'} -> {start} / {end or 'не указано'}", user, "system")
+    sv.audit(con, user, "subscription.period", str(sub_id))

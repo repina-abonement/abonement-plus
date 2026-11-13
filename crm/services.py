@@ -1062,7 +1062,8 @@ def journal(con, group_id: int, day: str, paid_only: bool = False) -> dict:
             a = con.execute("SELECT status, resolved, warned, note FROM attendance WHERE student_id=? AND date=? AND group_id=?",
                             (s["id"], day, group_id)).fetchone()
             from . import subscriptiondates
-            if subscriptiondates.excluded(con, s["id"], group_id, day) and not a:
+            if not a and (subscriptiondates.excluded(con, s["id"], group_id, day)
+                          or subscriptiondates.outside_period(con, s["id"], group_id, day)):
                 continue
             vac = logic.in_vacation(d, vacations_of(con, s["id"]))
             # в журнале только те, у кого оплачено фактически: абонемент на месяц или разовое (Юлия, 04.11).
@@ -1215,6 +1216,8 @@ def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -
     from . import subscriptiondates
     if status != "clear" and subscriptiondates.excluded(con, sid, group_id, day):
         raise ApiError("Эта дата исключена из абонемента: сначала оформите занятие отдельно")
+    if not a and status != "clear" and subscriptiondates.outside_period(con, sid, group_id, day):
+        raise ApiError("Дата занятия вне срока действия абонемента")
     if status == "clear":
         if a:
             con.execute("UPDATE makeups SET status='cancelled' WHERE absence_id=? AND status='booked'", (a["id"],))

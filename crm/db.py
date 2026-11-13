@@ -263,6 +263,10 @@ def init_db(con: sqlite3.Connection):
             DROP TABLE subscriptions;
             ALTER TABLE subscriptions_new RENAME TO subscriptions;
         """)
+    subscription_cols = {row[1] for row in con.execute("PRAGMA table_info(subscriptions)")}
+    for column in ("valid_from", "valid_until"):
+        if column not in subscription_cols:
+            con.execute(f"ALTER TABLE subscriptions ADD COLUMN {column} TEXT")
     if "excluded_dates" not in {r[1] for r in con.execute("PRAGMA table_info(subscriptions)")}:
         con.execute("ALTER TABLE subscriptions ADD COLUMN excluded_dates TEXT NOT NULL DEFAULT '[]'")
     if "program_selection" not in {r[1] for r in con.execute("PRAGMA table_info(subscriptions)")}:
