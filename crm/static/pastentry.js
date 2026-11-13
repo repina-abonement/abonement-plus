@@ -30,7 +30,8 @@ async function openPastEntry(d,root,reload) {
       const params=new URLSearchParams({group_id:f.group_id.value,month:f.month.value,tariff:f.tariff.value,ofp_group_id:f.ofp_group_id.value||'',paid_date:f.paid_date.value,trial_date:f.record_trial.checked?f.trial_date.value:''});
       try{const r=await api('GET',`/api/students/${s.id}/past-entry-options?${params}`);if(version!==generation||!root.isConnected)return;components=r.components||[];calculation=r.calculation;
         root.querySelector('[data-past-calendar]').innerHTML=components.map(c=>{
-          const excluded=c.dates.filter(day=>f.record_trial.checked&&+f.trial_group_id.value===c.group_id&&f.trial_date.value===day);
+          const trialCutoff=f.record_trial.checked?f.trial_date.value:existingDay;
+          const excluded=c.dates.filter(day=>trialCutoff&&day<=trialCutoff);
           const selected=c.dates.filter(day=>!excluded.includes(day));
           return `<h4>${esc(pastGroupLabel(groups.find(g=>g.id===c.group_id)||{name:c.group,active:1}))}</h4>`+saleCalendarHtml({calendar_dates:c.dates,dates:selected,excluded_dates:excluded},f.month.value)
             .replace('id="sl-calendar"',`data-past-component="${c.group_id}"`)
