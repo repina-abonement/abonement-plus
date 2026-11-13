@@ -296,6 +296,8 @@ def init_db(con: sqlite3.Connection):
     sources.init(con)
     from . import historyentry
     historyentry.init(con)
+    from . import subcomposition
+    subcomposition.init(con)
     money.init(con)
     comms.init(con)
     ai.init(con)

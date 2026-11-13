@@ -160,6 +160,11 @@ def plan_of(con, sid: int, pid: int) -> dict | None:
                     (sid, pid)).fetchone()
     tariff = a["tariff"] if a["tariff"] in TARIFFS else "pkg"
     nxt = json.loads(a["next_plan"]) if a["next_plan"] else None
+    fixed=con.execute("SELECT lesson_schedule FROM subscriptions WHERE student_id=? AND enrollment_id=? AND month=? AND composition_corrected=1 AND status!='cancelled' ORDER BY id DESC LIMIT 1",(sid,a['id'],date.today().strftime('%Y-%m'))).fetchone()
+    if fixed:
+        parts=json.loads(fixed['lesson_schedule'])
+        ofp_part=next((c for c in parts if con.execute("SELECT 1 FROM groups WHERE id=? AND lesson_kind='ofp'",(c['group_id'],)).fetchone()),None)
+        if ofp_part:o=[ofp_part['group_id']];tariff='pkg'
     return {"enrollment_id": a["id"], "group_id": a["group_id"], "tariff": tariff if o or tariff == "arena_only" else "arena_only",
             "ofp_group_id": o[0] if o else None, "next": nxt}
 
@@ -284,7 +289,7 @@ def reprice(con, sub_id: int, on: date | None = None) -> bool:
     from . import money, services as sv
     s = con.execute("""SELECT x.*, e.group_id FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id
                        WHERE x.id=? AND x.status='invoiced' AND x.kind='month'""", (sub_id,)).fetchone()
-    if not s or s["corrected"] or not program_of_group(con, s["group_id"]):
+    if not s or s["corrected"] or s["composition_corrected"] or not program_of_group(con, s["group_id"]):
         return False
     if money.balance(con, s["student_id"])["covered"].get(sub_id, 0):
         return False  # уже частично оплачен — не трогаем

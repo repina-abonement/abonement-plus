@@ -120,7 +120,7 @@ def reprice(con, sub_id: int, on: date | None = None) -> bool:
     on = on or date.today()
     s = con.execute("""SELECT x.*, g.program_id FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id
                        JOIN groups g ON g.id=e.group_id WHERE x.id=? AND x.status='invoiced' AND x.kind='month'""", (sub_id,)).fetchone()
-    if not s or s["program_id"] or s["corrected"] or s["late_fee"]:
+    if not s or s["program_id"] or s["corrected"] or s["composition_corrected"] or s["late_fee"]:
         return False
     dl = deadline(con, s["month"])
     pr = prices_for(con, s["month"])

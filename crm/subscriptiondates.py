@@ -26,14 +26,14 @@ def validate(raw, available):
 
 
 def excluded(con, sid, gid, day):
-    rows = con.execute("""SELECT x.excluded_dates,x.lesson_schedule,x.historical_sale FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id
+    rows = con.execute("""SELECT x.excluded_dates,x.lesson_schedule,x.historical_sale,x.composition_corrected FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id
         JOIN groups g ON g.id=e.group_id JOIN groups target ON target.id=?
         WHERE x.student_id=? AND x.month=? AND x.status!='cancelled'
           AND (e.group_id=? OR (g.program_id IS NOT NULL AND g.program_id=target.program_id))""",
         (gid, sid, day[:7], gid))
     excluded_flags=[]
     for row in rows:
-        if row['historical_sale'] and row['lesson_schedule']:
+        if (row['historical_sale'] or row['composition_corrected']) and row['lesson_schedule']:
             components=json.loads(row['lesson_schedule'])
             excluded_flags.append(not any(c.get('group_id')==gid and day in c.get('dates',[]) for c in components))
         else:

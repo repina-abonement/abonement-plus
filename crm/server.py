@@ -1910,6 +1910,18 @@ def prices_save(con, h, user, body, q):
     return {"items": pricing.listing(con)}
 
 
+@route("POST", "/api/subscriptions/{subid}/composition-preview", role="admin")
+def sub_composition_preview(con,h,user,body,q,subid):
+    from . import subcomposition
+    return subcomposition.preview(con,int(subid),int(body.get('ofp_group_id') or 0))
+
+
+@route("POST", "/api/subscriptions/{subid}/composition", role="admin")
+def sub_composition_apply(con,h,user,body,q,subid):
+    from . import subcomposition
+    return subcomposition.apply(con,int(subid),body,user)
+
+
 @route("POST", "/api/subscriptions/{sub}/correct", role="operator")
 def subscription_correct(con, h, user, body, q, sub):
     from . import pricing

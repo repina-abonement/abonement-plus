@@ -31,6 +31,11 @@ def calendar(con, sid, ym):
             if (iso,g['id']) not in singles and subscriptiondates.outside_period(con,sid,g['id'],iso):continue
             if logic.in_vacation(day,sv.vacations_of(con,sid)):continue
             add(iso,g['id'],'single' if (iso,g['id']) in singles else 'subscription')
+    # Исправленный состав — самостоятельный снимок оплаченных дат, не текущий план ученика.
+    for sub in con.execute("SELECT lesson_schedule FROM subscriptions WHERE student_id=? AND month=? AND status!='cancelled' AND composition_corrected=1",(sid,ym)):
+        for component in json.loads(sub['lesson_schedule'] or '[]'):
+            for day in component['dates']:
+                add(day,component['group_id'],'subscription')
     for (day,gid),a in marks.items():
         g=groups.get(gid,{})
         kind='makeup' if (day,gid) in mk or g.get('is_makeup') else 'single' if (day,gid) in singles else 'subscription'
