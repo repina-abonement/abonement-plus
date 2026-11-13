@@ -22,6 +22,7 @@ KINDS = {
     "reinvite_pu": ("Пригласить на ПУ повторно", "🔄"),
     "single_remind": ("Разовое завтра: подтвердить и отправить ссылку на оплату", "1️⃣"),
     "single_next": ("Разовые: договориться о следующем занятии", "1️⃣"),
+    "request_data": ("Запросить данные", "📋"),
     "manual": ("Задача", "✅"),
     "plan": ("Задача", "📌"),
     "bday": ("День рождения сотрудника", "🎂"),
@@ -386,10 +387,39 @@ def send_auto(con, s: dict, kind: str, tpl: str) -> dict:
 _PAYLINK_SYNC = datetime.min
 
 
+def request_missing_data(con, day: date) -> int:
+    """Независимая задача: одна на клиента, без цепочки и повторов после закрытия."""
+    from . import logic, smart
+    made = 0
+    for student in con.execute("SELECT id FROM students WHERE archived=0 AND funnel='members' AND stage!='left'").fetchall():
+        sid = student['id']
+        active = False
+        for sub in con.execute("SELECT month,valid_from,valid_until FROM subscriptions WHERE student_id=? AND status!='cancelled' AND COALESCE(kind,'month')='month'", (sid,)):
+            start, end = logic.month_bounds(sub['month'])
+            if (sub['valid_from'] or start.isoformat()) <= day.isoformat() <= (sub['valid_until'] or end.isoformat()):
+                active = True
+                break
+        if not active:
+            continue
+        info = smart.required_info(con, sid, 'sale')
+        if not info['missing']:
+            con.execute("UPDATE tasks SET note=? WHERE student_id=? AND kind='request_data' AND status='open'", ('Обязательные данные заполнены. Проверьте карточку и закройте задачу вручную.', sid))
+            continue
+        note = 'Необходимо запросить и заполнить: ' + ', '.join(info['labels'][k] for k in info['missing']) + '. После выполнения закройте задачу вручную.'
+        existing = con.execute("SELECT id FROM tasks WHERE student_id=? AND kind='request_data' AND status='open' ORDER BY id LIMIT 1", (sid,)).fetchone()
+        if existing:
+            con.execute("UPDATE tasks SET note=? WHERE id=?", (note, existing['id']))
+            continue
+        # Постоянный ключ намеренно сохраняется и после ручного закрытия.
+        made += bool(add_task(con, 'request_data', sid, day.isoformat(), auto_key=f'request_data:{sid}', source='data_quality', note=note))
+    return made
+
+
 def run(con, now: datetime | None = None, send: bool = True) -> dict:
     """Один проход: создать задачи по пробным, отправить автосообщения, закрыть неактуальные задачи."""
     now = now or _now()
     from . import planner, program
+    request_missing_data(con, now.date())
     planner.generate(con, now.date())
     program.apply_pending(con, now.date())
     from . import pu, waitlist, ownerbot, lifecycle
@@ -641,6 +671,7 @@ ERP_COLUMNS = [
     ("why_not_bought", "Почему не купили"),
     ("think", "Думает"),
     ("renew", "Проверить продление"),
+    ("request_data", "Запрос данных"),
     ("reinvite_pu", "Приглашение на ПУ повторно"),
     ("single", "Разовые занятия"),
 ]
@@ -717,6 +748,11 @@ def complete(con, tid: int, user: dict, result: str = "") -> None:
         from . import planner
         if not planner.can_view_plan(con, user, t["assignee_id"]):
             raise comms.CommsError("Нет доступа к задаче")
+    if t["kind"] == "request_data":
+        from . import smart
+        info = smart.required_info(con, t["student_id"], 'sale')
+        if info['missing']:
+            raise comms.CommsError('Задача остаётся открытой. Заполните: ' + ', '.join(info['labels'][k] for k in info['missing']))
     if t["kind"] == "rebook":
         raise comms.CommsError("Эту задачу закрывают результатом: перезаписан, не дозвонились, перезвонить позже или отказ")
     con.execute("UPDATE tasks SET status='done', done_at=?, done_by=?, result=? WHERE id=?",
@@ -725,7 +761,8 @@ def complete(con, tid: int, user: dict, result: str = "") -> None:
         con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
                     (t["student_id"], _iso(_now()), user.get("name", ""), "task",
                      f"Задача «{t['title']}» выполнена" + (f": {result.strip()}" if result.strip() else "")))
-        con.execute("UPDATE students SET priority=0 WHERE id=?", (t["student_id"],))
+        if t["kind"] != "request_data":
+            con.execute("UPDATE students SET priority=0 WHERE id=?", (t["student_id"],))
         if t["kind"] in ("how_was", "no_show"):  # связались после пробного — карточка больше не горит
             con.execute("UPDATE students SET contacted_after_trial=1 WHERE id=?", (t["student_id"],))
 
