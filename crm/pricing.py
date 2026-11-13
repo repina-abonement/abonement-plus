@@ -154,7 +154,7 @@ def correct(con, sub_id: int, price, comment: str, user: dict) -> None:
         raise PriceError("Укажите новую сумму")
     if price < 0 or price == s["price"]:
         raise PriceError("Новая сумма должна отличаться от текущей")
-    con.execute("UPDATE subscriptions SET price=?, corrected=1 WHERE id=?", (price, sub_id))
+    con.execute("UPDATE subscriptions SET price=?, corrected=1, calculation_reason=? WHERE id=?", (price, "Корректировка вручную: "+comment+". Администратор: "+user.get("name", ""), sub_id))
     con.execute("""INSERT INTO price_corrections(subscription_id, student_id, old_price, new_price, comment, user_name, created_at)
                    VALUES (?,?,?,?,?,?,?)""", (sub_id, s["student_id"], s["price"], price, comment, user.get("name", ""), _now()))
     money.reconcile(con, s["student_id"])

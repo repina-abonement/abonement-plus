@@ -833,6 +833,16 @@ def student_detail(con, sid: int) -> dict:
         """SELECT m.*, g.name AS group_name, a.date AS absence_date FROM makeups m
            JOIN groups g ON g.id = m.group_id JOIN attendance a ON a.id = m.absence_id
            WHERE m.student_id=? ORDER BY m.date DESC LIMIT 20""", (sid,)))
+    # Ранние исторические записи: показываем только подтверждаемую причину, без изменения базы.
+    for sub in subs:
+        correction=con.execute('SELECT comment,user_name FROM price_corrections WHERE subscription_id=? ORDER BY id DESC LIMIT 1',(sub['id'],)).fetchone()
+        if correction:
+            sub['calculation_reason']='Корректировка вручную: '+correction['comment']+'. Администратор: '+correction['user_name']
+        elif not sub.get('calculation_reason') and sub.get('historical_sale'):
+            trial_day=(s['trial_at'] or '')[:10]
+            excluded=json.loads(sub.get('excluded_dates') or '[]')
+            if trial_day and trial_day[:7]==sub['month'] and excluded and all(day<=trial_day for day in excluded):
+                sub['calculation_reason']='Клиент пришёл на ПУ внутри месяца ('+date.fromisoformat(trial_day).strftime('%d.%m.%Y')+'). Абонемент рассчитан на занятия после ПУ'
     hist = _rows(con.execute("SELECT ts, user_name, kind, text FROM history WHERE student_id=? AND NOT EXISTS (SELECT 1 FROM erp_full_history_corrections c WHERE c.history_id=history.id AND c.assigned_student_id IS NULL) ORDER BY id DESC LIMIT 100",
                              (sid,)))
     stage_label = SALES_LABELS.get(s["stage"], s["stage"])

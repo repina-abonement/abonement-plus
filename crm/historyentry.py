@@ -13,6 +13,8 @@ def init(con):
         if col.split()[0] not in cols:con.execute('ALTER TABLE students ADD COLUMN '+col)
     if 'historical_sale' not in {r[1] for r in con.execute('PRAGMA table_info(subscriptions)')}:
         con.execute('ALTER TABLE subscriptions ADD COLUMN historical_sale INTEGER NOT NULL DEFAULT 0')
+    if 'calculation_reason' not in {r[1] for r in con.execute('PRAGMA table_info(subscriptions)')}:
+        con.execute("ALTER TABLE subscriptions ADD COLUMN calculation_reason TEXT NOT NULL DEFAULT ''")
     con.executescript('''CREATE TABLE IF NOT EXISTS historical_entries (
         request_id TEXT PRIMARY KEY, student_id INTEGER NOT NULL REFERENCES students(id),
         signature TEXT NOT NULL, result TEXT NOT NULL, recorded_at TEXT NOT NULL, recorded_by TEXT NOT NULL);
@@ -89,6 +91,19 @@ def calculated_total(quoted, chosen):
     return base-math.floor(base*rules['discount_percent']/100+1e-9)
 
 
+def selection_reason(quoted, chosen, trial_day, ym, manual, user):
+    available={(c['group_id'],day) for c in quoted['components'] for day in c['dates']}
+    automatic={item for item in available if not trial_day or item[1]>trial_day}
+    reasons=[]
+    if trial_day and trial_day[:7]==ym and available-automatic:
+        reasons.append('Клиент пришёл на ПУ внутри месяца ('+date.fromisoformat(trial_day).strftime('%d.%m.%Y')+'). Абонемент рассчитан на занятия после ПУ')
+    if chosen!=automatic:
+        manual=str(manual or '').strip()
+        if len(manual)<5:raise sv.ApiError('Укажите причину ручного изменения дат занятий')
+        reasons.append('Даты изменены вручную: '+manual[:1000]+'. Администратор: '+user.get('name',''))
+    return '. '.join(reasons)
+
+
 def _day(raw,label):
     try:
         value=date.fromisoformat(str(raw or ''))
@@ -151,6 +166,8 @@ def record(con,sid,data,user):
                 chosen.add((int(item['group_id']),str(item['date'])))
             if not chosen or not chosen<=available:raise sv.ApiError('Отметьте фактически проданные занятия по расписанию')
             if trial and (trial_gid,at.date().isoformat()) in chosen:raise sv.ApiError('Пробное не включается в оплаченные занятия абонемента')
+            trial_day=at.date().isoformat() if at else (s['trial_at'] or '')[:10]
+            reason=selection_reason(quoted,chosen,trial_day,ym,data.get('dates_reason'),user)
             price=calculated_total(quoted,chosen)
             available_balance=max(0,money.balance(con,sid)['deposit'])
             if data.get('expected_balance') is not None and int(data['expected_balance'])!=available_balance:
@@ -181,6 +198,7 @@ def record(con,sid,data,user):
             subid=con.execute('''INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,per_lesson,price,status,
                 created_at,corrected,ledger_managed,lesson_schedule,historical_sale) VALUES (?,?,?,?,?,?,?,'invoiced',?,1,1,?,1)''',
                 (sid,eid,ym,tariff,len(chosen),price//len(chosen),price,sale_day.isoformat(),json.dumps(components))).lastrowid
+            con.execute('UPDATE subscriptions SET calculation_reason=? WHERE id=?',(reason,subid))
             undiscounted=calculated_total({**quoted,'calculation':{**quoted['calculation'],'discount_percent':0}},chosen)
             con.execute('UPDATE subscriptions SET discount_name=?,discount_amount=? WHERE id=?',
                 (quoted['calculation']['discount_name'],undiscounted-price,subid))

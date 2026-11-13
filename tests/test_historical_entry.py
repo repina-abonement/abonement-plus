@@ -59,6 +59,26 @@ class HistoricalEntryTest(unittest.TestCase):
         from crm import tasks
         tasks.run(self.con,datetime(2026,11,13,15),send=False)
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM tasks WHERE student_id=? AND kind IN ('trial_confirm','trial_today','how_was')",(self.sid,)).fetchone()[0],0)
+    def test_reason_for_trial_month_and_manual_date_changes(self):
+        r=historyentry.record(self.con,self.sid,self.data,self.user)
+        sub=self.con.execute('SELECT calculation_reason FROM subscriptions WHERE id=?',(r['subscription_id'],)).fetchone()
+        self.assertIn('ПУ внутри месяца (12.11.2026)',sub[0])
+        self.con.execute("UPDATE subscriptions SET calculation_reason='' WHERE id=?",(r['subscription_id'],))
+        detail=sv.student_detail(self.con,self.sid)
+        self.assertIn('ПУ внутри месяца',detail['subscriptions'][0]['calculation_reason'])
+        self.assertEqual(self.con.execute('SELECT calculation_reason FROM subscriptions WHERE id=?',(r['subscription_id'],)).fetchone()[0],'')
+        # Другой месяц покупки без повторного внесения ПУ: ручное сокращение требует причины.
+        quote=historyentry.options(self.con,self.sid,self.gid,'2026-12','fixed',paid_date='2026-11-12')
+        dates=[{'group_id':self.gid,'date':d} for d in quote['components'][0]['dates'][:2]]
+        price=historyentry.calculated_total(quote,{(x['group_id'],x['date']) for x in dates})
+        data={**self.data,'request_id':'manual-dates-0002','record_trial':False,'month':'2026-12','lessons':dates,'price':price,'amount':0}
+        with self.assertRaises(sv.ApiError):historyentry.record(self.con,self.sid,data,self.user)
+        result=historyentry.record(self.con,self.sid,{**data,'dates_reason':'Согласован отпуск семьи'},self.user)
+        saved=self.con.execute('SELECT calculation_reason FROM subscriptions WHERE id=?',(result['subscription_id'],)).fetchone()[0]
+        self.assertIn('Согласован отпуск семьи',saved);self.assertIn('Тест',saved)
+        pricing.correct(self.con,result['subscription_id'],price-100,'Согласовано с руководителем',self.user)
+        self.assertIn('Согласовано с руководителем',sv.student_detail(self.con,self.sid)['subscriptions'][0]['calculation_reason'])
+
     def test_historical_sale_without_email_keeps_data_request(self):
         from crm import smart, tasks
         with patch.object(smart,'REQUIRE',True):
