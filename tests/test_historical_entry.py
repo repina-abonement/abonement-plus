@@ -59,6 +59,21 @@ class HistoricalEntryTest(unittest.TestCase):
         from crm import tasks
         tasks.run(self.con,datetime(2026,11,13,15),send=False)
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM tasks WHERE student_id=? AND kind IN ('trial_confirm','trial_today','how_was')",(self.sid,)).fetchone()[0],0)
+    def test_balance_covers_purchase_without_duplicate_payment(self):
+        for deposit in (2000,7000):
+            with self.subTest(deposit=deposit):
+                self.con.execute('SAVEPOINT balance_case')
+                money.add_payment(self.con,self.sid,deposit,'cash',self.user,paid_at='2026-11-10')
+                quote=historyentry.options(self.con,self.sid)
+                self.assertEqual(quote['available_balance'],deposit)
+                with self.assertRaises(sv.ApiError):
+                    historyentry.record(self.con,self.sid,{**self.data,'use_balance':True,'expected_balance':deposit-1},self.user)
+                r=historyentry.record(self.con,self.sid,{**self.data,'use_balance':True,'expected_balance':deposit,'amount':max(0,5000-deposit)},self.user)
+                self.assertEqual(r['remaining'],0)
+                self.assertEqual(money.balance(self.con,self.sid)['deposit'],max(0,deposit-5000))
+                self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments WHERE student_id=?',(self.sid,)).fetchone()[0],2 if deposit<5000 else 1)
+                self.con.execute('ROLLBACK TO balance_case');self.con.execute('RELEASE balance_case')
+
     def test_calendar_calculation_and_duplicate_enrollment(self):
         quote=historyentry.options(self.con,self.sid,self.gid,'2026-11','fixed',paid_date='2026-11-12',trial_date='2026-11-12')
         chosen={(x['group_id'],x['date']) for x in self.data['lessons']}

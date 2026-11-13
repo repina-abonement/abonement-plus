@@ -27,7 +27,7 @@ def options(con,sid,group_id=None,ym=None,tariff='fixed',ofp_group_id=None,start
     student=sv.get_student_row(con,sid)
     groups=[dict(r) for r in con.execute('''SELECT g.id,g.name,g.branch_id,g.weekdays,g.time,g.day_times,g.program_id,g.lesson_kind,g.active,
         b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.is_makeup=0 ORDER BY b.name,g.name''')]
-    result={'groups':groups,'components':[]}
+    result={'groups':groups,'components':[],'available_balance':max(0,money.balance(con,sid)['deposit'])}
     if not group_id or not ym:return result
     try:ms,me=logic.month_bounds(ym)
     except (ValueError,TypeError):raise sv.ApiError('Выберите месяц абонемента')
@@ -143,6 +143,11 @@ def record(con,sid,data,user):
             if not chosen or not chosen<=available:raise sv.ApiError('Отметьте фактически проданные занятия по расписанию')
             if trial and (trial_gid,at.date().isoformat()) in chosen:raise sv.ApiError('Пробное не включается в оплаченные занятия абонемента')
             price=calculated_total(quoted,chosen)
+            available_balance=max(0,money.balance(con,sid)['deposit'])
+            if data.get('expected_balance') is not None and int(data['expected_balance'])!=available_balance:
+                raise sv.ApiError('Баланс изменился. Обновите форму перед сохранением')
+            if data.get('use_balance') and amount>max(0,price-available_balance):
+                raise sv.ApiError('С учётом баланса доплата меньше указанной суммы. Проверьте оплату')
             if price<=0 or amount<0 or amount>price:raise sv.ApiError('Оплата не должна превышать рассчитанную стоимость абонемента')
             if data.get('price') is not None and int(data['price'])!=price:raise sv.ApiError('Стоимость изменилась. Обновите расчёт по календарю')
             from . import subscriptiondates

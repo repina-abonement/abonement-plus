@@ -1745,3 +1745,6 @@ textarea.nav-q { height:40px; min-height:40px; max-height:40px; resize:none; ove
 .past-payment-grid { margin-top:20px; padding-top:16px; border-top:1px solid var(--line); }
 [data-past-total], [data-past-price-lines] { display:block; }
 [data-past-price-lines] { margin-top:4px; }
+
+.past-balance { margin-top:16px; padding:14px; border:1px solid var(--accent); border-radius:12px; }
+.past-balance p { margin:6px 0 10px; }
