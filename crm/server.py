@@ -2510,6 +2510,18 @@ def waitlist_funnel(con, h, user, body, q):
     return waitlist.funnel(con, force=bool(q.get("force"))) or {}
 
 
+@route("GET", "/api/students/{sid}/past-entry-options", role="operator")
+def past_entry_options(con,h,user,body,q,sid):
+    from . import historyentry
+    return historyentry.options(con,int(sid),q.get('group_id'),q.get('month'),q.get('tariff') or 'fixed',q.get('ofp_group_id'),q.get('start_date'))
+
+
+@route("POST", "/api/students/{sid}/past-entry", role="operator")
+def past_entry_record(con,h,user,body,q,sid):
+    from . import historyentry
+    return historyentry.record(con,int(sid),body,user)
+
+
 @route("GET", "/api/students/{sid}/trial-options", role="operator")
 def inline_trial_options(con,h,user,body,q,sid):
     from . import trialoffer

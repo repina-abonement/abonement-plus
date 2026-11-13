@@ -46,8 +46,9 @@ def calendar(con, sid, ym):
     trial_day=(student.get('trial_at') or '')[:10]
     if trial_day.startswith(ym):
         # Для завершённого ПУ показываем подтверждённый вид/дату; историческую группу не угадываем.
-        gid=student['group_id'] if student['funnel']=='sales' else None
+        gid=student.get('trial_group_id') or (student['group_id'] if student['funnel']=='sales' else None)
         add(trial_day,gid,'trial','present' if student['trial_came']==1 else 'absent' if student['trial_came']==0 else 'planned')
+        events.pop((trial_day,gid,'subscription'),None)
     for m in con.execute('SELECT * FROM trial_misses WHERE student_id=? AND undone=0 AND substr(trial_at,1,7)=?',(sid,ym)):
         add(m['trial_at'][:10],m['group_id'],'trial','absent',note=m['reason'] or '')
     result=[]

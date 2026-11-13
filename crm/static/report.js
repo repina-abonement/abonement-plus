@@ -28,7 +28,7 @@ function repPayForm(v, trial) {
       ${f.student_id ? `<div class="small rep-found">✅ Нашли в CRM: ${esc(f.name)} · ${esc(f.label || "")} <button class="linkish small" id="rp-unpick">другой</button></div>`
         : f.manual ? `<div class="small rep-found warn">⚠️ Нет в CRM, администратор разберёт вручную <button class="linkish small" id="rp-unpick">искать</button></div>` : `<div id="rp-hits"></div>`}</div>`}
     <input id="rp-sum" type="number" inputmode="numeric" placeholder="Сумма, ₽" value="${f.amount || ""}">
-    <div class="rep-btns">${Object.entries(v.pay_methods).map(([k, t]) => chip("data-rpm", k, t, f.method === k)).join("")}</div>
+    <div class="rep-btns">${Object.entries(v.pay_methods).filter(([k])=>!['card','qr'].includes(k)||f.method===k).map(([k, t]) => chip("data-rpm", k, t, f.method === k)).join("")}</div>
     ${f.method === "cash" ? `<div class="rep-btns">${chip("data-rpc", "check", `${f.check ? "✅" : "⬜"} 🧾 Чек пробил на кассе`, f.check)}${chip("data-rpc", "env", `${f.env ? "✅" : "⬜"} ✉️ Деньги в конверте`, f.env)}</div>` : ""}
     <div class="rep-btns">${Object.entries(v.pay_for).filter(([k]) => !trial || k !== "indiv").map(([k, t]) => chip("data-rpw", k, t, f.what === k)).join("")}</div>
     ${f.what === "other" ? `<input id="rp-other" placeholder="За что? Например: абонемент на декабрь" value="${esc(f.what_text || "")}">` : ""}

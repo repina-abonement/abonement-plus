@@ -1,7 +1,7 @@
 "use strict";
 /* Абонемент Плюс — мерч: продажи, итог смены тренера, раздел для админа. */
 
-const MERCH_METHODS = { cash: "💵 Наличные", card: "💳 Карта", qr: "📱 QR" };
+const MERCH_METHODS = {cash:"💵 Наличные",paykeeper:"По ссылке PayKeeper",card_branch:"💳 Картой на филиале",sber_qr_branch:"По QR Сбера на филиале",tochka_qr_link:"По QR/ссылке Точки от администратора"};
 
 /* форма продажи: товары с количеством, способ оплаты, для QR — отметка про чек */
 function merchSaleForm(items, opts = {}) {
@@ -29,7 +29,7 @@ function wireSaleForm(box, items, onSaved, branchId) {
   box.querySelectorAll("[data-mm]").forEach((b) => (b.onclick = () => {
     method = b.dataset.mm;
     box.querySelectorAll("[data-mm]").forEach((x) => x.classList.toggle("active", x === b));
-    box.querySelector("[data-qr]").hidden = method !== "qr";
+    box.querySelector("[data-qr]").hidden = !['qr','sber_qr_branch','tochka_qr_link'].includes(method);
   }));
   box.querySelector("[data-msave]").onclick = async () => {
     const lines = Object.entries(qty).filter(([, v]) => v > 0).map(([k, v]) => ({ item_id: +k, qty: v }));
@@ -38,7 +38,7 @@ function wireSaleForm(box, items, onSaved, branchId) {
     const bsel = box.querySelector("[data-mb]");
     try {
       await api("POST", "/api/merch/sales", { branch_id: bsel ? +bsel.value : branchId, method, lines,
-        receipt_done: method === "qr" && box.querySelector("[data-rc]").checked, note: box.querySelector("[data-mn]").value });
+        receipt_done: ['qr','sber_qr_branch','tochka_qr_link'].includes(method) && box.querySelector("[data-rc]").checked, note: box.querySelector("[data-mn]").value });
       toast("Продажа записана"); onSaved();
     } catch (e) { fail(e); }
   };
@@ -54,7 +54,7 @@ function merchShiftBox(d, viewOnly) {
       const mine = sales.filter((x) => x.branch_id === s.branch_id);
       return `<div class="checkin-row" style="flex-direction:column;align-items:stretch">
         ${shifts.length > 1 ? `<b>${esc(s.branch)}</b>` : ""}
-        ${mine.length ? `<div class="small" style="margin:4px 0">${mine.map((x) => `${esc(x.item_name)} × ${x.qty}, ${rub(x.amount)}, ${MERCH_METHODS[x.method]}${x.method === "qr" && !x.receipt_done ? " <b style='color:var(--red)'>чек не пробит</b>" : ""}`).join("<br>")}</div>` : ""}
+        ${mine.length ? `<div class="small" style="margin:4px 0">${mine.map((x) => `${esc(x.item_name)} × ${x.qty}, ${rub(x.amount)}, ${(MERCH_METHODS[x.method]||({card:"Карта (канал не уточнён)",qr:"QR (банк не уточнён)"}[x.method])||x.method)}${['qr','sber_qr_branch','tochka_qr_link'].includes(x.method) && !x.receipt_done ? " <b style='color:var(--red)'>чек не пробит</b>" : ""}`).join("<br>")}</div>` : ""}
         ${viewOnly ? "" : `<div class="row" style="flex-wrap:wrap;margin-top:6px">
           <button class="btn sm primary" data-sale="${s.branch_id}" style="flex:0">+ Продажа мерча</button></div>
           <div data-saleform="${s.branch_id}"></div>`}
@@ -107,13 +107,13 @@ async function renderMerch(page) {
       <div class="seg">${per.map(([t, a, b]) => `<button data-mper="${a}|${b}" class="${C.from === a && C.to === b ? "active" : ""}">${t}</button>`).join("")}</div>
       <span class="pay-dates"><input type="date" id="m-from" value="${C.from}"> <span class="muted">по</span> <input type="date" id="m-to" value="${C.to}"></span></div>
     <div class="cfacts" style="margin-bottom:14px"><div class="cfact green"><b>${rub(r.total)}</b><span>всего за период</span></div>
-      ${Object.entries(r.by_method).map(([k, v]) => `<div class="cfact"><b>${rub(v)}</b><span>${MERCH_METHODS[k]}</span></div>`).join("")}</div>
+      ${Object.entries(r.by_method).map(([k, v]) => `<div class="cfact"><b>${rub(v)}</b><span>${(MERCH_METHODS[k]||({card:"Карта (канал не уточнён)",qr:"QR (банк не уточнён)"}[k])||k)}</span></div>`).join("")}</div>
     ${r.rows.length ? `<div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:14px;margin-bottom:14px">
       <section class="panel" style="padding:14px;flex:1 1 280px"><h3 style="margin-top:0">По товарам</h3>${r.by_item.map((x) => `<div class="kid-row"><span class="grow">${esc(x.name)}</span><span class="small muted">${x.qty} шт.</span><b>${rub(x.amount)}</b></div>`).join("")}</section>
       <section class="panel" style="padding:14px;flex:1 1 280px"><h3 style="margin-top:0">По продавцам</h3>${r.by_seller.map((x) => `<div class="kid-row"><span class="grow">${esc(x.name)}</span><b>${rub(x.amount)}</b>${x.cash_not_handed ? `<span class="pill yellow">наличные не сданы ${rub(x.cash_not_handed)}</span>` : ""}</div>`).join("")}</section>
     </div>` : ""}
     <div class="list">${r.rows.length ? r.rows.map((x) => `<div class="list-row ${x.status === "cancelled" ? "muted" : ""}">
-      <div class="grow"><b>${esc(x.item_name)}</b> × ${x.qty} · ${rub(x.amount)} · ${MERCH_METHODS[x.method]}${x.status === "cancelled" ? " · <b>отменена</b>" : ""}
+      <div class="grow"><b>${esc(x.item_name)}</b> × ${x.qty} · ${rub(x.amount)} · ${(MERCH_METHODS[x.method]||({card:"Карта (канал не уточнён)",qr:"QR (банк не уточнён)"}[x.method])||x.method)}${x.status === "cancelled" ? " · <b>отменена</b>" : ""}
         <div class="small muted">${dShort(x.date)}, ${esc(x.branch || "")}, продал ${esc(x.seller)}${x.note ? `, ${esc(x.note)}` : ""}</div></div>
       ${x.status === "ok" && x.method === "qr" ? (x.receipt_done ? `<span class="pill green">чек пробит</span>` : `<button class="btn sm primary" data-flag="${x.id}" data-f="receipt_done">Чек пробит</button>`) : ""}
       ${x.status === "ok" && x.method === "cash" ? (x.cash_handed ? `<span class="pill green">деньги сданы</span>` : `<button class="btn sm" data-flag="${x.id}" data-f="cash_handed">Деньги сданы</button>`) : ""}

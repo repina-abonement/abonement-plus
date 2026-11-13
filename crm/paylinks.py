@@ -123,7 +123,7 @@ def apply_payments(con, pays: list[dict]) -> int:
             except ValueError:paid_day=date.today()
             program.reprice(con,link["subscription_id"],on=paid_day)
             pricing.reprice(con,link["subscription_id"],on=paid_day)
-        pid = money.add_payment(con, link["student_id"], amount, "online", ROBOT, subscription_id=link["subscription_id"],
+        pid = money.add_payment(con, link["student_id"], amount, "paykeeper", ROBOT, subscription_id=link["subscription_id"],
                                 comment=f"по ссылке PayKeeper №{p.get('id', '')}", paid_at=paid_at)
         con.execute("UPDATE pay_links SET status='paid', paid_at=?, payment_id=?, pk_payment_id=? WHERE id=?",
                     (paid_at, pid, str(p.get("id", "")), link["id"]))

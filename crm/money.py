@@ -12,8 +12,14 @@ from datetime import date, datetime
 
 from . import logic
 
-METHODS = {"cash": "Наличные", "card": "Картой", "sbp": "СБП", "online": "Онлайн-оплата", "transfer": "Перевод",
+METHODS = {"cash": "Наличные", "paykeeper": "По ссылке PayKeeper",
+           "card_branch": "Картой на филиале", "sber_qr_branch": "По QR Сбера на филиале",
+           "tochka_qr_link": "По QR/ссылке Точки от администратора",
+           "card": "Картой (канал не уточнён)", "sbp": "СБП (банк не уточнён)",
+           "online": "Онлайн-оплата (канал не уточнён)", "transfer": "Перевод",
            "unknown": "Перенесено", "balance": "Перенос с баланса", "refund": "Возврат", "refund_pending": "Зарезервировано для возврата"}
+MANUAL_METHODS = ('cash','card_branch','sber_qr_branch','tochka_qr_link','transfer')
+
 INTERNAL = ("unknown", "balance", "refund", "refund_pending")  # их не выбирают при приёме оплаты: ставит сама CRM
 
 SCHEMA = """
@@ -150,7 +156,9 @@ def add_payment(con, sid: int, amount: int, method: str, user: dict, *, subscrip
         raise ValueError("Сумма должна быть больше нуля")
     if method not in METHODS or method in INTERNAL:
         raise ValueError("Выберите способ оплаты")
-    confirmed = 1 if user.get("role") == "admin" or method in ("online", "sbp") else 0
+    if method=='paykeeper' and user.get('id')!=0:
+        raise ValueError('Оплата PayKeeper зачисляется по исходному платежу автоматически; не создавайте её повторно вручную')
+    confirmed = 1 if user.get("role") == "admin" or method in ("online", "sbp", "paykeeper", "sber_qr_branch", "tochka_qr_link") else 0
     pid = con.execute("""INSERT INTO payments(student_id, amount, method, paid_at, comment, user_name, confirmed,
                          confirmed_by, confirmed_at, subscription_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                       (sid, amount, method, paid_at or _now(), comment.strip(), user.get("name", ""), confirmed,
@@ -227,7 +235,7 @@ def move_balance(con, from_sid: int, to_sid: int, amount: int, user: dict) -> No
 def refund(con, sid: int, amount: int, user: dict, comment: str) -> None:
     """Возврат родителю из переплаты. Отдельная операция: в реестре минусом, нужен чек возврата."""
     amount = int(amount)
-    if con.execute("SELECT 1 FROM payments p LEFT JOIN pay_links l ON l.payment_id=p.id WHERE p.student_id=? AND p.cancelled=0 AND (p.method='online' OR l.pk_payment_id!='')", (sid,)).fetchone():
+    if con.execute("SELECT 1 FROM payments p LEFT JOIN pay_links l ON l.payment_id=p.id WHERE p.student_id=? AND p.cancelled=0 AND (p.method IN ('online','paykeeper') OR l.pk_payment_id!='')", (sid,)).fetchone():
         raise ValueError("Онлайн-оплаты возвращаются только по исходному платежу через PayKeeper: используйте отмену абонемента с проверкой возврата и чека")
     if not (comment or "").strip():
         raise ValueError("Напишите, почему возврат и как вернули деньги")
@@ -241,7 +249,7 @@ def refund(con, sid: int, amount: int, user: dict, comment: str) -> None:
 def ledger(con, sid: int) -> list[dict]:
     """Лента баланса: поступления, переносы, возвраты и абонементы по времени, с остатком после каждой строки."""
     months = dict(con.execute("SELECT id, month FROM subscriptions WHERE student_id=?", (sid,)).fetchall())
-    ev = [{"at": p["paid_at"], "kind": "pay", "ord": (months.get(p["subscription_id"], "9999"), 1, p["id"]), "text": f"{METHODS.get(p['method'], p['method'])}" + (f": {p['comment']}" if p["comment"] else ""),
+    ev = [{"at": p["paid_at"], "kind": "pay", "ord": (months.get(p["subscription_id"], "9999"), 1, p["id"]), "text": f"{METHODS.get(payment_method(con,p), p['method'])}" + (f": {p['comment']}" if p["comment"] else ""),
            "amount": p["amount"], "cancelled": bool(p["cancelled"])}
           for p in con.execute("SELECT * FROM payments WHERE student_id=? ORDER BY paid_at, id", (sid,))]
     for x in con.execute("""SELECT x.*, g.name AS gname FROM subscriptions x LEFT JOIN enrollments e ON e.id=x.enrollment_id
@@ -295,12 +303,29 @@ def confirm_payment(con, pid: int, user: dict) -> None:
                 (user.get("name", ""), _now(), pid))
 
 
+def payment_method(con, payment):
+    if con.execute("SELECT 1 FROM pay_links WHERE payment_id=? AND pk_payment_id!=''",(payment['id'],)).fetchone():
+        return 'paykeeper'
+    return payment['method']
+
+
+def payments_for_student(con,sid):
+    result=[dict(r) for r in con.execute('SELECT * FROM payments WHERE student_id=? ORDER BY paid_at DESC,id DESC LIMIT 30',(sid,))]
+    for p in result:
+        p['display_method']=payment_method(con,p)
+        p['method_label']=METHODS.get(p['display_method'],p['method'])
+    return result
+
+
 def registry(con, start: str, end: str, method: str = "", only_unconfirmed: bool = False) -> dict:
     where = ["p.paid_at BETWEEN ? AND ?", "p.method NOT IN ('balance','refund_pending')"]  # перенос между детьми семьи не приход
     args = [start, end + "T23:59"]
     if method:
-        where.append("p.method=?")
-        args.append(method)
+        if method=='paykeeper':
+            where.append("(p.method='paykeeper' OR EXISTS (SELECT 1 FROM pay_links l WHERE l.payment_id=p.id AND l.pk_payment_id!=''))")
+        else:
+            where.append("p.method=? AND NOT EXISTS (SELECT 1 FROM pay_links l WHERE l.payment_id=p.id AND l.pk_payment_id!='')")
+            args.append(method)
     if only_unconfirmed:
         where.append("p.confirmed=0 AND p.cancelled=0")
     rows = [dict(r) for r in con.execute(
@@ -309,7 +334,8 @@ def registry(con, start: str, end: str, method: str = "", only_unconfirmed: bool
             LEFT JOIN groups g ON g.id=s.group_id WHERE {' AND '.join(where)} ORDER BY p.paid_at DESC, p.id DESC""", args)]
     totals = {}
     for r in rows:
-        r["method_label"] = METHODS.get(r["method"], r["method"])
+        r["display_method"] = payment_method(con,r)
+        r["method_label"] = METHODS.get(r["display_method"], r["method"])
         if not r["cancelled"]:
             totals[r["method_label"]] = totals.get(r["method_label"], 0) + r["amount"]
     unconfirmed = con.execute("SELECT COUNT(*), COALESCE(SUM(amount),0) FROM payments WHERE confirmed=0 AND cancelled=0").fetchone()

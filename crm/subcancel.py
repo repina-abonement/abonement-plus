@@ -134,9 +134,9 @@ def _sources(con, sub, amount=None, retain=0):
             raise sv.ApiError('Сначала подтвердите исходную оплату у руководителя')
         link = con.execute("SELECT pk_payment_id FROM pay_links WHERE payment_id=? AND status='paid'", (p['id'],)).fetchone()
         pkid = link[0] if link else ''
-        if p['method'] == 'online' and not pkid:
+        if p['method'] in ('online','paykeeper') and not pkid:
             raise sv.ApiError('У онлайн-оплаты не найден ID исходного платежа PayKeeper. Сначала сверьте платёж с Юлией; возврат другим способом заблокирован')
-        if p['method'] not in ('cash','card','sbp','transfer','online'):
+        if p['method'] not in ('cash','card','sbp','transfer','online','paykeeper','card_branch','sber_qr_branch','tochka_qr_link'):
             raise sv.ApiError('Способ исходной оплаты не подтверждён. Сначала сверьте его с Юлией')
         if pkid and con.execute("SELECT 1 FROM subscription_refunds WHERE pk_payment_id=? AND status='pending'", (pkid,)).fetchone():
             raise sv.ApiError('По этому платежу PayKeeper уже ожидается возврат. Сначала завершите его проверку')

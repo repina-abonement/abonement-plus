@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS shift_reports (
 
 PRICE = [("Форма", 3800), ("Рюкзак большой", 3000), ("Сумка-шоппер", 1650), ("Рюкзак для обуви", 1300), ("Вымпел", 1200),
          ("Шарф", 2000), ("Гетры", 1100), ("Кружка", 880), ("Носки", 450), ("Мяч", 3850), ("Бутылка", 990), ("Тату", 330)]
-METHODS = {"cash": "Наличные", "card": "Карта", "qr": "QR"}
+METHODS = {"cash":"Наличные","paykeeper":"По ссылке PayKeeper","card_branch":"Картой на филиале","sber_qr_branch":"По QR Сбера на филиале","tochka_qr_link":"По QR/ссылке Точки от администратора","card":"Карта (канал не уточнён)","qr":"QR (банк не уточнён)"}
 
 
 class MerchError(ValueError):
@@ -139,7 +139,7 @@ def sell(con, user: dict, data: dict) -> list[int]:
             """INSERT INTO merch_sales(date, branch_id, user_id, student_id, item_id, item_name, qty, price, amount, method,
                receipt_done, note, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (d, bid, user["id"], sid, it["id"], it["name"], qty, it["price"], qty * it["price"], method,
-             1 if method == "qr" and data.get("receipt_done") else 0, (data.get("note") or "").strip()[:200],
+             1 if method in ("qr","sber_qr_branch","tochka_qr_link") and data.get("receipt_done") else 0, (data.get("note") or "").strip()[:200],
              _now().isoformat(timespec="minutes"))).lastrowid)
     if bid:
         report_shift(con, user, bid, True, d)

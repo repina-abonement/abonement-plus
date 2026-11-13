@@ -290,6 +290,8 @@ def init_db(con: sqlite3.Connection):
     staff.init(con)
     merch.init(con)
     sources.init(con)
+    from . import historyentry
+    historyentry.init(con)
     money.init(con)
     comms.init(con)
     ai.init(con)

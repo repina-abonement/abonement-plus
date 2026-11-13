@@ -852,7 +852,7 @@ def student_detail(con, sid: int) -> dict:
         "unpaid_cur": unpaid_groups(con, sid, cur) if s["funnel"] == "members" and s["stage"] != "left" else [],
         "ledger": __import__("crm.money", fromlist=["ledger"]).ledger(con, sid),
         "family_kids": _rows(con.execute("SELECT id, name FROM students WHERE family_id=? AND id!=? AND archived=0", (s["family_id"], sid))),
-        "payments": _rows(con.execute("SELECT * FROM payments WHERE student_id=? ORDER BY paid_at DESC, id DESC LIMIT 30", (sid,))),
+        "payments": __import__("crm.money",fromlist=["payments_for_student"]).payments_for_student(con,sid),
         "discounts": _rows(con.execute("SELECT id, name, percent, rule FROM discounts WHERE active=1 AND rule='manual' ORDER BY name")),
         "stage_label": stage_label,
         "next_month": logic.shift_month(cur, 1), "cur_month": cur,
@@ -974,6 +974,7 @@ def update_student(con, sid: int, data: dict, user) -> None:
         from . import sources as _src
         con.execute("UPDATE students SET source=? WHERE id=?", (_src.label(con, data.get("source_id")), sid))
     if "trial_at" in changes:
+        con.execute('UPDATE students SET historical_trial=0,trial_group_id=group_id WHERE id=?',(sid,))
         con.execute("UPDATE students SET contacted_after_trial = 0, trial_came = NULL WHERE id=?", (sid,))
         if data.get("trial_at"):
             con.execute("UPDATE students SET trial_booked_at = COALESCE(trial_booked_at, ?), trial_booked_by = COALESCE(trial_booked_by, ?) WHERE id=?",
@@ -1100,9 +1101,10 @@ def journal(con, group_id: int, day: str, paid_only: bool = False) -> dict:
                    WHERE m.group_id=? AND m.date=? AND m.status != 'cancelled' ORDER BY s.name""", (group_id, day)):
             rows.append(dict(m) | {"status": "makeup"})
         # пробные на этот день
-        for s in con.execute("""SELECT id, name, birth, trial_at FROM students WHERE funnel='sales' AND group_id=? AND archived=0
-                                AND substr(trial_at,1,10)=?""", (group_id, day)):
+        for s in con.execute("""SELECT id, name, birth, trial_at FROM students WHERE COALESCE(trial_group_id,group_id)=?
+                                AND ((funnel='sales' AND archived=0) OR historical_trial=1) AND substr(trial_at,1,10)=?""", (group_id, day)):
             came = con.execute("SELECT trial_came FROM students WHERE id=?", (s["id"],)).fetchone()[0]
+            rows=[r for r in rows if r['id']!=s['id']]
             rows.append({"id": s["id"], "name": s["name"], "birth": s["birth"] or "", "status": "trial", "trial_at": s["trial_at"], "trial_came": came})
     # Факт посещения принадлежит группе и дате, а не её сегодняшнему составу.
     marks = {a["student_id"]: dict(a) for a in con.execute(
@@ -1138,6 +1140,7 @@ def journal_month(con, group_id: int, ym: str) -> dict:
     marked_dates = {r[0] for r in con.execute(
         "SELECT DISTINCT date FROM attendance WHERE group_id=? AND date BETWEEN ? AND ?",
         (group_id,start.isoformat(),end.isoformat()))}
+    marked_dates.update(r[0] for r in con.execute("SELECT substr(trial_at,1,10) FROM students WHERE historical_trial=1 AND trial_group_id=? AND substr(trial_at,1,10) BETWEEN ? AND ?",(group_id,start.isoformat(),end.isoformat())))
     days, attendance, d = [], [], start
     while d <= end:
         j = journal(con, group_id, d.isoformat(), paid_only=True)
