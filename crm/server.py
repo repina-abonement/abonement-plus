@@ -822,6 +822,20 @@ def erp_verify(con, h, user, body, q):
     return erpimport.verify(con)
 
 
+@route("POST", "/api/erp/people/plan", role="admin")
+@route("POST", "/api/erp/people/apply", role="admin")
+def erp_people_transfer(con, h, user, body, q):
+    from . import erpimport, erppeople
+    apply = h.path.split("?", 1)[0].endswith("/apply")
+    token = body.get("token")
+    if apply and not token:
+        raise ApiError("Сначала проверьте перенос")
+    try:
+        return erppeople.transfer(con, body.get("visitors"), body.get("leads"), user, token if apply else None)
+    except erpimport.ImportError_ as exc:
+        raise ApiError(str(exc))
+
+
 @route("POST", "/api/erp/full/plan", role="admin")
 def erp_full_plan(con, h, user, body, q):
     from . import erpfull, erpimport
