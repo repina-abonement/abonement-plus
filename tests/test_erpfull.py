@@ -178,6 +178,17 @@ class RecoveryTest(unittest.TestCase):
         self.assertFalse(self.con.execute('SELECT erp_id FROM students WHERE id=?',(other,)).fetchone()[0])
         self.assertTrue(any(h['text']==text for h in services.student_detail(self.con,other)['history']))
 
+    def test_typed_trial_visit_does_not_create_subscription_attendance(self):
+        uid = self.upload('ID посетителя;ФИО посетителя;Группа;Дата занятия;Вид занятия;Отметка\n'
+                          '101;Тестовый Ребёнок;Тестовая группа;13.10.2026 16:30;Пробное занятие;+\n', 'visits')
+        report = self.run_import([uid])
+        self.assertEqual(report['counts']['updated_trial_visits'], 1)
+        student = self.con.execute('SELECT trial_at,trial_group_id,trial_came,historical_trial FROM students WHERE id=?',
+                                   (self.sid,)).fetchone()
+        self.assertEqual(tuple(student), ('2026-10-13T16:30', self.gid, 1, 1))
+        self.assertEqual(self.con.execute('SELECT count(*) FROM attendance').fetchone()[0], 0)
+        self.assertEqual(self.run_import([uid])['counts'].get('updated_trial_visits', 0), 0)
+
     def test_layout_classification(self):
         self.assertEqual(ei.guess_kind(['ID','ФИО посетителя','Имя родителя','Посещение']),'clients')
         self.assertEqual(ei.guess_kind(['ID','Имя ребенка','Имя родителя','Задача']),'clients')

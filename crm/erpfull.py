@@ -119,6 +119,7 @@ def _record(f, row):
         'payment_type': ['тип платежа'],
         'event_at': ['дата события'], 'event': ['событие'], 'task_end': ['задача (end)'],
         'task_new': ['задача (new)'], 'assignee': ['исполнитель'], 'author': ['автор'],
+        'visit_type': ['вид занятия', 'тип занятия', 'тип'],
         'start': ['дата начала'], 'end': ['дата окончания'], 'sale_at': ['дата продажи'],
         'discount': ['размер скидки'], 'phone2': ['второй телефон', 'телефон 2'],
         'balance': ['баланс'], 'task_status': ['состояние задачи', 'статус выполнения'],
@@ -355,6 +356,25 @@ def _process(con, files, now):
                     d, status, gid = _date(r.get('date', '')), ei.visit_status(r.get('status', '')), _group(con, r)
                     if not d or not status or not gid:
                         reason = 'Не определены дата, отметка или группа посещения'
+                    elif ei.sub_kind(r.get('visit_type', '')) == 'trial':
+                        student = con.execute('SELECT * FROM students WHERE id=?', (sid,)).fetchone()
+                        current = student['trial_at'] or ''
+                        current_group = student['trial_group_id'] or student['group_id']
+                        duplicate = con.execute('SELECT 1 FROM attendance WHERE student_id=? AND group_id=? AND date=?',
+                                                (sid, gid, d[:10])).fetchone()
+                        if duplicate or (current and (current[:10] != d[:10] or current_group != gid)):
+                            reason = 'Пробное ERP конфликтует с существующей записью CRM'
+                        elif len(d) < 16 and not current:
+                            reason = 'Для пробного ERP не указано время'
+                        else:
+                            came = int(status == 'present')
+                            when = d if len(d) >= 16 else current
+                            if (current, student['trial_group_id'], student['trial_came'], student['historical_trial']) != (when, gid, came, 1):
+                                con.execute('UPDATE students SET trial_at=?,trial_group_id=?,trial_came=?,historical_trial=1 WHERE id=?',
+                                            (when, gid, came, sid))
+                                _history(con, sid, now, f'Пробное из ERP: {when}, группа #{gid}, отметка {r["status"]}')
+                                counts['updated_trial_visits'] += 1
+                            state, tbl, target = 'native', 'students', sid
                     else:
                         a = con.execute('SELECT * FROM attendance WHERE student_id=? AND group_id=? AND date=?', (sid, gid, d[:10])).fetchone()
                         if a and a['status'] != status:
