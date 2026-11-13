@@ -52,12 +52,25 @@ def calendar(con, sid, ym):
         events.pop((trial_day,gid,'subscription'),None)
     for m in con.execute('SELECT * FROM trial_misses WHERE student_id=? AND undone=0 AND substr(trial_at,1,7)=?',(sid,ym)):
         add(m['trial_at'][:10],m['group_id'],'trial','absent',note=m['reason'] or '')
+    for trial in con.execute("""SELECT * FROM erp_trial_visits WHERE student_id=? AND visit_at>=? AND visit_at<?""",
+                             (sid, start.isoformat(), (end+timedelta(days=1)).isoformat())):
+        day, gid = trial['visit_at'][:10], trial['group_id']
+        if day == trial_day and gid == (student.get('trial_group_id') or student['group_id']):
+            events.pop((day, gid, 'trial'), None)
+            events.pop((day, None, 'trial'), None)
+        if (day, gid) not in marks:
+            events.pop((day, gid, 'subscription'), None)
+        events[(day, gid, 'trial', trial['id'])] = {'date':day,'group_id':gid,'kind':'trial',
+            'status':'present' if trial['came'] else 'absent','trial_time':trial['visit_at'][11:16]}
     result=[]
     for event in events.values():
         g=groups.get(event['group_id'],{})
         day=date.fromisoformat(event['date'])
         event.update(group=g.get('name',''),branch=g.get('branch',''),time=logic.group_time(schedule.on(con,g,day),day.weekday()) if g else '',future=event['date']>sv.today().isoformat())
         result.append(event)
+    for event in result:
+        if event.get('trial_time'):
+            event['time'] = event['trial_time']
     result.sort(key=lambda x:(x['date'],x['time'],x['kind']))
     return {'month':ym,'today':sv.today().isoformat(),'events':result,'counters':sv.absence_counters(con,sid),
             'attended':sum(x['status']=='present' for x in result),'missed':sum(x['status']=='absent' and x['kind']!='makeup' for x in result)}

@@ -183,11 +183,32 @@ class RecoveryTest(unittest.TestCase):
                           '101;Тестовый Ребёнок;Тестовая группа;13.10.2026 16:30;Пробное занятие;+\n', 'visits')
         report = self.run_import([uid])
         self.assertEqual(report['counts']['updated_trial_visits'], 1)
-        student = self.con.execute('SELECT trial_at,trial_group_id,trial_came,historical_trial FROM students WHERE id=?',
-                                   (self.sid,)).fetchone()
-        self.assertEqual(tuple(student), ('2026-10-13T16:30', self.gid, 1, 1))
+        trial = self.con.execute('SELECT visit_at,group_id,came FROM erp_trial_visits WHERE student_id=?',
+                                 (self.sid,)).fetchone()
+        self.assertEqual(tuple(trial), ('2026-10-13T16:30', self.gid, 1))
         self.assertEqual(self.con.execute('SELECT count(*) FROM attendance').fetchone()[0], 0)
         self.assertEqual(self.run_import([uid])['counts'].get('updated_trial_visits', 0), 0)
+        second = self.upload('ID посетителя;Группа;Дата занятия;Вид занятия;Отметка\n'
+                             '101;Тестовая группа;16.10.2026 16:30;Пробное занятие;не был\n', 'visits')
+        self.run_import([second])
+        for day, came in [('2026-10-13', 1), ('2026-10-16', 0)]:
+            journal = services.journal(self.con, self.gid, day)
+            self.assertEqual([(row['status'], row['trial_came']) for row in journal['rows']], [('trial', came)])
+
+    def test_reviewed_trial_reclassifies_only_matching_unencumbered_mark(self):
+        self.con.execute("INSERT INTO attendance(student_id,group_id,date,status) VALUES (?,?,'2026-10-13','present')",
+                         (self.sid, self.gid))
+        header = ('ID посетителя;Группа;Дата занятия;Вид занятия;Отметка;ID записи ERP;'
+                  'Подтверждена замена отметки CRM\n')
+        row = '101;Тестовая группа;13.10.2026 16:30;Пробное занятие;+;12345;'
+        blocked = self.upload(header + row + 'нет\n', 'visits')
+        self.assertEqual(self.run_import([blocked])['issue_count'], 1)
+        approved = self.upload(header + row + 'да\n', 'visits')
+        self.assertEqual(self.run_import([approved])['counts']['updated_trial_visits'], 1)
+        self.assertEqual(self.con.execute('SELECT count(*) FROM attendance').fetchone()[0], 0)
+        saved = self.con.execute('SELECT replaced_mark FROM erp_trial_visits').fetchone()[0]
+        self.assertIn('"status":"present"', saved)
+        self.assertEqual(self.run_import([approved])['counts']['updated_trial_visits'], 0)
 
     def test_layout_classification(self):
         self.assertEqual(ei.guess_kind(['ID','ФИО посетителя','Имя родителя','Посещение']),'clients')

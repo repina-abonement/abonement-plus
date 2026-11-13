@@ -1132,13 +1132,21 @@ def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpai
                             "tag":"paid" if paid else "unpaid", "status":mark["status"],"resolved":mark["resolved"],
                             "warned":bool(mark["warned"]),"note":mark["note"],"attendance_id":mark["id"],
                             "group_id":group_id,"date":day,"historical_attendance":True})
+    historical_trials = con.execute("""SELECT v.id AS historical_trial_id,s.id,s.name,s.birth,v.visit_at AS trial_at,
+                                      v.came AS trial_came FROM erp_trial_visits v JOIN students s ON s.id=v.student_id
+                                      WHERE v.group_id=? AND v.visit_at>=? AND v.visit_at<?""",
+                                   (group_id, day, (d+timedelta(days=1)).isoformat())).fetchall()
+    trial_students = {r['id'] for r in historical_trials}
+    marked_rows = [r for r in marked_rows if r['id'] not in trial_students
+                   or r.get('attendance_id') or r.get('makeup_id') or r.get('single_id')]
+    marked_rows.extend(dict(r) | {'status': 'trial'} for r in historical_trials)
     rows = marked_rows
     hidden = [r for r in hidden if r["id"] not in marks]
     # Дневной рабочий список — только оплаченные занятия; историю не удаляем.
     if paid_only and not include_unpaid_marks:
         excluded = [r for r in rows if r.get("unpaid") and not r.get("makeup_id") and r.get("status") != "trial"]
         excluded_ids = {r["id"] for r in excluded}
-        rows = [r for r in rows if r["id"] not in excluded_ids]
+        rows = [r for r in rows if r["id"] not in excluded_ids or r.get("status") == "trial"]
         hidden = list({r["id"]: {"id": r["id"], "name": r["name"]} for r in hidden + excluded}.values())
     return {"group": dict(g), "date": day, "has_lesson": has_lesson, "closed": closed, "rows": rows, "hidden_unpaid": hidden}
 
@@ -1150,6 +1158,9 @@ def journal_month(con, group_id: int, ym: str) -> dict:
         "SELECT DISTINCT date FROM attendance WHERE group_id=? AND date BETWEEN ? AND ?",
         (group_id,start.isoformat(),end.isoformat()))}
     marked_dates.update(r[0] for r in con.execute("SELECT substr(trial_at,1,10) FROM students WHERE historical_trial=1 AND trial_group_id=? AND substr(trial_at,1,10) BETWEEN ? AND ?",(group_id,start.isoformat(),end.isoformat())))
+    marked_dates.update(r[0] for r in con.execute(
+        "SELECT substr(visit_at,1,10) FROM erp_trial_visits WHERE group_id=? AND visit_at>=? AND visit_at<?",
+        (group_id, start.isoformat(), (end+timedelta(days=1)).isoformat())))
     days, attendance, d = [], [], start
     while d <= end:
         j = journal(con, group_id, d.isoformat(), paid_only=True)

@@ -46,6 +46,11 @@ CREATE TABLE IF NOT EXISTS erp_full_subscription_corrections (
  id INTEGER PRIMARY KEY, subscription_id INTEGER NOT NULL REFERENCES subscriptions(id),
  before_json TEXT NOT NULL, after_json TEXT NOT NULL, file_id INTEGER NOT NULL,
  row_num INTEGER NOT NULL, corrected_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS erp_trial_visits (
+ id INTEGER PRIMARY KEY, source_id TEXT UNIQUE, student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+ group_id INTEGER NOT NULL REFERENCES groups(id), visit_at TEXT NOT NULL, came INTEGER NOT NULL,
+ replaced_mark TEXT, UNIQUE(student_id,group_id,visit_at));
+CREATE INDEX IF NOT EXISTS erp_trial_visits_group_date ON erp_trial_visits(group_id,visit_at);
 CREATE TABLE IF NOT EXISTS erp_full_runs (
  id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, user_name TEXT NOT NULL,
  report TEXT NOT NULL, backup TEXT NOT NULL);
@@ -119,6 +124,8 @@ def _record(f, row):
         'payment_type': ['тип платежа'],
         'event_at': ['дата события'], 'event': ['событие'], 'task_end': ['задача (end)'],
         'task_new': ['задача (new)'], 'assignee': ['исполнитель'], 'author': ['автор'],
+        'visit_id': ['id записи erp'],
+        'replace_visit': ['подтверждена замена отметки crm'],
         'visit_type': ['вид занятия', 'тип занятия', 'тип'],
         'start': ['дата начала'], 'end': ['дата окончания'], 'sale_at': ['дата продажи'],
         'discount': ['размер скидки'], 'phone2': ['второй телефон', 'телефон 2'],
@@ -269,6 +276,32 @@ def _event_history(con, sid, ts, text, fid, index, counts, corrections):
     return _history(con, sid, ts, text, 'erp_task_event') if sid else None
 
 
+def _store_trial(con, sid, gid, when, status, source_id, replace):
+    came = int(status == 'present')
+    existing = con.execute("""SELECT * FROM erp_trial_visits WHERE source_id=?
+                           OR (student_id=? AND group_id=? AND visit_at=?)""", (source_id, sid, gid, when)).fetchall()
+    if existing:
+        if len(existing) == 1:
+            row = existing[0]
+            if ((row['student_id'], row['group_id'], row['visit_at'], row['came']) == (sid, gid, when, came)
+                    and (not source_id or row['source_id'] in (None, source_id))):
+                if source_id and not row['source_id']:
+                    con.execute('UPDATE erp_trial_visits SET source_id=? WHERE id=?', (source_id, row['id']))
+                return row['id'], 0, ''
+        return None, 0, 'Пробное ERP расходится с ранее перенесённой записью'
+    mark = con.execute('SELECT * FROM attendance WHERE student_id=? AND group_id=? AND date=?',
+                       (sid, gid, when[:10])).fetchone()
+    if mark and (not replace or not source_id or mark['status'] != status or mark['resolved']
+                 or mark['warned'] or mark['cert'] or con.execute(
+                     'SELECT 1 FROM makeups WHERE absence_id=?', (mark['id'],)).fetchone()):
+        return None, 0, 'Обычная отметка CRM требует отдельной сверки'
+    trial_id = con.execute('INSERT INTO erp_trial_visits(source_id,student_id,group_id,visit_at,came,replaced_mark) VALUES (?,?,?,?,?,?)',
+                           (source_id, sid, gid, when, came, _json(dict(mark)) if mark else None)).lastrowid
+    if mark:
+        con.execute('DELETE FROM attendance WHERE id=?', (mark['id'],))
+    return trial_id, 1, ''
+
+
 def _process(con, files, now):
     matcher = Matcher(con)
     report = {'files': [], 'counts': {}, 'issues': [], 'history_corrections': [], 'source_rows': 0, 'linked_rows': 0, 'native_rows': 0}
@@ -360,21 +393,16 @@ def _process(con, files, now):
                         student = con.execute('SELECT * FROM students WHERE id=?', (sid,)).fetchone()
                         current = student['trial_at'] or ''
                         current_group = student['trial_group_id'] or student['group_id']
-                        duplicate = con.execute('SELECT 1 FROM attendance WHERE student_id=? AND group_id=? AND date=?',
-                                                (sid, gid, d[:10])).fetchone()
-                        if duplicate or (current and (current[:10] != d[:10] or current_group != gid)):
-                            reason = 'Пробное ERP конфликтует с существующей записью CRM'
-                        elif len(d) < 16 and not current:
+                        same_trial = current[:10] == d[:10] and current_group == gid
+                        if len(d) < 16 and not same_trial:
                             reason = 'Для пробного ERP не указано время'
                         else:
-                            came = int(status == 'present')
-                            when = d if len(d) >= 16 else current
-                            if (current, student['trial_group_id'], student['trial_came'], student['historical_trial']) != (when, gid, came, 1):
-                                con.execute('UPDATE students SET trial_at=?,trial_group_id=?,trial_came=?,historical_trial=1 WHERE id=?',
-                                            (when, gid, came, sid))
-                                _history(con, sid, now, f'Пробное из ERP: {when}, группа #{gid}, отметка {r["status"]}')
-                                counts['updated_trial_visits'] += 1
-                            state, tbl, target = 'native', 'students', sid
+                            trial_id, changed, reason = _store_trial(con, sid, gid, d if len(d) >= 16 else current,
+                                                                     status, r.get('visit_id') or None,
+                                                                     ei._norm(r.get('replace_visit', '')) == 'да')
+                            if trial_id:
+                                counts['updated_trial_visits'] += changed
+                                state, tbl, target = 'native', 'erp_trial_visits', trial_id
                     else:
                         a = con.execute('SELECT * FROM attendance WHERE student_id=? AND group_id=? AND date=?', (sid, gid, d[:10])).fetchone()
                         if a and a['status'] != status:

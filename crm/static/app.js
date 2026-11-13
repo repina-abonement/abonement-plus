@@ -2286,6 +2286,7 @@ function journalRow(r, before) {
   if (r.warned) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(r.name)}${jAge(r)} <span class="pill yellow">предупредил, не придёт</span>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ""}</div>
     <div class="mark">${before ? `<button data-unwarn="${r.id}">Отменить, придёт</button>` : `<button data-att="present" data-sid="${r.id}">Всё-таки был</button>`}</div></div>`;
   if (r.status === "vacation") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(r.name)}${jAge(r)}</div><span class="pill yellow">Отпуск</span></div>`;
+  if (r.historical_trial_id) return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(r.name)}${jAge(r)} <span class="pill jt-trial">ПУ ${esc(r.trial_at.slice(11,16))}</span></div><span>${r.trial_came ? 'Пришёл' : 'Не пришёл'}</span></div>`;
   if (r.status === "trial") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(r.name)}${jAge(r)} <span class="pill jt-trial">ПУ ${r.trial_at.slice(11, 16)}</span></div>
     <div class="mark"><button data-trial="1" data-sid="${r.id}" class="${r.trial_came === 1 ? "on-present" : ""}">Пришёл</button><button data-trial="0" data-sid="${r.id}" class="${r.trial_came === 0 ? "on-absent" : ""}">Не пришёл</button></div></div>`;
   const unpaidPill = r.unpaid ? ` <span class="pill unpaid-flag">не оплачен, не допускать</span>` : "";
