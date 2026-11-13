@@ -2005,7 +2005,7 @@ def makeup_status(con, h, user, body, q, mid):
 @route("GET", "/api/journal", role="journal")
 def journal(con, h, user, body, q):
     coach_guard(con, user, int(q.get("group_id") or 0))
-    j = sv.journal(con, int(q.get("group_id") or 0), q.get("date") or sv.today().isoformat(), paid_only=True)
+    j = sv.journal(con, int(q.get("group_id") or 0), q.get("date") or sv.today().isoformat(), paid_only=True, include_unpaid_marks=False)
     from . import pu
     from datetime import datetime as _dt
     if j["has_lesson"]:

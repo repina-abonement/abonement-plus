@@ -1033,7 +1033,7 @@ def paid_for_month(con, sid: int, ym: str) -> bool:
                             (sid, ym, ym, ym)).fetchone())
 
 
-def journal(con, group_id: int, day: str, paid_only: bool = False) -> dict:
+def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpaid_marks: bool = True) -> dict:
     g = con.execute("SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.id=?",
                     (group_id,)).fetchone()
     if not g:
@@ -1132,6 +1132,12 @@ def journal(con, group_id: int, day: str, paid_only: bool = False) -> dict:
                             "group_id":group_id,"date":day,"historical_attendance":True})
     rows = marked_rows
     hidden = [r for r in hidden if r["id"] not in marks]
+    # Дневной рабочий список — только оплаченные занятия; историю не удаляем.
+    if paid_only and not include_unpaid_marks:
+        excluded = [r for r in rows if r.get("unpaid") and not r.get("makeup_id") and r.get("status") != "trial"]
+        excluded_ids = {r["id"] for r in excluded}
+        rows = [r for r in rows if r["id"] not in excluded_ids]
+        hidden = list({r["id"]: {"id": r["id"], "name": r["name"]} for r in hidden + excluded}.values())
     return {"group": dict(g), "date": day, "has_lesson": has_lesson, "closed": closed, "rows": rows, "hidden_unpaid": hidden}
 
 

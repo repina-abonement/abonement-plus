@@ -26,6 +26,10 @@ def main():
     d2 = m["days"][0]
     check(d2["list"] == 2 and d2["present"] == 1 and d2["absent"] == 1, "02.11: в журнале 2 (неоплативший без отметки не показан), был 1, пропуск 1")
     check(m["subs"] == {"paid": 1, "invoiced": 1, "single": 0, "none": 1} and m["kids"] == 3, "На абонементе 1, счёт 1, без оплаты 1")
+    daily = sv.journal(con, g, "2026-11-02", paid_only=True, include_unpaid_marks=False)
+    check([r["id"] for r in daily["rows"]] == [ids[0]], "Дневной список скрывает неоплаченного даже с отметкой")
+    check({r["id"] for r in daily["hidden_unpaid"]} == {ids[1], ids[2]}, "Неоплаченные вынесены отдельно без дублей")
+    check(con.execute("SELECT status FROM attendance WHERE student_id=?", (ids[1],)).fetchone()[0] == "absent", "Исходная отметка не изменена")
     historical_marks(con, U, b)
     print("ok")
 

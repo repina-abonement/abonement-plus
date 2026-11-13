@@ -33,7 +33,7 @@ def shift(con, branch_id: int, day: str, group_ids: list[int] | None = None) -> 
                             WHERE g.branch_id=? AND g.active=1""", (branch_id,)).fetchall():
         if group_ids is not None and g["id"] not in group_ids:
             continue
-        j = sv.journal(con, g["id"], day, paid_only=True)
+        j = sv.journal(con, g["id"], day, paid_only=True, include_unpaid_marks=False)
         if not j["has_lesson"]:
             continue
         gv = schedule.on(con, g, d)
