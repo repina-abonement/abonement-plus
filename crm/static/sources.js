@@ -37,6 +37,56 @@ async function renderSourceSettings(box) {
   }
   const imp=box.querySelector('[data-source-import]');box.querySelector('[data-source-import-toggle]').onclick=()=>imp.hidden=!imp.hidden;
   imp.onsubmit=e=>{e.preventDefault();if(imp.reportValidity())action(imp,'POST','/api/sources/import',{text:imp.elements.text.value})};
+  box.insertAdjacentHTML('beforeend', `<details style="margin-top:12px">
+    <summary>Сверить источники в карточках с ERP</summary>
+    <form data-client-sources>
+      <label>Данные ERP<textarea name="text" rows="6" required placeholder="Тип;ID;Канал;Источник"></textarea></label>
+      <p class="small muted">Тип: student для посетителя, lead для заявки. Связь по ID ERP.</p>
+      <button class="btn sm" type="submit">Проверить карточки</button>
+      <button class="btn sm" type="button" data-apply hidden>Применить изменения</button>
+      <p role="status"></p>
+      <details data-result hidden><summary>Подробности сверки</summary><ul></ul></details>
+    </form>
+  </details>`);
+  const transfer = box.querySelector('[data-client-sources]');
+  const text = transfer.elements.text;
+  const apply = transfer.querySelector('[data-apply]');
+  const status = transfer.querySelector('[role=status]');
+  const result = transfer.querySelector('[data-result]');
+  let preview;
+  const invalidate = () => { preview = null; apply.hidden = true; result.hidden = true; };
+  text.oninput = invalidate;
+  const run = async (mode) => {
+    const input = text.value;
+    const buttons = [...transfer.querySelectorAll('button')];
+    buttons.forEach(button => button.disabled = true);
+    text.readOnly = true;
+    try {
+      const data = await api('POST', '/api/erp/sources/' + mode, {text: input, token: preview?.token});
+      preview = mode === 'plan' ? data : null;
+      apply.hidden = !preview || !data.changes.length;
+      const count = mode === 'plan' ? 'К обновлению' : 'Обновлено';
+      status.textContent = `${count}: ${data.changes.length}. Совпадают: ${data.matched}. Пустые в ERP: ${data.empty}. Требуют сверки: ${data.issues.length}.`;
+      const changes = data.changes.map(c => `CRM ${c.id}: ${c.before || 'пусто'} → ${c.channel}: ${c.name}`);
+      const list = result.querySelector('ul');
+      list.replaceChildren(...[...data.issues, ...changes].map(value => {
+        const item = document.createElement('li');
+        item.textContent = value;
+        return item;
+      }));
+      result.hidden = !list.childElementCount;
+      if (mode === 'apply') S.meta.ad = await api('GET', '/api/sources');
+    } catch (error) {
+      invalidate();
+      status.textContent = error.message;
+    } finally {
+      buttons.forEach(button => button.disabled = false);
+      text.readOnly = false;
+    }
+  };
+  transfer.onsubmit = event => { event.preventDefault(); if (transfer.reportValidity()) run('plan'); };
+  apply.onclick = () => { if (preview) run('apply'); };
+
 }
 
 async function renderSourceReport(box, month) {
