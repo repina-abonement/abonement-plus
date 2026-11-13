@@ -1708,3 +1708,8 @@ textarea.nav-q { height:40px; min-height:40px; max-height:40px; resize:none; ove
 
 /* Текст задач можно выделять и копировать, в том числе администраторам. */
 .no-copy .task-copyable, .no-copy .task-copyable * { -webkit-user-select: text; user-select: text; }
+
+.subscription-cancel-form { margin:16px 0; padding:18px; border:1px solid var(--line); border-radius:12px; background:var(--surface); }
+.cancel-approval-warning { padding:12px; border-radius:8px; background:#fff3cd; color:#714d00; font-weight:700; }
+.subscription-refunds { display:grid; gap:12px; margin-top:12px; }
+.subscription-refund { padding:16px; border:1px solid var(--line); border-radius:12px; }

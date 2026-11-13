@@ -1904,11 +1904,23 @@ def attendance_cert(con, h, user, body, q, aid):
 
 @route("POST", "/api/subscriptions/{sub}/cancel", role="operator")
 def cancel(con, h, user, body, q, sub):
-    refund = bool(body.get("refund"))
-    if refund and not perms.can(user, "payments", "view"):
-        raise ApiError("Возврат делают руководитель или старший администратор", 403)
-    sv.cancel_subscription(con, int(sub), user, refund, body.get("comment") or "")
-    return {"ok": True}
+    from . import subcancel
+    if body.get('refund') or body.get('mode')=='refund':
+        if not perms.can(user, "payments", "view"):
+            raise ApiError("Возврат оформляют руководитель или старший администратор",403)
+    return subcancel.cancel(con,int(sub),user,body)
+
+
+@route("GET", "/api/subscriptions/{sub}/cancel-preview", role="operator")
+def cancel_preview(con,h,user,body,q,sub):
+    from . import subcancel
+    return subcancel.preview(con,int(sub))
+
+
+@route("POST", "/api/subscription-refunds/{rid}/confirm", role="payments:view")
+def subscription_refund_confirm(con,h,user,body,q,rid):
+    from . import subcancel
+    return subcancel.confirm(con,int(rid),user,body)
 
 
 @route("POST", "/api/students/{sid}/pay-family", role="operator")

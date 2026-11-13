@@ -16,8 +16,8 @@ const dShort = (iso) => { if (!iso) return ""; const [y, m, d] = iso.slice(0, 10
 const dtShort = (iso) => iso ? `${dShort(iso)} ${iso.slice(11, 16)}` : "";
 const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 const PAY_METHODS = { cash: "Наличные", card: "Картой", sbp: "СБП", online: "Онлайн-оплата", transfer: "Перевод", unknown: "Перенесено",
-  balance: "Перенос с баланса", refund: "Возврат" };
-const PAY_INTERNAL = ["unknown", "balance", "refund"];  // ставит сама CRM, при приёме оплаты не выбираются
+  balance: "Перенос с баланса", refund: "Возврат", refund_pending: "Ожидает возврата" };
+const PAY_INTERNAL = ["unknown", "balance", "refund", "refund_pending"];  // ставит сама CRM, при приёме оплаты не выбираются
 
 async function api(method, url, body) {
   const opt = { method, headers: {}, credentials: "same-origin" };
@@ -1629,15 +1629,53 @@ function clientSubscriptionsHtml(d) {
       <div class="small muted subscription-meta">${esc(tariffs[x.tariff]||'Абонемент')} · ${x.lessons} ${plural(x.lessons,'занятие','занятия','занятий')}</div>
       <div class="finance-numbers"><div><small>Стоимость</small><b>${rub(x.price)}</b></div><div><small>Оплачено</small><b>${rub(paid)}</b></div><div><small>${cancelled?'Статус':'Осталось оплатить'}</small><b class="${left&&!cancelled?'finance-due':''}">${cancelled?'Отменён':rub(left)}</b></div></div>
       ${x.credit_lessons||x.late_fee||x.discount_amount||x.corrected||x.excluded_dates&&x.excluded_dates!=='[]'?`<details class="finance-detail"><summary>Расчёт и условия</summary>${x.credit_lessons?`<div>Перерасчёт пропусков: ${x.credit_lessons}</div>`:''}${x.late_fee?`<div>Надбавка: ${rub(x.late_fee)}</div>`:''}${x.discount_amount?`<div>Скидка: ${rub(x.discount_amount)}</div>`:''}${x.corrected?'<div>Сумма скорректирована</div>':''}${x.excluded_dates&&x.excluded_dates!=='[]'?`<div>Исключены: ${JSON.parse(x.excluded_dates).map(dShort).join(', ')}</div>`:''}</details>`:''}
+      ${!cancelled&&can('members','full')?`<div class="sc-actions"><button type="button" class="btn sm danger" data-pcanc="${x.id}">Удалить абонемент</button></div><div data-sub-cancel-box="${x.id}"></div>`:''}
       ${active?`<button type="button" class="btn sm" data-sub-transfer="${x.id}">Поменять группу</button><div class="subscription-transfer" data-sub-transfer-box="${x.id}" hidden></div>`:''}</li>`;
   };
-  return `<h3>Абонементы</h3><p class="small muted">Условия и состояние оплаты каждого абонемента.</p>${d.subscriptions.length?`<ul class="sub-list ${d.subscriptions.length>3?'folded':''}">${d.subscriptions.map(card).join('')}</ul>`:'<p class="muted">Абонементов пока нет. Оформите первый кнопкой «Продать абонемент».</p>'}${d.subscriptions.length>3?`<button class="linkish" id="sub-more">Показать историю (${d.subscriptions.length})</button>`:''}`;
+  return `<h3>Абонементы</h3><p class="small muted">Условия и состояние оплаты каждого абонемента.</p>${d.subscriptions.length?`<ul class="sub-list ${d.subscriptions.length>3?'folded':''}">${d.subscriptions.map(card).join('')}</ul>`:'<p class="muted">Абонементов пока нет. Оформите первый кнопкой «Продать абонемент».</p>'}${d.subscriptions.length>3?`<button class="linkish" id="sub-more">Показать историю (${d.subscriptions.length})</button>`:''}${subscriptionRefundsHtml(d)}`;
 }
+function subscriptionRefundsHtml(d) {
+  const rows=d.subscription_refunds||[];
+  if(!rows.length)return '';
+  return `<h4>Возвраты по отменённым абонементам</h4><div class="subscription-refunds">${rows.map(r=>`<article class="subscription-refund"><div class="finance-card-head"><b>${rub(r.amount)}</b><span class="pill ${r.status==='done'?'green':'yellow'}">${r.status==='done'?'Возврат завершён':r.status==='receipt_pending'?'Деньги возвращены · ждём чек':'Ожидает возврата'}</span></div><p>${r.method==='paykeeper'?`PayKeeper · исходный платёж №${esc(r.pk_payment_id)} · на исходный платёжный инструмент`:esc(PAY_METHODS[r.method]||r.method)}</p>${r.method==='paykeeper'&&r.status!=='done'&&r.paykeeper_url?`<a class="btn sm" href="${esc(r.paykeeper_url)}" target="_blank" rel="noopener noreferrer">Открыть PayKeeper</a><p class="small">Найдите исходный платёж по ID выше. Выполните возврат согласованной суммы на исходный платёжный инструмент и сформируйте фискальный чек «Возврат прихода». Затем нажмите «Проверить возврат и фискальный чек».</p>`:''}${r.status==='pending'?'<p class="small muted">Сумма зарезервирована и недоступна для новых занятий. Деньги ещё не отмечены как возвращённые.</p>':''}${r.receipt_id?`<p class="small">Чек возврата: ${esc(r.receipt_id)}</p>`:''}${r.proof?`<p class="small">${esc(r.proof)}</p>`:''}${r.status!=='done'&&can('payments','view')?`<button class="btn sm" data-refund-confirm="${r.id}">${r.method==='paykeeper'?'Проверить возврат и фискальный чек':r.status==='receipt_pending'?'Внести фискальный чек':'Подтвердить фактический возврат'}</button><div data-refund-form="${r.id}"></div>`:''}</article>`).join('')}</div>`;
+}
+
+async function openSubscriptionCancel(subid,button,reload) {
+  const box=document.querySelector(`[data-sub-cancel-box="${subid}"]`);
+  if(!box)return;
+  button.disabled=true;
+  try {
+    const q=await api('GET',`/api/subscriptions/${subid}/cancel-preview`);
+    if(q.cancelled){toast('Абонемент уже отменён',true);reload();return}
+    box.innerHTML=`<form class="subscription-cancel-form"><h4>Удаление абонемента</h4><p>Абонемент будет отменён и останется в истории. Оплачено: <b>${rub(q.paid)}</b>.</p><p class="cancel-approval-warning">ПЕРЕД ЭТИМ ДЕЙСТВИЕМ СОГЛАСОВАТЬ С ЮЛИЕЙ</p><label class="check"><input name="approved" type="checkbox" required> Я согласовал(а) отмену и порядок расчёта с Юлией</label><div class="field"><label>Когда и где получено согласование</label><input name="approval" required maxlength="500" placeholder="Дата и ссылка на согласование или описание разговора"></div><div class="field"><label>Причина отмены</label><textarea name="reason" required rows="2" maxlength="1000"></textarea></div><div class="field"><label>Как поступить с деньгами</label><select name="mode"><option value="balance">Сохранить для будущих занятий</option>${q.paid&&can('payments','view')&&!q.refund_blocker?'<option value="refund">Вернуть клиенту</option>':''}</select></div>${q.refund_blocker?`<p class="small">Возврат пока недоступен: ${esc(q.refund_blocker)}</p>`:''}<div data-return-info hidden><p>Согласованная сумма возврата: <b>${rub(q.paid)}</b>. Если занятия уже проводились или нужна другая сумма, сначала согласуйте отдельный расчёт с Юлией.</p>${q.sources.map(p=>`<p>${rub(p.amount)} · ${p.method==='paykeeper'?`PayKeeper, исходный платёж №${esc(p.pk_payment_id)}. Возврат выполняется в кабинете на тот же платёжный инструмент. Обязательно сформируйте чек «Возврат прихода».`:esc(PAY_METHODS[p.method]||p.method)+'. Возврат исходным способом с документом и чеком.'}</p>`).join('')}<p class="small muted">После отмены сумма будет зарезервирована. Подтвердите фактический возврат и чек в блоке возвратов.</p></div><div class="small need-err"></div><div class="sc-actions"><button class="btn danger" type="submit">Отменить абонемент</button><button class="btn" type="button" data-cancel-close>Назад</button></div></form>`;
+    const form=box.querySelector('form');
+    form.elements.mode.onchange=()=>box.querySelector('[data-return-info]').hidden=form.elements.mode.value!=='refund';
+    box.querySelector('[data-cancel-close]').onclick=()=>{box.innerHTML='';button.disabled=false};
+    form.onsubmit=async e=>{
+      e.preventDefault();const submit=form.querySelector('[type=submit]');submit.disabled=true;
+      try {await api('POST',`/api/subscriptions/${subid}/cancel`,{mode:form.elements.mode.value,approved_by_yulia:form.elements.approved.checked,approval:form.elements.approval.value,reason:form.elements.reason.value});toast(form.elements.mode.value==='refund'?'Абонемент отменён. Теперь выполните возврат исходным способом и проверьте чек':'Абонемент отменён. Средства сохранены для будущих занятий');reload()}
+      catch(err){box.querySelector('.need-err').textContent=err.message;submit.disabled=false}
+    };
+  }catch(e){fail(e);button.disabled=false}
+}
+
+async function confirmSubscriptionRefund(rid,button,d,reload) {
+  const r=(d.subscription_refunds||[]).find(r=>r.id===rid);if(!r)return;
+  if(r.method==='paykeeper') {
+    button.disabled=true;
+    try {const result=await api('POST',`/api/subscription-refunds/${rid}/confirm`,{});toast(result.message||'Возврат и фискальный чек подтверждены',result.status!=='done');reload()}
+    catch(e){fail(e);button.disabled=false}return;
+  }
+  const box=document.querySelector(`[data-refund-form="${rid}"]`);
+  box.innerHTML=`<form class="subscription-cancel-form">${r.status==='pending'?`<p>Верните ${rub(r.amount)} исходным способом: ${esc(PAY_METHODS[r.method]||r.method)}.</p><label class="check"><input name="returned" type="checkbox" required> Деньги фактически возвращены</label><div class="field"><label>Документ или номер операции возврата</label><input name="proof" required maxlength="500"></div>`:''}<p>Сформируйте фискальный чек «Возврат прихода» и внесите его реквизиты. Если чек ещё не готов, можно сначала подтвердить возврат денег.</p><div class="row"><div class="field"><label>ФН</label><input name="receipt_fn" inputmode="numeric"></div><div class="field"><label>ФД</label><input name="receipt_fd" inputmode="numeric"></div><div class="field"><label>ФП</label><input name="receipt_fp" inputmode="numeric"></div></div><div class="small need-err"></div><button class="btn" type="submit">Сохранить подтверждение</button></form>`;
+  box.querySelector('form').onsubmit=async e=>{e.preventDefault();const form=e.target,submit=form.querySelector('button');submit.disabled=true;try{const result=await api('POST',`/api/subscription-refunds/${rid}/confirm`,{actually_returned:form.elements.returned?.checked,proof:form.elements.proof?.value,receipt_fn:form.elements.receipt_fn.value,receipt_fd:form.elements.receipt_fd.value,receipt_fp:form.elements.receipt_fp.value});toast(result.message||'Подтверждение сохранено',result.status!=='done');reload()}catch(err){box.querySelector('.need-err').textContent=err.message;submit.disabled=false}};
+}
+
 function clientBalanceHtml(d) {
   return `<h3>Оплаты и баланс</h3><div class="balance-summary"><div class="${d.balance.debt?'has-debt':''}"><small>Задолженность</small><b>${rub(d.balance.debt)}</b><span>По прошедшим и текущим счетам</span></div><div><small>Будущие занятия</small><b>${rub(d.balance.upcoming)}</b><span>К оплате за следующий месяц</span></div><div><small>Деньги на балансе</small><b>${rub(d.balance.deposit)}</b><span>Доступны для оплаты занятий</span></div></div>
     ${(d.unpaid_cur||[]).length?`<div class="finance-note">За текущий месяц ещё не оформлен или не оплачен абонемент: ${(d.unpaid_cur||[]).map(esc).join(', ')}</div>`:''}
     <div id="pay-form"></div><div id="pay-links"></div>
-    <h4 class="finance-history-title">История денег</h4>${d.payments.length?`<ul class="pay-list ${d.payments.length>4?'folded':''}">${d.payments.map(p=>`<li class="payment-card ${p.cancelled?'is-cancelled':''}"><div class="finance-card-head"><div><b class="payment-amount ${p.amount<0?'refund':''}">${p.amount<0?'−':'+'}${rub(Math.abs(p.amount))}</b><div class="small muted">${p.amount<0?'Возврат':'Поступление'} · ${esc(PAY_METHODS[p.method]||p.method)}</div></div><time>${dtShort(p.paid_at)}</time></div>${p.comment?`<div class="payment-comment">${esc(p.comment)}</div>`:''}<div class="small muted">${esc(p.user_name||'')}${p.cancelled?' · отменён':p.confirmed?'':' · ждёт подтверждения'}</div>${S.user.role==='admin'&&!p.cancelled&&p.method!=='unknown'?`<details class="finance-detail"><summary>Действия с платежом</summary>${p.confirmed?'':`<button class="btn sm" data-pconf="${p.id}">Подтвердить</button>`}<button class="btn sm danger" data-pcancel="${p.id}">Отменить платёж</button></details>`:''}</li>`).join('')}</ul>`:'<p class="muted">Платежей пока нет</p>'}${d.payments.length>4?`<button class="linkish" id="pay-more">Показать всю историю (${d.payments.length})</button>`:''}
+    <h4 class="finance-history-title">История денег</h4>${d.payments.length?`<ul class="pay-list ${d.payments.length>4?'folded':''}">${d.payments.map(p=>`<li class="payment-card ${p.cancelled?'is-cancelled':''}"><div class="finance-card-head"><div><b class="payment-amount ${p.amount<0?'refund':''}">${p.amount<0?'−':'+'}${rub(Math.abs(p.amount))}</b><div class="small muted">${p.method==='refund_pending'?'Зарезервировано для возврата':p.amount<0?'Возврат':'Поступление'} · ${esc(PAY_METHODS[p.method]||p.method)}</div></div><time>${dtShort(p.paid_at)}</time></div>${p.comment?`<div class="payment-comment">${esc(p.comment)}</div>`:''}<div class="small muted">${esc(p.user_name||'')}${p.cancelled?' · отменён':p.confirmed?'':' · ждёт подтверждения'}</div>${S.user.role==='admin'&&!p.cancelled&&!['unknown','refund_pending','refund'].includes(p.method)?`<details class="finance-detail"><summary>Действия с платежом</summary>${p.confirmed?'':`<button class="btn sm" data-pconf="${p.id}">Подтвердить</button>`}<button class="btn sm danger" data-pcancel="${p.id}">Отменить платёж</button></details>`:''}</li>`).join('')}</ul>`:'<p class="muted">Платежей пока нет</p>'}${d.payments.length>4?`<button class="linkish" id="pay-more">Показать всю историю (${d.payments.length})</button>`:''}
     ${d.family_kids.length||d.balance.deposit?`<details class="finance-detail"><summary>Другие операции</summary><div class="sc-actions">${d.family_kids.length?'<button class="btn sm" id="pay-fam">Оплата за семью</button>':''}${d.balance.deposit&&d.family_kids.length?'<button class="btn sm" id="bal-move">Перенести баланс другому ребёнку</button>':''}${d.balance.deposit&&can('payments','view')?'<button class="btn sm" id="bal-refund">Вернуть деньги с баланса</button>':''}</div></details>`:''}`;
 }
 async function loadClientPaymentLinks(sid) {
@@ -1911,20 +1949,8 @@ async function openStudent(id, options = {}) {
   loadClientPaymentLinks(id);
   body.querySelectorAll("[data-pconf]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/payments/${b.dataset.pconf}/confirm`, {}); reload(); } catch (e) { fail(e); } }));
   body.querySelectorAll("[data-pcancel]").forEach((b) => (b.onclick = async () => { if (!confirm("Отменить платёж? Он останется в реестре как отменённый.")) return; try { await api("POST", `/api/payments/${b.dataset.pcancel}/cancel`, {}); reload(); } catch (e) { fail(e); } }));
-  body.querySelectorAll("[data-pcanc]").forEach((b) => (b.onclick = () => {  // оплаченный: куда деньги
-    const box = document.createElement("div"); box.className = "quote"; box.style.marginTop = "8px";
-    box.innerHTML = `<b>Отменить оплаченный абонемент (${rub(+b.dataset.paid)})</b><div class="small muted">Пропуски из перерасчёта вернутся. Куда деньги?</div>
-      <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button class="btn sm primary" data-cx="bal">На баланс ребёнка</button>
-      ${can("payments", "view") ? `<button class="btn sm danger" data-cx="ref">Вернуть родителю</button>` : ""}<button class="btn sm" data-cx="no">Не отменять</button></div>`;
-    b.closest("li").appendChild(box); b.disabled = true;
-    box.querySelectorAll("[data-cx]").forEach((x) => (x.onclick = async () => {
-      if (x.dataset.cx === "no") { box.remove(); b.disabled = false; return; }
-      let comment = "";
-      if (x.dataset.cx === "ref") { comment = prompt("Почему возврат и как вернули деньги (наличными, на карту)?"); if (!comment) return; }
-      try { await api("POST", `/api/subscriptions/${b.dataset.pcanc}/cancel`, { refund: x.dataset.cx === "ref", comment });
-        toast(x.dataset.cx === "ref" ? "Отменён, возврат записан. Пробейте чек возврата" : "Отменён, деньги на балансе"); reload(); } catch (e) { fail(e); }
-    }));
-  }));
+  body.querySelectorAll("[data-pcanc]").forEach(b=>b.onclick=()=>openSubscriptionCancel(+b.dataset.pcanc,b,reload));
+  body.querySelectorAll('[data-refund-confirm]').forEach(b=>b.onclick=()=>confirmSubscriptionRefund(+b.dataset.refundConfirm,b,d,reload));
   body.querySelectorAll("[data-cert]").forEach((x) => (x.onchange = async () => {
     try { await api("POST", `/api/attendance/${x.dataset.cert}/cert`, { cert: x.checked }); toast(x.checked ? "Справка отмечена" : "Справка снята"); } catch (e) { fail(e); x.checked = !x.checked; }
   }));

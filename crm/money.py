@@ -13,8 +13,8 @@ from datetime import date, datetime
 from . import logic
 
 METHODS = {"cash": "Наличные", "card": "Картой", "sbp": "СБП", "online": "Онлайн-оплата", "transfer": "Перевод",
-           "unknown": "Перенесено", "balance": "Перенос с баланса", "refund": "Возврат"}
-INTERNAL = ("unknown", "balance", "refund")  # их не выбирают при приёме оплаты: ставит сама CRM
+           "unknown": "Перенесено", "balance": "Перенос с баланса", "refund": "Возврат", "refund_pending": "Зарезервировано для возврата"}
+INTERNAL = ("unknown", "balance", "refund", "refund_pending")  # их не выбирают при приёме оплаты: ставит сама CRM
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS payments (
@@ -216,6 +216,8 @@ def move_balance(con, from_sid: int, to_sid: int, amount: int, user: dict) -> No
 def refund(con, sid: int, amount: int, user: dict, comment: str) -> None:
     """Возврат родителю из переплаты. Отдельная операция: в реестре минусом, нужен чек возврата."""
     amount = int(amount)
+    if con.execute("SELECT 1 FROM payments p LEFT JOIN pay_links l ON l.payment_id=p.id WHERE p.student_id=? AND p.cancelled=0 AND (p.method='online' OR l.pk_payment_id!='')", (sid,)).fetchone():
+        raise ValueError("Онлайн-оплаты возвращаются только по исходному платежу через PayKeeper: используйте отмену абонемента с проверкой возврата и чека")
     if not (comment or "").strip():
         raise ValueError("Напишите, почему возврат и как вернули деньги")
     if amount <= 0 or amount > balance(con, sid)["deposit"]:
@@ -263,6 +265,10 @@ def cancel_payment(con, pid: int, user: dict) -> None:
     p = con.execute("SELECT * FROM payments WHERE id=?", (pid,)).fetchone()
     if not p or p["cancelled"]:
         raise ValueError("Платёж не найден или уже отменён")
+    if con.execute("SELECT 1 FROM pay_links WHERE payment_id=? AND status='paid'",(pid,)).fetchone():
+        raise ValueError("Оплата PayKeeper не отменяется как запись: оформите возврат через исходный платёж с фискальным чеком")
+    if con.execute("SELECT 1 FROM subscription_refunds WHERE reserve_id=? OR payment_id=?",(pid,pid)).fetchone():
+        raise ValueError("Эта строка связана с возвратом абонемента. Нельзя отменять резерв или подтверждённый возврат как обычный платёж")
     con.execute("UPDATE payments SET cancelled=1, cancelled_by=? WHERE id=?", (user.get("name", ""), pid))
     reconcile(con, p["student_id"])
     con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
@@ -275,7 +281,7 @@ def confirm_payment(con, pid: int, user: dict) -> None:
 
 
 def registry(con, start: str, end: str, method: str = "", only_unconfirmed: bool = False) -> dict:
-    where = ["p.paid_at BETWEEN ? AND ?", "p.method != 'balance'"]  # перенос между детьми семьи не приход
+    where = ["p.paid_at BETWEEN ? AND ?", "p.method NOT IN ('balance','refund_pending')"]  # перенос между детьми семьи не приход
     args = [start, end + "T23:59"]
     if method:
         where.append("p.method=?")

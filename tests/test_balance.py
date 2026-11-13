@@ -64,10 +64,14 @@ def main():
     except ApiError:
         ok = True
     check(ok, "Возврат без причины не проходит")
-    sv.cancel_subscription(con, inv[b]["id"], OP, refund=True, comment="Заболел надолго, вернули на карту")
-    check(money.balance(con, b)["deposit"] == 1000, "Отменили с возвратом: вернули оплату декабря, прежняя переплата осталась")
-    led = money.ledger(con, b)
-    check(led[0]["rest"] == 1000 and any(e["text"].startswith("Возврат") for e in led), "Лента баланса: возврат и остаток после каждой строки")
+    try:
+        sv.cancel_subscription(con, inv[b]["id"], OP, refund=True, comment="Заболел надолго, вернули на карту")
+        ok = False
+    except ApiError:
+        ok = True
+    check(ok, "Прямая запись возврата заблокирована: нужен новый процесс согласования, источника оплаты и чека")
+    check(con.execute("SELECT status FROM subscriptions WHERE id=?", (inv[b]["id"],)).fetchone()[0] == "paid",
+          "Отказ не отменяет абонемент и не меняет деньги")
     print("ok")
 
 

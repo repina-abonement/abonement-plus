@@ -319,7 +319,12 @@ def init_db(con: sqlite3.Connection):
     coachreport.init(con)
     from . import paylinks
     paylinks.init(con)
-    con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sub_enr_month ON subscriptions(enrollment_id, month)")
+    from . import subcancel
+    subcancel.init(con)
+    old_index = con.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_sub_enr_month'").fetchone()
+    if old_index and "WHERE" not in old_index[0].upper():
+        con.execute("DROP INDEX idx_sub_enr_month")
+    con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sub_enr_month ON subscriptions(enrollment_id, month) WHERE status!='cancelled'")
     for k, v in DEFAULT_SETTINGS.items():
         con.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
     login = os.environ.get("CRM_ADMIN_LOGIN", "admin")

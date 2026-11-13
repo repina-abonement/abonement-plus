@@ -433,7 +433,6 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
     if existing:
         raise ApiError(f"На {logic.month_label(ym)} в группу {e['group_name']} уже есть абонемент")
     q = quote or quote_for(con, sid, ym, e["id"], discount_id, tariff, excluded_dates, credit_requested)
-    con.execute("DELETE FROM subscriptions WHERE enrollment_id=? AND month=? AND status='cancelled'", (e["id"], ym))
     d = q.get("discount") or {}
     sub_id = con.execute(
         """INSERT INTO subscriptions(student_id, enrollment_id, month, tariff, lessons, per_lesson, credit_lessons,
@@ -487,27 +486,24 @@ def pay_subscription(con, sub_id: int, user, method: str = "cash", amount=None) 
 
 
 def cancel_subscription(con, sub_id: int, user, refund: bool = False, comment: str = "") -> None:
-    """Отмена абонемента. Оплаченное остаётся на балансе ребёнка, а с refund=True возвращается родителю (возврат)."""
+    """Внутренняя отмена с сохранением средств; возврат оформляется через subcancel."""
     sub = con.execute("SELECT * FROM subscriptions WHERE id = ?", (sub_id,)).fetchone()
     if not sub:
         raise ApiError("Абонемент не найден", 404)
     from . import money
+    if sub["status"] == "cancelled":
+        raise ApiError("Абонемент уже отменён")
+    if refund:
+        raise ApiError("Возврат оформляется отдельно с согласованием Юлии и проверкой исходного способа оплаты")
     paid = money.balance(con, sub["student_id"])["covered"].get(sub_id, 0)
-    if refund and not (comment or "").strip():
-        raise ApiError("Напишите, почему возврат и как вернули деньги")
     con.execute("UPDATE subscriptions SET status='cancelled' WHERE id=?", (sub_id,))
     con.execute("""UPDATE attendance SET resolved=NULL, resolved_month=NULL
                    WHERE student_id=? AND resolved='credit' AND resolved_month=?
                      AND (? IS NULL OR group_id = (SELECT group_id FROM enrollments WHERE id = ?))""",
                 (sub["student_id"], sub["month"], sub["enrollment_id"], sub["enrollment_id"]))
     money.reconcile(con, sub["student_id"])
-    if refund and paid:
-        try:
-            money.refund(con, sub["student_id"], min(paid, money.balance(con, sub["student_id"])["deposit"]), user, comment)
-        except ValueError as e:
-            raise ApiError(str(e))
     log(con, sub["student_id"], f"Счёт на {logic.month_label(sub['month'])} отменён, пропуски возвращены"
-        + ((" (оплата возвращена родителю)" if refund else " (оплата осталась на балансе)") if paid else ""), user, "payment")
+        + (" (оплата осталась на балансе)" if paid else ""), user, "payment")
 
 
 # ---------- карточки ----------
@@ -832,7 +828,7 @@ def student_detail(con, sid: int) -> dict:
     cur = logic.month_of(today())
     out = {
         "student": s, "family": fam, "parents": parents, "siblings": siblings, "group": grp,
-        "subscriptions": subs, "vacations": vacs,
+        "subscriptions": subs, "subscription_refunds": __import__("crm.subcancel",fromlist=["listing"]).listing(con,sid), "vacations": vacs,
         "enrollments": [e | {"age_warn": "" if e["program_id"] else logic.age_warning(s["birth"], e["group_age"], e["branch_name"])} for e in enrollments_of(con, sid)],
         "trial_age_warn": logic.age_warning(s["birth"], grp["age"], _branch_name(con, grp["branch_id"])) if grp and not grp["program_id"] and s["funnel"] == "sales" else "", "makeups": makeups, "history": hist,
         "counters": absence_counters(con, sid) if s["funnel"] == "members" else None,
