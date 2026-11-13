@@ -1076,6 +1076,8 @@ def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpai
                                 WHERE e.group_id=? AND (e.active=1 OR e.end_date > ?) AND (e.start_date = '' OR e.start_date <= ?)
                                   AND s.funnel='members' AND s.stage != 'left' AND s.archived=0
                                 ORDER BY s.name""", (group_id, day, day)).fetchall():
+            if any(row['id']==s['id'] for row in rows):
+                continue
             if s["weekdays"] and d.weekday() not in logic.parse_weekdays(s["weekdays"]):
                 continue
             a = con.execute("SELECT status, resolved, warned, note FROM attendance WHERE student_id=? AND date=? AND group_id=?",

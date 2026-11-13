@@ -86,6 +86,8 @@ def main():
         if total==12600:
             try:subcomposition.unit_rate(stored[0]);raise AssertionError('invented rounded date price')
             except sv.ApiError:pass
+    con.execute("INSERT INTO enrollments(student_id,group_id,tariff,active,created_at,start_date) VALUES (?,?,'included',1,'2026-11-14','2026-11-14')",(sid,sat))
+    assert sum(r['id']==sid for r in sv.journal(con,sat,'2026-11-14',True)['rows'])==1
     # An explicit off-schedule date is still planned in calendar/day/month journals.
     parts[1]['dates']=['2026-11-13','2026-11-21','2026-11-28']
     checked=subcomposition.preview(con,subid,components=parts)
