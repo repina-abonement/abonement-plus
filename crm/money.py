@@ -36,6 +36,11 @@ CREATE TABLE IF NOT EXISTS payments (
 CREATE INDEX IF NOT EXISTS idx_pay_student ON payments(student_id);
 CREATE INDEX IF NOT EXISTS idx_pay_date ON payments(paid_at);
 
+CREATE TABLE IF NOT EXISTS cancelled_service_charges (
+        subscription_id INTEGER PRIMARY KEY REFERENCES subscriptions(id), student_id INTEGER NOT NULL,
+        month TEXT NOT NULL, amount INTEGER NOT NULL, lessons INTEGER NOT NULL,
+        created_at TEXT NOT NULL, cutoff TEXT NOT NULL);
+
 CREATE TABLE IF NOT EXISTS discounts (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -58,7 +63,7 @@ def init(con):
         con.execute("ALTER TABLE payments ADD COLUMN batch TEXT NOT NULL DEFAULT ''")
     cols = {r[1] for r in con.execute("PRAGMA table_info(subscriptions)")}
     for col in ("kind TEXT NOT NULL DEFAULT 'month'", "discount_name TEXT NOT NULL DEFAULT ''",
-                "discount_amount INTEGER NOT NULL DEFAULT 0"):
+                "discount_amount INTEGER NOT NULL DEFAULT 0", "ledger_managed INTEGER NOT NULL DEFAULT 0"):
         if col.split()[0] not in cols:
             con.execute(f"ALTER TABLE subscriptions ADD COLUMN {col}")
     if not con.execute("SELECT 1 FROM discounts WHERE rule='first_on_trial_day'").fetchone():
@@ -80,7 +85,7 @@ def init(con):
                    created_at)
                    SELECT s.student_id, s.price, 'unknown', COALESCE(s.paid_at, s.created_at), 'Оплата до реестра платежей',
                           'Система', 1, s.id, COALESCE(s.paid_at, s.created_at) FROM subscriptions s
-                   WHERE s.status='paid' AND s.price > 0
+                   WHERE s.status='paid' AND s.price > 0 AND s.ledger_managed=0
                      {erp_guard}
                      AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.subscription_id = s.id)""")
 
@@ -97,17 +102,24 @@ def reconcile(con, sid: int) -> None:
         nodeadline.auto_exit(con, sid, "оплатил")
 
 
+def obligations(con,sid):
+    """Активные абонементы и сохранённая стоимость прошедшего периода отменённых."""
+    return [dict(r) for r in con.execute("""SELECT id,month,price,status,paid_at,0 AS retained,id AS ordering FROM subscriptions
+        WHERE student_id=? AND status!='cancelled'
+        UNION ALL SELECT -subscription_id,month,amount,'paid',NULL,1,subscription_id
+        FROM cancelled_service_charges WHERE student_id=? ORDER BY month,ordering""",(sid,sid))]
+
+
 def _reconcile(con, sid: int) -> None:
     pool = con.execute("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE student_id=? AND cancelled=0", (sid,)).fetchone()[0]
-    for sub in con.execute("""SELECT id, price, status, paid_at FROM subscriptions WHERE student_id=? AND status != 'cancelled'
-                              ORDER BY month, id""", (sid,)).fetchall():
+    for sub in obligations(con,sid):
         if pool >= sub["price"]:
             pool -= sub["price"]
-            if sub["status"] != "paid":
+            if not sub["retained"] and sub["status"] != "paid":
                 con.execute("UPDATE subscriptions SET status='paid', paid_at=? WHERE id=?", (_now(), sub["id"]))
         else:
             pool = 0 if pool < 0 else pool
-            if sub["status"] == "paid":
+            if not sub["retained"] and sub["status"] == "paid":
                 con.execute("UPDATE subscriptions SET status='invoiced', paid_at=NULL WHERE id=?", (sub["id"],))
 
 
@@ -117,9 +129,8 @@ def balance(con, sid: int, today: date | None = None) -> dict:
     cur = logic.month_of(today)
     paid = con.execute("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE student_id=? AND cancelled=0", (sid,)).fetchone()[0]
     pool, debt, upcoming, per_sub = paid, 0, 0, {}
-    for sub in con.execute("""SELECT id, month, price FROM subscriptions WHERE student_id=? AND status != 'cancelled'
-                              ORDER BY month, id""", (sid,)).fetchall():
-        covered = min(pool, sub["price"])
+    for sub in obligations(con,sid):
+        covered = min(max(0,pool), sub["price"])
         pool -= covered
         per_sub[sub["id"]] = covered
         left = sub["price"] - covered
@@ -238,6 +249,10 @@ def ledger(con, sid: int) -> list[dict]:
         label = "Разовое занятие" if x["kind"] == "single" else f"Абонемент {logic.month_label(x['month']).lower()}" + (f", {x['gname']}" if x["gname"] else "")
         ev.append({"at": x["created_at"], "kind": "sub", "ord": (x["month"], 0, x["id"]), "text": label + (" (отменён)" if x["status"] == "cancelled" else ""),
                    "amount": -x["price"], "cancelled": x["status"] == "cancelled"})
+    for charge in con.execute('SELECT * FROM cancelled_service_charges WHERE student_id=?',(sid,)):
+        ev.append({'at':charge['created_at'],'kind':'retained','ord':(charge['month'],0,charge['subscription_id']),
+                   'text':f"Стоимость прошедшего периода до {charge['cutoff']} по отменённому абонементу #{charge['subscription_id']}",
+                   'amount':-charge['amount'],'cancelled':False})
     ev.sort(key=lambda e: ((e["at"] or "")[:16], e.pop("ord")))  # в одну минуту: сначала счёт, потом оплата по нему
     rest = 0
     for e in ev:

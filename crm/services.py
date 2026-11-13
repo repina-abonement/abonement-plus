@@ -434,6 +434,8 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
         raise ApiError(f"На {logic.month_label(ym)} в группу {e['group_name']} уже есть абонемент")
     q = quote or quote_for(con, sid, ym, e["id"], discount_id, tariff, excluded_dates, credit_requested)
     d = q.get("discount") or {}
+    from . import money
+    available_before = max(0, money.balance(con,sid)['deposit'])
     sub_id = con.execute(
         """INSERT INTO subscriptions(student_id, enrollment_id, month, tariff, lessons, per_lesson, credit_lessons,
            late_fee, price, status, created_at, discount_name, discount_amount) VALUES (?,?,?,?,?,?,?,?,?,'invoiced',?,?,?)""",
@@ -444,6 +446,8 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
                             "deadline":q["program"]["deadline"],"lessons":q["lessons_paid"],"components":q["components"]}} if q.get("program") else None
     con.execute("UPDATE subscriptions SET excluded_dates=?, program_selection=? WHERE id=?",
                 (json.dumps(q.get("excluded_dates", [])), json.dumps(snapshot) if snapshot else "", sub_id))
+    schedule_snapshot = q.get('components') or [{'group_id':e['group_id'],'rate':1,'dates':q['dates']}]
+    con.execute('UPDATE subscriptions SET lesson_schedule=?,ledger_managed=1 WHERE id=?',(json.dumps(schedule_snapshot),sub_id))
     from . import money
     money.reconcile(con, sid)  # депозит сам закрывает новый счёт
     for aid in q["credit_absence_ids"]:
@@ -453,8 +457,18 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
         extra += ", индивидуально исключены даты: " + ", ".join(q["excluded_dates"])
     if d:
         extra += f", скидка «{d['name']}» −{d['amount']} ₽"
-    log(con, sid, f"Выставлен счёт на {q['month_label']}, {e['group_name']}: {q['total']} ₽ ({q['lessons_paid']} занятий{extra})",
-        user, "payment")
+    covered = max(0,money.balance(con,sid)['covered'].get(sub_id,0))
+    from_balance = min(available_before,covered)
+    details=f"{q['month_label']}, {e['group_name']}: {q['total']} ₽ ({q['lessons_paid']} занятий{extra})"
+    if q['total']>0 and from_balance==q['total']:
+        message=f"Абонемент оплачен средствами с баланса: {details}. Списано с баланса {from_balance} ₽"
+    elif q['total']>0 and covered==q['total']:
+        message=f"Абонемент оплачен ранее внесёнными средствами: {details}"
+    elif from_balance:
+        message=f"Оформлен абонемент: {details}. С баланса списано {from_balance} ₽, осталось доплатить {max(0,q['total']-covered)} ₽"
+    else:
+        message=f"Выставлен счёт на {details}"
+    log(con,sid,message,user,'payment')
     from . import tasks
     tasks.schedule_renewal(con, sid)
     return {"id": sub_id, "quote": q}
@@ -503,7 +517,7 @@ def cancel_subscription(con, sub_id: int, user, refund: bool = False, comment: s
                 (sub["student_id"], sub["month"], sub["enrollment_id"], sub["enrollment_id"]))
     money.reconcile(con, sub["student_id"])
     log(con, sub["student_id"], f"Счёт на {logic.month_label(sub['month'])} отменён, пропуски возвращены"
-        + (" (оплата осталась на балансе)" if paid else ""), user, "payment")
+        + (" (оплата сохранена в учёте)" if paid else ""), user, "payment")
 
 
 # ---------- карточки ----------
@@ -828,7 +842,7 @@ def student_detail(con, sid: int) -> dict:
     cur = logic.month_of(today())
     out = {
         "student": s, "family": fam, "parents": parents, "siblings": siblings, "group": grp,
-        "subscriptions": subs, "subscription_refunds": __import__("crm.subcancel",fromlist=["listing"]).listing(con,sid), "vacations": vacs,
+        "subscriptions": subs, "subscription_refunds": __import__("crm.subcancel",fromlist=["listing"]).listing(con,sid), "subscription_cancellations": __import__("crm.subcancel",fromlist=["cancellations"]).cancellations(con,sid), "vacations": vacs,
         "enrollments": [e | {"age_warn": "" if e["program_id"] else logic.age_warning(s["birth"], e["group_age"], e["branch_name"])} for e in enrollments_of(con, sid)],
         "trial_age_warn": logic.age_warning(s["birth"], grp["age"], _branch_name(con, grp["branch_id"])) if grp and not grp["program_id"] and s["funnel"] == "sales" else "", "makeups": makeups, "history": hist,
         "counters": absence_counters(con, sid) if s["funnel"] == "members" else None,

@@ -1,5 +1,7 @@
 """Отмена, резерв, исходный способ возврата, согласование и подтверждённый чек."""
 import tempfile
+import json
+from datetime import date
 from pathlib import Path
 from crm import db, money, services as sv, subcancel, fiscal
 
@@ -8,6 +10,7 @@ APPROVAL={'approved_by_yulia':True,'approval':'2026-11-13','reason':'Тесто�
 
 
 def main():
+    subcancel.today=lambda:date(2026,11,13)
     with tempfile.TemporaryDirectory() as tmp:
         con=db.connect(str(Path(tmp)/'test.sqlite3'));db.init_db(con)
         branch=con.execute("INSERT INTO branches(name) VALUES ('Тест')").lastrowid
@@ -16,6 +19,7 @@ def main():
             sid=sv.create_student(con,{'name':'Тест Примеров','birth':'2020-01-01','parent_name':'Анна','phone':'+7900000'+str(con.execute('SELECT COUNT(*) FROM students').fetchone()[0]).zfill(4),'group_id':gid,'funnel':'members'},ADMIN)
             eid=sv.enrollments_of(con,sid)[0]['id']
             sub=con.execute("INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,per_lesson,price,status,created_at) VALUES (?,?,?,'fixed',8,125,1000,'invoiced','2026-11-13')",(sid,eid,month)).lastrowid
+            con.execute('UPDATE subscriptions SET lesson_schedule=? WHERE id=?',(json.dumps([{'group_id':gid,'rate':1,'dates':['2026-12-'+str(d).zfill(2) for d in (1,4,8,11,15,18,22,25)]}]),sub))
             pid=money.add_payment(con,sid,paid,method,ADMIN,subscription_id=sub) if paid else None
             return sid,sub,pid,eid
         def denied(fn):

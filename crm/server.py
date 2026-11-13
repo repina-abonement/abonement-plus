@@ -1914,7 +1914,7 @@ def cancel(con, h, user, body, q, sub):
 @route("GET", "/api/subscriptions/{sub}/cancel-preview", role="operator")
 def cancel_preview(con,h,user,body,q,sub):
     from . import subcancel
-    return subcancel.preview(con,int(sub))
+    return subcancel.preview(con,int(sub),q.get("effective_date"))
 
 
 @route("POST", "/api/subscription-refunds/{rid}/confirm", role="payments:view")
