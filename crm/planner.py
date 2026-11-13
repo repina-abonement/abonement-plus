@@ -291,8 +291,9 @@ def stop_recurring(con, rid: int, user: dict):
     if not can_view_plan(con, user, r["assignee_id"]):
         raise PlanError("Нет доступа")
     con.execute("UPDATE recurring SET active=0 WHERE id=?", (rid,))
-    con.execute("UPDATE tasks SET status='cancelled' WHERE recur_id=? AND status='open' AND due_at>?",
-                (rid, date.today().isoformat()))
+    con.execute("""UPDATE tasks SET status='cancelled', done_at=?, done_by=?
+                   WHERE recur_id=? AND kind='plan' AND status='open' AND substr(due_at,1,10)>=?""",
+                (_now().isoformat(timespec='minutes'),user.get('name',''),rid,date.today().isoformat()))
 
 
 def _out(con, r) -> dict:
@@ -365,7 +366,8 @@ def task_detail(con, tid: int, user: dict) -> dict:
     if repeat:
         repeat["weekdays"] = [int(x) for x in repeat["weekdays"].split(",") if x]
     return {"task": task, "repeat": repeat, "staff": visible_staff(con, user),
-            "can_assign": can_manage(con, user), "can_edit": row["kind"] == "plan" and row["status"] == "open"}
+            "can_assign": can_manage(con, user), "can_edit": row["kind"] == "plan" and row["status"] == "open",
+            "can_stop_repeat": bool(recurring and recurring['active'] and can_view_plan(con,user,recurring['assignee_id']))}
 
 
 def edit_task(con, tid: int, user: dict, data: dict) -> dict:

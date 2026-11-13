@@ -77,7 +77,7 @@ async function renderPlanner(page) {
   } else if (C.tab === "recurring") {
     body = p.recurring.length ? `<div class="list">${p.recurring.map((r) => `<div class="list-row"><div class="grow">🔁 <b>${esc(r.title)}</b>
       <div class="small muted">${esc(r.assignee)} · ${r.rule_label}${r.rule === "weekly" ? ": " + r.weekdays.split(",").map((x) => WD_SHORT[+x]).join(", ") : r.rule === "monthly" ? `, ${r.monthday} числа` : r.rule === "yearly" ? `, ${r.yearday.slice(3)}.${r.yearday.slice(0, 2)}` : ""}${r.time ? ` в ${r.time}` : ""}</div></div>
-      <button class="btn sm" data-rstop="${r.id}">Остановить</button></div>`).join("")}</div>` : `<div class="muted">Повторяющихся дел нет. Поставьте задачу и выберите «Повтор»: например, «Купить воду» каждую неделю</div>`;
+      <button class="btn sm" data-rstop="${r.id}">Убрать будущие повторы</button></div>`).join("")}</div>` : `<div class="muted">Повторяющихся дел нет. Поставьте задачу и выберите «Повтор»: например, «Купить воду» каждую неделю</div>`;
   } else if (C.tab === "team") {
     const staffOpts = p.staff.filter((u) => u.role !== "coach").map((u) => `<option value="${u.id}" ${u.id === p.controller ? "selected" : ""}>${esc(u.name)}</option>`).join("");
     body = `${S.user.role === "admin" ? `<div class="row" style="max-width:520px;align-items:flex-end;margin-bottom:12px"><div class="field"><label>Контролёр задач команды</label><select id="pl-ctrl"><option value="">Только я</option>${staffOpts}</select></div></div>` : ""}
@@ -108,10 +108,7 @@ async function renderPlanner(page) {
     if (note === null) return;
     try { await api("POST", `/api/planner/tasks/${b.dataset.tret}/return`, { note }); toast("Задача вернулась сотруднику"); render(); } catch (e) { fail(e); }
   }));
-  page.querySelectorAll("[data-rstop]").forEach((b) => (b.onclick = async () => {
-    if (!confirm("Остановить повтор? Прошлые задачи останутся в истории")) return;
-    try { await api("POST", `/api/planner/recurring/${b.dataset.rstop}/stop`, {}); render(); } catch (e) { fail(e); }
-  }));
+  page.querySelectorAll("[data-rstop]").forEach(b=>b.onclick=()=>stopPlannerRepeat(b.dataset.rstop,b,render));
   page.querySelectorAll("[data-ub]").forEach((i) => (i.onchange = async () => {
     try { await api("PUT", `/api/users/${i.dataset.ub}/birth`, { birth: i.value }); toast("Сохранено"); } catch (e) { fail(e); }
   }));
@@ -229,6 +226,17 @@ async function renderWeek(box) {
   }));
 }
 
+async function stopPlannerRepeat(id, button, done) {
+  if (!confirm("Остановить серию и убрать её незакрытые задачи на сегодня и будущие даты? Выполненные задачи и прошлые просроченные останутся в истории.")) return;
+  button.disabled=true;
+  try {
+    await api("POST", `/api/planner/recurring/${id}/stop`, {});
+    toast("Повторы остановлены. Выполненные задачи сохранены");
+    await done();
+  } catch(e) { fail(e); }
+  finally { if(button.isConnected) button.disabled=false; }
+}
+
 async function showPlannerTask(t) {
   if (!t) return;
   openDrawer(`<div class="task-copyable"><h2>${esc(t.title)}</h2><div class="small muted">${esc(dtWhen(t.due_at))} · ${esc(t.assignee || "")}</div><div class="row" style="align-items:center;justify-content:space-between;gap:10px;margin-top:14px"><h3>Описание</h3>${t.note ? `<button type="button" class="btn sm" data-copy-task-description>Скопировать описание</button>` : ""}</div><div class="task-copyable" style="white-space:pre-wrap">${esc(t.note || "Описание не добавлено")}</div><h3>Комментарии</h3>${t.returned_note ? `<p style="white-space:pre-wrap"><b>Возврат на доработку:</b> ${esc(t.returned_note)}</p>` : ""}${t.result ? `<p style="white-space:pre-wrap"><b>Результат:</b> ${esc(t.result)}</p>` : ""}${!t.returned_note && !t.result ? `<p class="muted">Комментариев пока нет</p>` : ""}</div><div data-task-settings="${t.id}"></div>`);
@@ -243,7 +251,18 @@ async function loadPlannerTaskSettings(id) {
   let d;
   try { d = await api("GET", `/api/planner/tasks/${id}`); }
   catch (e) { if (host.isConnected) host.textContent = e.message; return; }
-  if (!host.isConnected || !d.can_edit) return;
+  if (!host.isConnected) return;
+  if (d.can_stop_repeat) {
+    const controls=document.createElement('div');
+    controls.className='row';controls.style.marginTop='16px';
+    controls.innerHTML='<button type="button" class="btn" data-stop-task-repeat>Убрать будущие повторы</button>';
+    host.before(controls);
+    const button=controls.querySelector('button');
+    button.onclick=()=>stopPlannerRepeat(d.repeat.id,button,()=>{closeDrawer();return render()});
+  } else if(d.repeat && d.repeat.id && !d.repeat.active) {
+    const note=document.createElement('p');note.className='small muted';note.textContent='Повторы остановлены';host.before(note);
+  }
+  if (!d.can_edit) return;
   const t = d.task, repeat = d.repeat || {}, weekdays = repeat.weekdays || [];
   host.innerHTML = `<details class="planner-task-settings" style="margin-top:24px;padding-top:12px;border-top:1px solid var(--line)">
     <summary class="small muted" style="cursor:pointer">Настройки задачи</summary>
