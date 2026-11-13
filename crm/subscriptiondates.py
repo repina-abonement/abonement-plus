@@ -76,3 +76,17 @@ def correct_period(con, sub_id, data, user):
     con.execute("UPDATE subscriptions SET valid_from=?,valid_until=? WHERE id=?", (start, end, sub_id))
     sv.log(con, row["student_id"], f"Срок абонемента #{sub_id}: {previous[0] or 'не указан'} / {previous[1] or 'не указан'} -> {start} / {end or 'не указано'}", user, "system")
     sv.audit(con, user, "subscription.period", str(sub_id))
+
+
+def guard_duplicate(con, sid, gid, ym, chosen=None):
+    """Не допускаем повторную продажу через другую запись той же группы."""
+    from .services import ApiError
+    rows=con.execute("""SELECT x.id,x.month,x.lesson_schedule FROM subscriptions x
+        LEFT JOIN enrollments e ON e.id=x.enrollment_id JOIN students s ON s.id=x.student_id
+        WHERE x.student_id=? AND x.status!='cancelled' AND COALESCE(x.kind,'month')='month'
+        AND COALESCE(e.group_id,s.group_id)=?""",(sid,gid))
+    for row in rows:
+        saved=json.loads(row['lesson_schedule'] or '[]')
+        overlap=bool(chosen and isinstance(saved,list) and any((c['group_id'],day) in chosen for c in saved for day in c.get('dates',[])))
+        if row['month']==ym or overlap:
+            raise ApiError(f"На этот период уже есть абонемент №{row['id']}. Откройте существующий абонемент — повторно вносить его не нужно")

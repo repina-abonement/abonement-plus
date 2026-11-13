@@ -44,7 +44,7 @@ def main():
     check(paylinks.sync(con, date.today()) == 1, "Оплата по ссылке зачислена, чужие платежи не трогаем")
     check(paylinks.sync(con, date.today()) == 0, "Повторно не зачисляется")
     p = con.execute("SELECT amount, method, confirmed, comment FROM payments WHERE student_id=?", (a,)).fetchone()
-    check(tuple(p)[:3] == (5400, "online", 1) and "777" in p[3], "В оплатах ученика: 5400 ₽ онлайн, подтверждено, номер платежа PayKeeper")
+    check(tuple(p)[:3] == (5400, "paykeeper", 1) and "777" in p[3], "В оплатах ученика: 5400 ₽ онлайн, подтверждено, номер платежа PayKeeper")
     check(money.balance(con, a)["deposit"] == 5400, "Деньги на балансе ребёнка")
     check(paylinks.listing(con, a)[0]["status"] == "paid", "Ссылка помечена оплаченной")
     print("Ссылка на конкретный абонемент")
@@ -60,6 +60,13 @@ def main():
     st = con.execute("SELECT status FROM subscriptions WHERE id=?", (inv["id"],)).fetchone()[0]
     sp = con.execute("SELECT subscription_id FROM payments WHERE comment LIKE '%778%'").fetchone()[0]
     check(st == "paid" and sp == inv["id"] and r2["url"], "Оплатили по ссылке: абонемент сам стал оплаченным")
+    from crm import subscriptiondates
+    try:
+        subscriptiondates.guard_duplicate(con,a,g,'2026-12')
+        raise AssertionError('Повторный абонемент не заблокирован')
+    except sv.ApiError:
+        pass
+    check(con.execute('SELECT COUNT(*) FROM subscriptions WHERE student_id=?',(a,)).fetchone()[0]==1, 'Повтор после PayKeeper не создаёт второй абонемент')
     print("ok")
 
 

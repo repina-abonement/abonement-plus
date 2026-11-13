@@ -428,6 +428,8 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
     from . import smart
     smart.require(con, sid, "sale")  # почта родителя нужна для чека PayKeeper
     e = _pick_enrollment(con, sid, enrollment_id)
+    from . import subscriptiondates
+    subscriptiondates.guard_duplicate(con,sid,e["group_id"],ym)
     existing = con.execute("SELECT 1 FROM subscriptions WHERE enrollment_id=? AND month=? AND status != 'cancelled'",
                            (e["id"], ym)).fetchone()
     if existing:

@@ -1,9 +1,10 @@
 """Explicit retrospective entry, with factual dates/amounts and no external payment or message calls."""
+import math
 import hashlib
 import json
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
-from . import services as sv, smart, money, logic, schedule, closures, program
+from . import services as sv, smart, money, logic, schedule, closures, program, pricing
 
 
 def init(con):
@@ -22,8 +23,8 @@ def now():
     return datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None)
 
 
-def options(con,sid,group_id=None,ym=None,tariff='fixed',ofp_group_id=None,start_date=None):
-    sv.get_student_row(con,sid)
+def options(con,sid,group_id=None,ym=None,tariff='fixed',ofp_group_id=None,start_date=None, paid_date=None, trial_date=None):
+    student=sv.get_student_row(con,sid)
     groups=[dict(r) for r in con.execute('''SELECT g.id,g.name,g.branch_id,g.weekdays,g.time,g.day_times,g.program_id,g.lesson_kind,g.active,
         b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.is_makeup=0 ORDER BY b.name,g.name''')]
     result={'groups':groups,'components':[]}
@@ -32,7 +33,8 @@ def options(con,sid,group_id=None,ym=None,tariff='fixed',ofp_group_id=None,start
     except (ValueError,TypeError):raise sv.ApiError('Выберите месяц абонемента')
     g=next((g for g in groups if g['id']==int(group_id)),None)
     if not g or g['lesson_kind']=='ofp':raise sv.ApiError('Выберите основную группу абонемента')
-    selected=[(g,1)]
+    pr=pricing.prices_for(con,ym)
+    selected=[(g,pr.get(tariff,pr['fixed']))]
     if g['program_id']:
         if tariff not in ('arena_only','pkg'):raise sv.ApiError('Выберите тариф сборной')
         rates=program.prices_for(con,g['program_id'],ym)
@@ -42,12 +44,42 @@ def options(con,sid,group_id=None,ym=None,tariff='fixed',ofp_group_id=None,start
             if not ofp:raise sv.ApiError('Выберите группу ОФП')
             selected.append((ofp,rates['ofp']))
     elif tariff not in ('fixed','flex'):raise sv.ApiError('Выберите тариф абонемента')
+    on=_day(paid_date,'дату оплаты') if paid_date else now().date()
+    had=con.execute("SELECT 1 FROM subscriptions WHERE student_id=? AND status!='cancelled' AND kind='month'",(sid,)).fetchone()
+    trial_day=trial_date or (student['trial_at'] or '')[:10]
+    newcomer=not had and trial_day[:7]==ym and on.strftime('%Y-%m')==ym
+    deadline=pricing.deadline(con,ym)
+    late_pct=pr['late_pct']
+    if g['program_id']:
+        prog=program.program_of_group(con,g['id'])
+        deadline=program._deadline(ym,prog['deadline_day'])
+        late_pct=rates['late_pct']
+    late=on>deadline and not newcomer
+    discounts=money.auto_discounts(con,sid,on)
+    if trial_day==on.isoformat() and not had and not g['program_id']:
+        first=con.execute("SELECT * FROM discounts WHERE rule='first_on_trial_day' AND active=1").fetchone()
+        if first:discounts.append(dict(first))
+    if g['program_id']:discounts=[d for d in discounts if d['rule']=='sibling']
+    discount=None if late else money.best_discount(discounts)
+    result['calculation']={'discount_percent':int(discount['percent']) if discount else 0,
+        'discount_name':discount['name'] if discount else '', 'late_pct':float(late_pct) if late else 0,
+        'unit_late':bool(g['program_id']), 'deadline':deadline.isoformat()}
     for group,rate in selected:
         closed=closures.closed_dates(con,group['id'],ms,me)
         days=[d.isoformat() for d in schedule.month_dates(con,group,'',ym)
               if d.isoformat() not in closed and (not start_date or d.isoformat()>=start_date)]
         result['components'].append({'group_id':group['id'],'group':group['name'],'rate':rate,'dates':days})
     return result
+
+
+def calculated_total(quoted, chosen):
+    rules=quoted['calculation'];base=0
+    for component in quoted['components']:
+        rate=component['rate']
+        if rules['unit_late']:rate=math.ceil(rate*(1+rules['late_pct']/100)-1e-9)
+        base+=sum((component['group_id'],day) in chosen for day in component['dates'])*rate
+    if not rules['unit_late']:base+=pricing.late_fee(base,rules['late_pct'])
+    return base-math.floor(base*rules['discount_percent']/100+1e-9)
 
 
 def _day(raw,label):
@@ -100,17 +132,21 @@ def record(con,sid,data,user):
             sale_day=_day(data.get('sale_date'),'дату продажи');paid_day=_day(data.get('paid_date') or sale_day.isoformat(),'дату оплаты')
             if trial and sale_day<at.date():raise sv.ApiError('Дата продажи раньше указанного ПУ. Проверьте последовательность событий')
             ym=str(data.get('month') or '');gid=int(data.get('group_id') or 0);tariff=str(data.get('tariff') or 'fixed')
-            price=int(data.get('price') or 0);amount=int(data.get('amount') or 0);method=str(data.get('method') or '')
-            if price<=0 or amount<0 or amount>price:raise sv.ApiError('Укажите фактическую стоимость и оплату не больше стоимости')
+            amount=int(data.get('amount') or 0);method=str(data.get('method') or '')
             if amount and paid_day<sale_day:raise sv.ApiError('Дата оплаты раньше продажи. Предоплату учтите отдельным существующим платежом')
             if amount and method not in ('cash','card','sbp','transfer','card_branch','sber_qr_branch','tochka_qr_link'):raise sv.ApiError('Онлайн-оплату нельзя дублировать вручную: используйте уже учтённый платёж')
-            quoted=options(con,sid,gid,ym,tariff,data.get('ofp_group_id'))
+            quoted=options(con,sid,gid,ym,tariff,data.get('ofp_group_id'),paid_date=paid_day.isoformat(),trial_date=at.date().isoformat() if at else None)
             available={(c['group_id'],d) for c in quoted['components'] for d in c['dates']}
             chosen=set()
             for item in data.get('lessons') or []:
                 chosen.add((int(item['group_id']),str(item['date'])))
             if not chosen or not chosen<=available:raise sv.ApiError('Отметьте фактически проданные занятия по расписанию')
             if trial and (trial_gid,at.date().isoformat()) in chosen:raise sv.ApiError('Пробное не включается в оплаченные занятия абонемента')
+            price=calculated_total(quoted,chosen)
+            if price<=0 or amount<0 or amount>price:raise sv.ApiError('Оплата не должна превышать рассчитанную стоимость абонемента')
+            if data.get('price') is not None and int(data['price'])!=price:raise sv.ApiError('Стоимость изменилась. Обновите расчёт по календарю')
+            from . import subscriptiondates
+            subscriptiondates.guard_duplicate(con,sid,gid,ym,chosen)
             g=con.execute('SELECT * FROM groups WHERE id=?',(gid,)).fetchone()
             eid=con.execute('SELECT id FROM enrollments WHERE student_id=? AND group_id=? AND active=1',(sid,gid)).fetchone()
             if not eid:

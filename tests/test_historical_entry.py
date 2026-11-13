@@ -15,6 +15,8 @@ class HistoricalEntryTest(unittest.TestCase):
         self.sid=sv.create_student(self.con,{'name':'Даниил','parent_name':'Екатерина','phone':'+79000000001'},self.user)
         b=self.con.execute("INSERT INTO branches(name) VALUES ('Тест')").lastrowid
         self.gid=self.con.execute("INSERT INTO groups(branch_id,name,weekdays,time,age,trial_ok) VALUES (?,'Тест Чт/Вс','3,6','16:45','3–8',1)",(b,)).lastrowid
+        self.con.execute("UPDATE price_list SET fixed=1250")
+        self.con.execute("UPDATE discounts SET percent=20 WHERE rule='first_on_trial_day'")
         self.data={'request_id':'test-entry-0001','record_trial':True,'sold':True,'child_name':'Даниил Примеров','birth':'2020-01-01',
             'parent_name':'Екатерина','phone':'+79000000001','email':'test@example.invalid','trial_date':'2026-11-12','trial_time':'16:45',
             'trial_group_id':self.gid,'sale_date':'2026-11-12','paid_date':'2026-11-12','month':'2026-11','group_id':self.gid,
@@ -57,6 +59,17 @@ class HistoricalEntryTest(unittest.TestCase):
         from crm import tasks
         tasks.run(self.con,datetime(2026,11,13,15),send=False)
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM tasks WHERE student_id=? AND kind IN ('trial_confirm','trial_today','how_was')",(self.sid,)).fetchone()[0],0)
+    def test_calendar_calculation_and_duplicate_enrollment(self):
+        quote=historyentry.options(self.con,self.sid,self.gid,'2026-11','fixed',paid_date='2026-11-12',trial_date='2026-11-12')
+        chosen={(x['group_id'],x['date']) for x in self.data['lessons']}
+        self.assertEqual(historyentry.calculated_total(quote,chosen),5000)
+        self.assertEqual(historyentry.calculated_total(quote,set(sorted(chosen)[:2])),2000)
+        with self.assertRaises(sv.ApiError):historyentry.record(self.con,self.sid,{**self.data,'price':1},self.user)
+        result=historyentry.record(self.con,self.sid,self.data,self.user)
+        self.con.execute("UPDATE enrollments SET active=0 WHERE student_id=?",(self.sid,))
+        with self.assertRaises(sv.ApiError):historyentry.record(self.con,self.sid,{**self.data,'request_id':'another-entry-0002','record_trial':False,'amount':0,'price':None},self.user)
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM subscriptions WHERE student_id=?',(self.sid,)).fetchone()[0],1)
+
     def test_price_does_not_change_to_todays_tariff(self):
         r=historyentry.record(self.con,self.sid,{**self.data,'amount':1000},self.user)
         pricing.reprice(self.con,r['subscription_id'])
