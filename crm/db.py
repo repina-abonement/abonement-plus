@@ -325,6 +325,7 @@ def init_db(con: sqlite3.Connection):
     perms.init(con)
     from . import offlineplanner
     offlineplanner.provision_requested(con)
+    offlineplanner.share_victoria_existing(con)
     pricing.init(con)
     from . import mypay, coachreport
     mypay.init(con)

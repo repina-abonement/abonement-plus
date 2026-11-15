@@ -62,3 +62,35 @@ def provision_requested(con):
         con.execute('RELEASE offline_staff_setup')
     except BaseException:
         con.execute('ROLLBACK TO offline_staff_setup');con.execute('RELEASE offline_staff_setup');raise
+
+
+def share_victoria_existing(con):
+    """Открытые личные задачи Виктории: перенос, не копирование; история закрытых сохраняется."""
+    import re,json
+    from . import services as sv
+    key='offline_planner_victoria_open_v1'
+    if comms.get(con,key):return
+    people=[dict(r) for r in con.execute("SELECT * FROM users WHERE active=1 AND role='operator' AND is_offline_admin=1")]
+    def find(required):
+        return [r for r in people if required.issubset(set(re.findall(r'[а-яё]+',r['name'].casefold())))]
+    source=find({'виктория','сафронова'});peer=find({'татьяна','данейкина'})
+    if len(source)!=1 or len(peer)!=1 or source[0]['id']==peer[0]['id']:return
+    uid=source[0]['id'];peer_id=peer[0]['id'];pool=pool_id(con)
+    con.execute('SAVEPOINT offline_victoria_tasks')
+    try:
+        series=[r[0] for r in con.execute("SELECT id FROM recurring WHERE created_by_id=? AND assignee_id IN (?,?) AND active=1",(uid,uid,peer_id))]
+        rows=[dict(r) for r in con.execute("""SELECT id,assignee_id,recur_id FROM tasks WHERE kind='plan' AND status='open'
+                   AND student_id IS NULL AND family_id IS NULL AND created_by_id=? AND assignee_id IN (?,?)""",(uid,uid,peer_id))]
+        # Exceptions from these same series must move as well, even if edited by another authorized person.
+        if series:
+            placeholders=','.join('?' for _ in series)
+            extra=[dict(r) for r in con.execute(f"SELECT id,assignee_id,recur_id FROM tasks WHERE kind='plan' AND status='open' AND student_id IS NULL AND family_id IS NULL AND recur_id IN ({placeholders}) AND assignee_id IN (?,?)",(*series,uid,peer_id))]
+            rows=list({r['id']:r for r in rows+extra}.values())
+        for row in rows:con.execute('UPDATE tasks SET assignee_id=? WHERE id=?',(pool,row['id']))
+        for rid in series:con.execute('UPDATE recurring SET assignee_id=? WHERE id=?',(pool,rid))
+        evidence={'source_user':uid,'peer_user':peer_id,'pool':pool,'tasks':rows,'recurring':series}
+        sv.audit(con,None,'planner.offline_share_victoria',json.dumps(evidence,ensure_ascii=False))
+        comms.put(con,key,json.dumps({'tasks':len(rows),'recurring':len(series),'source':uid}))
+        con.execute('RELEASE offline_victoria_tasks')
+    except BaseException:
+        con.execute('ROLLBACK TO offline_victoria_tasks');con.execute('RELEASE offline_victoria_tasks');raise
