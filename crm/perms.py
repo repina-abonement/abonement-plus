@@ -94,6 +94,7 @@ def view_of(user: dict) -> dict:
 
 
 def title(user: dict) -> str:
+    if user.get('role')=='operator' and user.get('is_offline_admin'):return 'Офлайн-администратор'
     rs = roles_of(user)
     main = next((TITLES[r] for r in ("owner", "senior", "operator", "coach", "lawyer", "trainee") if r in rs), "")
     if "promoter" in rs:

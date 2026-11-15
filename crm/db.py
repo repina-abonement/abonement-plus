@@ -323,6 +323,8 @@ def init_db(con: sqlite3.Connection):
     from . import singles
     singles.init(con)
     perms.init(con)
+    from . import offlineplanner
+    offlineplanner.provision_requested(con)
     pricing.init(con)
     from . import mypay, coachreport
     mypay.init(con)

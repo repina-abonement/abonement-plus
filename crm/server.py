@@ -76,7 +76,7 @@ def current_user(con, handler) -> dict | None:
     tok = c.get("crm_session")
     if not tok:
         return None
-    r = con.execute("""SELECT u.id, u.login, u.name, u.role, u.is_senior, u.is_promoter, u.is_journal, s.created_at FROM sessions s
+    r = con.execute("""SELECT u.id, u.login, u.name, u.role, u.is_senior, u.is_offline_admin, u.is_promoter, u.is_journal, s.created_at FROM sessions s
                        JOIN users u ON u.id=s.user_id WHERE s.token=? AND u.active=1""", (tok.value,)).fetchone()
     if not r:
         return None
@@ -196,19 +196,19 @@ def change_password(con, h, user, body, q):
 def users_list(con, h, user, body, q):
     ucols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
     ph = "phone" if "phone" in ucols else "'' AS phone"
-    out = [dict(r) for r in con.execute(f"""SELECT id, login, name, role, is_senior, is_promoter, is_journal, active, sip_number, tg_username, {ph}, photo_at
-                                            FROM users ORDER BY id""")]
+    out = [dict(r) for r in con.execute(f"""SELECT id, login, name, role, is_senior, is_offline_admin, is_promoter, is_journal, active, sip_number, tg_username, {ph}, photo_at
+                                            FROM users WHERE role!='offline_pool' ORDER BY id""")]
     return [u | {"title": perms.title(u)} for u in out]
 
 
 def set_post(con, uid: int, post: str | None, promoter=None):
     """Должность из Настроек: owner | senior | operator | coach | lawyer (+ отметка промоутера)."""
-    roles = {"owner": ("admin", 0), "senior": ("operator", 1), "operator": ("operator", 0), "coach": ("coach", 0), "lawyer": ("lawyer", 0), "trainee": ("trainee", 0)}
+    roles = {"owner": ("admin", 0), "senior": ("operator", 1), "operator": ("operator", 0), "offline_admin": ("operator", 0), "coach": ("coach", 0), "lawyer": ("lawyer", 0), "trainee": ("trainee", 0)}
     if post:
         if post not in roles:
             raise ApiError("Неизвестная должность")
         role, senior = roles[post]
-        con.execute("UPDATE users SET role=?, is_senior=? WHERE id=?", (role, senior, uid))
+        con.execute("UPDATE users SET role=?, is_senior=?, is_offline_admin=? WHERE id=?", (role, senior, int(post=='offline_admin'), uid))
         if role == "trainee":
             con.execute("UPDATE users SET is_promoter=0, is_journal=0 WHERE id=?", (uid,))
         if role != "coach":
@@ -1658,6 +1658,7 @@ def planner_stop(con, h, user, body, q, rid):
 
 @route("PUT", "/api/planner/settings", role="planner:full")
 def planner_settings(con, h, user, body, q):
+    if 'offline_planner_viewer' in body and user['role']!='admin':raise ApiError('Доступ к общему Планеру настраивает руководитель',403)
     px(planner.save_settings, con, body)
     return {"ok": True}
 
@@ -2432,7 +2433,7 @@ def my_pay(con, h, user, body, q):
     from . import mypay
     who = user
     if q.get("user_id") and perms.can(user, "pay", "full"):
-        r = con.execute("SELECT id, name, role, is_senior, is_promoter FROM users WHERE id=?", (int(q["user_id"]),)).fetchone()
+        r = con.execute("SELECT id, name, role, is_senior, is_offline_admin, is_promoter FROM users WHERE id=?", (int(q["user_id"]),)).fetchone()
         if not r:
             raise ApiError("Сотрудник не найден", 404)
         who = dict(r)

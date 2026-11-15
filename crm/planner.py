@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
-from . import comms
+from . import comms,offlineplanner
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS recurring (
@@ -40,6 +40,7 @@ class PlanError(ValueError):
 
 def init(con):
     con.executescript(SCHEMA)
+    offlineplanner.init(con)
     rcols = {r[1] for r in con.execute("PRAGMA table_info(recurring)")}
     if "end_date" not in rcols:
         con.execute("ALTER TABLE recurring ADD COLUMN end_date TEXT NOT NULL DEFAULT ''")
@@ -70,6 +71,7 @@ def can_manage(con, user: dict) -> bool:
 
 
 def can_view_plan(con, user: dict, uid: int) -> bool:
+    if uid==offlineplanner.pool_id(con):return offlineplanner.can_view(con,user)
     if user["role"] == "trainee":
         return uid == user["id"]
     if uid == user["id"] or user["role"] == "admin":
@@ -78,10 +80,15 @@ def can_view_plan(con, user: dict, uid: int) -> bool:
         "SELECT 1 FROM users WHERE id=? AND role!='admin'", (uid,)).fetchone())
 
 
+def can_change_plan(con,user,uid):
+    if uid==offlineplanner.pool_id(con):return offlineplanner.can_edit(con,user)
+    return can_view_plan(con,user,uid)
+
+
 def visible_staff(con, user: dict) -> list[dict]:
-    return [dict(row) for row in con.execute(
-        "SELECT id, name, role, birth FROM users WHERE active=1 ORDER BY role, name")
-        if can_view_plan(con, user, row["id"])]
+    rows=[dict(row) for row in con.execute("SELECT id,name,role,birth FROM users WHERE active=1 ORDER BY role,name") if can_view_plan(con,user,row['id'])]
+    if offlineplanner.can_view(con,user):rows.append({'id':offlineplanner.pool_id(con),'name':'Офлайн-администраторы — общий планер','role':'offline_pool','birth':''})
+    return rows
 
 
 def _due(d: str, t: str) -> str:
@@ -100,9 +107,10 @@ def add(con, user: dict, data: dict) -> int:
     if not title:
         raise PlanError("Напишите, что нужно сделать")
     who = int(data.get("assignee_id") or user["id"])
-    if not can_view_plan(con, user, who):
+    if offlineplanner.member(con,user) and who==user['id']:who=offlineplanner.pool_id(con)
+    if not can_change_plan(con, user, who):
         raise PlanError("Ставить задачи другим может администратор или контролёр")
-    if not con.execute("SELECT 1 FROM users WHERE id=? AND active=1", (who,)).fetchone():
+    if who!=offlineplanner.pool_id(con) and not con.execute("SELECT 1 FROM users WHERE id=? AND active=1", (who,)).fetchone():
         raise PlanError("Сотрудник не найден")
     d = data.get("date") or date.today().isoformat()
     due = _due(d, data.get("time") or "")
@@ -205,7 +213,10 @@ def week(con, user: dict, start: str, who: int | None = None, *, rolling: bool =
     d0 = date.fromisoformat(start)
     if not rolling:
         d0 -= timedelta(days=d0.weekday())
-    uid = who if who and can_view_plan(con, user, who) else user["id"]
+    if who and not can_view_plan(con,user,who):
+        if who==offlineplanner.pool_id(con):raise PlanError('Нет доступа к этому Планеру')
+        who=None
+    uid = who or (offlineplanner.pool_id(con) if offlineplanner.member(con,user) else user['id'])
     today = date.today()
     for i in range(7):  # повторы на эту неделю (не дальше двух месяцев вперёд)
         d = d0 + timedelta(days=i)
@@ -223,8 +234,8 @@ def week(con, user: dict, start: str, who: int | None = None, *, rolling: bool =
            AND substr(due_at,1,10)<? ORDER BY due_at""",
         (uid, min(today.isoformat(), d0.isoformat())))]
     name = (con.execute("SELECT name FROM users WHERE id=?", (uid,)).fetchone() or [""])[0]
-    return {"start": d0.isoformat(), "days": days, "overdue": overdue, "user_id": uid, "user_name": name,
-            "can_manage": user["role"] != "trainee" and (user["role"] == "admin" or bool(user.get("is_senior"))),
+    return {"start": d0.isoformat(), "days": days, "overdue": overdue, "user_id": uid, "user_name": name,"can_edit":can_change_plan(con,user,uid),
+            "can_manage": len(visible_staff(con,user))>1,
             "staff": visible_staff(con, user)}
 
 
@@ -243,7 +254,7 @@ def move(con, tid: int, user: dict, new_date: str):
     t = con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
     if not t:
         raise PlanError("Задача не найдена")
-    if not can_view_plan(con, user, t["assignee_id"]):
+    if not can_change_plan(con, user, t["assignee_id"]):
         raise PlanError("Переносить можно свои задачи")
     try:
         date.fromisoformat(new_date)
@@ -256,7 +267,7 @@ def move(con, tid: int, user: dict, new_date: str):
 
 def reopen(con, tid: int, user: dict):
     t = con.execute("SELECT assignee_id FROM tasks WHERE id=?", (tid,)).fetchone()
-    if not t or not can_view_plan(con, user, t["assignee_id"]):
+    if not t or not can_change_plan(con, user, t["assignee_id"]):
         raise PlanError("Нет доступа")
     con.execute("UPDATE tasks SET status='open', done_at=NULL WHERE id=?", (tid,))
 
@@ -265,8 +276,8 @@ def cancel(con, tid: int, user: dict):
     t = con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
     if not t:
         raise PlanError("Задача не найдена")
-    if not can_view_plan(con, user, t["assignee_id"]) or not (
-        can_manage(con, user) or t["created_by_id"] == user["id"]
+    if not can_change_plan(con, user, t["assignee_id"]) or not (
+        can_manage(con, user) or t["created_by_id"] == user["id"] or (t['assignee_id']==offlineplanner.pool_id(con) and offlineplanner.can_edit(con,user))
     ):
         raise PlanError("Убрать задачу может тот, кто её поставил")
     con.execute("UPDATE tasks SET status='cancelled', done_at=?, done_by=? WHERE id=?",
@@ -278,7 +289,7 @@ def return_task(con, tid: int, user: dict, note: str):
     if not can_manage(con, user):
         raise PlanError("Возвращать задачи может контролёр или администратор")
     t = con.execute("SELECT due_at, assignee_id FROM tasks WHERE id=?", (tid,)).fetchone()
-    if not t or not can_view_plan(con, user, t["assignee_id"]):
+    if not t or not can_change_plan(con, user, t["assignee_id"]):
         raise PlanError("Нет доступа")
     con.execute("UPDATE tasks SET status='open', done_at=NULL, returned_note=?, due_at=? WHERE id=?",
                 ((note or "Вернули на доработку").strip()[:300], f"{date.today().isoformat()}T{t['due_at'][11:16]}", tid))
@@ -288,7 +299,7 @@ def stop_recurring(con, rid: int, user: dict):
     r = con.execute("SELECT created_by_id, assignee_id FROM recurring WHERE id=?", (rid,)).fetchone()
     if not r:
         raise PlanError("Повтор не найден")
-    if not can_view_plan(con, user, r["assignee_id"]):
+    if not can_change_plan(con, user, r["assignee_id"]):
         raise PlanError("Нет доступа")
     con.execute("UPDATE recurring SET active=0 WHERE id=?", (rid,))
     con.execute("""UPDATE tasks SET status='cancelled', done_at=?, done_by=?
@@ -305,18 +316,19 @@ def view(con, user: dict) -> dict:
     """Страница «Планер»: мои дела по датам, что я поручила, повторы, команда (для контролёра)."""
     generate(con)
     today = date.today().isoformat()
+    mine_id=offlineplanner.pool_id(con) if offlineplanner.member(con,user) else user['id']
     mine = [_out(con, r) for r in con.execute(
-        "SELECT * FROM tasks WHERE kind IN ('plan','bday') AND status='open' AND assignee_id=? ORDER BY due_at", (user["id"],))]
+        "SELECT * FROM tasks WHERE kind IN ('plan','bday') AND status='open' AND assignee_id=? ORDER BY due_at", (mine_id,))]
     given = [_out(con, r) for r in con.execute(
         """SELECT * FROM tasks WHERE kind IN ('plan','bday') AND created_by_id=? AND assignee_id!=? AND (status='open' OR done_at>=?)
            ORDER BY status='open' DESC, due_at""", (user["id"], user["id"], (date.today() - timedelta(days=7)).isoformat()))
         if can_view_plan(con, user, r["assignee_id"])]
-    recurring = [dict(r) | {"rule_label": RULES[r["rule"]]} for r in con.execute(
+    recurring = [dict(r) | {"rule_label": RULES[r["rule"]],"can_edit":can_change_plan(con,user,r['assignee_id'])} for r in con.execute(
         """SELECT r.*, u.name AS assignee FROM recurring r JOIN users u ON u.id=r.assignee_id
             WHERE r.active=1 ORDER BY u.name, r.title""") if can_view_plan(con, user, r["assignee_id"])]
     out = {"mine": mine, "given": given, "recurring": recurring, "today": today,
            "can_manage": user["role"] != "trainee" and (user["role"] == "admin" or bool(user.get("is_senior"))),
-           "controller": controller(con), "rules": RULES,
+           "controller": controller(con), "rules": RULES,"offline_viewer":comms.get(con,offlineplanner.VIEWER_KEY) if user['role']=='admin' else None,
            "staff": visible_staff(con, user)}
     if out["can_manage"]:
         out["team"] = team(con, user)
@@ -341,6 +353,7 @@ def team(con, user: dict) -> list[dict]:
 
 
 def save_settings(con, data: dict):
+    if offlineplanner.VIEWER_KEY in data:comms.put(con,offlineplanner.VIEWER_KEY,offlineplanner.validate_viewer(con,data[offlineplanner.VIEWER_KEY]))
     if CONTROLLER_KEY in data:
         comms.put(con, CONTROLLER_KEY, str(data[CONTROLLER_KEY] or ""))
     if BDAY_LEAD_KEY in data:
@@ -366,8 +379,8 @@ def task_detail(con, tid: int, user: dict) -> dict:
     if repeat:
         repeat["weekdays"] = [int(x) for x in repeat["weekdays"].split(",") if x]
     return {"task": task, "repeat": repeat, "staff": visible_staff(con, user),
-            "can_assign": can_manage(con, user), "can_edit": row["kind"] == "plan" and row["status"] == "open",
-            "can_stop_repeat": bool(recurring and recurring['active'] and can_view_plan(con,user,recurring['assignee_id']))}
+            "can_assign": can_manage(con, user), "can_edit": row["kind"] == "plan" and row["status"] == "open" and can_change_plan(con,user,row['assignee_id']),
+            "can_stop_repeat": bool(recurring and recurring['active'] and can_change_plan(con,user,recurring['assignee_id']))}
 
 
 def edit_task(con, tid: int, user: dict, data: dict) -> dict:
@@ -392,7 +405,7 @@ def edit_task(con, tid: int, user: dict, data: dict) -> dict:
         who = int(data.get("assignee_id") or t["assignee_id"])
     except (ValueError, TypeError):
         raise PlanError("Проверьте дату, время и исполнителя")
-    if not can_view_plan(con, user, who) or not con.execute("SELECT 1 FROM users WHERE id=? AND active=1", (who,)).fetchone():
+    if not can_change_plan(con, user, who) or (who!=offlineplanner.pool_id(con) and not con.execute("SELECT 1 FROM users WHERE id=? AND active=1", (who,)).fetchone()):
         raise PlanError("Нельзя назначить задачу этому сотруднику")
     scope = data.get("scope") or "one"
     if scope not in ("one", "future"):

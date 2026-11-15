@@ -2756,8 +2756,8 @@ async function renderPriceList(box) {
 }
 
 /* должности для Настроек → Сотрудники (perms.py) */
-const POSTS = [["owner", "Руководитель"], ["senior", "Старший администратор"], ["operator", "Администратор"], ["coach", "Тренер"], ["lawyer", "Юрист"], ["trainee", "Стажёр (только Планер)"]];
-const postOf = (u) => u.role === "admin" ? "owner" : u.role === "operator" ? (u.is_senior ? "senior" : "operator") : u.role;
+const POSTS = [["owner", "Руководитель"], ["senior", "Старший администратор"], ["operator", "Администратор"], ["offline_admin", "Офлайн-администратор"], ["coach", "Тренер"], ["lawyer", "Юрист"], ["trainee", "Стажёр (только Планер)"]];
+const postOf = (u) => u.role === "admin" ? "owner" : u.role === "operator" ? (u.is_offline_admin ? "offline_admin" : u.is_senior ? "senior" : "operator") : u.role;
 
 /* ---------- старт ---------- */
 async function boot() {

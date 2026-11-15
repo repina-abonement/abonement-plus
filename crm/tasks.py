@@ -590,9 +590,9 @@ def edit(con, tid: int, data: dict, user: dict) -> dict:
     client = bool(t["student_id"] or t["family_id"])
     if t["kind"] == "plan" and not client:
         from . import planner
-        if not planner.can_view_plan(con, user, t["assignee_id"]):
+        if not planner.can_change_plan(con, user, t["assignee_id"]):
             raise comms.CommsError("Нет доступа к задаче")
-        if data.get("assignee_id") and not planner.can_view_plan(con, user, int(data["assignee_id"])):
+        if data.get("assignee_id") and not planner.can_change_plan(con, user, int(data["assignee_id"])):
             raise comms.CommsError("Нет доступа к планеру сотрудника")
     sets, args, notes = [], [], []
     if client and t["assignee_id"] is not None:
@@ -753,7 +753,7 @@ def complete(con, tid: int, user: dict, result: str = "") -> None:
     client = bool(t["student_id"] or t["family_id"])
     if t["kind"] == "plan" and not client:
         from . import planner
-        if not planner.can_view_plan(con, user, t["assignee_id"]):
+        if not planner.can_change_plan(con, user, t["assignee_id"]):
             raise comms.CommsError("Нет доступа к задаче")
     if t["kind"] == "request_data":
         from . import smart

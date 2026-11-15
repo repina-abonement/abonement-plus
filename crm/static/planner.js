@@ -77,10 +77,11 @@ async function renderPlanner(page) {
   } else if (C.tab === "recurring") {
     body = p.recurring.length ? `<div class="list">${p.recurring.map((r) => `<div class="list-row"><div class="grow">🔁 <b>${esc(r.title)}</b>
       <div class="small muted">${esc(r.assignee)} · ${r.rule_label}${r.rule === "weekly" ? ": " + r.weekdays.split(",").map((x) => WD_SHORT[+x]).join(", ") : r.rule === "monthly" ? `, ${r.monthday} числа` : r.rule === "yearly" ? `, ${r.yearday.slice(3)}.${r.yearday.slice(0, 2)}` : ""}${r.time ? ` в ${r.time}` : ""}</div></div>
-      <button class="btn sm" data-rstop="${r.id}">Убрать будущие повторы</button></div>`).join("")}</div>` : `<div class="muted">Повторяющихся дел нет. Поставьте задачу и выберите «Повтор»: например, «Купить воду» каждую неделю</div>`;
+      ${r.can_edit===false?'':`<button class="btn sm" data-rstop="${r.id}">Убрать будущие повторы</button>`}</div>`).join("")}</div>` : `<div class="muted">Повторяющихся дел нет. Поставьте задачу и выберите «Повтор»: например, «Купить воду» каждую неделю</div>`;
   } else if (C.tab === "team") {
     const staffOpts = p.staff.filter((u) => u.role !== "coach").map((u) => `<option value="${u.id}" ${u.id === p.controller ? "selected" : ""}>${esc(u.name)}</option>`).join("");
     body = `${S.user.role === "admin" ? `<div class="row" style="max-width:520px;align-items:flex-end;margin-bottom:12px"><div class="field"><label>Контролёр задач команды</label><select id="pl-ctrl"><option value="">Только я</option>${staffOpts}</select></div></div>` : ""}
+      ${S.user.role==='admin'?`<div class="field" style="max-width:520px"><label>Общий Планер офлайн-администраторов — кто ещё может смотреть</label><select id="pl-offline-viewer"><option value="">Только руководитель и офлайн-администраторы</option>${p.staff.filter(u=>u.role==='operator').map(u=>`<option value="${u.id}" ${String(p.offline_viewer)===String(u.id)?'selected':''}>${esc(u.name)}</option>`).join('')}</select><span class="small muted">Выберите Варю. Доступ только на просмотр.</span></div>`:''}
       ${p.team.length ? p.team.map((u) => `<section class="panel" style="padding:12px 14px;margin-bottom:10px">
         <div class="team-head"><b>${esc(u.name)}</b>
           ${u.overdue.length ? `<span class="pill red">просрочено ${u.overdue.length}</span>` : ""}<span class="pill">сегодня ${u.today.length}</span><span class="pill green">сделано ${u.done_today}</span></div>
@@ -88,7 +89,7 @@ async function renderPlanner(page) {
       </section>`).join("") : `<div class="muted">У команды на сегодня всё сделано 🎉</div>`}`;
   } else if (C.tab === "bdays") {
     body = `<div class="small muted" style="margin-bottom:10px">За ${7} дней до дня рождения контролёру придёт задача «Создать чат в Telegram для сбора денег», в сам день «Поздравить»</div>
-      <div class="list">${p.staff.map((u) => `<div class="list-row"><span class="grow">${esc(u.name)}</span><input type="date" data-ub="${u.id}" value="${esc(u.birth || "")}" style="flex:0 0 170px"></div>`).join("")}</div>`;
+      <div class="list">${p.staff.filter(u=>u.role!=='offline_pool').map((u) => `<div class="list-row"><span class="grow">${esc(u.name)}</span><input type="date" data-ub="${u.id}" value="${esc(u.birth || "")}" style="flex:0 0 170px"></div>`).join("")}</div>`;
   }
   page.innerHTML = `<div class="page-head"><h2 class="grow">Планер</h2><button class="btn primary" id="pl-add">+ Задача</button></div>
     <div id="pl-form"></div>
@@ -112,6 +113,7 @@ async function renderPlanner(page) {
   page.querySelectorAll("[data-ub]").forEach((i) => (i.onchange = async () => {
     try { await api("PUT", `/api/users/${i.dataset.ub}/birth`, { birth: i.value }); toast("Сохранено"); } catch (e) { fail(e); }
   }));
+  if($('#pl-offline-viewer'))$('#pl-offline-viewer').onchange=async e=>{try{await api('PUT','/api/planner/settings',{offline_planner_viewer:e.target.value});toast('Доступ сохранён');render()}catch(err){fail(err)}};
   if ($("#pl-ctrl")) $("#pl-ctrl").onchange = async (e) => {
     try { await api("PUT", "/api/planner/settings", { planner_controller: e.target.value }); toast("Контролёр назначен"); render(); } catch (err) { fail(err); }
   };
@@ -121,12 +123,12 @@ async function renderPlanner(page) {
 /* ---------- неделя колонками, как в Weeek ---------- */
 const PL_DAY = new Intl.DateTimeFormat("ru-RU", { weekday: "long", day: "numeric", month: "long" });
 function pcard(t) {
-  const done = t.status === "done";
-  return `<article class="pcard ${done ? "done" : ""} ${t.priority ? "hot" : ""}" draggable="${done ? "false" : "true"}" data-pc="${t.id}" role="button" tabindex="0" aria-label="${esc(t.title)}">
-    <label class="pcheck"><input type="checkbox" aria-label="Задача выполнена" data-pdone="${t.id}" ${done ? "checked" : ""}></label>
+  const done = t.status === "done",readOnly=Boolean(S.planner.readOnly);
+  return `<article class="pcard ${done ? "done" : ""} ${t.priority ? "hot" : ""}" draggable="${done||readOnly ? "false" : "true"}" data-pc="${t.id}" role="button" tabindex="0" aria-label="${esc(t.title)}">
+    <label class="pcheck"><input type="checkbox" aria-label="Задача выполнена" data-pdone="${t.id}" ${done ? "checked" : ""} ${readOnly?'disabled':''}></label>
     <div class="grow"><div class="ptitle">${t.priority ? "🔥 " : ""}${esc(t.title)}</div>
     </div>
-    ${done ? "" : `<button class="pmove" data-pmove="${t.id}" title="Перенести на другой день">📅</button>`}
+    ${done||readOnly ? "" : `<button class="pmove" data-pmove="${t.id}" title="Перенести на другой день">📅</button>`}
   </article>`;
 }
 
@@ -135,6 +137,8 @@ async function renderWeek(box) {
   if (!C.start) C.start = S.meta.today;
   const w = await api("GET", `/api/planner/week?rolling=1&start=${C.start}${C.user ? "&user=" + C.user : ""}`);
   const end = addDays(w.start, 6), today = S.meta.today;
+  C.readOnly=w.can_edit===false;C.user=w.user_id;
+  const addButton=$('#pl-add');if(addButton)addButton.disabled=C.readOnly;
   const visible = (t) => C.status === "all" || t.status === C.status;
   const overdue = w.overdue.filter(visible);
   const days = w.days.map((day) => ({ ...day, tasks: day.tasks.filter(visible) }));
@@ -161,7 +165,7 @@ async function renderWeek(box) {
       <div class="col-body ov-body">${overdue.map(pcard).join("")}</div></section>` : ""}
     <div class="board week-board">${days.map((d) => `<section class="col ${d.date === today ? "is-today" : ""} ${d.date < today ? "past" : ""}" data-day="${d.date}">
       <div class="col-head"><h3>${PL_DAY.format(new Date(d.date + "T00:00"))}</h3><span class="count">${d.tasks.length}</span></div>
-      <button type="button" class="btn sm pquick" data-pq="${d.date}">+ Добавить задачу</button>
+      <button type="button" class="btn sm pquick" data-pq="${d.date}" ${C.readOnly?'disabled':''}>+ Добавить задачу</button>
       <div class="col-body">${groups(d.tasks)}</div>
     </section>`).join("")}</div>
     <input type="date" id="pmove-date" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px">`;
