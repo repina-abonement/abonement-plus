@@ -102,7 +102,7 @@ EDITABLE_KEYS = {"sipuni_user", "sipuni_secret", "tg_token", "tg_relay", "max_to
                  "yc_api_key", "yc_folder", "ai_enabled", "ai_mode", "ai_model", "ai_min_talk", "lead_notify"}
 DEFAULT_GREETING = ("Здравствуйте! Вы написали в нашу школу. Задайте вопрос здесь, администратор скоро ответит.\n"
                     "Чтобы мы сразу нашли вашу карточку, нажмите кнопку «Поделиться номером» ниже")
-CHANNEL_LABELS = {"telegram": "Telegram", "max": "MAX", "whatsapp": "WhatsApp", "wazzup_max": "MAX", "wazzup_telegram": "Telegram школы",
+CHANNEL_LABELS = {"telegram": "Telegram-бот", "max": "MAX", "whatsapp": "WhatsApp", "wazzup_max": "MAX", "wazzup_telegram": "Telegram через Wazzup",
                   "tg_archive": "Telegram (до CRM)"}
 KIND_LABELS = {"image": "📷 Фото", "file": "📎 Файл", "audio": "🎤 Голосовое", "video": "🎬 Видео",
                "sticker": "Стикер", "contact": "👤 Контакт", "other": "Вложение"}
@@ -236,6 +236,7 @@ def save_settings(con, data: dict):
         v = (v or "").strip() if isinstance(v, str) else str(v)
         if k in SECRET_KEYS and v.startswith("••••"):
             continue  # не меняли
+        if get(con,k)==v:continue
         put(con, k, v)
         if k in ("tg_token", "tg_relay"):
             put(con, "tg_ok", "0")
@@ -1312,6 +1313,15 @@ def counts(con) -> dict:
     }
 
 
+def preferred_telegram_reply(con,current,conversations):
+    """Only a provably identical recipient may default from bot to Wazzup."""
+    if current['channel']!='telegram' or not status(con)['wazzup_telegram']:return current['id']
+    phone=current.get('phone_norm') or ''
+    peer=telegram_user_id(current['channel'],current.get('external_id') or '')
+    candidates=[c for c in conversations if c['channel']=='wazzup_telegram' and c.get('family_id')==current.get('family_id') and current.get('family_id') and ((phone and phone==c.get('phone_norm')) or (peer and peer==telegram_user_id(c['channel'],c.get('external_id') or '')))]
+    return candidates[0]['id'] if len(candidates)==1 else current['id']
+
+
 def conversation(con, cid: int, mark_read: bool = True) -> dict:
     r = con.execute("SELECT * FROM conversations WHERE id=?", (cid,)).fetchone()
     if not r:
@@ -1329,7 +1339,7 @@ def conversation(con, cid: int, mark_read: bool = True) -> dict:
         convs_label = _conv_out(con, r)["channel_label"]
         convs, items = [_conv_out(con, r)], [{"type": "msg", "channel": r["channel"], "conversation_id": cid,
                                               "channel_label": convs_label, **m} for m in msgs]
-    return {"conversation": _conv_out(con, r), "messages": msgs, "history": items,
+    return {"conversation": _conv_out(con, r), "messages": msgs, "history": items, "preferred_reply_id":preferred_telegram_reply(con,dict(r),convs),
             "targets": [{"id": c["id"], "channel":c["channel"], "label": c["channel_label"] + (" · " + c["title"] if c["title"] else "")} for c in convs
                         if c["channel"] != "tg_archive"]}
 

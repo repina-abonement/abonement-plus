@@ -369,6 +369,8 @@ async function renderTaskSettings(box, users) {
     <div class="field"><label>Текст после пробного</label><textarea data-t="msg_after" rows="2">${esc(v.msg_after)}</textarea></div>
     <div class="field"><label>Предложение ближайших пробных (кнопка «📅 Предложить ближайшие ПУ» в переписке). {slots}: список дат</label><textarea data-t="msg_trial_offer" rows="4">${esc(v.msg_trial_offer || "")}</textarea></div>
     <div class="small muted" style="margin-bottom:10px">В текст подставятся: {child} имя ребёнка, {date} дата, {time} время, {place} филиал, {admin} чат с администратором. Сообщение уходит туда, где семья уже переписывалась со школой (Telegram, MAX или WhatsApp). Если переписки нет, в задаче будет видно «не ушло», и Оля напишет вручную</div>
+    <h3>Скрипты по филиалам</h3><p class="small muted">Время и дата берутся из записи. {hello}: приветствие по времени отправки, {channel}: канал филиала в Telegram или MAX.</p>
+    ${Object.entries(d.branch_templates||{}).map(([key,label])=>`<details><summary>${esc(label)}</summary><textarea data-t="${key}" rows="15">${esc(v[key]||'')}</textarea></details>`).join('')}
     <h3>Правила школы: текст и каналы</h3>
     <p class="small muted">Комплект выбирается по группе ребёнка. Малыши используют каналы Неба. MAX и Telegram настраиваются отдельно.</p>
     <button type="button" class="btn sm" id="rules-import">Загрузить настройки из файла</button><input type="file" id="rules-import-file" accept=".json" hidden>

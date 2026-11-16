@@ -38,8 +38,11 @@ def main():
     assert planner.task_detail(con,tid,tatyana)['can_edit']
     try:planner.task_detail(con,tid,stranger);raise AssertionError('private task leaked')
     except planner.PlanError:pass
+    # Opening the week legitimately generates the remaining recurring dates.
+    # Check migration idempotence against that updated state, not the pre-week count.
+    after_week=[tuple(r) for r in con.execute('SELECT * FROM tasks ORDER BY id')]
     op.share_victoria_existing(con)
-    assert con.execute('SELECT count(*) FROM tasks').fetchone()[0]==count
+    assert [tuple(r) for r in con.execute('SELECT * FROM tasks ORDER BY id')]==after_week
     planner.generate(con,date.today()+timedelta(days=3))
     assert con.execute("SELECT count(*) FROM tasks WHERE recur_id=? AND status='open' AND assignee_id!=?",(rid,pool)).fetchone()[0]==0
     print('PASS existing open tasks and repeats visible to Tatyana, unchanged IDs/content/history, no copies, future shared instances, identity guard, outsider privacy, idempotence')

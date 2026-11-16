@@ -122,10 +122,12 @@ def catalog(con,sid=None,channel='',gid=None):
     items=[]
     titles={'msg_after':'Как прошло пробное','msg_missed':'Пропущенный звонок','msg_booked':'Записан на пробное','msg_day_before':'Напоминание о пробном завтра','msg_2h_before':'Напоминание о пробном сегодня'}
     for key,title in titles.items():
-        text=tasks.booked_text(con,s,channel) if key=='msg_booked' and t else tasks.setting(con,key)
+        reason=''
+        try:text=(tasks.booked_text(con,s,channel) if key=='msg_booked' else tasks.render_template(con,key,s,channel)) if t else tasks.setting(con,key)
+        except comms.CommsError as error:text='';reason=str(error)
         for field,value in values.items():text=text.replace('{'+field+'}',value)
         missing=re.findall(r'\{[a-z_]+\}',text)
-        reason='Сначала выберите ребёнка' if not s and missing else 'В карточке не указаны данные пробного занятия' if missing else ''
+        reason=reason or ('Сначала выберите ребёнка' if not s and missing else 'В карточке не указаны данные пробного занятия' if missing else '')
         items.append({'key':key,'title':title,'text':text,'reason':reason})
     if sid:items.insert(0,rules(con,sid,channel,gid))
     return {'items':items}

@@ -95,12 +95,7 @@ def send(con,cid,aid,user,caption=''):
             if not ext:raise comms.CommsError('MAX не подтвердил отправку')
             demo=False
         else:
-            payload=comms._wz_destination(con,conv)|{'contentUri':media_url,'crmMessageId':aid}
-            payload['phone' if conv['external_id'].startswith('phone:') else 'chatId']=conv['external_id'][6:] if conv['external_id'].startswith('phone:') else conv['external_id']
-            if caption:payload['text']=caption
-            response=comms.wz_call(con,'POST','message',payload) or {};ext=response.get('messageId')
-            if not ext:raise comms.CommsError('Wazzup не подтвердил отправку')
-            demo=False
+            return _send_wazzup_bundle(con,conv,r,user,caption,kind,media_url)
     except Exception as error:
         detail=str(error) if isinstance(error,comms.CommsError) else 'Не удалось подтвердить отправку файла'
         mid=comms.add_message(con,cid,'out',caption or r['filename'],kind=kind,media='attachment:'+aid,user_name=user.get('name',''),status='error',error=detail)
@@ -127,3 +122,28 @@ def _max_upload_document(con,r):
     token=(data or {}).get('token')
     if not isinstance(token,str) or not token:raise comms.CommsError('MAX не подтвердил загрузку документа')
     return token
+
+
+def _send_wazzup_bundle(con,conv,attachment,user,text,kind,url):
+    """Wazzup v3 accepts contentUri OR text. Record each confirmed part separately."""
+    aid=attachment['id'];cid=conv['id']
+    destination=comms._wz_destination(con,conv)
+    destination['phone' if conv['external_id'].startswith('phone:') else 'chatId']=conv['external_id'][6:] if conv['external_id'].startswith('phone:') else conv['external_id']
+    result=comms.wz_call(con,'POST','message',destination|{'contentUri':url,'crmMessageId':aid}) or {}
+    external=result.get('messageId')
+    if not external:raise comms.CommsError('Wazzup не подтвердил отправку файла')
+    mid=comms.add_message(con,cid,'out',attachment['filename'],kind=kind,media='attachment:'+aid,user_name=user.get('name',''),external_id=external,status='sent')
+    text_mid=None
+    if text:
+        try:
+            result=comms.wz_call(con,'POST','message',destination|{'text':text,'crmMessageId':aid+'-text'}) or {}
+            external_text=result.get('messageId')
+            if not external_text:raise comms.CommsError('Wazzup не подтвердил отправку текста')
+            text_mid=comms.add_message(con,cid,'out',text,user_name=user.get('name',''),external_id=external_text,status='sent')
+        except Exception as error:
+            detail=str(error) if isinstance(error,comms.CommsError) else 'Нет подтверждения отправки текста'
+            comms.add_message(con,cid,'out',text,user_name=user.get('name',''),status='error',error=detail)
+            con.execute("UPDATE chat_attachments SET status='partial',message_id=?,error=? WHERE id=?",(mid,detail,aid))
+            return {'ok':False,'partial':True,'file_sent':True,'uncertain':True,'id':mid,'error':'Файл отправлен, отправка текста не подтверждена. Проверьте доставку текста перед повтором'}
+    con.execute("UPDATE chat_attachments SET status='sent',message_id=? WHERE id=?",(mid,aid))
+    return {'ok':True,'id':mid,'text_id':text_mid,'demo':False}

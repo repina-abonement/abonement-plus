@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, timedelta
 
-from . import comms
+from . import comms, trialscripts
 
 KINDS = {
     "trial_confirm": ("Напомнить о пробном и подтвердить", "📅"),
@@ -44,7 +44,7 @@ DEFAULT_TEMPLATES = {
     "msg_day_before": ("Здравствуйте! Напоминаем: завтра, {date}, в {time} пробное занятие по футболу, {place}.\n"
                        "Ребёнок: {child}. Подтвердите, пожалуйста, что придёте 🙌"),
     "msg_2h_before": "Ждём вас сегодня в {time} ⚽",  # Юлия, 01.11: коротко, остальное уже в сообщении после записи
-    "msg_after": "Здравствуйте! Как прошло пробное занятие? Поделитесь, пожалуйста, впечатлениями, нам важно ваше мнение 🙂",
+    "msg_after": trialscripts.AFTER_TEXT,
     # Юлия, 01.11: пропущенный звонок, через 2 минуты клиенту вежливый вопрос (вариант 2, согласован)
     "msg_missed": ("{hello} Это «Футболика» ⚽ Вы нам звонили, а мы не успели взять трубку. "
                    "Напишите, пожалуйста, ваш вопрос, ответим в ближайшее время 🙂"),
@@ -111,6 +111,12 @@ OLD_2H = ("Сегодня в {time} пробное занятие, ждём ва
 
 def init(con):
     con.executescript(SCHEMA)
+    if not comms.get(con,'msg_after_approved_20261116'):
+        previous=comms.get(con,'msg_after')
+        if previous and previous!=trialscripts.AFTER_TEXT:comms.put(con,'msg_after_previous_20261116',previous)
+        comms.put(con,'msg_after',trialscripts.AFTER_TEXT)
+        comms.put(con,'msg_after_approved_20261116','1')
+
     # 01.11: сохранённый старый текст «за 2 часа» меняем на короткий (если его не правили вручную)
     if comms.get(con, "msg_2h_before") == OLD_2H:
         comms.put(con, "msg_2h_before", "")
@@ -120,7 +126,7 @@ def setting(con, key: str) -> str:
     v = comms.get(con, key)
     if v:
         return v
-    return DEFAULT_TEMPLATES.get(key) or AUTO_SETTINGS.get(key) or CONTACT_SETTINGS.get(key, "")
+    return DEFAULT_TEMPLATES.get(key) or trialscripts.DEFAULTS.get(key) or AUTO_SETTINGS.get(key) or CONTACT_SETTINGS.get(key, "")
 
 
 def admin_link(con, channel: str = "") -> str:
@@ -204,6 +210,8 @@ def _place(con, s: dict) -> str:
 
 
 def render_template(con, key: str, s: dict, channel: str = "") -> str:
+    branch_text=trialscripts.render(con,key,s,channel)
+    if branch_text is not None:return branch_text
     t = datetime.fromisoformat(s["trial_at"])
     child = s["name"] if "заявка" not in s["name"].lower() else "ребёнка"
     return (setting(con, key).replace("{child}", child.split()[0]).replace("{time}", t.strftime("%H:%M"))
@@ -227,7 +235,17 @@ def best_conversation(con, family_id: int) -> int | None:
         r = con.execute("""SELECT id FROM conversations WHERE family_id=? AND external_id NOT LIKE 'demo-%'
                        ORDER BY last_at IS NULL, last_at DESC LIMIT 1""", (family_id,)).fetchone()
     if r:
-        return r[0]
+        current=dict(con.execute('SELECT * FROM conversations WHERE id=?',(r[0],)).fetchone())
+        conversations=[dict(c) for c in con.execute('SELECT * FROM conversations WHERE family_id=?',(family_id,))]
+        preferred=comms.preferred_telegram_reply(con,current,conversations)
+        if current['channel']!='telegram' or preferred!=current['id']:return preferred
+        if primary and primary['phone_norm'] and current.get('phone_norm')==primary['phone_norm'] and comms.status(con)['wazzup_telegram']:
+            if any(c['channel']=='wazzup_telegram' and c.get('phone_norm')==primary['phone_norm'] for c in conversations):return None
+            cid=comms.start_wazzup_telegram(con,primary['phone'])
+            existing=con.execute('SELECT family_id FROM conversations WHERE id=?',(cid,)).fetchone()
+            if existing and existing[0] not in (None,family_id):return None
+            comms.link(con,cid,family_id);return cid
+        return None
     if comms.status(con)["whatsapp"]:
         p = con.execute("SELECT phone FROM parents WHERE family_id=? AND phone != '' ORDER BY is_primary DESC,id LIMIT 1", (family_id,)).fetchone()
         if p and (not primary or primary['phone']==p[0]):
@@ -259,6 +277,8 @@ def booked_places(con) -> dict:
 
 
 def booked_text(con, s: dict, channel: str = "") -> str:
+    branch_text=trialscripts.render(con,'msg_booked',s,channel)
+    if branch_text is not None:return branch_text
     t = datetime.fromisoformat(s["trial_at"])
     g = con.execute("SELECT branch_id FROM groups WHERE id=?", (s.get("group_id") or 0,)).fetchone()
     pl = booked_places(con).get(str(g[0]) if g else "", {})
@@ -283,8 +303,8 @@ def send_booked(con, sid: int) -> dict:
         ok, err = False, "у семьи нет переписки в мессенджере"
     else:
         channel = con.execute("SELECT channel FROM conversations WHERE id=?", (cid,)).fetchone()[0]
-        text = booked_text(con, s, channel)
         try:
+            text = booked_text(con, s, channel)
             comms.send(con, cid, text, {"name": "Автосообщение"})
         except comms.CommsError as e:
             ok, err = False, str(e)
@@ -371,13 +391,13 @@ def send_auto(con, s: dict, kind: str, tpl: str) -> dict:
         return {"ok": False, "error": "не выбрана группа"}
     cid = best_conversation(con, s["family_id"])
     ok, err, channel = True, "", ""
-    text = render_template(con, tpl, s)
+    text = ""
     if not cid:
         ok, err = False, "у семьи нет переписки в мессенджере"
     else:
         channel = con.execute("SELECT channel FROM conversations WHERE id=?", (cid,)).fetchone()[0]
-        text = render_template(con, tpl, s, channel)
         try:
+            text = render_template(con, tpl, s, channel)
             comms.send(con, cid, text, {"name": "Автосообщение"})
         except comms.CommsError as e:
             ok, err = False, str(e)
@@ -775,14 +795,14 @@ def complete(con, tid: int, user: dict, result: str = "") -> None:
 
 
 def settings_view(con) -> dict:
-    vals = {k: setting(con, k) for k in list(DEFAULT_TEMPLATES) + list(AUTO_SETTINGS) + list(CONTACT_SETTINGS)}
+    vals = {k: setting(con, k) for k in list(DEFAULT_TEMPLATES) + list(trialscripts.DEFAULTS) + list(AUTO_SETTINGS) + list(CONTACT_SETTINGS)}
     vals[OWNER_KEY] = str(owner(con) or "")
     from . import trialoffer
     vals["msg_trial_offer"] = setting(con, "msg_trial_offer") or trialoffer.DEFAULT
     from . import reminders
     vals["msg_lesson"] = setting(con, "msg_lesson") or reminders.DEFAULT_TEXT
     from . import chatscripts
-    return {"values": vals, "erp_statuses": list(ERP_STATUSES), "booked_places": booked_places(con), "school_rules":chatscripts.profiles(con), "auto_live": comms.auto_live(con)}
+    return {"values": vals, "erp_statuses": list(ERP_STATUSES), "branch_templates":trialscripts.LABELS, "booked_places": booked_places(con), "school_rules":chatscripts.profiles(con), "auto_live": comms.auto_live(con)}
 
 
 def save_settings(con, data: dict):
@@ -790,7 +810,7 @@ def save_settings(con, data: dict):
         from . import chatscripts
         chatscripts.save_profiles(con,data["school_rules"])
     for k, v in data.items():
-        if k in DEFAULT_TEMPLATES or k in AUTO_SETTINGS or k in CONTACT_SETTINGS or k in (OWNER_KEY, "msg_trial_offer", "msg_lesson"):
+        if k in DEFAULT_TEMPLATES or k in trialscripts.DEFAULTS or k in AUTO_SETTINGS or k in CONTACT_SETTINGS or k in (OWNER_KEY, "msg_trial_offer", "msg_lesson"):
             comms.put(con, k, str(v or "").strip())
         elif k == "booked_places" and isinstance(v, dict):
             comms.put(con, k, json.dumps({str(b): {f: str(x.get(f) or "").strip() for f in ("place", "area", "tg", "max")}

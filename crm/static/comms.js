@@ -209,6 +209,34 @@ function resizeMessageInput(input) {
   input.style.height="auto";
   input.style.height=Math.max(minimum,Math.min(input.scrollHeight+2,window.innerHeight*.6))+"px";
 }
+function preferredFamilyTarget(conversations,targets,primary,status) {
+  // Existing family correspondence wins over opening a new messenger chat.
+  const existing=conversations.filter(c=>!['tg_archive','telegram'].includes(c.channel)&&targets.some(t=>t.v==='c'+c.id));
+  existing.sort((a,b)=>(b.last_at||'').localeCompare(a.last_at||'')||b.id-a.id);
+  if(existing.length)return 'c'+existing[0].id;
+  if(!primary)return targets.length===1?targets[0].v:'';
+  return targets.find(t=>['t','w','m'].some(prefix=>t.v===prefix+primary.id))?.v||'';
+}
+
+function replyTargetHtml(id,targets,selected) {
+  const current=targets.find(t=>String(t.v)===String(selected));
+  return `<div class="reply-target"><div class="reply-target-current" ${current?'':'hidden'}><span id="${id==='chat-to'?'chat-channel-label':'cm-channel-label'}">Ответ уйдёт: ${esc(current?.t||'')}</span>${targets.length>1?'<button type="button" class="linkish" data-change-reply>Изменить</button>':''}</div><select id="${id}" aria-label="Мессенджер для ответа" ${current?'hidden':''}><option value="">Выберите мессенджер для отправки</option>${targets.map(t=>`<option value="${esc(t.v)}" ${String(t.v)===String(selected)?'selected':''}>${esc(t.t)}</option>`).join('')}</select></div>`;
+}
+
+function wireReplyTarget(select,onchange) {
+  if(!select)return;
+  const box=select.closest('.reply-target'),current=box.querySelector('.reply-target-current');
+  const change=box.querySelector('[data-change-reply]');
+  if(change)change.onclick=()=>{select.hidden=false;select.focus()};
+  select.onchange=()=>{
+    const option=select.selectedOptions[0];
+    current.hidden=!select.value;
+    current.querySelector('span').textContent='Ответ уйдёт: '+(option?.textContent||'');
+    select.hidden=!!select.value;
+    onchange();
+  };
+}
+
 async function loadFamilyComms(familyId, parents, studentId, kid) {
   const box = $("#comms-box");
   if (!box) return;
@@ -218,10 +246,10 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   try { d = await api("GET", `/api/families/${familyId}/comms`); } catch (e) { box.innerHTML = `<h3>Связь с семьёй</h3><div class="error">${esc(e.message)}</div>`; return; }
   if ($("#comms-box") !== box) return;
   if (sameFamily) draft = $("#cm-text")?.value || "";
-  const attachmentState=sameFamily&&$('#cm-text')?{file:$('#cm-text')._attachmentFile,upload:$('#cm-text')._attachmentUpload,preview:$('#cm-text')._attachmentPreview?.innerHTML}:null;
+  const attachmentState=sameFamily&&$('#cm-text')?{file:$('#cm-text')._attachmentFile,upload:$('#cm-text')._attachmentUpload,preview:$('#cm-text')._attachmentPreview?.innerHTML,uncertain:$('#cm-text')._uncertainBundle}:null;
   box.dataset.familyId = familyId;
   const st = d.status;
-  const targets = d.conversations.filter((c) => c.channel !== "tg_archive").map((c) => ({ v: "c" + c.id, t: `${chLabel(c.channel)}${c.title ? " · " + c.title : ""}` }));
+  const targets = d.conversations.filter((c) => !["tg_archive","telegram"].includes(c.channel)).map((c) => ({ v: "c" + c.id, t: `${chLabel(c.channel)}${c.title ? " · " + c.title : ""}` }));
   if (st.whatsapp) parents.filter((p) => p.phone && !d.conversations.some((c) => c.channel === "whatsapp" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
     .forEach((p) => targets.push({ v: "w" + p.id, t: `WhatsApp · ${p.name} (новый чат)` }));
   if (st.wazzup_telegram) parents.filter((p) => p.phone && !d.conversations.some((c) => c.channel === "wazzup_telegram" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
@@ -231,11 +259,8 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   S.familySendTargets = S.familySendTargets || {};
   const primary=parents.find(p=>p.is_primary);
   const targetKey = `${S.user.id}:${familyId}:${primary?.id||0}`;
-  const primaryPhone=(primary?.phone||'').replace(/\D/g,'').replace(/^8(?=\d{10}$)/,'7');
-  const primaryUsername=(primary?.messenger||'').trim().replace(/^@/,'').toLowerCase();
-  const primaryConversation=primary&&d.conversations.find(c=>c.channel!=='tg_archive'&&((primaryPhone&&c.phone_norm===primaryPhone)||(primaryUsername&&(c.username||'').replace(/^@/,'').toLowerCase()===primaryUsername)));
-  const primaryTarget=primaryConversation?'c'+primaryConversation.id:primary?targets.find(t=>['w','t','m'].some(prefix=>t.v===prefix+primary.id))?.v:'';
-  const selectedTarget = targets.some(x => x.v === S.familySendTargets[targetKey]) ? S.familySendTargets[targetKey] : (primaryTarget || (!primary&&targets.length === 1 ? targets[0].v : ""));
+  const primaryTarget=preferredFamilyTarget(d.conversations,targets,primary,st);
+  const selectedTarget = targets.some(x => x.v === S.familySendTargets[targetKey]) ? S.familySendTargets[targetKey] : primaryTarget;
   const oq = d.conversations.filter((c) => c.open_q);
   box.innerHTML = `
     <h3>Связь с семьёй</h3>
@@ -247,11 +272,11 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     ${kid && kid.funnel === "sales" ? `<div class="to-bar" style="margin-top:10px"><button class="btn sm" id="to-open">📅 Предложить дни для пробного</button><button class="btn sm" id="to-book">✅ Записать на пробное</button></div><div id="to-panel" hidden></div>` : ""}
     ${targets.length ? `
       <div class="composer">
-        ${targets.length > 1 ? `<select id="cm-to" aria-label="Мессенджер для отправки"><option value="">Выберите мессенджер для отправки</option>${targets.map((x) => `<option value="${x.v}" ${x.v === selectedTarget ? "selected" : ""}>${esc(x.t)}</option>`).join("")}</select>` : `<div class="small muted">Ответ уйдёт: ${esc(targets[0].t)}</div><input type="hidden" id="cm-to" value="${targets[0].v}">`}
+        ${replyTargetHtml('cm-to',targets,selectedTarget)}
         <div class="row"><textarea id="cm-text" rows="6" placeholder="Сообщение родителю…"></textarea><button class="btn primary" id="cm-send" style="flex:0">Отправить</button></div>
       </div>` : `<div class="small muted">Написать отсюда можно, когда родитель напишет школе в Telegram или MAX${st.whatsapp || st.wazzup_telegram ? "" : ". Первыми написать можно после подключения Wazzup"}</div>`}`;
   if ($("#cm-text")) { $("#cm-text").value = draft; $("#cm-text").addEventListener("input",e=>resizeMessageInput(e.target)); resizeMessageInput($("#cm-text")); }
-  const toSelect = $("#cm-to"); if (toSelect) toSelect.onchange = () => { S.familySendTargets[targetKey] = toSelect.value; };
+  const toSelect = $("#cm-to"); wireReplyTarget(toSelect,()=>{S.familySendTargets[targetKey]=toSelect.value});
   const feed = $("#feed"); if (feed) feed.scrollTop = feed.scrollHeight;
   // карточка открыта: новые сообщения подтягиваем сами каждые 10 секунд (раньше были видны только после повторного открытия)
   const lastKey = (items) => items.length ? items[items.length - 1].type + items[items.length - 1].id + ":" + items.length : "";
@@ -297,6 +322,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   restoreAttachmentDraft($('#cm-text'),attachmentState);
   const send = $("#cm-send");
   if (send) send.onclick = async () => {
+    if(!confirmPendingText($("#cm-text")))return;
     if(await sendComposerAttachment($('#cm-text'),resolveFileConversation,async sentCid=>{S.familySendTargets[targetKey]='c'+sentCid;await loadFamilyComms(familyId,parents,studentId,kid)}))return;
     const text = $("#cm-text").value.trim(), to = $("#cm-to").value;
     if (!text) return;
@@ -393,8 +419,14 @@ async function openChat(cid, keepScroll = false) {
   let d;
   try { d = await api("GET", `/api/conversations/${cid}${keepScroll ? "" : "?remember=1"}`); } catch (e) { return fail(e); }
   const c = d.conversation;
+  d.targets=(d.targets||[]).filter(x=>x.channel!=="telegram");
+  S.chatSendTargets=S.chatSendTargets||{};
+  const replyKey=`${S.user.id}:${cid}`,savedReply=S.chatSendTargets[replyKey];
+  const validReply=id=>(d.targets||[]).some(x=>x.id===id);
+  const replyId=validReply(savedReply)?savedReply:validReply(d.preferred_reply_id)?d.preferred_reply_id:validReply(cid)?cid:0;
+  const reply=(d.targets||[]).find(x=>x.id===replyId)||{id:0,channel:'',label:'Выберите мессенджер для ответа'};
   const sameChat=+($('#chat-text')?.closest('[data-chat]')?.dataset.chat||0)===cid;
-  const attachmentState=sameChat&&$('#chat-text')?{file:$('#chat-text')._attachmentFile,upload:$('#chat-text')._attachmentUpload,preview:$('#chat-text')._attachmentPreview?.innerHTML}:null;
+  const attachmentState=sameChat&&$('#chat-text')?{file:$('#chat-text')._attachmentFile,upload:$('#chat-text')._attachmentUpload,preview:$('#chat-text')._attachmentPreview?.innerHTML,uncertain:$('#chat-text')._uncertainBundle}:null;
   const draft = sameChat && $("#chat-text") ? $("#chat-text").value : "";
   const html = `
     <div class="chat" data-chat="${cid}">
@@ -417,10 +449,10 @@ async function openChat(cid, keepScroll = false) {
       <div class="composer sticky">
         <div class="to-bar"><button class="btn sm" id="to-open">📅 Предложить ближайшие ПУ</button></div>
         <div id="to-panel" hidden></div>
-        ${(d.targets || []).length > 1 ? `<select id="chat-to" style="margin-bottom:6px">${d.targets.map((x) => `<option value="${x.id}" ${x.id === cid ? "selected" : ""}>Ответ уйдёт: ${esc(x.label)}</option>`).join("")}</select>` : ""}
-        <div class="reply-channel" id="chat-channel-label" aria-live="polite">Отправка: ${esc(c.channel_label || chLabel(c.channel))}</div>
+        ${replyTargetHtml('chat-to',d.targets.map(x=>({v:x.id,t:x.label})),replyId)}
+
         <div class="row"><textarea id="chat-text" rows="2" placeholder="Ответ…">${esc(draft)}</textarea><button class="btn primary" id="chat-send" style="flex:0">Отправить</button></div>
-        ${c.channel === "telegram" && !c.meta.biz ? `<div class="small muted">Ответ уйдёт от бота школы</div>` : ""}
+        ${c.channel === "telegram" && !replyId ? `<div class="small muted">Переписка бота сохранена. Для ответа выберите нужного родителя через Wazzup; если канала здесь нет, откройте карточку клиента выше.</div>` : ""}
       </div>
     </div>`;
   openDrawer(html);
@@ -449,20 +481,24 @@ async function openChat(cid, keepScroll = false) {
   }
   wireOpenQuestion(cid, c);
   const chatTo = $("#chat-to");
-  if (chatTo) chatTo.onchange = () => {
+  wireReplyTarget(chatTo,() => {
     const selected = (d.targets || []).find(x => x.id === +chatTo.value);
-    $("#chat-channel-label").textContent = "Отправка: " + (selected ? selected.label : "выберите мессенджер");
-  };
+    S.chatSendTargets[replyKey]=+chatTo.value;
+    if($("#chat-bot-hint"))$("#chat-bot-hint").hidden=selected?.channel!=="telegram";
+  });
   wireMessagePicker("#chat-text", async (sticker) => {
     const to = $("#chat-to") ? +$("#chat-to").value : cid;
+    if(!to)throw Error("Выберите мессенджер для ответа");
     await api("POST", `/api/conversations/${to}/send`, { sticker });
     await openChat(cid);
   },{students:c.students||[],channel:()=>{const id=$('#chat-to')?+$('#chat-to').value:cid;return (d.targets||[]).find(x=>x.id===id)?.channel||(id===cid?c.channel:'')},resolveConversation:async()=>$('#chat-to')?+$('#chat-to').value:cid});
   restoreAttachmentDraft($('#chat-text'),attachmentState);
   const sendBtn = $("#chat-send");
   sendBtn.onclick = async () => {
+    if(!confirmPendingText($("#chat-text")))return;
     if(await sendComposerAttachment($('#chat-text'),async()=>$('#chat-to')?+$('#chat-to').value:cid,async()=>openChat(cid)))return;
     const text = $("#chat-text").value.trim(); if (!text) return;
+    if(!$("#chat-to").value)return toast("Выберите мессенджер для ответа");
     sendBtn.disabled = true;
     const to = $("#chat-to") ? +$("#chat-to").value : cid;
     try {
@@ -510,7 +546,10 @@ function stopChatTimer() { if (chatTimer) clearInterval(chatTimer); chatTimer = 
 
 /* ---------- настройки связи (админ) ---------- */
 async function renderCommsSettings(box, users) {
-  const d = await api("GET", "/api/integrations");
+  let d;
+  try{d=await api('GET','/api/integrations')}
+  catch(error){box.innerHTML=`<h3>Связь с клиентами</h3><p class="error">${esc(error.message||'Не удалось загрузить настройки')}</p><button type="button" class="btn sm" data-retry-comms>Повторить загрузку</button>`;box.querySelector('[data-retry-comms]').onclick=()=>renderCommsSettings(box,users);return;}
+
   const v = d.values, inf = d.info, st = d.status;
   const ok = (on, text) => `<span class="pill ${on ? "green" : ""}">${on ? "подключено" : text || "не подключено"}</span>`;
   box.innerHTML = `
@@ -541,7 +580,7 @@ async function renderCommsSettings(box, users) {
 
     <div class="int"><div class="int-head"><b>WhatsApp, MAX и Telegram через Wazzup</b>${ok(st.whatsapp || st.wazzup_telegram || st.wazzup_max)}</div>
       <div class="chips small" style="margin-bottom:8px"><span>WhatsApp: ${ok(st.whatsapp)}</span><span>Telegram: ${ok(st.wazzup_telegram)}</span><span>MAX: ${ok(st.wazzup_max)}</span></div>
-      <div class="small muted" style="margin-bottom:6px">Подключает рабочие аккаунты школы. Сообщения родителей в WhatsApp и MAX приходят в «Чаты», ответ уходит из CRM. В WhatsApp, Telegram и MAX можно написать родителю первыми по номеру из карточки</div>
+      <div class="small muted" style="margin-bottom:6px">Подключает рабочие аккаунты школы. Сообщения родителей в WhatsApp, Telegram и MAX приходят в «Чаты», ответ уходит из CRM. В WhatsApp, Telegram и MAX можно написать родителю первыми по номеру из карточки. Для Telegram через Wazzup отдельный Telegram-бот и мост не нужны.</div>
       <div class="field"><label>API-ключ Wazzup</label><input data-k="wazzup_key" value="${esc(v.wazzup_key)}"></div>
       ${inf.wazzup_channels.length ? `<div class="small">Каналы: ${inf.wazzup_channels.map((c) => esc(`${c.transport} ${c.name} (${c.state})`)).join(", ")}</div>` : ""}
       ${inf.wazzup_error ? `<div class="error">${esc(inf.wazzup_error)}</div>` : ""}
@@ -601,11 +640,53 @@ async function renderCommsSettings(box, users) {
   box.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async () => {
     try { await navigator.clipboard.writeText(b.dataset.copy); toast("Скопировано"); } catch (_) { b.previousElementSibling.select(); }
   }));
-  box.querySelector("details").ontoggle = async (e) => {
+  box.querySelector("#hook-log").closest("details").ontoggle = async (e) => {
     if (!e.target.open) return;
     const rows = await api("GET", "/api/integrations/log").catch(() => []);
     $("#hook-log").innerHTML = rows.length ? rows.map((r) => `<div class="log-row"><b>${dtShort(r.ts)} ${esc(r.source)}</b>${r.error ? ` <span class="error">${esc(r.error)}</span>` : ""}<pre>${esc(r.payload)}</pre></div>`).join("") : "Пока пусто";
   };
+  compactCommsSettings(box,d);
+}
+
+function compactCommsSettings(box,d) {
+  box.classList.add('comms-settings');
+  box.querySelector(':scope > .small.muted')?.remove();
+  const blocks=[...box.querySelectorAll(':scope > .int')];
+  const main=document.createElement('div'),extra=document.createElement('div'),extraToggle=document.createElement('button');
+  main.className='connection-list';extra.className='connection-list connection-extra';extra.hidden=true;
+  extraToggle.type='button';extraToggle.className='btn sm connection-extra-toggle';extraToggle.textContent='Дополнительные настройки';extraToggle.setAttribute('aria-expanded','false');
+  extraToggle.onclick=()=>{extra.hidden=!extra.hidden;extraToggle.setAttribute('aria-expanded',String(!extra.hidden))};
+  const footer=document.createElement('div');footer.className='connection-editor-save';footer.hidden=true;footer.append(box.querySelector('#int-save'));
+  const panels=[];
+  function card(block,title,summary,target=main){
+    const header=block.querySelector(':scope > .int-head');if(header)header.remove();
+    const section=document.createElement('section'),top=document.createElement('div'),copy=document.createElement('div'),heading=document.createElement('h4'),button=document.createElement('button');
+    section.className='connection-card';top.className='connection-card-top';heading.textContent=title;copy.append(heading);button.type='button';button.className='btn sm';button.textContent='Настроить';button.setAttribute('aria-expanded','false');
+    if(summary){const label=document.createElement('div');label.className='small muted';label.textContent=summary;copy.append(label)}
+    top.append(copy,button);section.append(top);block.hidden=true;block.classList.add('connection-editor');section.append(block);target.append(section);panels.push({block,button});
+    button.onclick=()=>{const opening=block.hidden;for(const p of panels){p.block.hidden=true;p.button.setAttribute('aria-expanded','false');p.button.textContent='Настроить'}footer.hidden=!opening;if(opening){block.hidden=false;button.setAttribute('aria-expanded','true');button.textContent='Закрыть';block.append(footer)}else box.append(footer)};
+    return section;
+  }
+  const wz=blocks.find(b=>b.querySelector('[data-k="wazzup_key"]'));
+  if(wz){
+    const section=card(wz,'Мессенджеры','Переписка через Wazzup');
+    const rows=document.createElement('div');rows.className='connection-channel-list';
+    rows.innerHTML=[['Telegram',d.status.wazzup_telegram],['WhatsApp',d.status.whatsapp],['MAX',d.status.wazzup_max]].map(([name,on])=>`<div class="connection-channel"><span>${name}</span><span class="connection-state ${on?'on':''}">${on?'Подключено':'Не подключено'}</span></div>`).join('');
+    section.insertBefore(rows,wz);
+    const quick=document.createElement('div');quick.className='connection-card-check';const check=wz.querySelector('[data-wz-diagnostics]'),result=wz.querySelector('[data-wz-diagnostics-result]');if(check)quick.append(check);if(result)quick.append(result);section.insertBefore(quick,wz);
+    wz.querySelector('.chips')?.remove();
+  }
+  const phone=blocks.find(b=>b.querySelector('[data-k="sipuni_user"]'));if(phone)card(phone,'Телефония',d.status.sipuni?'Подключена':'Не подключена');
+  const lead=blocks.find(b=>b.querySelector('[data-k="lead_notify"]'));if(lead)card(lead,'Заявки с сайта',d.info.lead_last?'Последняя заявка: '+dtShort(d.info.lead_last):'Ожидание новой заявки');
+  for(const block of blocks){
+    if([wz,phone,lead].includes(block))continue;
+    const title=block.querySelector('.int-head b')?.textContent||'Приветствие служебных ботов';
+    const label=block.querySelector('[data-k="tg_token"]')?'Отдельный Telegram-бот':block.querySelector('[data-k="max_token"]')?'Отдельный MAX-бот':title;
+    card(block,label,'',extra);
+  }
+  const log=box.querySelector('#hook-log')?.closest('details');if(log)extra.append(log);
+  box.append(main,extraToggle,extra,footer);
+  for(const input of box.querySelectorAll('[data-k]'))if(['sipuni_secret','tg_token','max_token','wazzup_key','yc_api_key'].includes(input.dataset.k)){input.type='password';input.autocomplete='off';}
 }
 
 /* ---------- аналитика звонков ---------- */
@@ -805,11 +886,19 @@ function insertAdministratorGreeting(input,user=S.user) {
 }
 
 function restoreAttachmentDraft(input,state) {
-  if(!input||!state?.file)return;
+  if(!input||!state)return;
+  input._uncertainBundle=state.uncertain;
+  if(!state.file){if(state.uncertain)input._attachmentPreview.innerHTML=state.preview||'';return;}
   input._attachmentFile=state.file;input._attachmentUpload=state.upload;
   input._attachmentPreview.innerHTML=state.preview||'';
   const remove=input._attachmentPreview.querySelector('[data-remove-file]');
   if(remove)remove.onclick=()=>{if(!input._attachmentBusy){input._attachmentFile=null;input._attachmentUpload=null;input._attachmentPreview.replaceChildren()}};
+}
+
+function confirmPendingText(input) {
+  if(!input?._uncertainBundle)return true;
+  if(!confirm('Файл уже отправлен, повторится только текст. Его предыдущая отправка не подтверждена. Вы проверили чат и хотите отправить текст ещё раз?'))return false;
+  input._uncertainBundle=false;input._attachmentPreview?.replaceChildren();return true;
 }
 
 async function sendComposerAttachment(input,resolveConversation,done) {
@@ -829,6 +918,7 @@ async function sendComposerAttachment(input,resolveConversation,done) {
       input._attachmentUpload={id:uploaded.id,cid};
     }
     const result=await api('POST',`/api/conversations/${cid}/attachments/${input._attachmentUpload.id}/send`,{caption});
+    if(result.partial&&result.file_sent){input._attachmentFile=null;input._attachmentUpload=null;input._uncertainBundle=true;if(input._attachmentPreview)input._attachmentPreview.textContent=result.error;}
     if(!result.ok)throw Error((result.error||'Не удалось подтвердить отправку')+'. Проверьте доставку в мессенджере перед повторной попыткой');
     input._attachmentFile=null;input._attachmentUpload=null;input.value='';input._attachmentPreview?.replaceChildren();
     input.dispatchEvent(new Event('input',{bubbles:true}));
@@ -848,7 +938,7 @@ function wireMessagePicker(selector, sendSticker, context={}) {
     <div class="picker-options" data-picker-panel="scripts" hidden></div>
     <div class="chips picker-options" data-picker-panel="emoji" hidden>${["😊", "😀", "😄", "😉", "😍", "🥰", "😘", "😎", "🤔", "😢", "😭", "😂", "👍", "👏", "🙏", "❤️", "🎉", "⚽", "✅", "🔥", "💪"].map(x => `<button type="button" class="btn sm" data-emoji="${esc(x)}">${x}</button>`).join("")}</div>
     <div class="picker-options" data-picker-panel="sticker" hidden><div class="sticker-grid">${stickers.map(([id, code, label]) => `<button type="button" class="sticker-choice" data-sticker="${id}" title="Отправить: ${label}" aria-label="Отправить стикер: ${label}"><img src="https://raw.githubusercontent.com/jdecked/twemoji/v15.1.0/assets/72x72/${code}.png" width="56" height="56" alt="${label}"><span>${label}</span></button>`).join("")}</div><p class="small muted">Базовые стикеры: Twemoji, CC BY 4.0.</p><div data-custom-packs></div>
-      ${S.user?.role === "admin" ? `<details class="sticker-import"><summary>+ Добавить свой набор Telegram</summary><label>Ссылка на набор<input data-pack-url value="https://t.me/addstickers/Footbolika_Olya" placeholder="https://t.me/addstickers/Название"></label><button class="btn sm" type="button" data-pack-import>Добавить набор</button><div class="small muted" data-pack-status>Для импорта нужен подключённый Telegram-бот. Набор будет доступен всей команде.</div></details>` : ""}
+      ${S.user?.role === "admin" ? `<details class="sticker-import"><summary>Добавить свой набор Telegram</summary><label>Ссылка на набор<input data-pack-url value="https://t.me/addstickers/Footbolika_Olya" placeholder="https://t.me/addstickers/Название"></label><button class="btn sm" type="button" data-pack-import>Добавить набор</button><div class="small muted" data-pack-status>Импорт по ссылке использует Telegram Bot API. Для переписки через Wazzup бот и мост не нужны. Уже добавленные стикеры доступны всей команде.</div></details>` : ""}
       <p class="small muted">Свои наборы: в Telegram-боте — настоящие стикеры с анимацией. Через Wazzup/MAX — изображения или статичные превью; поддержка WEBP зависит от канала.</p></div>`;
   panel.querySelectorAll("[data-picker-tab]").forEach(b => {
     b.onmousedown = e => e.preventDefault();

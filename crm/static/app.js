@@ -775,7 +775,7 @@ async function renderBoard(page, funnel) {
   if (funnel === "members") return renderMembersList(page, data);
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">${BOARD_TITLES[funnel]}</h2>
-      ${funnel === "members" && can("members", "full") ? `<button class="btn sm" id="arch-btn">🗄 Архив ▾</button>` : ""}
+      ${funnel === "members" && can("members", "full") ? `<button class="btn sm" id="arch-btn">🗄 Архив +</button>` : ""}
 </div>
     <div class="section arch-box" id="arch-box" hidden></div>
     ${data.note ? `<div class="note">${esc(data.note)}</div>` : ""}
@@ -828,7 +828,7 @@ function renderMembersList(page, data) {
   } else body = rows.map((k) => row(k, false)).join("");
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">${BOARD_TITLES.members}</h2>
-      ${can("members", "full") ? `<button class="btn sm" id="dup-btn" hidden>👯 Дубли</button><button class="btn sm" id="arch-btn">🗄 Архив ▾</button>` : ""}
+      ${can("members", "full") ? `<button class="btn sm" id="dup-btn" hidden>👯 Дубли</button><button class="btn sm" id="arch-btn">🗄 Архив +</button>` : ""}
 </div>
     <div class="section arch-box" id="arch-box" hidden></div>
     <div class="m-views" id="m-views"></div>
@@ -1158,7 +1158,7 @@ function openDups(items) {
 async function membersArchive(page) {
   const btn = $("#arch-btn"), box = $("#arch-box");
   let list = await api("GET", "/api/archive/students").catch(() => []);
-  const label = () => { btn.textContent = `🗄 Архив (${list.length}) ${box.hidden ? "▾" : "▴"}`; };
+  const label = () => { btn.textContent = `🗄 Архив (${list.length}) ${box.hidden ? "+" : "−"}`; };
   const draw = (q = "") => {
     const n = q.toLowerCase().replace(/\D/g, "") ? q.replace(/\D/g, "") : "";
     const rows = list.filter((x) => !q || (x.name + " " + x.family).toLowerCase().includes(q.toLowerCase()) || (n && (x.phone || "").replace(/\D/g, "").includes(n)));
@@ -1845,7 +1845,7 @@ async function openStudent(id, options = {}) {
       ${!isMember?'<button type="button" class="btn sc-tool" id="act-trial" title="Записать на пробное" aria-label="Записать на пробное">ПУ</button>':''}
       ${d.parents.some(p=>p.phone)?'<button type="button" class="btn sc-tool" id="act-call" title="Позвонить основному родителю" aria-label="Позвонить основному родителю"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3 4 5c-2 3 7 14 12 15l4-3-4-4-3 2-4-4 2-3Z"/></svg></button>':''}
       ${full?'<button type="button" class="btn sc-tool" data-profile-edit="name" title="Изменить данные клиента" aria-label="Изменить данные клиента"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16 12-12 4 4L8 20H4Zm10-10 4 4"/></svg></button><button type="button" class="btn sc-tool" data-client-add title="Добавить члена семьи" aria-label="Добавить родителя или ребёнка"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7" r="3"/><path d="M3 20v-3c0-5 12-5 12 0v3M19 7v8M15 11h8"/></svg></button>':''}
-      <details class="sc-extra-actions sc-tool-menu"><summary class="btn sc-tool" aria-label="Другие действия" title="Другие действия">⋯</summary><div>${full?'<button class="btn sm" id="act-past-entry">Внести прошедшее ПУ / покупку</button>':''}${isMember?'<button class="btn sm" id="act-vac">Отпуск</button>':''}</div></details>
+      <details class="sc-extra-actions sc-tool-menu"><summary class="btn sc-tool" aria-label="Другие действия" title="Другие действия">⋯</summary><div>${full?'<button class="btn sm" id="act-past-entry">Внести прошедшее ПУ / покупку</button>':''}${isMember?'<button class="btn sm" id="act-vac">Отпуск</button>':''}${full?`<button type="button" class="btn sm" id="act-archive-card">${s.archived?"Вернуть из архива":"Перенести в архив"}</button>`:""}</div></details>
     </div>
     <div id="sc-profile-edit" hidden></div>
     ${!isMember ? '<div id="sc-trial-booking" hidden></div>' : ""}
@@ -2107,6 +2107,7 @@ async function openStudent(id, options = {}) {
   body.querySelectorAll("[data-vdel]").forEach((b) => (b.onclick = async () => {
     try { await api("DELETE", `/api/vacations/${b.dataset.vdel}`); reload(); } catch (e) { fail(e); }
   }));
+  if($("#act-archive-card"))$("#act-archive-card").onclick=()=>$("#s-arch").click();
   $("#s-arch").onclick = async () => {
     if (!s.archived && !confirm("Перенести карточку в архив? Она пропадёт из воронок, вернуть можно в любой момент")) return;
     try { await api("POST", `/api/students/${id}/archive`, { archived: !s.archived }); toast(s.archived ? "Карточка возвращена" : "Карточка в архиве"); closeDrawer(); render(); } catch (e) { fail(e); }

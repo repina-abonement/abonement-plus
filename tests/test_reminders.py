@@ -29,7 +29,7 @@ def main():
     fams = {}
     for k in (paid, unpaid, warned, single, trial):
         fid = con.execute("SELECT family_id FROM students WHERE id=?", (k,)).fetchone()[0]
-        cid = comms.upsert_conversation(con, "telegram", f"t-{k}", phone=f"7900{k}")
+        cid = comms.upsert_conversation(con, "wazzup_telegram", f"t-{k}", phone=f"7900{k}")
         comms.link(con, cid, fid); fams[cid] = k
     sent = []
     comms.send = lambda con, c, text, user: sent.append((fams.get(c), text)) or {"id": 1}

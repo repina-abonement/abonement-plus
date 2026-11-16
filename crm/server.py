@@ -2992,7 +2992,6 @@ def call_record(con, h, user, body, q, cid):
 
 @route("GET", "/api/integrations", role="admin")
 def integrations_get(con, h, user, body, q):
-    comms.put(con, "public_url", base_url(h))
     return comms.admin_view(con, base_url(h))
 
 
@@ -3017,6 +3016,7 @@ def family_consent(con, h, user, body, q, fid):
 
 @route("PUT", "/api/integrations", role="admin")
 def integrations_put(con, h, user, body, q):
+    comms.put(con,"public_url",base_url(h))
     comms.save_settings(con, body)
     sv.audit(con, user, "integrations.update", ",".join(sorted(k for k in body if k in comms.EDITABLE_KEYS)))
     return comms.admin_view(con, base_url(h))
@@ -3049,11 +3049,13 @@ def int_tg_diagnostics(con,h,user,body,q):
 
 @route("POST", "/api/integrations/telegram/connect", role="admin")
 def int_tg(con, h, user, body, q):
+    comms.put(con,"public_url",base_url(h))
     return cx(comms.tg_connect, con, base_url(h))
 
 
 @route("POST", "/api/integrations/max/connect", role="admin")
 def int_max(con, h, user, body, q):
+    comms.put(con,"public_url",base_url(h))
     return cx(comms.max_connect, con, base_url(h))
 
 
@@ -3064,6 +3066,7 @@ def int_wazzup_diagnostics(con,h,user,body,q):
 
 @route("POST", "/api/integrations/wazzup/connect", role="admin")
 def int_wz(con, h, user, body, q):
+    comms.put(con,"public_url",base_url(h))
     return cx(comms.wz_connect, con, base_url(h))
 
 
