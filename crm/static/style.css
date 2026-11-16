@@ -1839,3 +1839,24 @@ select:not([multiple]):not([size]){appearance:none;-webkit-appearance:none;paddi
 .chat-header>.grow{flex:1}.chat-info-menu #to-open{margin-top:10px}@media(max-width:900px){.inbox-workspace{height:calc(100dvh - 265px);min-height:320px}}
 
 .chat-info-menu[open]{position:relative}.chat-info-panel{position:absolute;right:0;top:calc(100% + 10px);z-index:7;width:min(390px,calc(100vw - 44px));max-height:60vh;overflow:auto;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:var(--shadow)}.chat-info-panel>.section,.chat-info-panel>#oq-box{position:static!important;width:auto!important;margin:0;box-shadow:none!important;border:0!important;padding:0;background:none}.chat-info-panel>#oq-box{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)!important}
+
+/* Context actions work with mouse, touch and keyboard. */
+.conv-more{border:0;background:none;font:inherit;font-size:20px;line-height:1;padding:3px 4px;color:var(--ink-2);cursor:pointer;flex:none}.conv-pinned{font-size:9px;color:var(--ink-2)}.conv-row{-webkit-touch-callout:none;user-select:none;touch-action:pan-y}.chat-context-menu{position:fixed;z-index:1200;min-width:235px;max-width:calc(100vw - 16px);padding:6px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:0 8px 30px #0002}.chat-context-menu button,.chat-quick-actions button{display:block;width:100%;padding:11px 12px;border:0;border-radius:7px;background:none;color:var(--ink);text-align:left;font:inherit;font-size:14px;cursor:pointer}.chat-context-menu button:hover,.chat-context-menu button:focus-visible,.chat-quick-actions button:hover{background:var(--surface-2)}.chat-quick-actions{padding-bottom:10px;margin-bottom:12px;border-bottom:1px solid var(--line)}.filter-count{display:inline-flex;align-items:center;justify-content:center;min-width:19px;height:19px;padding:0 5px;margin-left:5px;border-radius:10px;background:#c92c3a;color:#fff;font-weight:800;font-size:11px}.filter-count[data-empty="1"]{background:var(--surface-2);color:var(--ink-2)}#conv-list .conv-row.reply-overdue{background:var(--red-soft);box-shadow:inset 4px 0 0 var(--red)}#conv-list .conv-row.reply-overdue .conv-title b,#conv-list .conv-row.reply-overdue .conv-preview{color:#b42332}#conv-list .conv-row.reply-overdue.selected{background:var(--red-soft)}
+
+.mobile-compose-toggle{display:none}
+@media(max-width:900px){
+ body.chat-fullscreen{overflow:hidden}body.chat-fullscreen .topbar,body.chat-fullscreen .tabbar{display:none!important}body.chat-fullscreen .page>.page-head{display:none}
+ body.chat-fullscreen .inbox-workspace.chat-open{position:fixed;left:0;right:0;top:var(--chat-viewport-top,0px);height:var(--chat-viewport-height,100dvh);min-height:0;z-index:40;border:0;border-radius:0;margin:0}
+ body.chat-fullscreen #inbox-chat-pane .chat-header{padding-top:max(10px,env(safe-area-inset-top));padding-bottom:10px}
+ body.chat-fullscreen #inbox-chat-pane .composer{padding:6px 8px max(8px,env(safe-area-inset-bottom));gap:4px;max-height:55%}
+ #inbox-chat-pane .composer:not(.tools-open) .message-picker>.chips:first-child,#inbox-chat-pane .composer:not(.tools-open) .message-picker>.picker-options{display:none!important}
+ #inbox-chat-pane .composer>.reply-target{display:none}#inbox-chat-pane .composer.channel-choice>.reply-target{display:block}
+ #inbox-chat-pane .mobile-compose-toggle{display:inline-flex;align-items:center;justify-content:center;width:40px;height:44px;flex:0 0 40px;border:0;background:none;color:var(--accent);font-size:27px;padding:0;cursor:pointer}
+ #inbox-chat-pane .composer .row{gap:6px;align-items:flex-end;flex-wrap:nowrap}#inbox-chat-pane .composer textarea{font-size:16px;min-height:44px;max-height:120px;padding:11px 12px;flex:1;min-width:0}
+ #inbox-chat-pane #chat-send{width:44px;height:44px;min-width:44px;flex:0 0 44px!important;border-radius:50%;font-size:0;padding:0}#inbox-chat-pane #chat-send::after{content:'↑';font-size:23px}
+ #inbox-chat-pane .composer .picker-options{max-height:35dvh;overflow:auto}.chat-context-menu{z-index:1200}
+}
+
+@media(max-width:900px){body.chat-fullscreen .toast{bottom:auto;top:calc(env(safe-area-inset-top) + 72px)}}
+
+.conv-muted svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.7}

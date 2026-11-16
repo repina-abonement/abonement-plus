@@ -140,6 +140,8 @@ def init(con):
     con.executescript(SCHEMA)
     from . import messagedeletion
     messagedeletion.init(con)
+    from . import chatinbox
+    chatinbox.init(con)
     con.execute("CREATE TABLE IF NOT EXISTS conversation_pins(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,created_at TEXT NOT NULL,PRIMARY KEY(user_id,conversation_id))")
     from . import stickerpacks
     stickerpacks.init(con)
@@ -807,6 +809,9 @@ def merge_conversations(con, src: int, dst: int) -> None:
     last = con.execute("SELECT ts, text, direction FROM messages WHERE conversation_id=? ORDER BY ts DESC, id DESC LIMIT 1", (dst,)).fetchone()
     if last:
         con.execute("UPDATE conversations SET last_at=?, last_text=? WHERE id=?", (last[0], ("Вы: " if last[2] == "out" else "") + (last[1] or "")[:120], dst))
+    con.execute('INSERT OR IGNORE INTO conversation_preferences(user_id,conversation_id,muted,archived,archived_after) SELECT user_id,?,muted,archived,archived_after FROM conversation_preferences WHERE conversation_id=?',(dst,src))
+    con.execute('INSERT OR IGNORE INTO conversation_pins(user_id,conversation_id,created_at) SELECT user_id,?,created_at FROM conversation_pins WHERE conversation_id=?',(dst,src))
+    con.execute('UPDATE conversations SET unread=MAX(unread,?) WHERE id=?',(s['unread'],dst))
     con.execute("DELETE FROM conversations WHERE id=?", (src,))
     latest=con.execute('SELECT m.id,d.state FROM messages m JOIN message_deletions d ON d.message_id=m.id WHERE m.conversation_id=? ORDER BY m.ts DESC,m.id DESC LIMIT 1',(dst,)).fetchone()
     if latest and latest['state'] in ('requested','deleted'):
@@ -1270,25 +1275,36 @@ def _lead_note(con, sid, title, details):
 
 # ---------------- ленты для интерфейса ----------------
 
-def _conv_out(con, r) -> dict:
+def _conv_out(con, r, overdue=None, pref=None, identity_cache=None) -> dict:
     d = dict(r)
     d["meta"] = json.loads(d["meta"] or "{}")
     d["channel_label"] = CHANNEL_LABELS.get(d["channel"], d["channel"].replace("wazzup_", "").capitalize())
     d["family_name"] = ""
     d["students"] = []
-    if d["family_id"]:
-        f = con.execute("SELECT name FROM families WHERE id=?", (d["family_id"],)).fetchone()
+    from . import chatinbox
+    display_family=chatinbox.display_family(con,d,identity_cache)
+    d["display_family_id"]=display_family
+    if display_family:
+        f = con.execute("SELECT name FROM families WHERE id=?", (display_family,)).fetchone()
         d["family_name"] = f[0] if f else ""
         d["students"] = [dict(x) for x in con.execute(
-            "SELECT id, name, funnel, stage, birth, group_id, trial_at FROM students WHERE family_id=? AND archived=0 ORDER BY id", (d["family_id"],))]
+            "SELECT id, name, funnel, stage, birth, group_id, trial_at FROM students WHERE family_id=? AND archived=0 ORDER BY id", (display_family,))]
+    d['original_title']=d['title']
+    d['title']=chatinbox.display_title(con,d|{'family_id':display_family},d['students'])
+    d['reply_overdue']=d['id'] in (chatinbox.waiting(con) if overdue is None else overdue)
+    d['unread']=max(d['unread'],int(d['reply_overdue']))
+    d['muted']=bool((pref or {}).get('muted'))
+    d['archived']=chatinbox.archived(con,d,pref or {})
     d["demo"] = d["external_id"].startswith("demo-")
     return d
 
 
 def inbox(con, filt: str = "all", q: str = "", user=None) -> dict:
+    from . import chatinbox
+    overdue=chatinbox.waiting(con);prefs=chatinbox.preferences(con,(user or {}).get('id',0))
     where, args = [], []
     if filt == "unread":
-        where.append("c.unread > 0")
+        where.append("(c.unread > 0 OR c.id IN ("+','.join(str(int(cid)) for cid in overdue or [-1])+"))")
     elif filt == "nofamily":
         where.append("c.family_id IS NULL")
     elif filt == "open":
@@ -1298,12 +1314,19 @@ def inbox(con, filt: str = "all", q: str = "", user=None) -> dict:
         where.append("""(ulower(c.title) LIKE ? OR ulower(c.username) LIKE ?
             OR phone_match(c.phone_norm,?) OR phone_match(c.phone,?)
             OR c.family_id IN (SELECT id FROM families WHERE ulower(name) LIKE ?)
+            OR EXISTS (SELECT 1 FROM parents p WHERE p.family_id=c.family_id AND ulower(p.name) LIKE ?)
+            OR EXISTS (SELECT 1 FROM students st WHERE st.family_id=c.family_id AND (ulower(st.name) LIKE ? OR ulower(trim(substr(st.name,instr(st.name,' ')+1)||' '||substr(st.name,1,instr(st.name,' ')-1))) LIKE ?))
             OR EXISTS (SELECT 1 FROM parents p WHERE p.family_id=c.family_id AND (phone_match(p.phone_norm,?) OR phone_match(p.phone,?)))
             OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND ((?='' AND ulower(m.text) LIKE ?) OR message_phone_match(m.text,?))))""")
-        args += [like,like,q,q,like,q,q,phone_search_digits(q) if not any(ch.isalpha() for ch in q) else '',like,q]
+        args += [like,like,q,q,like,like,like,like,q,q,phone_search_digits(q) if not any(ch.isalpha() for ch in q) else '',like,q]
     sql = "SELECT c.*,CASE WHEN pins.conversation_id IS NULL THEN 0 ELSE 1 END AS pinned FROM conversations c LEFT JOIN conversation_pins pins ON pins.conversation_id=c.id AND pins.user_id=?" + (" WHERE " + " AND ".join(where) if where else "")
-    sql += " ORDER BY pinned DESC,c.last_at IS NULL,c.last_at DESC,c.id DESC LIMIT 200"
-    return {"conversations": [_conv_out(con, r) for r in con.execute(sql, [(user or {}).get('id',0),*args])], **counts(con)}
+    overdue_ids=",".join(str(int(cid)) for cid in overdue or [-1])
+    sql += " ORDER BY CASE WHEN c.id IN ("+overdue_ids+") THEN 0 ELSE 1 END,pinned DESC,c.last_at IS NULL,c.last_at DESC,c.id DESC LIMIT 1000"
+    identity_cache={}
+    items=[_conv_out(con,r,overdue,prefs.get(r['id']),identity_cache) for r in con.execute(sql,[(user or {}).get('id',0),*args])]
+    items.sort(key=lambda c:(not c["reply_overdue"],overdue.get(c["id"],"")))
+    items=[c for c in items if (c['archived'] if filt=='archived' else not c['archived'] or filt=='unread')]
+    return {"conversations":items[:200],**counts(con,user,overdue)}
 
 
 def pin_conversation(con,cid,user,pinned):
@@ -1314,9 +1337,14 @@ def pin_conversation(con,cid,user,pinned):
     return {'pinned':pinned}
 
 
-def counts(con) -> dict:
+def counts(con,user=None,overdue=None) -> dict:
+    from . import chatinbox
+    overdue=chatinbox.waiting(con) if overdue is None else overdue
+    effective={r[0] for r in con.execute('SELECT id FROM conversations WHERE unread>0')}|set(overdue)
+    muted={r[0] for r in con.execute('SELECT conversation_id FROM conversation_preferences WHERE user_id=? AND muted=1',((user or {}).get('id',0),))}
+    notify=con.execute("SELECT COALESCE(MAX(id),0) FROM messages WHERE direction='in' AND conversation_id NOT IN ("+','.join(str(int(cid)) for cid in muted or [-1])+")").fetchone()[0]
     return {
-        "unread": con.execute("SELECT COUNT(*) FROM conversations WHERE unread > 0").fetchone()[0],
+        "unread":len(effective),"last_notify_in":notify,"overdue":len(overdue),"overdue_key":",".join(str(cid) for cid in sorted(overdue)),
         "missed": con.execute("SELECT COUNT(*) FROM calls WHERE direction='in' AND status IN ('missed','busy') AND seen=0")
                      .fetchone()[0],
         # для звука: номера последних входящих (сообщение, пропущенный звонок, заявка с сайта)
@@ -1344,6 +1372,7 @@ def conversation(con, cid: int, mark_read: bool = True) -> dict:
         "SELECT * FROM (SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 200) ORDER BY id", (cid,))]
     if mark_read and r["unread"]:
         con.execute("UPDATE conversations SET unread=0 WHERE id=?", (cid,))
+        r=con.execute('SELECT * FROM conversations WHERE id=?',(cid,)).fetchone()
     # открыли чат: показываем всю историю этой семьи (все мессенджеры и звонки), а не только этот канал
     phones = [r["phone_norm"]] if r["phone_norm"] else []
     if r["family_id"]:
@@ -1426,7 +1455,9 @@ def history(con, family_id: int | None, phones: list[str], mark_read: bool = Tru
     """Вся история семьи (или номера, если семьи нет): переписки во всех мессенджерах и звонки одной лентой."""
     phones = [p for p in phones if p]
     ph_sql = ",".join("?" * len(phones)) or "''"
-    convs = [_conv_out(con, r) for r in con.execute(
+    from . import chatinbox
+    overdue=chatinbox.waiting(con)
+    convs = [_conv_out(con, r,overdue) for r in con.execute(
         f"SELECT * FROM conversations WHERE (family_id=? AND family_id IS NOT NULL) OR (family_id IS NULL AND phone_norm IN ({ph_sql})) ORDER BY last_at DESC",
         (family_id, *phones))]
     items = []
@@ -1452,12 +1483,12 @@ def history(con, family_id: int | None, phones: list[str], mark_read: bool = Tru
     return convs, items[-120:]
 
 
-def family_comms(con, family_id: int) -> dict:
+def family_comms(con, family_id: int, mark_read=True) -> dict:
     relink_family_conversations(con, family_id)
     phones = [r[0] for r in con.execute("SELECT phone_norm FROM parents WHERE family_id=? AND phone_norm != ''",
                                         (family_id,))]
     phones = [phone for phone in phones if family_by_phone(con, phone) == family_id]
-    convs, items = history(con, family_id, phones)
+    convs, items = history(con, family_id, phones, mark_read)
     return {"conversations": convs, "items": items, "status": status(con)}
 
 

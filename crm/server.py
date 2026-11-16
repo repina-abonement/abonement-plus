@@ -2513,6 +2513,24 @@ def settings_put(con, h, user, body, q):
 
 # ---------------- связь: переписки, звонки, интеграции ----------------
 
+@route("POST", "/api/conversations/{cid}/unread", role="inbox")
+def mark_chat_unread(con,h,user,body,q,cid):
+    from . import chatinbox
+    return cx(chatinbox.mark_unread,con,int(cid),user)
+
+
+@route("POST", "/api/conversations/{cid}/read", role="inbox")
+def mark_chat_read(con,h,user,body,q,cid):
+    from . import chatinbox
+    return cx(chatinbox.mark_read,con,int(cid))
+
+
+@route("POST", "/api/conversations/{cid}/preferences", role="inbox")
+def chat_preferences(con,h,user,body,q,cid):
+    from . import chatinbox
+    return cx(chatinbox.set_preference,con,int(cid),user,body)
+
+
 @route("POST", "/api/conversations/{cid}/pin", role="inbox")
 def pin_chat(con,h,user,body,q,cid):
     return cx(comms.pin_conversation,con,int(cid),user,body.get('pinned'))
@@ -2525,7 +2543,7 @@ def inbox(con, h, user, body, q):
 
 @route("GET", "/api/inbox/counts", role="operator")
 def inbox_counts(con, h, user, body, q):
-    return comms.counts(con)
+    return comms.counts(con,user)
 
 
 @route("POST", "/api/trial-hold", role="operator")
@@ -2538,7 +2556,12 @@ def trial_hold(con, h, user, body, q):
 
 @route("GET", "/api/conversations/{cid}", role="operator")
 def conv_get(con, h, user, body, q, cid):
-    detail = cx(comms.conversation, con, int(cid))
+    detail = cx(comms.conversation, con, int(cid),q.get("read")!="0")
+    from . import chatinbox
+    pref=chatinbox.preferences(con,user['id']).get(int(cid),{})
+    detail['conversation']['muted']=bool(pref.get('muted'))
+    detail['conversation']['archived']=chatinbox.archived(con,detail['conversation'],pref)
+    detail['conversation']['pinned']=bool(con.execute('SELECT 1 FROM conversation_pins WHERE user_id=? AND conversation_id=?',(user['id'],int(cid))).fetchone())
     from . import recents
     if q.get("remember") == "1":
         for student in detail.get("conversation", {}).get("students", []):
@@ -2889,7 +2912,7 @@ def family_patch(con, h, user, body, q, fid):
 
 @route("GET", "/api/families/{fid}/comms", role="operator")
 def family_comms(con, h, user, body, q, fid):
-    return comms.family_comms(con, int(fid))
+    return comms.family_comms(con, int(fid),q.get("read")!="0")
 
 
 @route("POST", "/api/families/{fid}/whatsapp", role="operator")

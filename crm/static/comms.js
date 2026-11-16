@@ -19,9 +19,9 @@ async function pollCounts() {
     const n = c.unread + c.missed;
     document.querySelectorAll("[data-badge]").forEach((b) => { b.hidden = !n; b.textContent = n; });
     const p = S.counts;
-    if(S.view==='inbox'&&S.inbox.tab==='chats'&&p&&(p.last_in!==c.last_in||p.unread!==c.unread))S.inbox.refresh?.().catch(()=>{});
+    if(S.view==='inbox'&&S.inbox.tab==='chats'&&p&&(p.last_in!==c.last_in||p.unread!==c.unread||p.overdue_key!==c.overdue_key))S.inbox.refresh?.().catch(()=>{});
     if (p && p.last_in !== undefined) {
-      const what = c.last_lead > p.last_lead ? "🔥 Заявка с сайта" : c.last_in > p.last_in ? "💬 Новое сообщение" : c.last_missed > p.last_missed ? "📞 Пропущенный звонок" : "";
+      const what = c.last_lead > p.last_lead ? "🔥 Заявка с сайта" : (c.last_notify_in??c.last_in) > (p.last_notify_in??p.last_in) ? "💬 Новое сообщение" : c.last_missed > p.last_missed ? "📞 Пропущенный звонок" : "";
       if (what) newInboxAlert(what);
     }
     // пропущенный звонок не обработан: напоминаем звуком каждые 3 минуты (дальше «Служба заботы», через 30 минут руководитель)
@@ -30,6 +30,7 @@ async function pollCounts() {
       else if (Date.now() - (S.missedDing || S.missedSince) >= 180000) { S.missedDing = Date.now(); newInboxAlert("📞 Пропущенный звонок не обработан"); }
     } else { S.missedSince = 0; S.missedDing = 0; }
     S.counts = c;
+    const fresh=$('#inbox-new-count');if(fresh){fresh.textContent=c.unread;fresh.dataset.empty=c.unread?'0':'1'}
   } catch (_) { /* тихо */ }
 }
 
@@ -303,7 +304,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     const f = $("#feed");
     if (!f || !document.body.contains(box)) { clearInterval(S.commsTimer); return; }
     if (document.hidden) return;
-    let n; try { n = await api("GET", `/api/families/${familyId}/comms`); } catch (_) { return; }
+    let n; try { n = await api("GET", `/api/families/${familyId}/comms?read=0`); } catch (_) { return; }
     const k = lastKey(n.items);
     if ($("#comms-box") !== box) return;
     if (n.conversations.map(c => c.id).sort((a,b) => a-b).join(",") !== d.conversations.map(c => c.id).sort((a,b) => a-b).join(",")) return loadFamilyComms(familyId, parents, studentId, kid);
@@ -356,10 +357,47 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   };
 }
 
+function chatActionsHtml(c,active=false){
+  const unread=active||!c.unread;
+  return `<button type="button" role="menuitem" data-chat-action="${unread?'unread':'read'}" data-chat-id="${c.id}">${unread?'Отметить непрочитанным':'Отметить прочитанным'}</button><button type="button" role="menuitem" data-chat-action="pin" data-chat-id="${c.id}">${c.pinned?'Открепить':'Закрепить'}</button><button type="button" role="menuitem" data-chat-action="mute" data-chat-id="${c.id}">${c.muted?'Включить звук':'Без звука'}</button><button type="button" role="menuitem" data-chat-action="archive" data-chat-id="${c.id}">${c.archived?'Вернуть из архива':'В архив'}</button>`;
+}
+function closeChatMenu(){$('#chat-context-menu')?.remove()}
+function syncChatViewport(){const v=window.visualViewport;document.documentElement.style.setProperty('--chat-viewport-height',(v?.height||innerHeight)+'px');document.documentElement.style.setProperty('--chat-viewport-top',(v?.offsetTop||0)+'px')}
+window.visualViewport?.addEventListener('resize',syncChatViewport);window.visualViewport?.addEventListener('scroll',syncChatViewport);window.addEventListener('resize',syncChatViewport);
+
+function showChatMenu(c,x,y){
+  closeChatMenu();const menu=document.createElement('div');menu.id='chat-context-menu';menu.className='chat-context-menu';menu.setAttribute('role','menu');menu.setAttribute('aria-label','Действия с чатом');menu.innerHTML=chatActionsHtml(c,+$('[data-chat]')?.dataset.chat===c.id);document.body.append(menu);
+  const r=menu.getBoundingClientRect();menu.style.left=Math.max(8,Math.min(x,innerWidth-r.width-8))+'px';menu.style.top=Math.max(8,Math.min(y,innerHeight-r.height-12))+'px';menu.querySelector('button')?.focus();
+}
+async function chatAction(c,action){
+  if(action==='unread'||action==='read')await api('POST',`/api/conversations/${c.id}/${action}`,{});
+  else if(action==='pin')await api('POST',`/api/conversations/${c.id}/pin`,{pinned:!c.pinned});
+  else await api('POST',`/api/conversations/${c.id}/preferences`,action==='mute'?{muted:!c.muted}:{archived:!c.archived});
+  if(action==='unread'||(action==='archive'&&!c.archived)){
+    const active=$('[data-chat]');if(+active?.dataset.chat===c.id){
+      rememberChatDraft();stopChatTimer();S.chatOpenRequest=(S.chatOpenRequest||0)+1;
+      const panel=$('#inbox-chat-pane');if(panel&&panel.contains(active)){S.inbox.active=null;document.body.classList.remove('chat-fullscreen');panel.closest('.inbox-workspace').classList.remove('chat-open');panel.innerHTML='<div class="chat-placeholder">Выберите диалог слева</div>'}else closeDrawer();
+    }
+  }
+  if(S.view==='inbox')await S.inbox.refresh?.();
+  S.counts=await api('GET','/api/inbox/counts');await pollCounts();
+  if(action==='unread')toast('Чат отмечен непрочитанным');
+  if(action==='read'&&c.reply_overdue)toast('Чат всё ещё ждёт ответа — красная отметка снимется после ответа');
+}
+document.addEventListener('click',async event=>{
+  const button=event.target.closest('[data-chat-action]');if(!button)return;
+  event.preventDefault();event.stopPropagation();const cid=+button.dataset.chatId,c=S.chatRows?.[cid];if(!c)return;
+  button.disabled=true;try{await chatAction(c,button.dataset.chatAction);closeChatMenu();button.closest('details')?.removeAttribute('open')}catch(error){button.disabled=false;fail(error)}
+});
+document.addEventListener('pointerdown',event=>{if(!event.target.closest('#chat-context-menu,[data-chat-more]'))closeChatMenu()});
+document.addEventListener('keydown',event=>{if(event.key==='Escape')closeChatMenu()});
+window.addEventListener('resize',closeChatMenu);
+
 /* ---------- раздел «Чаты и звонки» ---------- */
 async function renderInbox(page) {
   const I = S.inbox;
   rememberChatDraft();
+  document.body.classList.remove("chat-fullscreen");
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Чаты и звонки</h2>
       <div class="seg">${[["chats", "Переписки"], ["calls", "Звонки"], ["stats", "Аналитика звонков"]].map(([k, t]) => `<button data-tab="${k}" class="${I.tab === k ? "active" : ""}">${t}</button>`).join("")}</div></div>
@@ -371,7 +409,7 @@ async function renderInbox(page) {
   body.innerHTML = `
     <div class="inbox-workspace"><aside class="inbox-list-panel">
       <div class="inbox-search"><input class="search" id="iq" placeholder="Поиск по имени или телефону" value="${esc(I.q)}"></div>
-      <div class="inbox-filters">${[["all","Все"],["unread","Новые"],["open","Вопросы"],["nofamily","Без карточки"]].map(([k,t])=>`<button data-f="${k}" class="${I.filter===k?'active':''}">${t}</button>`).join('')}</div>
+      <div class="inbox-filters">${[["all","Все"],["unread","Новые"],["open","Вопросы"],["nofamily","Без карточки"],["archived","Архив"]].map(([k,t])=>`<button data-f="${k}" class="${I.filter===k?'active':''}">${t}${k==='unread'?'<span id="inbox-new-count" class="filter-count" aria-label="Непрочитанные чаты">0</span>':''}</button>`).join('')}</div>
       ${connectHint()}<div class="list" id="conv-list"><div class="list-row muted">Загружаю…</div></div>
     </aside><section id="inbox-chat-pane" aria-label="Переписка"><div class="chat-placeholder">Выберите диалог слева</div></section></div>`;
   body.querySelectorAll("[data-f]").forEach((b) => (b.onclick = () => { I.filter = b.dataset.f; render(); }));
@@ -379,15 +417,24 @@ async function renderInbox(page) {
   async function loadList() {
     const d = await api("GET", `/api/inbox?filter=${I.filter}&q=${encodeURIComponent(I.q)}`);
     const list = $("#conv-list"); if (!list) return;
+    S.chatRows=S.chatRows||{};d.conversations.forEach(c=>S.chatRows[c.id]=c);
+    const badge=$('#inbox-new-count');if(badge){badge.textContent=d.unread;badge.dataset.empty=d.unread?'0':'1'}
     list.innerHTML = d.conversations.length ? d.conversations.map(c=>{
       const name=c.title||c.username||c.phone||'Без имени';
       const initials=name.trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();
-      return `<div class="list-row click conv-row ${c.unread?'unread':''} ${I.active===c.id?'selected':''}" data-conv="${c.id}" tabindex="0" role="button" aria-label="${esc(name)}${c.unread?', непрочитанных: '+c.unread:''}">
+      return `<div class="list-row click conv-row ${c.unread?'unread':''} ${c.reply_overdue?'reply-overdue':''} ${I.active===c.id?'selected':''}" data-conv="${c.id}" tabindex="0" role="button" aria-label="${esc(name)}${c.unread?', непрочитанных: '+c.unread:''}">
         <div class="conv-avatar" aria-hidden="true">${esc(initials)}${c.unread?`<span class="conv-unread-count" aria-label="Непрочитанных сообщений: ${c.unread}">${c.unread>99?'99+':c.unread}</span>`:''}</div>
-        <div class="conv-copy"><div class="conv-title"><b>${esc(name)}</b><time>${dtWhen(c.last_at)}</time></div><div class="conv-preview"><span>${c.open_q?'Открытый вопрос · ':''}${esc(c.last_text||chLabel(c.channel))}</span><button type="button" class="conv-pin" data-pin-conv="${c.id}" aria-pressed="${!!c.pinned}" aria-label="${c.pinned?'Открепить':'Закрепить'} чат" title="${c.pinned?'Открепить':'Закрепить'}">${c.pinned?'●':'○'}</button></div></div>
+        <div class="conv-copy"><div class="conv-title"><b>${esc(name)}</b><time>${dtWhen(c.last_at)}</time></div><div class="conv-preview"><span>${c.reply_overdue?'Нет ответа 5 мин · ':''}${c.open_q?'Открытый вопрос · ':''}${esc(c.last_text||chLabel(c.channel))}</span>${c.pinned?'<span class="conv-pinned" title="Закреплён">●</span>':''}${c.muted?'<span class="conv-muted" title="Без звука" aria-label="Без звука"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4ZM16 9l5 6m0-6-5 6"/></svg></span>':''}<button type="button" class="conv-more" data-chat-more="${c.id}" aria-label="Действия с чатом">⋯</button></div></div>
       </div>`}).join(''):'<div class="list-row muted">Переписок нет</div>';
-    list.querySelectorAll('[data-pin-conv]').forEach(button=>button.onclick=async e=>{e.stopPropagation();const row=d.conversations.find(c=>c.id===+button.dataset.pinConv);button.disabled=true;try{await api('POST',`/api/conversations/${row.id}/pin`,{pinned:!row.pinned});loadList()}catch(error){button.disabled=false;fail(error)}});
-    list.querySelectorAll("[data-conv]").forEach(el=>{el.onclick=()=>openChat(+el.dataset.conv);el.onkeydown=e=>{if(e.target===el&&["Enter"," "].includes(e.key)){e.preventDefault();openChat(+el.dataset.conv)}}});
+    list.querySelectorAll('[data-chat-more]').forEach(button=>button.onclick=e=>{e.stopPropagation();const r=button.getBoundingClientRect();showChatMenu(S.chatRows[+button.dataset.chatMore],r.right,r.bottom)});
+    list.querySelectorAll('[data-conv]').forEach(el=>{
+      let hold=null,start=null;const clear=()=>{clearTimeout(hold);hold=null};
+      el.onclick=e=>{if(e.target.closest('button'))return;if(Date.now()<(el._suppressUntil||0)){e.preventDefault();return}openChat(+el.dataset.conv)};
+      el.oncontextmenu=e=>{e.preventDefault();clear();el._suppressUntil=Date.now()+900;showChatMenu(S.chatRows[+el.dataset.conv],e.clientX,e.clientY)};
+      el.onpointerdown=e=>{if(e.pointerType==='mouse'||e.target.closest('button'))return;start={x:e.clientX,y:e.clientY};clear();hold=setTimeout(()=>{el._suppressUntil=Date.now()+900;showChatMenu(S.chatRows[+el.dataset.conv],start.x,start.y)},550)};
+      el.onpointermove=e=>{if(start&&Math.hypot(e.clientX-start.x,e.clientY-start.y)>10)clear()};el.onpointerup=clear;el.onpointercancel=clear;
+      el.onkeydown=e=>{if(e.target!==el)return;if(e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10')){e.preventDefault();const r=el.getBoundingClientRect();showChatMenu(S.chatRows[+el.dataset.conv],r.x+40,r.y+30)}else if(['Enter',' '].includes(e.key)){e.preventDefault();openChat(+el.dataset.conv)}};
+    });
   }
   I.refresh=loadList;
   await loadList();
@@ -445,9 +492,10 @@ async function openChat(cid, keepScroll = false) {
   const previousScroll = previousFeed ? previousFeed.scrollTop : 0;
   const wasAtEnd = !previousFeed || previousFeed.scrollHeight - previousFeed.scrollTop - previousFeed.clientHeight < 80;
   let d;
-  try { d = await api("GET", `/api/conversations/${cid}${keepScroll ? "" : "?remember=1"}`); } catch (e) { return fail(e); }
+  try { d = await api("GET", `/api/conversations/${cid}${keepScroll ? "?read=0" : "?remember=1"}`); } catch (e) { return fail(e); }
   if(request!==S.chatOpenRequest)return;
   const c = d.conversation;
+  S.chatRows=S.chatRows||{};S.chatRows[c.id]=c;
   d.targets=(d.targets||[]).filter(x=>x.channel!=="telegram");
   S.chatSendTargets=S.chatSendTargets||{};
   const replyKey=`${S.user.id}:${cid}`,savedReply=S.chatSendTargets[replyKey];
@@ -459,7 +507,7 @@ async function openChat(cid, keepScroll = false) {
   const draft = sameChat && $("#chat-text") ? $("#chat-text").value : S.chatDrafts?.[cid]?.text||"";
   const html = `
     <div class="chat" data-chat="${cid}">
-      <header class="chat-header"><button type="button" class="chat-back btn sm" aria-label="К списку чатов">←</button><div class="grow"><h2>${esc(c.title||c.username||c.phone||'Без имени')}</h2><div class="small muted">${esc(reply.channel?chLabel(reply.channel):c.channel_label)}${c.phone?' · '+esc(c.phone):''}</div></div><details class="chat-info-menu"><summary class="btn sm" aria-label="Информация о клиенте">⋯</summary><div class="chat-info-panel">
+      <header class="chat-header"><button type="button" class="chat-back btn sm" aria-label="К списку чатов">←</button><div class="grow"><h2>${esc(c.title||c.username||c.phone||'Без имени')}</h2><div class="small muted">${esc(reply.channel?chLabel(reply.channel):c.channel_label)}${c.phone?' · '+esc(c.phone):''}</div></div><details class="chat-info-menu"><summary class="btn sm" aria-label="Информация о клиенте">⋯</summary><div class="chat-info-panel"><div class="chat-quick-actions" role="menu">${chatActionsHtml(c,true)}<button type="button" data-change-chat-channel>Канал ответа</button></div>
       <div class="section">
         ${c.family_id ? `<div class="small muted">Семья ${esc(c.family_name)}</div>
           <div class="chips" style="margin-top:6px">${c.students.map((x) => `<button class="chip" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join("")}
@@ -479,16 +527,17 @@ async function openChat(cid, keepScroll = false) {
         <div id="to-panel" hidden></div>
         ${replyTargetHtml('chat-to',d.targets.map(x=>({v:x.id,t:x.label})),replyId)}
 
-        <div class="row"><textarea id="chat-text" rows="2" placeholder="Ответ…">${esc(draft)}</textarea><button class="btn primary" id="chat-send" style="flex:0">Отправить</button></div>
+        <div class="row"><textarea id="chat-text" rows="2" placeholder="Ответ…">${esc(draft)}</textarea><button class="btn primary" id="chat-send" aria-label="Отправить сообщение" style="flex:0">Отправить</button></div>
         ${c.channel === "telegram" && !replyId ? `<div class="small muted">Переписка бота сохранена. Для ответа выберите нужного родителя через Wazzup; если канала здесь нет, откройте карточку клиента выше.</div>` : ""}
       </div>
     </div>`;
   const panel=S.view==='inbox'?$('#inbox-chat-pane'):null;
-  if(panel){hideDrawer();panel.innerHTML=html;S.inbox.active=cid;panel.closest('.inbox-workspace').classList.add('chat-open');document.querySelectorAll('[data-conv]').forEach(el=>el.classList.toggle('selected',+el.dataset.conv===cid));}
+  if(panel){hideDrawer();document.body.classList.add('chat-fullscreen');syncChatViewport();panel.innerHTML=html;S.inbox.active=cid;panel.closest('.inbox-workspace').classList.add('chat-open');document.querySelectorAll('[data-conv]').forEach(el=>el.classList.toggle('selected',+el.dataset.conv===cid));}
   else openDrawer(html);
-  const back=$('.chat-back');if(back)back.onclick=()=>{rememberChatDraft();stopChatTimer();if(panel){S.inbox.active=null;panel.closest('.inbox-workspace').classList.remove('chat-open');panel.innerHTML='<div class="chat-placeholder">Выберите диалог слева</div>';}else closeDrawer()};
+  const back=$('.chat-back');if(back)back.onclick=()=>{rememberChatDraft();stopChatTimer();if(panel){S.inbox.active=null;document.body.classList.remove('chat-fullscreen');panel.closest('.inbox-workspace').classList.remove('chat-open');panel.innerHTML='<div class="chat-placeholder">Выберите диалог слева</div>';}else closeDrawer();S.inbox.refresh?.()};
   const feed = $("#chat-feed"); feed.scrollTop = keepScroll && !wasAtEnd ? previousScroll : feed.scrollHeight;
   const body = panel||$("#drawer-body");
+  const changeChannel=body.querySelector("[data-change-chat-channel]");if(changeChannel)changeChannel.onclick=()=>{const composer=body.querySelector(".composer");composer.classList.add("channel-choice");const select=body.querySelector("#chat-to");select.hidden=false;select.focus();changeChannel.closest("details").open=false};
   const offerButton=body.querySelector("#to-open"),info=body.querySelector(".chat-info-menu .section");
   if(offerButton&&info)info.append(offerButton);
   body.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => { stopChatTimer(); openStudent(+b.dataset.open); }));
@@ -517,6 +566,8 @@ async function openChat(cid, keepScroll = false) {
   wireReplyTarget(chatTo,() => {
     const selected = (d.targets || []).find(x => x.id === +chatTo.value);
     S.chatSendTargets[replyKey]=+chatTo.value;
+    chatTo.closest(".composer")?.classList.remove("channel-choice");
+    const subtitle=body.querySelector(".chat-header .small");if(subtitle&&selected)subtitle.textContent=chLabel(selected.channel);
     if($("#chat-bot-hint"))$("#chat-bot-hint").hidden=selected?.channel!=="telegram";
   });
   wireMessagePicker("#chat-text", async (sticker) => {
@@ -526,6 +577,7 @@ async function openChat(cid, keepScroll = false) {
     await openChat(cid);
   },{students:c.students||[],channel:()=>{const id=$('#chat-to')?+$('#chat-to').value:cid;return (d.targets||[]).find(x=>x.id===id)?.channel||(id===cid?c.channel:'')},resolveConversation:async()=>$('#chat-to')?+$('#chat-to').value:cid});
   restoreAttachmentDraft($('#chat-text'),attachmentState);
+  const editor=$('#chat-text');editor.rows=1;editor.addEventListener('input',()=>resizeMessageInput(editor));resizeMessageInput(editor);
   const sendBtn = $("#chat-send");
   sendBtn.onclick = async () => {
     if(!confirmPendingText($("#chat-text")))return;
@@ -548,7 +600,7 @@ async function openChat(cid, keepScroll = false) {
   chatTimer = setInterval(async () => {
     const open = $(`[data-chat="${cid}"]`);
     if (!open || (!panel&&$("#drawer").hidden)) return stopChatTimer();
-    const n = await api("GET", `/api/conversations/${cid}`).catch(() => null);
+    const n = await api("GET", `/api/conversations/${cid}?read=0`).catch(() => null);
     const len = (x) => (x.history || x.messages).length + ":" + JSON.stringify(((x.history || x.messages).slice(-1)[0] || {}).id)+":"+(x.history||x.messages).map(m=>m.deletion_status||"").join(",");
     if (n && len(n) !== len(d)) { stopChatTimer(); openChat(cid, true); }
   }, 8000);
@@ -987,7 +1039,11 @@ function wireMessagePicker(selector, sendSticker, context={}) {
       panel.querySelectorAll("[data-picker-panel]").forEach(x => { x.hidden = !opening || x.dataset.pickerPanel !== b.dataset.pickerTab; });
     };
   });
-  input.closest(".row").before(panel);
+  const editorRow=input.closest('.row');editorRow.before(panel);
+  if(input.id==='chat-text'){
+    const toggle=document.createElement('button');toggle.type='button';toggle.className='mobile-compose-toggle';toggle.textContent='＋';toggle.setAttribute('aria-label','Инструменты сообщения');toggle.setAttribute('aria-expanded','false');editorRow.prepend(toggle);
+    toggle.onclick=()=>{const open=input.closest('.composer').classList.toggle('tools-open');toggle.setAttribute('aria-expanded',String(open));toggle.textContent=open?'×':'＋'};
+  }
   const preview=document.createElement('div');preview.className='small';panel.append(preview);input._attachmentPreview=preview;
   const fileInput=panel.querySelector('[data-attach-input]');
   panel.querySelector('[data-attach-file]').onclick=()=>{if(!input._attachmentBusy)fileInput.click()};

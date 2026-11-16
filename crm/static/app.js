@@ -549,6 +549,7 @@ function go(view, fromHistory = false) {
 }
 
 async function render() {
+  if(S.view!=="inbox")document.body.classList.remove("chat-fullscreen");
   const page = $("#page");
   if (!page) return;
   page.classList.remove("readonly");

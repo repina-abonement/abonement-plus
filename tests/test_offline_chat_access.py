@@ -37,10 +37,20 @@ class OfflineChatAccess(unittest.TestCase):
                     for endpoint in ['/api/inbox',f'/api/conversations/{cid}',f'/api/families/{fid}/comms']:
                         self.assertEqual(call(token,'GET',endpoint)[0],200)
                     self.assertEqual(call(token,'POST',f'/api/conversations/{cid}/send',{'text':'Synthetic access test'})[0],200)
+                    self.assertEqual(call(token,'POST',f'/api/conversations/{cid}/unread',{})[0],200)
+                    self.assertEqual(call(token,'GET',f'/api/conversations/{cid}?read=0')[1]['conversation']['unread'],1)
+                    self.assertEqual(call(token,'GET',f'/api/families/{fid}/comms?read=0')[0],200)
+                    self.assertEqual(call(token,'GET','/api/inbox/counts')[1]['unread'],1)
+                    self.assertEqual(call(token,'POST',f'/api/conversations/{cid}/read',{})[0],200)
+                    self.assertEqual(call(token,'GET','/api/inbox/counts')[1]['unread'],0)
+                    self.assertEqual(call(token,'POST',f'/api/conversations/{cid}/preferences',{'muted':True})[0],200)
+                    self.assertTrue(call(token,'GET',f'/api/conversations/{cid}?read=0')[1]['conversation']['muted'])
                     self.assertEqual(call(token,'GET','/api/integrations')[0],403)
                     self.assertEqual(call(token,'PUT','/api/integrations',{'wazzup_key':'NO_CHANGE'})[0],403)
                 self.assertEqual(call('synthetic-coach','GET','/api/inbox')[0],403)
                 self.assertEqual(call('synthetic-coach','POST',f'/api/conversations/{cid}/send',{'text':'Must not send'})[0],403)
+                for action in ['unread','read','preferences']:
+                    self.assertEqual(call('synthetic-coach','POST',f'/api/conversations/{cid}/{action}',{'muted':True})[0],403)
                 self.assertEqual(provider.call_count,2)
         finally:
             srv.shutdown();srv.server_close();thread.join(timeout=5);db.DB_PATH=old_path
