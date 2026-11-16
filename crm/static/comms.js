@@ -715,7 +715,21 @@ async function renderCommsSettings(box, users) {
     catch(e){result.textContent=e.message}finally{if(button.isConnected)button.disabled=false}
   };
   const wzCheck=box.querySelector('[data-wz-diagnostics]');
-  if(wzCheck)wzCheck.onclick=async()=>{const result=box.querySelector('[data-wz-diagnostics-result]');wzCheck.disabled=true;result.textContent='Проверяю каналы…';try{const report=await api('GET','/api/integrations/wazzup/diagnostics');result.textContent=report.error||(!report.configured?'Wazzup не подключён':report.channels.map(c=>({telegram:'Telegram',tgapi:'Telegram',max:'MAX',maxapi:'MAX',whatsapp:'WhatsApp',wapi:'WhatsApp'}[c.transport]||c.transport)+' · '+c.state+(c.selected?' · выбран в CRM':' · не выбран в CRM')).join(' · ')||'Wazzup не вернул каналы')}catch(error){result.textContent=error.message}finally{if(wzCheck.isConnected)wzCheck.disabled=false}};
+  if(wzCheck)wzCheck.onclick=async()=>{
+    const result=box.querySelector('[data-wz-diagnostics-result]');wzCheck.disabled=true;result.textContent='Проверяю каналы…';
+    try{
+      const report=await api('GET','/api/integrations/wazzup/diagnostics');
+      const channelText=report.error||(!report.configured?'Wazzup не подключён':report.channels.map(c=>({telegram:'Telegram',tgapi:'Telegram',max:'MAX',maxapi:'MAX',whatsapp:'WhatsApp',wapi:'WhatsApp'}[c.transport]||c.transport)+' · '+c.state+(c.selected?' · выбран в CRM':' · не выбран в CRM')).join(' · ')||'Wazzup не вернул каналы');
+      result.textContent=channelText+(report.missing_selected?' · Выбранный в CRM канал отсутствует в Wazzup':'');
+      if(report.failures?.length){
+        const details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');
+        summary.textContent='Последние ошибки отправки';pre.style.whiteSpace='pre-wrap';
+        pre.textContent=report.failures.map(f=>f.transport+': '+(f.codes.join(', ')||'Код не сохранён')+(f.request_id?' · requestId='+f.request_id:'')).join('\n');
+        details.append(summary,pre);result.append(details);
+      }
+    }catch(error){result.textContent=error.message}finally{if(wzCheck.isConnected)wzCheck.disabled=false}
+  };
+
   box.querySelectorAll("[data-connect]").forEach((b) => (b.onclick = async () => {
     b.disabled = true;
     try {

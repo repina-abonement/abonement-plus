@@ -745,17 +745,39 @@ def wz_call(con, method: str, path: str, data=None, key: str | None = None):
         detail = str(detail or "").replace(k, "[скрыто]")[:300]
         reason = str(err or 'ошибка ' + str(code)).replace(k, "[скрыто]")[:200]
         hint = "Telegram не нашёл контакт по номеру. Попробуйте написать по @нику или попросите клиента написать первым" if "CHANNEL_TGAPI_PHONE_NOT_OCCUPIED" in reason else ""
-        raise CommsError(" · ".join(x for x in (hint, "Wazzup: " + reason, detail if detail != reason else "") if x))
+        request_id = str(js.get("requestId") or "") if isinstance(js, dict) else ""
+        request_id = request_id if re.fullmatch(r"[a-zA-Z0-9-]{8,64}", request_id) else ""
+        raise CommsError(" · ".join(x for x in (hint, "Wazzup: " + reason, detail if detail != reason else "", "requestId=" + request_id if request_id else "") if x))
     return js
 
 
 def wazzup_diagnostics(con):
-    key=get(con,'wazzup_key')
-    if not key:return {'configured':False,'channels':[]}
-    try:channels=wz_call(con,'GET','channels') or []
-    except CommsError as error:return {'configured':True,'channels':[],'error':str(error).replace(key,'[скрыто]')[:400]}
-    selected={get(con,k) for k in ('wazzup_channel','wazzup_tg_channel','wazzup_max_channel')} - {''}
-    return {'configured':True,'channels':[{'transport':c.get('transport') or '', 'state':c.get('state') or 'неизвестно','selected':c.get('channelId') in selected} for c in channels if isinstance(c,dict)]}
+    """Read-only, bounded provider diagnostics: no contacts, message text or credentials."""
+    key = get(con, 'wazzup_key')
+    report = {'configured': bool(key), 'channels': [], 'failures': []}
+    # Extract only machine codes and request IDs; never expose provider free text here.
+    rows = con.execute("""SELECT c.channel,m.error FROM messages m JOIN conversations c ON c.id=m.conversation_id
+                          WHERE m.direction='out' AND m.status='error'
+                          AND c.channel IN ('whatsapp','wazzup_telegram','wazzup_max')
+                          ORDER BY m.id DESC LIMIT 20""").fetchall()
+    for row in rows:
+        error = str(row['error'] or '').replace(key, '[скрыто]') if key else str(row['error'] or '')
+        codes = re.findall(r'(?<![A-Za-z0-9_])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+(?![A-Za-z0-9_])', error)
+        request = re.search(r'requestId=([a-zA-Z0-9-]{8,64})(?![a-zA-Z0-9-])', error)
+        report['failures'].append({'transport': WZ_ROUTE[row['channel']][0], 'codes': list(dict.fromkeys(codes))[:3],
+                                   'request_id': request[1] if request else ''})
+    if not key:
+        return report
+    try:
+        channels = wz_call(con, 'GET', 'channels') or []
+    except CommsError as error:
+        report['error'] = 'Не удалось проверить каналы Wazzup'
+        return report
+    selected = {get(con, k) for k in ('wazzup_channel', 'wazzup_tg_channel', 'wazzup_max_channel')} - {''}
+    report['channels'] = [{'transport': c.get('transport') or '', 'state': c.get('state') or 'неизвестно',
+                           'selected': c.get('channelId') in selected} for c in channels if isinstance(c, dict)]
+    report['missing_selected'] = len(selected - {c.get('channelId') for c in channels if isinstance(c, dict)})
+    return report
 
 
 def wz_connect(con, base_url: str) -> dict:
