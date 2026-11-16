@@ -26,6 +26,22 @@ class ScriptsTest(unittest.TestCase):
         with patch.object(memos,'image',return_value=b'PNG'):
             rule=scripts.rules(self.con,self.sid,'max')
         self.assertFalse(rule['reason']);self.assertIn('max.ru/test_school_channel',rule['text']);self.assertNotIn('t.me',rule['text'])
+    def test_arctic_max_without_channel_keeps_rules_offer_contact_and_picture(self):
+        pid=self.con.execute("SELECT id FROM programs WHERE slug='sbornaya'").fetchone()[0]
+        self.con.execute("UPDATE groups SET program_id=?,lesson_kind='arena' WHERE id=?",(pid,self.gid))
+        self.con.execute("UPDATE conversations SET channel='max' WHERE id=?",(self.cid,))
+        with patch.object(memos,'image',return_value=b'\x89PNG\r\n\x1a\nTEST'),patch.object(comms,'max_call') as network:
+            rule=scripts.rules(self.con,self.sid,'max')
+            draft=scripts.stage_rules(self.con,self.cid,self.user,self.sid)
+        self.assertFalse(rule['reason']);self.assertTrue(rule['image']);self.assertIn('/4005/',rule['text']);self.assertIn('Написать нам в MAX:',rule['text']);self.assertIn('памятку',rule['text']);self.assertNotIn('подпишитесь',rule['text'].lower());self.assertNotIn('Именно в канале',rule['text']);self.assertNotIn('t.me',rule['text']);self.assertNotIn('{',rule['text']);self.assertEqual(draft['text'],rule['text']);network.assert_not_called()
+        with patch.object(memos,'image',return_value=b'PNG'):
+            telegram=scripts.rules(self.con,self.sid,'telegram')
+        self.assertIn('Telegram',telegram['reason'])
+    def test_missing_other_branch_channel_still_blocks(self):
+        scripts.save_profiles(self.con,{'nebo':{'max':''}})
+        with patch.object(memos,'image',return_value=b'PNG'):
+            rule=scripts.rules(self.con,self.sid,'max')
+        self.assertIn('MAX',rule['reason'])
     def test_stage_rules_does_not_send_and_is_bound_to_family(self):
         with patch.object(memos,'image',return_value=b'\x89PNG\r\n\x1a\nTEST'),patch.object(comms,'tg_call') as send:
             draft=scripts.stage_rules(self.con,self.cid,self.user,self.sid)

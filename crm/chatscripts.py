@@ -92,11 +92,18 @@ def rules(con,sid,channel,gid=None):
     if reason:return {'key':'rules','title':'Правила школы','text':'','reason':reason,'groups':[{'id':x['id'],'name':x['name']} for x in groups]}
     p=profiles(con)[key];target='max' if channel.endswith('max') else 'telegram'
     link=p[target]
+    without_channel=key=='arctic' and target=='max' and not link
     if not channel:reason='Выберите мессенджер'
-    elif not link:reason='Не задан канал '+('MAX' if target=='max' else 'Telegram')+' для '+p['name']
+    elif not link and not without_channel:reason='Не задан канал '+('MAX' if target=='max' else 'Telegram')+' для '+p['name']
     elif not p['offer']:reason='Не задана оферта для '+p['name']
     contact=('\nНаписать нам в MAX: '+tasks.admin_link(con,channel)) if channel.endswith('max') else ''
-    text=p['text'].replace('{contact}',contact).replace('{channel}',link).replace('{branch}',('сборной «Арктика»' if key=='arctic' else 'филиала '+('«Небо»' if key in ('nebo','toddlers') else 'СК «Западный»'))).replace('{offer}',p['offer'])
+    template=p['text']
+    if without_channel:
+        # The user confirmed no Arctic MAX channel exists; omit only the invitation.
+        template=template.replace(RULES_TEXT.split('\n\nДобро пожаловать',1)[0],'').lstrip()
+        template='\n\n'.join(part for part in template.split('\n\n') if '{channel}' not in part and not part.startswith('Именно в канале'))
+    text=template.replace('{contact}',contact).replace('{channel}',link).replace('{branch}',('сборной «Арктика»' if key=='arctic' else 'филиала '+('«Небо»' if key in ('nebo','toddlers') else 'СК «Западный»'))).replace('{offer}',p['offer'])
+    if without_channel and tasks.admin_link(con,channel) not in text:text+=contact
     memo_key=memos.key_for_group(con,g)
     image=memos.image(con,memo_key) if memo_key else None
     if not image and not reason:reason='Актуальная картинка правил ещё формируется. Откройте скрипты повторно'

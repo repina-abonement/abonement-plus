@@ -372,7 +372,7 @@ async function renderTaskSettings(box, users) {
     <h3>Правила школы: текст и каналы</h3>
     <p class="small muted">Комплект выбирается по группе ребёнка. Малыши используют каналы Неба. MAX и Telegram настраиваются отдельно.</p>
     <button type="button" class="btn sm" id="rules-import">Загрузить настройки из файла</button><input type="file" id="rules-import-file" accept=".json" hidden>
-    ${Object.entries(d.school_rules||{}).map(([id,p])=>`<details data-rule="${id}"><summary>${esc(p.name)}</summary>
+    ${Object.entries(d.school_rules||{}).map(([id,p])=>`<details data-rule="${id}"><summary>${esc(p.name)}</summary>${id==='arctic'?'<p class="small muted">У Арктики нет канала MAX. Поле можно оставить пустым: правила отправятся с памяткой, офертой и контактом администратора.</p>':''}
       ${['telegram','max','offer'].map(f=>`<label>${f==='offer'?'Оферта':f==='max'?'Канал MAX':'Канал Telegram'}<input data-rf="${f}" value="${esc(p[f])}" ${id==='toddlers'&&f!=='offer'?'disabled':''}></label>`).join('')}
       <label>Текст с картинкой. Поля: {channel}, {branch}, {offer}<textarea data-rf="text" rows="12">${esc(p.text)}</textarea></label></details>`).join('')}
     <button class="btn primary" id="t-save">Сохранить</button>`;
