@@ -138,6 +138,7 @@ def _ts_from_unix(v) -> str | None:
 
 def init(con):
     con.executescript(SCHEMA)
+    con.execute("CREATE TABLE IF NOT EXISTS conversation_pins(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,created_at TEXT NOT NULL,PRIMARY KEY(user_id,conversation_id))")
     from . import stickerpacks
     stickerpacks.init(con)
     ucols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
@@ -432,11 +433,11 @@ def tg_api(con) -> str:
     return f"{relay}/tg" if relay else TG_API
 
 
-def tg_call(con, method: str, payload: dict | None = None, token: str | None = None) -> dict:
+def tg_call(con, method: str, payload: dict | None = None, token: str | None = None, *, timeout=12) -> dict:
     tok = token or get(con, "tg_token")
     if not tok:raise CommsError("Telegram не подключён")
     relay=bool(get(con,'tg_relay'));route='relay' if relay else 'direct'
-    try:code,js=http('POST',f"{tg_api(con)}/bot{tok}/{method}",data=payload or {})
+    try:code,js=http('POST',f"{tg_api(con)}/bot{tok}/{method}",data=payload or {},timeout=timeout)
     except CommsError:
         raise TelegramTransportError('Нет сетевой связи с Telegram-мостом. Проверьте доступность моста с сервера CRM' if relay else 'Нет сетевой связи с Telegram с сервера CRM',route) from None
     if not isinstance(js,dict) or not js.get('ok'):
@@ -737,6 +738,15 @@ def wz_call(con, method: str, path: str, data=None, key: str | None = None):
         err = (js.get("error") or js.get("description") or js.get("_text")) if isinstance(js, dict) else None
         raise CommsError(f"Wazzup: {err or 'ошибка ' + str(code)}")
     return js
+
+
+def wazzup_diagnostics(con):
+    key=get(con,'wazzup_key')
+    if not key:return {'configured':False,'channels':[]}
+    try:channels=wz_call(con,'GET','channels') or []
+    except CommsError as error:return {'configured':True,'channels':[],'error':str(error).replace(key,'[скрыто]')[:400]}
+    selected={get(con,k) for k in ('wazzup_channel','wazzup_tg_channel','wazzup_max_channel')} - {''}
+    return {'configured':True,'channels':[{'transport':c.get('transport') or '', 'state':c.get('state') or 'неизвестно','selected':c.get('channelId') in selected} for c in channels if isinstance(c,dict)]}
 
 
 def wz_connect(con, base_url: str) -> dict:
@@ -1049,6 +1059,9 @@ def media_for(con, mid: int) -> tuple[bytes, str]:
     if not r or not r[0]:
         raise CommsError("Вложения нет")
     media = r[0]
+    if media.startswith('attachment:'):
+        from . import chatattachments
+        return chatattachments.local_file(con,media.split(':',1)[1])
     if media.startswith("tg:"):
         f = tg_call(con, "getFile", {"file_id": media[3:]})
         url = f"{tg_api(con)}/file/bot{get(con, 'tg_token')}/{f['file_path']}"
@@ -1258,7 +1271,7 @@ def _conv_out(con, r) -> dict:
     return d
 
 
-def inbox(con, filt: str = "all", q: str = "") -> dict:
+def inbox(con, filt: str = "all", q: str = "", user=None) -> dict:
     where, args = [], []
     if filt == "unread":
         where.append("c.unread > 0")
@@ -1274,9 +1287,17 @@ def inbox(con, filt: str = "all", q: str = "") -> dict:
             OR EXISTS (SELECT 1 FROM parents p WHERE p.family_id=c.family_id AND (phone_match(p.phone_norm,?) OR phone_match(p.phone,?)))
             OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND ((?='' AND ulower(m.text) LIKE ?) OR message_phone_match(m.text,?))))""")
         args += [like,like,q,q,like,q,q,phone_search_digits(q) if not any(ch.isalpha() for ch in q) else '',like,q]
-    sql = "SELECT c.* FROM conversations c" + (" WHERE " + " AND ".join(where) if where else "")
-    sql += " ORDER BY c.last_at IS NULL, c.last_at DESC LIMIT 200"
-    return {"conversations": [_conv_out(con, r) for r in con.execute(sql, args)], **counts(con)}
+    sql = "SELECT c.*,CASE WHEN pins.conversation_id IS NULL THEN 0 ELSE 1 END AS pinned FROM conversations c LEFT JOIN conversation_pins pins ON pins.conversation_id=c.id AND pins.user_id=?" + (" WHERE " + " AND ".join(where) if where else "")
+    sql += " ORDER BY pinned DESC,c.last_at IS NULL,c.last_at DESC,c.id DESC LIMIT 200"
+    return {"conversations": [_conv_out(con, r) for r in con.execute(sql, [(user or {}).get('id',0),*args])], **counts(con)}
+
+
+def pin_conversation(con,cid,user,pinned):
+    if not isinstance(pinned,bool):raise CommsError('Укажите, закрепить ли чат')
+    if not con.execute('SELECT 1 FROM conversations WHERE id=?',(cid,)).fetchone():raise CommsError('Чат не найден')
+    if pinned:con.execute('INSERT OR IGNORE INTO conversation_pins(user_id,conversation_id,created_at) VALUES (?,?,?)',(user['id'],cid,ts_now()))
+    else:con.execute('DELETE FROM conversation_pins WHERE user_id=? AND conversation_id=?',(user['id'],cid))
+    return {'pinned':pinned}
 
 
 def counts(con) -> dict:
@@ -1309,7 +1330,7 @@ def conversation(con, cid: int, mark_read: bool = True) -> dict:
         convs, items = [_conv_out(con, r)], [{"type": "msg", "channel": r["channel"], "conversation_id": cid,
                                               "channel_label": convs_label, **m} for m in msgs]
     return {"conversation": _conv_out(con, r), "messages": msgs, "history": items,
-            "targets": [{"id": c["id"], "label": c["channel_label"] + (" · " + c["title"] if c["title"] else "")} for c in convs
+            "targets": [{"id": c["id"], "channel":c["channel"], "label": c["channel_label"] + (" · " + c["title"] if c["title"] else "")} for c in convs
                         if c["channel"] != "tg_archive"]}
 
 

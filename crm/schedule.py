@@ -223,9 +223,13 @@ BASE = "0000-01-01"  # исходное расписание группы до �
 def on(con, g, d: date | str) -> dict:
     """Группа с днями и временем, которые действуют в дату d. Без запланированных изменений - как в карточке группы."""
     g = dict(g)
+    if g.get('started_on') and str(d)[:10]<g['started_on']:return g|{'weekdays':''}
     v = con.execute("""SELECT weekdays, time, day_times FROM group_versions WHERE group_id=? AND valid_from<=?
                        ORDER BY valid_from DESC LIMIT 1""", (g["id"], str(d)[:10])).fetchone()
-    return g | dict(v) if v else g
+    result=g|dict(v) if v else g
+    if g.get('started_on') and not g.get('day_times') and g.get('time') and result.get('time'):
+        result['name']=g['name'].replace(g['time'],result['time'])
+    return result
 
 
 def versions(con, gid: int) -> list[dict]:
@@ -277,7 +281,7 @@ def apply_versions(con, today: date) -> int:
             continue
         v = on(con, g, today)
         if (v["weekdays"], v["time"], v["day_times"]) != (g["weekdays"], g["time"], g["day_times"]):
-            con.execute("UPDATE groups SET weekdays=?, time=?, day_times=? WHERE id=?", (v["weekdays"], v["time"], v["day_times"], gid))
+            con.execute("UPDATE groups SET weekdays=?, time=?, day_times=?,name=? WHERE id=?", (v["weekdays"], v["time"], v["day_times"],v['name'], gid))
             n += 1
     return n
 

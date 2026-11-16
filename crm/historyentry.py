@@ -27,7 +27,7 @@ def now():
 
 def options(con,sid,group_id=None,ym=None,tariff='fixed',ofp_group_id=None,start_date=None, paid_date=None, trial_date=None, discount_id=None):
     student=sv.get_student_row(con,sid)
-    groups=[dict(r) for r in con.execute('''SELECT g.id,g.name,g.branch_id,g.weekdays,g.time,g.day_times,g.program_id,g.lesson_kind,g.active,
+    groups=[dict(r) for r in con.execute('''SELECT g.id,g.name,g.branch_id,g.weekdays,g.time,g.day_times,g.started_on,g.program_id,g.lesson_kind,g.active,
         b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.is_makeup=0 ORDER BY b.name,g.name''')]
     result={'groups':groups,'components':[],'available_balance':max(0,money.balance(con,sid)['deposit']),'discounts':[dict(d) for d in con.execute('SELECT id,name,percent,rule FROM discounts WHERE active=1 ORDER BY percent DESC,name')]}
     if not group_id or not ym:return result
@@ -36,6 +36,9 @@ def options(con,sid,group_id=None,ym=None,tariff='fixed',ofp_group_id=None,start
     g=next((g for g in groups if g['id']==int(group_id)),None)
     if not g or g['lesson_kind']=='ofp':raise sv.ApiError('Выберите основную группу абонемента')
     pr=pricing.prices_for(con,ym)
+    from . import groupterms
+    special=groupterms.terms(con,g['id'],ym)
+    if special:pr=dict(pr,fixed=special['per_lesson'],flex=special['per_lesson'])
     selected=[(g,pr.get(tariff,pr['fixed']))]
     if g['program_id']:
         if tariff not in ('arena_only','pkg'):raise sv.ApiError('Выберите тариф сборной')

@@ -305,6 +305,8 @@ def init_db(con: sqlite3.Connection):
     subcomposition.init(con)
     money.init(con)
     comms.init(con)
+    from . import chatattachments
+    chatattachments.init(con)
     ai.init(con)
     calldigest.init(con)
     tasks.init(con)
@@ -330,6 +332,9 @@ def init_db(con: sqlite3.Connection):
     offlineplanner.provision_requested(con)
     offlineplanner.share_victoria_existing(con)
     pricing.init(con)
+    from . import groupterms
+    groupterms.init(con)
+    groupterms.provision_nebo_morning(con)
     from . import mypay, coachreport
     mypay.init(con)
     coachreport.init(con)

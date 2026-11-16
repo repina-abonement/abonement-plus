@@ -58,7 +58,9 @@ ROUTES: list[tuple[str, re.Pattern, callable, str]] = []
 
 
 def route(method: str, pattern: str, role: str = "any"):
-    rx = re.compile("^" + re.sub(r"\{(\w+)\}", r"(?P<\1>[0-9]+)", pattern) + "$")
+    # Existing IDs stay numeric. Attachment IDs/tickets are deliberately opaque.
+    parameter_types={'aid':r'[0-9a-f]{32}'} if '/attachments/' in pattern else {'ticket':r'[A-Za-z0-9_-]{43}','filename':r'[^/]+'} if pattern.startswith('/api/chat-files/') else {}
+    rx = re.compile("^" + re.sub(r"\{(\w+)\}", lambda m:'(?P<'+m[1]+'>'+parameter_types.get(m[1],r'[0-9]+')+')', pattern) + "$")
 
     def deco(fn):
         ROUTES.append((method, rx, fn, role))
@@ -622,6 +624,18 @@ def required_post(con, h, user, body, q, sid):
     return {"ok": True}
 
 
+@route("GET", "/api/chat-scripts", role="operator")
+def chat_scripts_get(con, h, user, body, q):
+    from . import chatscripts
+    return cx(chatscripts.catalog,con, int(q['student_id']) if q.get('student_id') else None, q.get('channel',''), int(q['group_id']) if q.get('group_id') else None)
+
+
+@route("POST", "/api/conversations/{cid}/rules-draft", role="operator")
+def chat_rules_draft(con, h, user, body, q, cid):
+    from . import chatscripts
+    return cx(chatscripts.stage_rules,con,int(cid),user,int(body.get('student_id') or 0),int(body['group_id']) if body.get('group_id') else None)
+
+
 @route("GET", "/api/memos", role="operator")
 def memos_get(con, h, user, body, q):
     from . import memos
@@ -637,7 +651,7 @@ def memos_post(con, h, user, body, q):
 @route("GET", "/api/memos/png", role="operator")
 def memos_png(con, h, user, body, q):
     from . import memos
-    png = memos.image(con, q.get("key", ""), fresh_only=False)
+    png = memos.image(con, q.get("key", ""), fresh_only=True)
     if not png:
         raise ApiError("Памятка ещё не нарисована", 404)
     return Raw(png, "image/png")
@@ -1037,7 +1051,7 @@ def tasks_settings(con, h, user, body, q):
 
 @route("PUT", "/api/tasks/settings", role="admin")
 def tasks_settings_put(con, h, user, body, q):
-    tasks.save_settings(con, body)
+    cx(tasks.save_settings,con,body)
     return tasks.settings_view(con)
 
 
@@ -2498,9 +2512,14 @@ def settings_put(con, h, user, body, q):
 
 # ---------------- связь: переписки, звонки, интеграции ----------------
 
+@route("POST", "/api/conversations/{cid}/pin", role="inbox")
+def pin_chat(con,h,user,body,q,cid):
+    return cx(comms.pin_conversation,con,int(cid),user,body.get('pinned'))
+
+
 @route("GET", "/api/inbox", role="operator")
 def inbox(con, h, user, body, q):
-    return comms.inbox(con, q.get("filter", "all"), q.get("q", ""))
+    return comms.inbox(con, q.get("filter", "all"), q.get("q", ""), user)
 
 
 @route("GET", "/api/inbox/counts", role="operator")
@@ -2524,6 +2543,41 @@ def conv_get(con, h, user, body, q, cid):
         for student in detail.get("conversation", {}).get("students", []):
             recents.remember(con, user["id"], student["id"])
     return detail
+
+
+@route("POST", "/api/conversations/{cid}/attachments", role="operator")
+def attachment_upload(con,h,user,body,q,cid):
+    from . import chatattachments
+    return cx(chatattachments.upload,con,int(cid),user,body.get('filename'),body.get('data'))
+
+
+@route("POST", "/api/conversations/{cid}/attachments/{aid}/send", role="operator")
+def attachment_send(con,h,user,body,q,cid,aid):
+    from . import chatattachments
+    return cx(chatattachments.send,con,int(cid),aid,user,body.get('caption') or '')
+
+
+@route("GET", "/api/chat-files/{ticket}/{filename}", role="public")
+@route("HEAD", "/api/chat-files/{ticket}/{filename}", role="public")
+def attachment_public(con,h,user,body,q,ticket,filename):
+    from . import chatattachments
+    try:data,mime,name=chatattachments.public_file(con,ticket)
+    except comms.CommsError:raise ApiError('Файл недоступен',404)
+    h.extra_headers=getattr(h,'extra_headers',[])+[('Cache-Control','no-store'),('X-Content-Type-Options','nosniff')]
+    return Raw(data,mime,name)
+
+
+@route("POST", "/api/families/{fid}/attachment-target", role="operator")
+def family_attachment_target(con,h,user,body,q,fid):
+    parent=con.execute('SELECT * FROM parents WHERE id=? AND family_id=?',(body.get('parent_id'),int(fid))).fetchone()
+    if not parent or not parent['phone']:raise ApiError('Выберите контакт этой семьи')
+    starters={'telegram':comms.start_wazzup_telegram,'max':comms.start_wazzup_max,'whatsapp':comms.start_whatsapp}
+    fn=starters.get(body.get('channel'))
+    if not fn:raise ApiError('Выберите канал отправки')
+    cid=cx(fn,con,parent['phone'])
+    target=con.execute('SELECT family_id FROM conversations WHERE id=?',(cid,)).fetchone()
+    if target and target[0] not in (None,int(fid)):raise ApiError('Чат уже связан с другой семьёй; сначала проверьте контакт')
+    return {'conversation_id':cid}
 
 
 @route("POST", "/api/conversations/{cid}/send", role="operator")
@@ -3002,6 +3056,11 @@ def int_max(con, h, user, body, q):
     return cx(comms.max_connect, con, base_url(h))
 
 
+@route("GET", "/api/integrations/wazzup/diagnostics", role="admin")
+def int_wazzup_diagnostics(con,h,user,body,q):
+    return cx(comms.wazzup_diagnostics,con)
+
+
 @route("POST", "/api/integrations/wazzup/connect", role="admin")
 def int_wz(con, h, user, body, q):
     return cx(comms.wz_connect, con, base_url(h))
@@ -3188,7 +3247,7 @@ class Handler(BaseHTTPRequestHandler):
                     if method != "DELETE" and "application/json" not in (self.headers.get("Content-Type") or ""):
                         raise ApiError("Ожидается JSON", 415)
                     n = int(self.headers.get("Content-Length") or 0)
-                    if n > (21_000_000 if url.path.startswith("/api/offers") else 40_000_000 if url.path.startswith("/api/erp") else 80_000_000 if url.path.startswith("/api/import/telegram") else 8_000_000 if url.path.startswith("/api/memos") else 14_000_000 if url.path.startswith("/api/posts") else 1_000_000):
+                    if n > (21_000_000 if url.path.startswith("/api/offers") else 40_000_000 if url.path.startswith("/api/erp") else 80_000_000 if url.path.startswith("/api/import/telegram") else 8_000_000 if re.fullmatch(r'/api/conversations/[0-9]+/attachments',url.path) else 8_000_000 if url.path.startswith("/api/memos") else 14_000_000 if url.path.startswith("/api/posts") else 1_000_000):
                         raise ApiError("Слишком большой запрос", 413)
                     if n:
                         body = json.loads(self.rfile.read(n) or b"{}")

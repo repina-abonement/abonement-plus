@@ -112,7 +112,7 @@ def age_warning(birth: str, age_txt: str, branch: str = "", on: date | None = No
 
 
 def quote(*, weekdays: list[int], ym: str, tariff: str, prices: dict,
-          vacations: list[tuple[date, date]], prev_unresolved_absences: int, closed: set | None = None) -> dict:
+          vacations: list[tuple[date, date]], prev_unresolved_absences: int, closed: set | None = None, credit_limit: int = MAX_FLEX_CREDIT, allow_fixed_credit: bool = False) -> dict:
     """Цена абонемента на месяц ym.
 
     prev_unresolved_absences — неотработанные и не пересчитанные пропуски
@@ -122,7 +122,7 @@ def quote(*, weekdays: list[int], ym: str, tariff: str, prices: dict,
     all_dates = [d for d in lesson_dates(weekdays, ym) if not closed or d.isoformat() not in closed]
     vac_dates = [d for d in all_dates if in_vacation(d, vacations)]
     paid_dates = [d for d in all_dates if not in_vacation(d, vacations)]
-    credit_lessons = min(MAX_FLEX_CREDIT, prev_unresolved_absences) if tariff == "flex" else 0
+    credit_lessons = min(credit_limit, prev_unresolved_absences) if tariff == "flex" or allow_fixed_credit else 0
     base = len(paid_dates) * per
     credit = credit_lessons * per
     total = max(0, base - credit)

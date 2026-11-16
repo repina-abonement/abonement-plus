@@ -464,8 +464,8 @@ function shell() {
   app.innerHTML = `
   <header class="topbar">
     <div class="brand"><i aria-hidden="true">⚽</i><div>Абонемент <span>Плюс</span></div></div>
-    <nav class="nav">${sideNav(views)}</nav>
     ${can("members", "full") ? `<button class="btn" id="new-client">+ Клиент</button>` : ""}
+    <nav class="nav">${sideNav(views)}</nav>
     <div class="sidebar-account">
       <div class="sidebar-account-text"><b>${esc(S.user.name)}</b><small>${esc(S.user.title || "")}</small></div>
       <button type="button" class="btn sm" data-account-logout aria-label="Выйти из аккаунта">Выйти</button>
@@ -1902,7 +1902,7 @@ async function openStudent(id, options = {}) {
     <h3>История</h3>
     ${isOwner() ? `<button class="btn" id="erp-full-client">Исходные данные ERP</button><div id="erp-full-client-out"></div>` : ''}
     <div class="row" style="margin-bottom:10px"><input id="note" placeholder="Комментарий, итог звонка…"><button class="btn sm" id="note-add" style="flex:0">Добавить</button></div>
-    <ul class="history">${d.history.map((h) => `<li><div class="when">${dtShort(h.ts)} · ${esc(h.user_name)}</div>${esc(h.text)}</li>`).join("")}</ul>
+    <ul class="history">${d.history.map((h) => `<li><div class="when">${dtShort(h.ts)} · ${esc(h.display_author||h.user_name)}</div><div style="white-space:pre-wrap">${esc(h.display_text||h.text)}</div>${h.technical_text?`<details class="small muted"><summary>Подробности ERP</summary><div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(h.technical_text)}</div></details>`:''}</li>`).join("")}</ul>
   </div>
   <div style="margin-top:14px" data-sc="arch"><button class="btn sm ${s.archived ? "" : "danger"}" id="s-arch">${s.archived ? "Вернуть из архива" : "Перенести в архив"}</button></div>`;
   openDrawer(html, "wide");

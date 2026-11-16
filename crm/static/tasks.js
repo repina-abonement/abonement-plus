@@ -369,13 +369,28 @@ async function renderTaskSettings(box, users) {
     <div class="field"><label>Текст после пробного</label><textarea data-t="msg_after" rows="2">${esc(v.msg_after)}</textarea></div>
     <div class="field"><label>Предложение ближайших пробных (кнопка «📅 Предложить ближайшие ПУ» в переписке). {slots}: список дат</label><textarea data-t="msg_trial_offer" rows="4">${esc(v.msg_trial_offer || "")}</textarea></div>
     <div class="small muted" style="margin-bottom:10px">В текст подставятся: {child} имя ребёнка, {date} дата, {time} время, {place} филиал, {admin} чат с администратором. Сообщение уходит туда, где семья уже переписывалась со школой (Telegram, MAX или WhatsApp). Если переписки нет, в задаче будет видно «не ушло», и Оля напишет вручную</div>
+    <h3>Правила школы: текст и каналы</h3>
+    <p class="small muted">Комплект выбирается по группе ребёнка. Малыши используют каналы Неба. MAX и Telegram настраиваются отдельно.</p>
+    <button type="button" class="btn sm" id="rules-import">Загрузить настройки из файла</button><input type="file" id="rules-import-file" accept=".json" hidden>
+    ${Object.entries(d.school_rules||{}).map(([id,p])=>`<details data-rule="${id}"><summary>${esc(p.name)}</summary>
+      ${['telegram','max','offer'].map(f=>`<label>${f==='offer'?'Оферта':f==='max'?'Канал MAX':'Канал Telegram'}<input data-rf="${f}" value="${esc(p[f])}" ${id==='toddlers'&&f!=='offer'?'disabled':''}></label>`).join('')}
+      <label>Текст с картинкой. Поля: {channel}, {branch}, {offer}<textarea data-rf="text" rows="12">${esc(p.text)}</textarea></label></details>`).join('')}
     <button class="btn primary" id="t-save">Сохранить</button>`;
+  $('#rules-import').onclick=()=>$('#rules-import-file').click();
+  $('#rules-import-file').onchange=async e=>{try{
+    const file=e.target.files[0];if(!file)return;if(file.size>100000)throw Error('Слишком большой файл настроек');
+    const data=JSON.parse(await file.text());for(const el of box.querySelectorAll('[data-rule]')){
+      const p=data[el.dataset.rule];if(!p)continue;for(const input of el.querySelectorAll('[data-rf]'))if(typeof p[input.dataset.rf]==='string')input.value=p[input.dataset.rf];
+    }toast('Настройки заполнены. Проверьте и нажмите «Сохранить»');
+  }catch(e){fail(e)}};
+
   $("#auto-live").onclick = async () => {
     if (!d.auto_live && !confirm("Запустить автосообщения клиентам? С этой минуты CRM сама будет писать родителям")) return;
     try { await api("PUT", "/api/auto-live", { on: !d.auto_live }); renderTaskSettings(box, users); } catch (e) { fail(e); }
   };
   $("#t-save").onclick = async () => {
     const body = Object.fromEntries([...box.querySelectorAll("[data-t]")].map((i) => [i.dataset.t, i.value]));
+    body.school_rules=Object.fromEntries([...box.querySelectorAll('[data-rule]')].map(el=>[el.dataset.rule,Object.fromEntries([...el.querySelectorAll('[data-rf]')].filter(i=>!i.disabled).map(i=>[i.dataset.rf,i.value]))]));
     body.booked_places = Object.fromEntries([...box.querySelectorAll("[data-bk]")].map((el) => [el.dataset.bk,
       Object.fromEntries([...el.querySelectorAll("[data-bf]")].map((i) => [i.dataset.bf, i.value]))]));
     try { await api("PUT", "/api/tasks/settings", body); toast("Сохранено"); }

@@ -73,7 +73,7 @@ def calendar(con, sid, ym):
     for event in events.values():
         g=groups.get(event['group_id'],{})
         day=date.fromisoformat(event['date'])
-        event.update(group=g.get('name',''),branch=g.get('branch',''),time=logic.group_time(schedule.on(con,g,day),day.weekday()) if g else '',future=event['date']>sv.today().isoformat())
+        event.update(group=schedule.on(con,g,day).get('name','') if g else '',branch=g.get('branch',''),time=logic.group_time(schedule.on(con,g,day),day.weekday()) if g else '',future=event['date']>sv.today().isoformat())
         result.append(event)
     for event in result:
         if event.get('trial_time'):

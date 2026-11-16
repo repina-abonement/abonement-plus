@@ -1,7 +1,7 @@
 "use strict";
 /* Абонемент Плюс — чаты и звонки. Подключается после app.js и пользуется его функциями. */
 
-const CH = { telegram: "Telegram", max: "MAX", whatsapp: "WhatsApp", wazzup_telegram: "Telegram школы", wazzup_max: "MAX", tg_archive: "Telegram (до CRM)" };
+const CH = { telegram: "Telegram-бот", max: "MAX", whatsapp: "WhatsApp", wazzup_telegram: "Telegram через Wazzup", wazzup_max: "MAX", tg_archive: "Telegram (до CRM)" };
 const chLabel = (c) => CH[c] || String(c || "").replace("wazzup_", "");
 const CALL_ST = { ringing: "звонит", talking: "разговор", answered: "принят", missed: "пропущен", busy: "занято", failed: "не дозвонились" };
 const secs = (n) => n == null ? "" : n < 60 ? `${n} сек` : `${Math.floor(n / 60)} мин ${n % 60 ? (n % 60) + " сек" : ""}`.trim();
@@ -224,7 +224,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   if (st.whatsapp) parents.filter((p) => p.phone && !d.conversations.some((c) => c.channel === "whatsapp" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
     .forEach((p) => targets.push({ v: "w" + p.id, t: `WhatsApp · ${p.name} (новый чат)` }));
   if (st.wazzup_telegram) parents.filter((p) => p.phone && !d.conversations.some((c) => c.channel === "wazzup_telegram" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
-    .forEach((p) => targets.push({ v: "t" + p.id, t: `Telegram от школы · ${p.name} (новый чат)` }));
+    .forEach((p) => targets.push({ v: "t" + p.id, t: `Telegram через Wazzup · ${p.name} (новый чат)` }));
   if (st.wazzup_max) parents.filter(p => p.phone && !d.conversations.some(c => c.channel === "wazzup_max" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
     .forEach(p => targets.push({v:"m" + p.id,t:`MAX · ${p.name} (новый чат)`}));
   S.familySendTargets = S.familySendTargets || {};
@@ -274,6 +274,13 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   box.querySelectorAll("[data-dial]").forEach((b) => (b.onclick = () => dial(b.dataset.dial)));
   box.querySelectorAll("[data-oqchat]").forEach((b) => (b.onclick = () => openChat(+b.dataset.oqchat)));
   if (kid && kid.funnel === "sales") wireTrialOffer({ students: [kid], family_id: familyId, onBooked: kid.onBooked }, "#cm-text");
+  const resolveFileConversation=async()=>{
+    const to=$('#cm-to').value;if(!to)throw Error('Выберите мессенджер для отправки');
+    if(to[0]==='c')return +to.slice(1);
+    const created=await api('POST',`/api/families/${familyId}/attachment-target`,{parent_id:+to.slice(1),channel:to[0]==='m'?'max':to[0]==='t'?'telegram':'whatsapp'});
+    return created.conversation_id;
+  };
+  const familyChannel=()=>{const to=$('#cm-to')?.value||'';return to[0]==='c'?(d.conversations.find(c=>c.id===+to.slice(1))?.channel||''):to[0]==='m'?'wazzup_max':to[0]==='t'?'wazzup_telegram':to[0]==='w'?'whatsapp':''};
   wireMessagePicker("#cm-text", async (sticker) => {
     const draft = $("#cm-text").value;
     const to = $("#cm-to").value;
@@ -285,9 +292,10 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     }
     await loadFamilyComms(familyId, parents, studentId, kid);
     if ($("#cm-text")) $("#cm-text").value = draft;
-  });
+  },{student_id:studentId,students:kid?[kid]:[],channel:familyChannel,resolveConversation:resolveFileConversation});
   const send = $("#cm-send");
   if (send) send.onclick = async () => {
+    if(await sendComposerAttachment($('#cm-text'),resolveFileConversation,async sentCid=>{S.familySendTargets[targetKey]='c'+sentCid;await loadFamilyComms(familyId,parents,studentId,kid)}))return;
     const text = $("#cm-text").value.trim(), to = $("#cm-to").value;
     if (!text) return;
     if (!to) return toast("Выберите мессенджер для отправки");
@@ -330,8 +338,9 @@ async function renderInbox(page) {
       <div class="list-row click conv-row ${c.unread ? "unread" : ""}" data-conv="${c.id}" title="${esc(chLabel(c.channel))}">
         <div class="grow"><b>${esc(c.title || c.username || c.phone || "Без имени")}</b>${c.open_q ? ` <span class="pill red" title="${esc(c.open_note || "Открытый вопрос")}">❗ открытый вопрос</span>` : ""}${c.family_name ? ` <span class="muted small">· семья ${esc(c.family_name)}</span>` : ` <span class="pill yellow">нет карточки</span>`}${c.demo ? ` <span class="pill">тест</span>` : ""}
           <div class="small muted ellipsis">${esc(c.last_text)}</div></div>
-        <div class="right"><div class="small muted">${dtWhen(c.last_at)}</div>${c.unread ? `<span class="nbadge static">${c.unread}</span>` : ""}</div>
+        <button type="button" class="btn sm" data-pin-conv="${c.id}" aria-pressed="${Boolean(c.pinned)}" title="${c.pinned?'Открепить':'Закрепить'} чат">${c.pinned?'Открепить':'Закрепить'}</button><div class="right"><div class="small muted">${dtWhen(c.last_at)}</div>${c.unread ? `<span class="nbadge static">${c.unread}</span>` : ""}</div>
       </div>`).join("") : `<div class="list-row muted">Переписок нет</div>`;
+    list.querySelectorAll('[data-pin-conv]').forEach(button=>button.onclick=async e=>{e.stopPropagation();const row=d.conversations.find(c=>c.id===+button.dataset.pinConv);button.disabled=true;try{await api('POST',`/api/conversations/${row.id}/pin`,{pinned:!row.pinned});loadList()}catch(error){button.disabled=false;fail(error)}});
     list.querySelectorAll("[data-conv]").forEach((el) => (el.onclick = () => openChat(+el.dataset.conv)));
   }
   await loadList();
@@ -382,7 +391,9 @@ async function openChat(cid, keepScroll = false) {
   let d;
   try { d = await api("GET", `/api/conversations/${cid}${keepScroll ? "" : "?remember=1"}`); } catch (e) { return fail(e); }
   const c = d.conversation;
-  const draft = $("#chat-text") ? $("#chat-text").value : "";
+  const sameChat=+($('#chat-text')?.closest('[data-chat]')?.dataset.chat||0)===cid;
+  const attachmentState=sameChat&&$('#chat-text')?{file:$('#chat-text')._attachmentFile,upload:$('#chat-text')._attachmentUpload,preview:$('#chat-text')._attachmentPreview?.innerHTML}:null;
+  const draft = sameChat && $("#chat-text") ? $("#chat-text").value : "";
   const html = `
     <div class="chat" data-chat="${cid}">
       <div><span class="pill ch-${esc(c.channel)}">${esc(c.channel_label)}</span>${c.demo ? ` <span class="pill">тест</span>` : ""}</div>
@@ -444,9 +455,11 @@ async function openChat(cid, keepScroll = false) {
     const to = $("#chat-to") ? +$("#chat-to").value : cid;
     await api("POST", `/api/conversations/${to}/send`, { sticker });
     await openChat(cid);
-  });
+  },{students:c.students||[],channel:()=>{const id=$('#chat-to')?+$('#chat-to').value:cid;return (d.targets||[]).find(x=>x.id===id)?.channel||(id===cid?c.channel:'')},resolveConversation:async()=>$('#chat-to')?+$('#chat-to').value:cid});
+  if(attachmentState?.file){const input=$('#chat-text');input._attachmentFile=attachmentState.file;input._attachmentUpload=attachmentState.upload;input._attachmentPreview.innerHTML=attachmentState.preview||'';}
   const sendBtn = $("#chat-send");
   sendBtn.onclick = async () => {
+    if(await sendComposerAttachment($('#chat-text'),async()=>$('#chat-to')?+$('#chat-to').value:cid,async()=>openChat(cid)))return;
     const text = $("#chat-text").value.trim(); if (!text) return;
     sendBtn.disabled = true;
     const to = $("#chat-to") ? +$("#chat-to").value : cid;
@@ -530,7 +543,7 @@ async function renderCommsSettings(box, users) {
       <div class="field"><label>API-ключ Wazzup</label><input data-k="wazzup_key" value="${esc(v.wazzup_key)}"></div>
       ${inf.wazzup_channels.length ? `<div class="small">Каналы: ${inf.wazzup_channels.map((c) => esc(`${c.transport} ${c.name} (${c.state})`)).join(", ")}</div>` : ""}
       ${inf.wazzup_error ? `<div class="error">${esc(inf.wazzup_error)}</div>` : ""}
-      <button class="btn sm" data-connect="wazzup">Сохранить и подключить</button>
+      <button class="btn sm" data-connect="wazzup">Сохранить и подключить</button><button type="button" class="btn sm" data-wz-diagnostics>Проверить каналы</button><div class="small muted" data-wz-diagnostics-result></div>
     </div>
 
     ${d.review_on ? `<div class="int"><div class="int-head"><b>Отзывы с Яндекс Карт и 2ГИС</b>${ok(!!d.review_last, "ждём первый отзыв")}</div>
@@ -566,6 +579,8 @@ async function renderCommsSettings(box, users) {
     try{const report=await api('GET','/api/integrations/telegram/diagnostics');result.textContent=report.configured?report.probes.map(p=>(p.route==='relay'?'Через мост: ':'Напрямую: ')+p.detail).join(' · '):'Telegram не подключён'}
     catch(e){result.textContent=e.message}finally{if(button.isConnected)button.disabled=false}
   };
+  const wzCheck=box.querySelector('[data-wz-diagnostics]');
+  if(wzCheck)wzCheck.onclick=async()=>{const result=box.querySelector('[data-wz-diagnostics-result]');wzCheck.disabled=true;result.textContent='Проверяю каналы…';try{const report=await api('GET','/api/integrations/wazzup/diagnostics');result.textContent=report.error||(!report.configured?'Wazzup не подключён':report.channels.map(c=>({telegram:'Telegram',tgapi:'Telegram',max:'MAX',maxapi:'MAX',whatsapp:'WhatsApp',wapi:'WhatsApp'}[c.transport]||c.transport)+' · '+c.state+(c.selected?' · выбран в CRM':' · не выбран в CRM')).join(' · ')||'Wazzup не вернул каналы')}catch(error){result.textContent=error.message}finally{if(wzCheck.isConnected)wzCheck.disabled=false}};
   box.querySelectorAll("[data-connect]").forEach((b) => (b.onclick = async () => {
     b.disabled = true;
     try {
@@ -787,13 +802,40 @@ function insertAdministratorGreeting(input,user=S.user) {
   input.dispatchEvent(new Event('input',{bubbles:true}));
 }
 
+async function sendComposerAttachment(input,resolveConversation,done) {
+  if(!input?._attachmentFile)return false;
+  if(input._attachmentBusy)return true;
+  input._attachmentBusy=true;
+  const button=$(input.id==='cm-text'?'#cm-send':'#chat-send'),target=$(input.id==='cm-text'?'#cm-to':'#chat-to');
+  const disabled=input.disabled,targetDisabled=target?.disabled;
+  input.disabled=true;if(button)button.disabled=true;if(target)target.disabled=true;
+  try {
+    const cid=await resolveConversation(),file=input._attachmentFile,caption=input.value;
+    if(!cid)throw Error('Выберите мессенджер для отправки');
+    if(input._attachmentUpload&&input._attachmentUpload.cid!==cid)throw Error('Получатель изменился. Уберите вложение и выберите файл заново');
+    if(!input._attachmentUpload){
+      const encoded=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=()=>reject(Error('Не удалось прочитать файл'));reader.readAsDataURL(file)});
+      const uploaded=await api('POST',`/api/conversations/${cid}/attachments`,{filename:file.name,data:encoded});
+      input._attachmentUpload={id:uploaded.id,cid};
+    }
+    const result=await api('POST',`/api/conversations/${cid}/attachments/${input._attachmentUpload.id}/send`,{caption});
+    if(!result.ok)throw Error((result.error||'Не удалось подтвердить отправку')+'. Проверьте доставку в мессенджере перед повторной попыткой');
+    input._attachmentFile=null;input._attachmentUpload=null;input.value='';input._attachmentPreview?.replaceChildren();
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+    if(input.isConnected)await done(cid);
+  }catch(error){fail(error)}
+  finally{input._attachmentBusy=false;input.disabled=disabled;if(button?.isConnected)button.disabled=false;if(target?.isConnected)target.disabled=targetDisabled}
+  return true;
+}
+
 /* One picker shared by the inbox and the client card. */
-function wireMessagePicker(selector, sendSticker) {
+function wireMessagePicker(selector, sendSticker, context={}) {
   const input = $(selector); if (!input) return;
   const panel = document.createElement("div");
   panel.className = "message-picker";
   const stickers = [["smile", "1f60a", "Улыбка"], ["thanks", "1f64f", "Спасибо"], ["yes", "1f44d", "Отлично"], ["heart", "2764", "Сердце"], ["party", "1f389", "Поздравляем"], ["football", "26bd", "Футбол"]];
-  panel.innerHTML = `<div class="chips"><button type="button" class="btn sm" data-administrator-greeting>Приветствие</button><button type="button" class="btn sm" data-picker-tab="emoji" aria-expanded="false">😊 Смайлы</button><button type="button" class="btn sm" data-picker-tab="sticker" aria-expanded="false">Стикеры</button></div>
+  panel.innerHTML = `<div class="chips"><button type="button" class="btn sm" data-attach-file title="Прикрепить фото или файл" aria-label="Прикрепить фото или файл">📎</button><input type="file" data-attach-input hidden accept=".jpg,.jpeg,.png,.webp,.pdf,.txt,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.zip"><button type="button" class="btn sm" data-administrator-greeting>Приветствие</button><button type="button" class="btn sm" data-picker-tab="scripts" aria-expanded="false">Скрипты</button><button type="button" class="btn sm" data-picker-tab="emoji" aria-expanded="false">😊 Смайлы</button><button type="button" class="btn sm" data-picker-tab="sticker" aria-expanded="false">Стикеры</button></div>
+    <div class="picker-options" data-picker-panel="scripts" hidden></div>
     <div class="chips picker-options" data-picker-panel="emoji" hidden>${["😊", "😀", "😄", "😉", "😍", "🥰", "😘", "😎", "🤔", "😢", "😭", "😂", "👍", "👏", "🙏", "❤️", "🎉", "⚽", "✅", "🔥", "💪"].map(x => `<button type="button" class="btn sm" data-emoji="${esc(x)}">${x}</button>`).join("")}</div>
     <div class="picker-options" data-picker-panel="sticker" hidden><div class="sticker-grid">${stickers.map(([id, code, label]) => `<button type="button" class="sticker-choice" data-sticker="${id}" title="Отправить: ${label}" aria-label="Отправить стикер: ${label}"><img src="https://raw.githubusercontent.com/jdecked/twemoji/v15.1.0/assets/72x72/${code}.png" width="56" height="56" alt="${label}"><span>${label}</span></button>`).join("")}</div><p class="small muted">Базовые стикеры: Twemoji, CC BY 4.0.</p><div data-custom-packs></div>
       ${S.user?.role === "admin" ? `<details class="sticker-import"><summary>+ Добавить свой набор Telegram</summary><label>Ссылка на набор<input data-pack-url value="https://t.me/addstickers/Footbolika_Olya" placeholder="https://t.me/addstickers/Название"></label><button class="btn sm" type="button" data-pack-import>Добавить набор</button><div class="small muted" data-pack-status>Для импорта нужен подключённый Telegram-бот. Набор будет доступен всей команде.</div></details>` : ""}
@@ -803,16 +845,77 @@ function wireMessagePicker(selector, sendSticker) {
     b.onclick = () => {
       const opening = b.getAttribute("aria-expanded") !== "true";
       if (opening && b.dataset.pickerTab === "sticker") loadCustomPacks().catch(fail);
+      if (opening && b.dataset.pickerTab === "scripts") loadScripts().catch(fail);
       panel.querySelectorAll("[data-picker-tab]").forEach(x => x.setAttribute("aria-expanded", String(opening && x === b)));
       panel.querySelectorAll("[data-picker-panel]").forEach(x => { x.hidden = !opening || x.dataset.pickerPanel !== b.dataset.pickerTab; });
     };
   });
   input.closest(".row").before(panel);
+  const preview=document.createElement('div');preview.className='small';panel.append(preview);input._attachmentPreview=preview;
+  const fileInput=panel.querySelector('[data-attach-input]');
+  panel.querySelector('[data-attach-file]').onclick=()=>{if(!input._attachmentBusy)fileInput.click()};
+  fileInput.onchange=()=>{
+    const file=fileInput.files[0];fileInput.value='';if(!file)return;
+    if(file.size>5*1024*1024){toast('Файл должен быть не больше 5 МБ');return;}
+    input._attachmentFile=file;input._attachmentUpload=null;
+    preview.innerHTML='<span></span> <button type="button" class="btn sm" data-remove-file>Убрать</button>';
+    preview.querySelector('span').textContent=file.name+' · '+Math.ceil(file.size/1024)+' КБ · отправится по кнопке «Отправить»';
+    preview.querySelector('button').onclick=()=>{if(!input._attachmentBusy){input._attachmentFile=null;input._attachmentUpload=null;preview.replaceChildren()}};
+  };
   panel.querySelector('[data-administrator-greeting]').onclick=()=>insertAdministratorGreeting(input);
   panel.querySelectorAll("[data-emoji]").forEach(b => {
     b.onmousedown = e => e.preventDefault();
     b.onclick = () => { input.setRangeText(b.dataset.emoji, input.selectionStart, input.selectionEnd, "end"); input.focus(); input.dispatchEvent(new Event("input", { bubbles: true })); };
   });
+  let scriptsRequest=0;
+  const loadScripts = async (chosenStudent,chosenGroup) => {
+    const request=++scriptsRequest;
+    const root=panel.querySelector('[data-picker-panel="scripts"]');
+    const students=context.students||[];
+    const sid=chosenStudent||context.student_id||(students.length===1?students[0].id:0);
+    root.replaceChildren();
+    if(students.length>1){
+      const label=document.createElement('label');label.textContent='Для кого';
+      const select=document.createElement('select');select.innerHTML='<option value="">Выберите ребёнка</option>'+students.map(k=>`<option value="${k.id}" ${k.id===+sid?'selected':''}>${esc(displayChildName(k.name))}</option>`).join('');
+      select.onchange=()=>loadScripts(+select.value).catch(fail);label.append(select);root.append(label);
+    }
+    const channel=context.channel?context.channel():'';
+    const d=await api('GET','/api/chat-scripts?'+new URLSearchParams({student_id:sid||'',group_id:chosenGroup||'',channel}));
+    if(!panel.isConnected||request!==scriptsRequest)return;
+    const rules=d.items.find(x=>x.key==='rules');
+    if(rules?.groups?.length>1){
+      const label=document.createElement('label');label.textContent='Группа';const select=document.createElement('select');
+      select.innerHTML='<option value="">Выберите группу</option>'+rules.groups.map(g=>`<option value="${g.id}" ${g.id===+rules.group_id?'selected':''}>${esc(g.name)}</option>`).join('');
+      select.onchange=()=>loadScripts(+sid,+select.value).catch(fail);label.append(select);root.append(label);
+    }
+    for(const item of d.items){
+      const details=document.createElement('details');details.style.marginTop='8px';
+      const summary=document.createElement('summary');summary.textContent=item.title;details.append(summary);
+      if(item.image){const img=document.createElement('img');img.src=item.image;img.alt=item.title;img.style.cssText='max-width:200px;max-height:260px;object-fit:contain';details.append(img)}
+      const text=document.createElement('div');text.style.cssText='white-space:pre-wrap;margin:8px 0';text.textContent=item.reason||item.text;details.append(text);
+      const button=document.createElement('button');button.type='button';button.className='btn sm';button.textContent='Вставить в сообщение';button.disabled=!!item.reason;details.append(button);
+      button.onclick=async()=>{
+        if(input._attachmentBusy)return;
+        if((input.value.trim()||input._attachmentFile)&&!confirm('Заменить текущий черновик выбранным скриптом?'))return;
+        button.disabled=true;
+        try{
+          if(context.channel&&context.channel()!==channel)throw Error('Мессенджер изменился. Откройте скрипты заново');
+          if(item.key==='rules'){
+            const cid=await context.resolveConversation();
+            const staged=await api('POST',`/api/conversations/${cid}/rules-draft`,{student_id:+sid,group_id:item.group_id});
+            input._attachmentUpload={id:staged.id,cid};input._attachmentFile={name:staged.filename,size:staged.size};
+            preview.innerHTML='<span></span><br><img style="max-width:160px;max-height:210px" alt="Правила школы">';
+            preview.querySelector('span').textContent=staged.filename+' · вместе с текстом по кнопке «Отправить»';preview.querySelector('img').src=item.image;
+            input.value=staged.text;
+          }else{
+            input._attachmentFile=null;input._attachmentUpload=null;preview.replaceChildren();input.value=item.text;
+          }
+          input.focus();input.dispatchEvent(new Event('input',{bubbles:true}));root.hidden=true;panel.querySelector('[data-picker-tab="scripts"]').setAttribute('aria-expanded','false');
+        }catch(e){fail(e)}finally{button.disabled=!!item.reason}
+      };
+      root.append(details);
+    }
+  };
   const loadCustomPacks = async () => {
     const root = panel.querySelector("[data-custom-packs]");
     const data = await api("GET", "/api/sticker-packs");

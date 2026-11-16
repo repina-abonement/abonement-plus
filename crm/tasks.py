@@ -781,10 +781,14 @@ def settings_view(con) -> dict:
     vals["msg_trial_offer"] = setting(con, "msg_trial_offer") or trialoffer.DEFAULT
     from . import reminders
     vals["msg_lesson"] = setting(con, "msg_lesson") or reminders.DEFAULT_TEXT
-    return {"values": vals, "erp_statuses": list(ERP_STATUSES), "booked_places": booked_places(con), "auto_live": comms.auto_live(con)}
+    from . import chatscripts
+    return {"values": vals, "erp_statuses": list(ERP_STATUSES), "booked_places": booked_places(con), "school_rules":chatscripts.profiles(con), "auto_live": comms.auto_live(con)}
 
 
 def save_settings(con, data: dict):
+    if "school_rules" in data:
+        from . import chatscripts
+        chatscripts.save_profiles(con,data["school_rules"])
     for k, v in data.items():
         if k in DEFAULT_TEMPLATES or k in AUTO_SETTINGS or k in CONTACT_SETTINGS or k in (OWNER_KEY, "msg_trial_offer", "msg_lesson"):
             comms.put(con, k, str(v or "").strip())

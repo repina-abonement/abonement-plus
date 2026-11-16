@@ -3,13 +3,14 @@
 CRM сама рисует картинку-памятку для каждого филиала и для сборной из текущих цен и правил.
 Сервер собирает данные памятки и их отпечаток. Картинку рисует браузер любого сотрудника (canvas,
 шрифт Nunito) и присылает на сервер. Поменялись цены или правила, отпечаток другой: следующий
-сотрудник, открывший CRM, перерисует памятку сам. Пока свежей картинки нет, сообщения уходят без неё.
+сотрудник, открывший CRM, перерисует памятку сам. Ручной скрипт правил недоступен без актуальной картинки.
 """
 from __future__ import annotations
 
 import base64
 import hashlib
 import json
+from pathlib import Path
 from datetime import date, datetime
 
 from . import logic
@@ -23,7 +24,7 @@ CREATE TABLE IF NOT EXISTS memo_images (
 );
 """
 # Поменяли тексты или рисунок в memos.js: увеличьте номер, и все памятки перерисуются
-VERSION = 2
+VERSION = 3
 WD = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
 WD_FULL = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
 
@@ -68,7 +69,7 @@ def _regular(con, b, today: date) -> dict:
     late = pn["late_pct"] or p["late_pct"]
     d = {"kind": "regular", "title": b["name"], "deadline_day": dl,
          "fixed": p["fixed"], "flex": p["flex"], "fixed8": p["fixed"] * 8, "flex8": p["flex"] * 8,
-         "credit": logic.MAX_FLEX_CREDIT, "late_pct": late, "makeups": _makeups(con)}
+         "credit": logic.MAX_FLEX_CREDIT, "late_pct": late or 5, "makeups": _makeups(con)}
     if (pn["fixed"], pn["flex"]) != (p["fixed"], p["flex"]):
         d["next"] = {"from": _from(nxt), "fixed": pn["fixed"], "flex": pn["flex"]}
     return d
@@ -91,7 +92,7 @@ def _program(con, prog, today: date) -> dict:
                 if x != "":
                     out.append(f"{WD_FULL[int(x)]} {logic.group_time(g, int(x)) or g['time']}")
         return ", ".join(out)
-    d = {"kind": "program", "title": title, "program": prog["name"], "deadline_day": int(prog.get("deadline_day") or 25),
+    d = {"kind": "program", "title": title, "program": prog["name"], "program_slug":prog["slug"], "deadline_day": int(prog.get("deadline_day") or 25),
          "arena": p["arena"], "ofp": p["ofp"], "arena_only": p["arena_only"], "late_pct": pn["late_pct"] or p["late_pct"],
          "arena_sched": sched(arena), "ofp_sched": (ofp[0]["branch"] + ": " + sched(ofp)) if ofp else "",
          "makeups": _makeups(con)}
@@ -107,6 +108,14 @@ def targets(con, today: date | None = None) -> list[dict]:
     for b in con.execute("""SELECT DISTINCT b.id, b.name FROM branches b JOIN groups g ON g.branch_id=b.id
                             WHERE b.active=1 AND g.active=1 AND g.is_makeup=0 AND g.program_id IS NULL ORDER BY b.name"""):
         out.append({"key": f"b{b['id']}", "data": _regular(con, b, today)})
+    from . import groupterms
+    for g in con.execute("SELECT g.*,b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.active=1 AND g.program_id IS NULL AND g.is_makeup=0"):
+        term=groupterms.terms(con,g['id'],logic.month_of(today))
+        age=str(g['age'] or '').replace(' ','').replace(',','.').replace('–','-').replace('—','-')
+        if 'небо' in g['branch'].casefold() and (term or age=='1.5-3'):
+            # This group's approved terms differ from ordinary Nebo tariffs.
+            data={'kind':'toddlers','title':g['branch']+' · Группа 1,5–3 года','deadline_day':25,'late_pct':5,'per_lesson':term['per_lesson'] if term else 1600,'credit':term['credit_limit'] if term else 2}
+            out.append({'key':f"g{g['id']}",'data':data})
     try:
         for prog in con.execute("SELECT * FROM programs ORDER BY id").fetchall():
             try:
@@ -125,7 +134,8 @@ def status(con) -> list[dict]:
     out = []
     for t in targets(con):
         s = saved.get(t["key"])
-        out.append(t | {"fresh": bool(s and s["hash"] == t["hash"]), "drawn_at": s["created_at"] if s else None})
+        designed=designed_image(t)
+        out.append(t | {"fresh": bool(designed or (s and s["hash"] == t["hash"])), "drawn_at": "2026-11-16" if designed else s["created_at"] if s else None})
     return out
 
 
@@ -144,6 +154,9 @@ def save(con, key: str, h: str, png_b64: str) -> bool:
 
 def image(con, key: str, fresh_only: bool = True) -> bytes | None:
     """Картинка памятки; если цены поменялись, а новая ещё не нарисована, None (не шлём устаревшую)."""
+    target=next((x for x in targets(con) if x['key']==key),None)
+    designed=designed_image(target) if target else None
+    if designed:return designed
     r = con.execute("SELECT hash, png FROM memo_images WHERE key=?", (key,)).fetchone()
     if not r:
         return None
@@ -155,11 +168,33 @@ def image(con, key: str, fresh_only: bool = True) -> bytes | None:
 
 
 def key_for_student(con, sid: int) -> str | None:
-    """Какая памятка нужна ученику: сборная по направлению, иначе филиал его группы."""
-    r = con.execute("""SELECT g.branch_id, g.program_id FROM enrollments e JOIN groups g ON g.id=e.group_id
-                       WHERE e.student_id=? AND e.active=1 ORDER BY g.program_id IS NULL, e.id LIMIT 1""", (sid,)).fetchone()
-    if not r:
-        r = con.execute("SELECT g.branch_id, g.program_id FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=?", (sid,)).fetchone()
-    if not r:
-        return None
-    return f"p{r['program_id']}" if r["program_id"] else f"b{r['branch_id']}"
+    # Never silently select an unrelated branch when the student has several groups.
+    from . import chatscripts
+    _,g,_=chatscripts.group_for(con,sid)
+    return key_for_group(con,g) if g else None
+
+
+def key_for_group(con, g):
+    if g.get('program_id'):return f"p{g['program_id']}"
+    key=f"g{g['id']}"
+    if any(x['key']==key for x in targets(con)):return key
+    return f"b{g['branch_id']}"
+
+
+def designed_image(target):
+    """Approved artwork is valid only while the matching tariff/rule version remains current."""
+    if VERSION!=3:return None
+    d=target['data'];kind=d['kind'];profile=None
+    if d.get('deadline_day')!=25 or d.get('late_pct')!=5:return None
+    if kind=='toddlers' and (d['per_lesson'],d['credit'])==(1600,2):profile='toddlers'
+    elif kind=='regular' and (d['fixed'],d['flex'],d['credit'])==(1350,1550,3) and not d.get('next'):
+        name=d['title'].casefold()
+        profile='nebo' if 'небо' in name else 'western' if 'запад' in name or 'чобот' in name else None
+    elif kind=='program' and d.get('program_slug')=='sbornaya':
+        current=(d['arena'],d['ofp'],d['arena_only'])
+        nxt=d.get('next')
+        expected=(1600,1200,1800)
+        if (current==(1500,1200,1700) and nxt and (nxt['arena'],nxt['ofp'],nxt['arena_only'])==expected) or (current==expected and not nxt):profile='arctic'
+    if not profile:return None
+    path=Path(__file__).parent/'static'/'rules'/(profile+'.png')
+    return path.read_bytes() if path.is_file() else None

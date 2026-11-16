@@ -315,12 +315,19 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
     prev_flex = con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND enrollment_id=? AND month=?
         AND tariff='flex' AND status='paid'""", (sid, e["id"], logic.shift_month(ym, -1))).fetchone()
     eligible = prev_abs if prev_flex and e["tariff"] == "flex" else []
+    from . import groupterms
+    special=groupterms.terms(con,e['group_id'],ym)
+    credit_limit=special['credit_limit'] if special else logic.MAX_FLEX_CREDIT
+    if special:
+        previous=con.execute("SELECT 1 FROM subscriptions x JOIN enrollments en ON en.id=x.enrollment_id WHERE x.student_id=? AND en.group_id=? AND x.month=? AND x.status='paid' AND COALESCE(x.kind,'month')='month'",(sid,e['group_id'],logic.shift_month(ym,-1))).fetchone()
+        eligible=prev_abs if previous else []
     requested = credit_requested is True or credit_requested == "1"
     from . import closures, pricing, program, subscriptiondates
     if program.program_of_group(con, e["group_id"]):
         return program.quote(con, sid, ym, e, discount_id=discount_id, excluded_dates=excluded_dates, selection={"tariff": tariff, "ofp_group_id": ofp_group_id} if tariff is not None else None, validate_selection=True)
     on = today()
     pr = pricing.prices_for(con, ym)  # прайс оплачиваемого месяца (pricing.py)
+    if special:pr=dict(pr,fixed=special['per_lesson'],flex=special['per_lesson'])
     ms, me = logic.month_bounds(ym)
     newcomer = pricing.is_newcomer(con, sid, ym, on)
     closed = closures.closed_dates(con, e["group_id"], ms, me)
@@ -339,10 +346,12 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
     exceptions = subscriptiondates.validate(excluded_dates, available)
     closed = closed | set(exceptions)
     q = logic.quote(weekdays=weekdays, ym=ym, tariff=e["tariff"], prices={"fixed": pr["fixed"], "flex": pr["flex"]},
-                    vacations=vacations_of(con, sid), prev_unresolved_absences=min(len(eligible), len(available) - len(exceptions)) if requested else 0, closed=closed)
+                    vacations=vacations_of(con, sid), prev_unresolved_absences=min(len(eligible), len(available) - len(exceptions)) if requested else 0, closed=closed,credit_limit=credit_limit,allow_fixed_credit=bool(special))
     q["calendar_dates"] = available
     q["excluded_dates"] = exceptions
-    q["credit_available"] = min(len(eligible), logic.MAX_FLEX_CREDIT)
+    q["credit_available"] = min(len(eligible), credit_limit)
+    q['credit_limit']=credit_limit
+    if special:q['group_terms']={'per_lesson':special['per_lesson'],'credit_limit':credit_limit}
     q["credit_requested"] = requested
     q["credit_absence_ids"] = [a["id"] for a in eligible[:q["credit_lessons"]]]
     q["credit_absence_dates"] = [a["date"] for a in eligible[:q["credit_lessons"]]]
@@ -848,6 +857,8 @@ def student_detail(con, sid: int) -> dict:
                 sub['calculation_reason']='Клиент пришёл на ПУ внутри месяца ('+date.fromisoformat(trial_day).strftime('%d.%m.%Y')+'). Абонемент рассчитан на занятия после ПУ'
     hist = _rows(con.execute("SELECT ts, user_name, kind, text FROM history WHERE student_id=? AND NOT EXISTS (SELECT 1 FROM erp_full_history_corrections c WHERE c.history_id=history.id AND c.assigned_student_id IS NULL) ORDER BY id DESC LIMIT 100",
                              (sid,)))
+    from .historyview import present as present_history
+    hist=[present_history(row) for row in hist]
     stage_label = SALES_LABELS.get(s["stage"], s["stage"])
     if s["funnel"] == "sales":
         eff, color, _ = effective_sales_stage(s, st, now())
