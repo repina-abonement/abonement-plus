@@ -52,6 +52,21 @@ class OfflineChatAccess(unittest.TestCase):
                 for action in ['unread','read','preferences']:
                     self.assertEqual(call('synthetic-coach','POST',f'/api/conversations/{cid}/{action}',{'muted':True})[0],403)
                 self.assertEqual(provider.call_count,2)
+            with patch.object(comms,'wz_call',side_effect=comms.CommsError('Wazzup: POST_MESSAGE_ERROR · requestId=abc123456789')) as provider:
+                for token,user in users:
+                    code,response=call(token,'POST',f'/api/conversations/{cid}/send',{'text':'Synthetic failed delivery'})
+                    self.assertEqual(code,400)
+                    self.assertIn('requestId=abc123456789',response['error'])
+                self.assertEqual(provider.call_count,2)
+            reader=db.connect()
+            failures=reader.execute("SELECT status,error FROM messages WHERE text='Synthetic failed delivery'").fetchall()
+            self.assertEqual(len(failures),2)
+            self.assertTrue(all(row['status']=='error' and 'abc123456789' in row['error'] for row in failures))
+            with patch.object(comms,'wz_call',return_value=[]):
+                diagnostic=comms.wazzup_diagnostics(reader)
+            self.assertEqual(len(diagnostic['failures']),2)
+            self.assertEqual(diagnostic['failures'][0]['codes'],['POST_MESSAGE_ERROR'])
+            reader.close()
         finally:
             srv.shutdown();srv.server_close();thread.join(timeout=5);db.DB_PATH=old_path
 

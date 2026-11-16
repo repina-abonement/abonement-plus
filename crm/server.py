@@ -27,6 +27,12 @@ class Raw:
         self.data, self.ctype, self.filename = data, ctype, filename
 
 
+class JsonResponse:
+    """Explicit response after a successful local transaction (including failed delivery records)."""
+    def __init__(self, body: dict, status: int):
+        self.body, self.status = body, status
+
+
 def csv_raw(rows: list[list], filename: str) -> "Raw":
     """Таблица для Excel: точка с запятой, UTF-8 с BOM, чтобы кириллица открылась без танцев."""
     import csv
@@ -2612,9 +2618,14 @@ def family_attachment_target(con,h,user,body,q,fid):
 
 @route("POST", "/api/conversations/{cid}/send", role="operator")
 def conv_send(con, h, user, body, q, cid):
-    if body.get("sticker"):
-        return cx(comms.send_sticker, con, int(cid), body["sticker"], user)
-    return cx(comms.send, con, int(cid), body.get("text") or "", user)
+    try:
+        if body.get("sticker"):
+            return comms.send_sticker(con, int(cid), body["sticker"], user)
+        return comms.send(con, int(cid), body.get("text") or "", user)
+    except comms.CommsError as error:
+        # The send functions record a failed attempt. Keep it, while preserving the
+        # non-2xx response so the UI retains the draft and never claims success.
+        return JsonResponse({"error": str(error)}, 400)
 
 
 @route("POST", "/api/conversations/{cid}/question", role="operator")
@@ -3319,6 +3330,8 @@ class Handler(BaseHTTPRequestHandler):
                 except BaseException:
                     con.execute("ROLLBACK")
                     raise
+                if isinstance(result, JsonResponse):
+                    return self._send(result.status, result.body)
                 if isinstance(result, Raw):
                     return self._send_raw(result)
                 if user and user["role"] == "coach":
