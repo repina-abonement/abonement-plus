@@ -29,6 +29,7 @@ def main():
     con.execute("INSERT INTO messages(conversation_id,direction,text,ts) VALUES (?,'in','Встреча 12.11.2026, сумма 1200 рублей','2026-11-16')",(date_chat,))
     assert date_chat not in {r['id'] for r in comms.inbox(con,q='12')['conversations']}
     assert date_chat in {r['id'] for r in comms.inbox(con,q='Встреча')['conversations']}
+    assert date_chat in {r['id'] for r in comms.inbox(con,q='Встреча 12')['conversations']}
     # Snapshot after the explicit fixture insertion, before the read-only searches.
     before={table:[tuple(r) for r in con.execute('SELECT * FROM '+table)] for table in ('parents','conversations','messages')}
     # Every two-digit combination is searchable at its actual position in the number.

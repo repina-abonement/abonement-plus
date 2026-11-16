@@ -1239,7 +1239,7 @@ def inbox(con, filt: str = "all", q: str = "") -> dict:
             OR c.family_id IN (SELECT id FROM families WHERE ulower(name) LIKE ?)
             OR EXISTS (SELECT 1 FROM parents p WHERE p.family_id=c.family_id AND (phone_match(p.phone_norm,?) OR phone_match(p.phone,?)))
             OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND ((?='' AND ulower(m.text) LIKE ?) OR message_phone_match(m.text,?))))""")
-        args += [like,like,q,q,like,q,q,phone_search_digits(q),like,q]
+        args += [like,like,q,q,like,q,q,phone_search_digits(q) if not any(ch.isalpha() for ch in q) else '',like,q]
     sql = "SELECT c.* FROM conversations c" + (" WHERE " + " AND ".join(where) if where else "")
     sql += " ORDER BY c.last_at IS NULL, c.last_at DESC LIMIT 200"
     return {"conversations": [_conv_out(con, r) for r in con.execute(sql, args)], **counts(con)}
