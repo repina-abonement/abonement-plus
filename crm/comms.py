@@ -1233,10 +1233,12 @@ def inbox(con, filt: str = "all", q: str = "") -> dict:
         where.append("c.open_q = 1")
     if q.strip():
         like = f"%{q.strip().lower()}%"
-        pq = normalize_phone(q)
-        where.append("""(ulower(c.title) LIKE ? OR ulower(c.username) LIKE ? OR (? != '' AND c.phone_norm LIKE ?)
-                        OR c.family_id IN (SELECT id FROM families WHERE ulower(name) LIKE ?))""")
-        args += [like, like, pq, f"%{pq}%", like]
+        where.append("""(ulower(c.title) LIKE ? OR ulower(c.username) LIKE ?
+            OR phone_match(c.phone_norm,?) OR phone_match(c.phone,?)
+            OR c.family_id IN (SELECT id FROM families WHERE ulower(name) LIKE ?)
+            OR EXISTS (SELECT 1 FROM parents p WHERE p.family_id=c.family_id AND (phone_match(p.phone_norm,?) OR phone_match(p.phone,?)))
+            OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND (ulower(m.text) LIKE ? OR phone_match(m.text,?))))""")
+        args += [like,like,q,q,like,q,q,like,q]
     sql = "SELECT c.* FROM conversations c" + (" WHERE " + " AND ".join(where) if where else "")
     sql += " ORDER BY c.last_at IS NULL, c.last_at DESC LIMIT 200"
     return {"conversations": [_conv_out(con, r) for r in con.execute(sql, args)], **counts(con)}

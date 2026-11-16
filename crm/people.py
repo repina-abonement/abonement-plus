@@ -25,10 +25,10 @@ def listing(con, kind: str = "all", status: str = "", erp: str = "", q: str = ""
 
     where, args = "s.archived = ?", [1 if archived else 0]
     if q.strip():
-        like, p = f"%{q.strip().lower()}%", sv.normalize_phone(q)
+        like = f"%{q.strip().lower()}%"
         where += """ AND (ulower(s.name) LIKE ? OR ulower(f.name) LIKE ? OR EXISTS (SELECT 1 FROM parents p WHERE p.family_id=f.id
-                     AND (ulower(p.name) LIKE ? OR (? != '' AND p.phone_norm LIKE ?))))"""
-        args += [like, like, like, p, f"%{p}%"]
+                     AND (ulower(p.name) LIKE ? OR (phone_match(p.phone_norm,?) OR phone_match(p.phone,?)))))"""
+        args += [like, like, like, q, q]
     rows = con.execute(f"""SELECT s.id, s.name, s.funnel, s.stage, s.erp_status, s.group_id, s.family_id
                            FROM students s JOIN families f ON f.id=s.family_id WHERE {where} ORDER BY s.name""", args).fetchall()
 

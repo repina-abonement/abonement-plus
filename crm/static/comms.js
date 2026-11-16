@@ -761,13 +761,31 @@ function wireTrialOffer(c, textSel = "#chat-text") {
   };
 }
 
+function administratorGreeting(user=S.user) {
+  const words=String(user?.first_name||user?.name||'').trim().split(/\s+/).filter(Boolean);
+  // Варвара представляется клиентам как Варя, в том числе при фамилии первым словом.
+  const varya=words.find(word=>/^(варвара|варя)$/iu.test(word));
+  const name=varya?'Варя':words[0];
+  if(!name||/^(администратор|оператор|руководитель)$/iu.test(name))return '';
+  return `Добрый день!\n\nНа связи администратор ${name} 💚`;
+}
+
+function insertAdministratorGreeting(input,user=S.user) {
+  const text=administratorGreeting(user);
+  if(!text){toast('Укажите имя сотрудника в настройках аккаунта');return;}
+  const draft=input.value;
+  if(draft!==text&&!draft.startsWith(text+'\n'))input.value=text+(draft?'\n\n'+draft:'');
+  input.focus();input.setSelectionRange(input.value.length,input.value.length);
+  input.dispatchEvent(new Event('input',{bubbles:true}));
+}
+
 /* One picker shared by the inbox and the client card. */
 function wireMessagePicker(selector, sendSticker) {
   const input = $(selector); if (!input) return;
   const panel = document.createElement("div");
   panel.className = "message-picker";
   const stickers = [["smile", "1f60a", "Улыбка"], ["thanks", "1f64f", "Спасибо"], ["yes", "1f44d", "Отлично"], ["heart", "2764", "Сердце"], ["party", "1f389", "Поздравляем"], ["football", "26bd", "Футбол"]];
-  panel.innerHTML = `<div class="chips"><button type="button" class="btn sm" data-picker-tab="emoji" aria-expanded="false">😊 Смайлы</button><button type="button" class="btn sm" data-picker-tab="sticker" aria-expanded="false">Стикеры</button></div>
+  panel.innerHTML = `<div class="chips"><button type="button" class="btn sm" data-administrator-greeting>Приветствие</button><button type="button" class="btn sm" data-picker-tab="emoji" aria-expanded="false">😊 Смайлы</button><button type="button" class="btn sm" data-picker-tab="sticker" aria-expanded="false">Стикеры</button></div>
     <div class="chips picker-options" data-picker-panel="emoji" hidden>${["😊", "😀", "😄", "😉", "😍", "🥰", "😘", "😎", "🤔", "😢", "😭", "😂", "👍", "👏", "🙏", "❤️", "🎉", "⚽", "✅", "🔥", "💪"].map(x => `<button type="button" class="btn sm" data-emoji="${esc(x)}">${x}</button>`).join("")}</div>
     <div class="picker-options" data-picker-panel="sticker" hidden><div class="sticker-grid">${stickers.map(([id, code, label]) => `<button type="button" class="sticker-choice" data-sticker="${id}" title="Отправить: ${label}" aria-label="Отправить стикер: ${label}"><img src="https://raw.githubusercontent.com/jdecked/twemoji/v15.1.0/assets/72x72/${code}.png" width="56" height="56" alt="${label}"><span>${label}</span></button>`).join("")}</div><p class="small muted">Базовые стикеры: Twemoji, CC BY 4.0.</p><div data-custom-packs></div>
       ${S.user?.role === "admin" ? `<details class="sticker-import"><summary>+ Добавить свой набор Telegram</summary><label>Ссылка на набор<input data-pack-url value="https://t.me/addstickers/Footbolika_Olya" placeholder="https://t.me/addstickers/Название"></label><button class="btn sm" type="button" data-pack-import>Добавить набор</button><div class="small muted" data-pack-status>Для импорта нужен подключённый Telegram-бот. Набор будет доступен всей команде.</div></details>` : ""}
@@ -782,6 +800,7 @@ function wireMessagePicker(selector, sendSticker) {
     };
   });
   input.closest(".row").before(panel);
+  panel.querySelector('[data-administrator-greeting]').onclick=()=>insertAdministratorGreeting(input);
   panel.querySelectorAll("[data-emoji]").forEach(b => {
     b.onmousedown = e => e.preventDefault();
     b.onclick = () => { input.setRangeText(b.dataset.emoji, input.selectionStart, input.selectionEnd, "end"); input.focus(); input.dispatchEvent(new Event("input", { bubbles: true })); };
