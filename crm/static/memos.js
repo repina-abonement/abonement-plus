@@ -9,7 +9,7 @@ function memoLines(d) {
   const rub = (n) => Number(n).toLocaleString("ru-RU") + " ₽";
   const late = d.late_pct ? `После ${d.deadline_day} числа стоимость выше на ${String(d.late_pct).replace(".", ",")}%` : "";
   const mk = d.makeups && d.makeups.length ? d.makeups : [];
-  const makeupRules=d.makeup_rules||[];
+  const makeupRules=(d.makeup_rules||[]).map(line=>"• "+line);
   if(d.kind==='toddlers')return [
     {h:`ОПЛАТА ДО ${d.deadline_day} ЧИСЛА`,t:[`Продлевайте абонемент до ${d.deadline_day}-го включительно`,late].filter(Boolean)},
     {h:'АБОНЕМЕНТ',t:[`${rub(d.per_lesson)} за занятие`,`${rub(d.per_lesson*8)} за 8 занятий`,'Сумма зависит от количества занятий в месяце']},
@@ -70,7 +70,7 @@ async function drawMemo(d) {
   const tw=(width-104-22-14)/2;
   const tariffRows=t=>{font(400,14);return t.t.flatMap(line=>wrap(line,tw-18))};
   const tariffHeight=b=>b.tariffs?Math.max(140,...b.tariffs.map(t=>110+tariffRows(t).length*18)):0;
-  const measure=b=>{const th=tariffHeight(b);font(400,sz);return 74+th+b.t.reduce((n,line)=>n+wrap(line,textW).length*sz*1.4,0)};
+  const measure=b=>{const th=tariffHeight(b);font(400,sz);return 74+th+b.t.reduce((n,line)=>n+wrap(line,textW-14).length*sz*1.4+(line.startsWith("• ")?6:0),0)};
   H=Math.max(baseHeight,Math.ceil(262+blocks.reduce((n,b)=>n+measure(b)+gap,0)+245));
   c.height=H*S;x.scale(S,S);
   // фон и круги, как у дизайнерской памятки
@@ -108,7 +108,7 @@ async function drawMemo(d) {
       ty += th+10;
     }
     x.fillStyle = MEMO.text; font(400, sz);
-    b.t.forEach((s) => wrap(s, textW).forEach((line) => { ty += sz * 1.4; x.fillText(line, textX, ty); }));
+    b.t.forEach((s) => {const bullet=s.startsWith("• ");wrap(s,textW-(bullet?14:0)).forEach((line,i)=>{ty+=sz*1.4;x.fillText(line,textX+(bullet&&i?14:0),ty)});if(bullet)ty+=6});
     y += h + gap;
   });
   x.fillStyle = MEMO.navy; font(800, 20); center("С любовью, Футболика ⚽", H - 30);

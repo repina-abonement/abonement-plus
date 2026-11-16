@@ -35,7 +35,9 @@ class RefreshTest(unittest.TestCase):
         with patch.object(memos,'RENDERER_REVISION','next-renderer'):self.assertIsNone(memos.image(self.con,self.key))
     def test_current_paid_rules_and_max_destinations(self):
         text=' '.join(makeuppolicy.parent_rules())
-        for part in ['следующем','оплаченный абонемент','2 оплаченных','3-м','Только отмеченные','повторно не используются']:self.assertIn(part,text)
+        for part in ['следующем','оплачен абонемент','две обычные тренировки','дополнительным','согласуйте дату','свободных мест']:self.assertIn(part,text)
+        self.assertEqual(len(makeuppolicy.parent_rules()),4)
+        self.assertTrue(all(not line.endswith('.') for line in makeuppolicy.parent_rules()))
         p=chatscripts.profiles(self.con)
         self.assertEqual(p['nebo']['max'],'https://max.ru/id183210983596_biz');self.assertEqual(p['toddlers']['max'],p['nebo']['max']);self.assertEqual(p['western']['max'],'https://max.ru/id183210983596_biz3')
         self.assertEqual(p['arctic']['max'],'');self.assertNotEqual(p['nebo']['max'],comms.get(self.con,'admin_max'))

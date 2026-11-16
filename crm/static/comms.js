@@ -19,6 +19,7 @@ async function pollCounts() {
     const n = c.unread + c.missed;
     document.querySelectorAll("[data-badge]").forEach((b) => { b.hidden = !n; b.textContent = n; });
     const p = S.counts;
+    if(S.view==='inbox'&&S.inbox.tab==='chats'&&p&&(p.last_in!==c.last_in||p.unread!==c.unread))S.inbox.refresh?.().catch(()=>{});
     if (p && p.last_in !== undefined) {
       const what = c.last_lead > p.last_lead ? "🔥 Заявка с сайта" : c.last_in > p.last_in ? "💬 Новое сообщение" : c.last_missed > p.last_missed ? "📞 Пропущенный звонок" : "";
       if (what) newInboxAlert(what);
@@ -85,7 +86,22 @@ function chatHistoryHtml(items) {
   return html + (previous !== null ? "</section>" : "");
 }
 
+document.addEventListener('click',async event=>{
+  const button=event.target.closest('[data-delete-message]');if(!button||button.disabled)return;
+  if(!confirm('Удалить это сообщение у клиента? Отменить удаление нельзя'))return;
+  const card=button.closest('#comms-box'),chat=button.closest('[data-chat]');
+  button.disabled=true;
+  try{
+    const result=await api('DELETE',`/api/messages/${button.dataset.deleteMessage}`);
+    if(result.ok)toast(result.state==='deleted'?'Сообщение удалено':'Запрос на удаление отправлен');else fail(Error(result.error||'Не удалось подтвердить удаление'));
+    if(chat?.isConnected)await openChat(+chat.dataset.chat,true);
+    else if(card?.isConnected&&card._reloadComms)await card._reloadComms();
+  }catch(error){button.disabled=false;fail(error)}
+});
+
 function msgHtml(m) {
+  if(['requested','deleted'].includes(m.deletion_status))return `<div class="msg ${m.direction} msg-deleted"><div class="msg-text muted">${m.deletion_status==='deleted'?'Сообщение удалено':'Удаление запрошено — ждём подтверждения'}</div><div class="msg-meta">${dtWhen(m.ts)}</div></div>`;
+  const deletion=m.direction==='out'&&['admin','operator'].includes(S.user?.role)?m.deletion_status==='uncertain'?'<div class="small muted">Удаление не подтверждено — проверьте сообщение в мессенджере</div>':`<button type="button" class="msg-delete" data-delete-message="${m.id}" ${m.can_delete?'':'disabled'} title="${esc(m.can_delete?'Удалить у клиента':m.delete_reason||'Удаление недоступно')}">Удалить</button>`:'';
   const media = m.media ? (["image", "sticker"].includes(m.kind)
     ? `<a href="/api/messages/${m.id}/media" target="_blank" rel="noopener"><img class="msg-img${m.kind === "sticker" ? " msg-sticker" : ""}" loading="lazy" src="/api/messages/${m.id}/media" alt="${m.kind === "sticker" ? "Стикер" : "Фото"}">${m.kind === "sticker" ? `<span hidden>Стикер: открыть файл</span>` : ""}</a>`
     : m.kind === "audio" ? `<audio controls preload="none" src="/api/messages/${m.id}/media"></audio>`
@@ -93,8 +109,8 @@ function msgHtml(m) {
   const label = !m.text && !media ? ({ sticker: "Стикер", contact: "Контакт", other: "Вложение" }[m.kind] || "") : "";
   const who = m.direction === "out" ? (m.user_name || "") : "";
   return `<div class="msg ${m.direction}${m.status === "error" ? " err" : ""}">
-    ${media}${m.text ? `<div class="msg-text">${esc(m.text)}</div>` : ""}${label ? `<div class="msg-text muted">${label}</div>` : ""}
-    <div class="msg-meta">${[who, m.channel_label, dtWhen(m.ts), m.status === "error" ? "не доставлено: " + esc(m.error) : "", m.status === "demo" ? "тест, не отправлено" : ""].filter(Boolean).join(" · ")}</div>
+    ${deletion}${media}${m.text ? `<div class="msg-text">${esc(m.text)}</div>` : ""}${label ? `<div class="msg-text muted">${label}</div>` : ""}
+    <div class="msg-meta">${[esc(who), esc(m.channel_label||""), dtWhen(m.ts), m.status === "error" ? "не доставлено: " + esc(m.error) : "", m.status === "demo" ? "тест, не отправлено" : ""].filter(Boolean).join(" · ")}</div>
   </div>`;
 }
 
@@ -248,6 +264,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   if (sameFamily) draft = $("#cm-text")?.value || "";
   const attachmentState=sameFamily&&$('#cm-text')?{file:$('#cm-text')._attachmentFile,upload:$('#cm-text')._attachmentUpload,preview:$('#cm-text')._attachmentPreview?.innerHTML,uncertain:$('#cm-text')._uncertainBundle}:null;
   box.dataset.familyId = familyId;
+  box._reloadComms=()=>loadFamilyComms(familyId,parents,studentId,kid);
   const st = d.status;
   const targets = d.conversations.filter((c) => !["tg_archive","telegram"].includes(c.channel)).map((c) => ({ v: "c" + c.id, t: `${chLabel(c.channel)}${c.title ? " · " + c.title : ""}` }));
   if (st.whatsapp) parents.filter((p) => p.phone && !d.conversations.some((c) => c.channel === "whatsapp" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
@@ -279,7 +296,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   const toSelect = $("#cm-to"); wireReplyTarget(toSelect,()=>{S.familySendTargets[targetKey]=toSelect.value});
   const feed = $("#feed"); if (feed) feed.scrollTop = feed.scrollHeight;
   // карточка открыта: новые сообщения подтягиваем сами каждые 10 секунд (раньше были видны только после повторного открытия)
-  const lastKey = (items) => items.length ? items[items.length - 1].type + items[items.length - 1].id + ":" + items.length : "";
+  const lastKey = (items) => items.length ? items[items.length - 1].type + items[items.length - 1].id + ":" + items.length+":"+items.map(m=>m.deletion_status||"").join(",") : "";
   let seen = lastKey(d.items);
   clearInterval(S.commsTimer);
   S.commsTimer = setInterval(async () => {
@@ -342,6 +359,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
 /* ---------- раздел «Чаты и звонки» ---------- */
 async function renderInbox(page) {
   const I = S.inbox;
+  rememberChatDraft();
   page.innerHTML = `
     <div class="page-head"><h2 class="grow">Чаты и звонки</h2>
       <div class="seg">${[["chats", "Переписки"], ["calls", "Звонки"], ["stats", "Аналитика звонков"]].map(([k, t]) => `<button data-tab="${k}" class="${I.tab === k ? "active" : ""}">${t}</button>`).join("")}</div></div>
@@ -351,27 +369,29 @@ async function renderInbox(page) {
   if (I.tab === "stats") return renderCallStats($("#inbox-body"));
   const body = $("#inbox-body");
   body.innerHTML = `
-    <div class="row" style="max-width:720px;margin-bottom:12px;align-items:center">
-      <div class="seg" style="flex:0 0 auto">${[["all", "Все"], ["unread", "Непрочитанные"], ["open", "❗ Открытые вопросы"], ["nofamily", "Без карточки"]].map(([k, t]) => `<button data-f="${k}" class="${I.filter === k ? "active" : ""}">${t}</button>`).join("")}</div>
-      <input class="search" id="iq" placeholder="Имя, телефон, семья" value="${esc(I.q)}">
-    </div>
-    ${connectHint()}
-    <div class="list" id="conv-list"><div class="list-row muted">Загружаю…</div></div>`;
+    <div class="inbox-workspace"><aside class="inbox-list-panel">
+      <div class="inbox-search"><input class="search" id="iq" placeholder="Поиск по имени или телефону" value="${esc(I.q)}"></div>
+      <div class="inbox-filters">${[["all","Все"],["unread","Новые"],["open","Вопросы"],["nofamily","Без карточки"]].map(([k,t])=>`<button data-f="${k}" class="${I.filter===k?'active':''}">${t}</button>`).join('')}</div>
+      ${connectHint()}<div class="list" id="conv-list"><div class="list-row muted">Загружаю…</div></div>
+    </aside><section id="inbox-chat-pane" aria-label="Переписка"><div class="chat-placeholder">Выберите диалог слева</div></section></div>`;
   body.querySelectorAll("[data-f]").forEach((b) => (b.onclick = () => { I.filter = b.dataset.f; render(); }));
   let t; $("#iq").oninput = (e) => { I.q = e.target.value; clearTimeout(t); t = setTimeout(loadList, 250); };
   async function loadList() {
     const d = await api("GET", `/api/inbox?filter=${I.filter}&q=${encodeURIComponent(I.q)}`);
     const list = $("#conv-list"); if (!list) return;
-    list.innerHTML = d.conversations.length ? d.conversations.map((c) => `
-      <div class="list-row click conv-row ${c.unread ? "unread" : ""}" data-conv="${c.id}" title="${esc(chLabel(c.channel))}">
-        <div class="grow"><b>${esc(c.title || c.username || c.phone || "Без имени")}</b>${c.open_q ? ` <span class="pill red" title="${esc(c.open_note || "Открытый вопрос")}">❗ открытый вопрос</span>` : ""}${c.family_name ? ` <span class="muted small">· семья ${esc(c.family_name)}</span>` : ` <span class="pill yellow">нет карточки</span>`}${c.demo ? ` <span class="pill">тест</span>` : ""}
-          <div class="small muted ellipsis">${esc(c.last_text)}</div></div>
-        <button type="button" class="btn sm" data-pin-conv="${c.id}" aria-pressed="${Boolean(c.pinned)}" title="${c.pinned?'Открепить':'Закрепить'} чат">${c.pinned?'Открепить':'Закрепить'}</button><div class="right"><div class="small muted">${dtWhen(c.last_at)}</div>${c.unread ? `<span class="nbadge static">${c.unread}</span>` : ""}</div>
-      </div>`).join("") : `<div class="list-row muted">Переписок нет</div>`;
+    list.innerHTML = d.conversations.length ? d.conversations.map(c=>{
+      const name=c.title||c.username||c.phone||'Без имени';
+      const initials=name.trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();
+      return `<div class="list-row click conv-row ${c.unread?'unread':''} ${I.active===c.id?'selected':''}" data-conv="${c.id}" tabindex="0" role="button" aria-label="${esc(name)}${c.unread?', непрочитанных: '+c.unread:''}">
+        <div class="conv-avatar" aria-hidden="true">${esc(initials)}${c.unread?`<span class="conv-unread-count" aria-label="Непрочитанных сообщений: ${c.unread}">${c.unread>99?'99+':c.unread}</span>`:''}</div>
+        <div class="conv-copy"><div class="conv-title"><b>${esc(name)}</b><time>${dtWhen(c.last_at)}</time></div><div class="conv-preview"><span>${c.open_q?'Открытый вопрос · ':''}${esc(c.last_text||chLabel(c.channel))}</span><button type="button" class="conv-pin" data-pin-conv="${c.id}" aria-pressed="${!!c.pinned}" aria-label="${c.pinned?'Открепить':'Закрепить'} чат" title="${c.pinned?'Открепить':'Закрепить'}">${c.pinned?'●':'○'}</button></div></div>
+      </div>`}).join(''):'<div class="list-row muted">Переписок нет</div>';
     list.querySelectorAll('[data-pin-conv]').forEach(button=>button.onclick=async e=>{e.stopPropagation();const row=d.conversations.find(c=>c.id===+button.dataset.pinConv);button.disabled=true;try{await api('POST',`/api/conversations/${row.id}/pin`,{pinned:!row.pinned});loadList()}catch(error){button.disabled=false;fail(error)}});
-    list.querySelectorAll("[data-conv]").forEach((el) => (el.onclick = () => openChat(+el.dataset.conv)));
+    list.querySelectorAll("[data-conv]").forEach(el=>{el.onclick=()=>openChat(+el.dataset.conv);el.onkeydown=e=>{if(e.target===el&&["Enter"," "].includes(e.key)){e.preventDefault();openChat(+el.dataset.conv)}}});
   }
+  I.refresh=loadList;
   await loadList();
+  if(I.active)await openChat(I.active,true);
 }
 
 function connectHint() {
@@ -412,12 +432,21 @@ async function renderCalls(body) {
 
 /* ---------- окно переписки ---------- */
 let chatTimer = null;
+function rememberChatDraft(){
+  const input=$('#chat-text'),cid=+(input?.closest('[data-chat]')?.dataset.chat||0);
+  if(!cid)return;
+  S.chatDrafts=S.chatDrafts||{};
+  S.chatDrafts[cid]={text:input.value,attachment:{file:input._attachmentFile,upload:input._attachmentUpload,preview:input._attachmentPreview?.innerHTML,uncertain:input._uncertainBundle}};
+}
 async function openChat(cid, keepScroll = false) {
+  rememberChatDraft();
+  const request=S.chatOpenRequest=(S.chatOpenRequest||0)+1;
   const previousFeed = $("#chat-feed");
   const previousScroll = previousFeed ? previousFeed.scrollTop : 0;
   const wasAtEnd = !previousFeed || previousFeed.scrollHeight - previousFeed.scrollTop - previousFeed.clientHeight < 80;
   let d;
   try { d = await api("GET", `/api/conversations/${cid}${keepScroll ? "" : "?remember=1"}`); } catch (e) { return fail(e); }
+  if(request!==S.chatOpenRequest)return;
   const c = d.conversation;
   d.targets=(d.targets||[]).filter(x=>x.channel!=="telegram");
   S.chatSendTargets=S.chatSendTargets||{};
@@ -426,13 +455,11 @@ async function openChat(cid, keepScroll = false) {
   const replyId=validReply(savedReply)?savedReply:validReply(d.preferred_reply_id)?d.preferred_reply_id:validReply(cid)?cid:0;
   const reply=(d.targets||[]).find(x=>x.id===replyId)||{id:0,channel:'',label:'Выберите мессенджер для ответа'};
   const sameChat=+($('#chat-text')?.closest('[data-chat]')?.dataset.chat||0)===cid;
-  const attachmentState=sameChat&&$('#chat-text')?{file:$('#chat-text')._attachmentFile,upload:$('#chat-text')._attachmentUpload,preview:$('#chat-text')._attachmentPreview?.innerHTML,uncertain:$('#chat-text')._uncertainBundle}:null;
-  const draft = sameChat && $("#chat-text") ? $("#chat-text").value : "";
+  const attachmentState=sameChat&&$('#chat-text')?{file:$('#chat-text')._attachmentFile,upload:$('#chat-text')._attachmentUpload,preview:$('#chat-text')._attachmentPreview?.innerHTML,uncertain:$('#chat-text')._uncertainBundle}:S.chatDrafts?.[cid]?.attachment;
+  const draft = sameChat && $("#chat-text") ? $("#chat-text").value : S.chatDrafts?.[cid]?.text||"";
   const html = `
     <div class="chat" data-chat="${cid}">
-      <div><span class="pill ch-${esc(c.channel)}">${esc(c.channel_label)}</span>${c.demo ? ` <span class="pill">тест</span>` : ""}</div>
-      <h2 style="margin-top:8px">${esc(c.title || c.username || c.phone || "Без имени")}</h2>
-      <div class="small muted">${[c.username ? "@" + c.username : "", c.phone].filter(Boolean).map(esc).join(" · ")}</div>
+      <header class="chat-header"><button type="button" class="chat-back btn sm" aria-label="К списку чатов">←</button><div class="grow"><h2>${esc(c.title||c.username||c.phone||'Без имени')}</h2><div class="small muted">${esc(reply.channel?chLabel(reply.channel):c.channel_label)}${c.phone?' · '+esc(c.phone):''}</div></div><details class="chat-info-menu"><summary class="btn sm" aria-label="Информация о клиенте">⋯</summary><div class="chat-info-panel">
       <div class="section">
         ${c.family_id ? `<div class="small muted">Семья ${esc(c.family_name)}</div>
           <div class="chips" style="margin-top:6px">${c.students.map((x) => `<button class="chip" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join("")}
@@ -445,6 +472,7 @@ async function openChat(cid, keepScroll = false) {
           <div class="small muted">Вернуться к ${esc(dtShort(c.open_due))}${c.open_by ? ` · отметил(а) ${esc(c.open_by)}` : ""}</div></div>
           <button class="btn sm primary" id="oq-close">✅ Вопрос решён</button></div>`
         : `<button class="btn sm" id="oq-open" title="В диалоге осталось незакрытое дело: он появится на рабочем столе у всех администраторов">❗ Открытый вопрос</button>`}</div>
+      </div></details></header>
       <div class="feed chat-feed" id="chat-feed">${chatHistoryHtml(d.history || d.messages) || `<div class="muted small">Сообщений нет</div>`}</div>
       <div class="composer sticky">
         <div class="to-bar"><button class="btn sm" id="to-open">📅 Предложить ближайшие ПУ</button></div>
@@ -455,11 +483,16 @@ async function openChat(cid, keepScroll = false) {
         ${c.channel === "telegram" && !replyId ? `<div class="small muted">Переписка бота сохранена. Для ответа выберите нужного родителя через Wazzup; если канала здесь нет, откройте карточку клиента выше.</div>` : ""}
       </div>
     </div>`;
-  openDrawer(html);
+  const panel=S.view==='inbox'?$('#inbox-chat-pane'):null;
+  if(panel){hideDrawer();panel.innerHTML=html;S.inbox.active=cid;panel.closest('.inbox-workspace').classList.add('chat-open');document.querySelectorAll('[data-conv]').forEach(el=>el.classList.toggle('selected',+el.dataset.conv===cid));}
+  else openDrawer(html);
+  const back=$('.chat-back');if(back)back.onclick=()=>{rememberChatDraft();stopChatTimer();if(panel){S.inbox.active=null;panel.closest('.inbox-workspace').classList.remove('chat-open');panel.innerHTML='<div class="chat-placeholder">Выберите диалог слева</div>';}else closeDrawer()};
   const feed = $("#chat-feed"); feed.scrollTop = keepScroll && !wasAtEnd ? previousScroll : feed.scrollHeight;
-  const body = $("#drawer-body");
+  const body = panel||$("#drawer-body");
+  const offerButton=body.querySelector("#to-open"),info=body.querySelector(".chat-info-menu .section");
+  if(offerButton&&info)info.append(offerButton);
   body.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => { stopChatTimer(); openStudent(+b.dataset.open); }));
-  if (c.family_id) loadWarnBox(c.family_id, $("#warn-box"));
+  if (c.family_id) loadWarnBox(c.family_id, body.querySelector("#warn-box"));
   wireTrialOffer(c);
   if ($("#unlink")) $("#unlink").onclick = async () => { await api("POST", `/api/conversations/${cid}/link`, { family_id: null }).catch(fail); openChat(cid); };
   if ($("#new-lead")) $("#new-lead").onclick = () => { stopChatTimer(); openNewClient({ phone: c.phone, parent_name: c.title, conversation_id: cid }); };
@@ -500,25 +533,27 @@ async function openChat(cid, keepScroll = false) {
     const text = $("#chat-text").value.trim(); if (!text) return;
     if(!$("#chat-to").value)return toast("Выберите мессенджер для ответа");
     sendBtn.disabled = true;
+    const input=$('#chat-text');
     const to = $("#chat-to") ? +$("#chat-to").value : cid;
     try {
-      await api("POST", `/api/conversations/${to}/send`, { text }); $("#chat-text").value = "";
-      if (c.open_q && confirm("В этом диалоге открытый вопрос. Он решён?")) await api("POST", `/api/conversations/${cid}/question/close`, {});
-      openChat(cid);
+      await api("POST", `/api/conversations/${to}/send`, { text });
+      S.chatDrafts=S.chatDrafts||{};S.chatDrafts[cid]={text:'',attachment:null};
+      if(input.isConnected){input.value='';if(c.open_q&&confirm('В этом диалоге открытый вопрос — он решён?'))await api('POST',`/api/conversations/${cid}/question/close`,{});openChat(cid)}
+      else S.inbox.refresh?.();
     }
     catch (e) { fail(e); sendBtn.disabled = false; }
   };
   $("#chat-text").onkeydown = (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendBtn.click(); };
   stopChatTimer();
   chatTimer = setInterval(async () => {
-    const open = $(`#drawer-body [data-chat="${cid}"]`);
-    if (!open || $("#drawer").hidden) return stopChatTimer();
+    const open = $(`[data-chat="${cid}"]`);
+    if (!open || (!panel&&$("#drawer").hidden)) return stopChatTimer();
     const n = await api("GET", `/api/conversations/${cid}`).catch(() => null);
-    const len = (x) => (x.history || x.messages).length + ":" + JSON.stringify(((x.history || x.messages).slice(-1)[0] || {}).id);
+    const len = (x) => (x.history || x.messages).length + ":" + JSON.stringify(((x.history || x.messages).slice(-1)[0] || {}).id)+":"+(x.history||x.messages).map(m=>m.deletion_status||"").join(",");
     if (n && len(n) !== len(d)) { stopChatTimer(); openChat(cid, true); }
   }, 8000);
   pollCounts();
-  if (S.view === "inbox" && !keepScroll) render();
+  if (panel && !keepScroll) S.inbox.refresh?.();
 }
 /* «Открытый вопрос»: отметка на диалоге, видна всем админам на столе, пока не нажмут «Вопрос решён» */
 function wireOpenQuestion(cid, c) {
@@ -812,6 +847,8 @@ function aiSettingsHtml(v, inf, st) {
 
 /* «Предложить ближайшие ПУ»: подбор групп по возрасту и ближайших дат со свободными местами, текст сразу в поле ответа */
 function wireTrialOffer(c, textSel = "#chat-text") {
+  const root=document.querySelector(textSel)?.closest(".chat,#comms-box")||document;
+  const $=selector=>root.querySelector(selector);
   const btn = $("#to-open"), panel = $("#to-panel");
   if (!btn) return;
   if ($("#to-book")) $("#to-book").onclick = () => { if (panel.hidden) btn.onclick(); };

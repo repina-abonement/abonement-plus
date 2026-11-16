@@ -2911,6 +2911,12 @@ def family_whatsapp(con, h, user, body, q, fid):
     return result | {"conversation_id": cid}
 
 
+@route("DELETE", "/api/messages/{mid}", role="operator")
+def message_delete(con,h,user,body,q,mid):
+    from . import messagedeletion
+    return cx(messagedeletion.delete,con,int(mid),user)
+
+
 @route("GET", "/api/messages/{mid}/media", role="operator")
 def message_media(con, h, user, body, q, mid):
     return Raw(*cx(comms.media_for, con, int(mid)))

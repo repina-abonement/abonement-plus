@@ -1994,7 +1994,7 @@ async function openStudent(id, options = {}) {
   }));
   const tip = body.querySelector(".stage-tip"); if (tip) tip.addEventListener("toggle", () => { S.tipsOpen = tip.open; });
   if ($("#ns-go")) $("#ns-go").onclick = () => {
-    const a = d.next_step.action, click = (sel) => { const b = $(sel); if (b) { b.click(); return true; } return false; };
+    const a = d.next_step.action, click = (sel) => { const b = body.querySelector(sel); if (b) { b.click(); return true; } return false; };
     if (a === "reply") { scTab("feed"); const t = $("#cm-text"); if (t) { t.scrollIntoView({ block: "center", behavior: "smooth" }); t.focus(); } }
     else if (a === "call") dial(firstPhone);
     else if (a === "offer") { scTab("feed"); click("#to-open"); }
@@ -2006,7 +2006,7 @@ async function openStudent(id, options = {}) {
   };
   if ($("#fam-note")) $("#fam-note").onchange = async (e) => { try { await api("PATCH", `/api/families/${s.family_id}`, { note: e.target.value }); toast("Заметка сохранена"); reload(); } catch (err) { fail(err); } };
 
-  if (isMember) loadWarnBox(s.family_id, $("#warn-box"), id);
+  if (isMember) loadWarnBox(s.family_id, body.querySelector("#warn-box"), id);
   if ($("#mk-slots")) loadSlots($("#mk-slots"), async (x) => {
     if (!confirm(`Записать ${s.name} на отработку ${dayLabel(x.date)} ${x.time} в группу ${x.group}?`)) return;
     try { await api("POST", `/api/students/${id}/makeups`, { group_id: x.group_id, date: x.date }); toast("Записан на отработку"); reload(); } catch (e) { fail(e); }

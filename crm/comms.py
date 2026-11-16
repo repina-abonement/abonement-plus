@@ -138,6 +138,8 @@ def _ts_from_unix(v) -> str | None:
 
 def init(con):
     con.executescript(SCHEMA)
+    from . import messagedeletion
+    messagedeletion.init(con)
     con.execute("CREATE TABLE IF NOT EXISTS conversation_pins(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,created_at TEXT NOT NULL,PRIMARY KEY(user_id,conversation_id))")
     from . import stickerpacks
     stickerpacks.init(con)
@@ -792,9 +794,12 @@ def merge_conversations(con, src: int, dst: int) -> None:
     if src == dst:
         return
     for m in con.execute("SELECT * FROM messages WHERE conversation_id=? ORDER BY id", (src,)).fetchall():
-        dup = m["external_id"] and con.execute("SELECT 1 FROM messages WHERE conversation_id=? AND external_id=?", (dst, m["external_id"])).fetchone()
+        dup = m["external_id"] and con.execute("SELECT id FROM messages WHERE conversation_id=? AND external_id=?", (dst, m["external_id"])).fetchone()
         if not dup:
             con.execute("UPDATE messages SET conversation_id=? WHERE id=?", (dst, m["id"]))
+        else:
+            from . import messagedeletion
+            messagedeletion.merge(con,m['id'],dup[0])
     con.execute("DELETE FROM messages WHERE conversation_id=?", (src,))
     s, d = con.execute("SELECT * FROM conversations WHERE id=?", (src,)).fetchone(), con.execute("SELECT * FROM conversations WHERE id=?", (dst,)).fetchone()
     con.execute("""UPDATE conversations SET family_id=COALESCE(family_id, ?), phone=CASE WHEN phone='' THEN ? ELSE phone END,
@@ -803,6 +808,10 @@ def merge_conversations(con, src: int, dst: int) -> None:
     if last:
         con.execute("UPDATE conversations SET last_at=?, last_text=? WHERE id=?", (last[0], ("Вы: " if last[2] == "out" else "") + (last[1] or "")[:120], dst))
     con.execute("DELETE FROM conversations WHERE id=?", (src,))
+    latest=con.execute('SELECT m.id,d.state FROM messages m JOIN message_deletions d ON d.message_id=m.id WHERE m.conversation_id=? ORDER BY m.ts DESC,m.id DESC LIMIT 1',(dst,)).fetchone()
+    if latest and latest['state'] in ('requested','deleted'):
+        from . import messagedeletion
+        messagedeletion.preview(con,dst,latest['id'],'Сообщение удалено' if latest['state']=='deleted' else 'Вы: удаление сообщения запрошено')
     _ = d
 
 
@@ -864,6 +873,10 @@ def wz_hook(con, payload: dict) -> None:
         cid = upsert_conversation(con, channel, ext, title=contact.get("name") or "",
                                   username=contact.get("username") or "", phone=phone or "",
                                   meta={"channelId": m.get("channelId"), "chatType": ct})
+        if m.get("isDeleted") is True:
+            from . import messagedeletion
+            messagedeletion.confirmed(con,cid,m.get("messageId"))
+            continue
         kind = WZ_KINDS.get(m.get("type") or "text", "other")
         echo = bool(m.get("isEcho"))
         if echo and m.get("messageId") and con.execute("SELECT 1 FROM messages WHERE external_id=?", (str(m["messageId"]),)).fetchone():
@@ -1326,7 +1339,8 @@ def conversation(con, cid: int, mark_read: bool = True) -> dict:
     r = con.execute("SELECT * FROM conversations WHERE id=?", (cid,)).fetchone()
     if not r:
         raise CommsError("Переписка не найдена")
-    msgs = [dict(x) for x in con.execute(
+    from . import messagedeletion
+    msgs = [messagedeletion.public(con,dict(x),r["channel"]) for x in con.execute(
         "SELECT * FROM (SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 200) ORDER BY id", (cid,))]
     if mark_read and r["unread"]:
         con.execute("UPDATE conversations SET unread=0 WHERE id=?", (cid,))
@@ -1419,7 +1433,9 @@ def history(con, family_id: int | None, phones: list[str], mark_read: bool = Tru
     for c in convs:
         for m in con.execute("SELECT * FROM (SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 60)",
                              (c["id"],)):
-            items.append({"type": "msg", "ts": m["ts"], "channel": c["channel"], "channel_label": c["channel_label"],
+            from . import messagedeletion
+            message=messagedeletion.public(con,dict(m),c["channel"])
+            items.append({"type": "msg", "can_delete":message["can_delete"],"delete_reason":message["delete_reason"],"deletion_status":message["deletion_status"], "ts": m["ts"], "channel": c["channel"], "channel_label": c["channel_label"],
                           "conversation_id": c["id"], **{k: m[k] for k in ("id", "direction", "text", "kind", "media",
                                                                             "user_name", "status", "error")}})
     for k in con.execute(f"SELECT * FROM calls WHERE (family_id=? AND family_id IS NOT NULL) OR (family_id IS NULL AND phone_norm IN ({ph_sql})) ORDER BY id DESC LIMIT 60",
