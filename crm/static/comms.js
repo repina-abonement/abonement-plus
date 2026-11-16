@@ -407,12 +407,20 @@ async function renderInbox(page) {
   const body = $("#inbox-body");
   body.innerHTML = `
     <div class="inbox-workspace"><aside class="inbox-list-panel">
-      <div class="inbox-search"><input class="search" id="iq" placeholder="Поиск по имени или телефону" value="${esc(I.q)}"></div>
+      <div class="inbox-search"><input class="search" id="iq" placeholder="Имя, телефон или @ник Telegram" value="${esc(I.q)}"><button type="button" id="start-telegram-username" hidden>Написать в Telegram</button></div>
       <div class="inbox-filters">${[["all","Все"],["unread","Новые"],["open","Вопросы"],["nofamily","Без карточки"],["archived","Архив"]].map(([k,t])=>`<button data-f="${k}" class="${I.filter===k?'active':''}">${t}${k==='unread'?'<span id="inbox-new-count" class="filter-count" aria-label="Непрочитанные чаты">0</span>':''}</button>`).join('')}</div>
       ${connectHint()}<div class="list" id="conv-list"><div class="list-row muted">Загружаю…</div></div>
     </aside><section id="inbox-chat-pane" aria-label="Переписка"><div class="chat-placeholder">Выберите диалог слева</div></section></div>`;
   body.querySelectorAll("[data-f]").forEach((b) => (b.onclick = () => { I.filter = b.dataset.f; render(); }));
-  let t; $("#iq").oninput = (e) => { I.q = e.target.value; clearTimeout(t); t = setTimeout(loadList, 250); };
+  const startTelegram=$('#start-telegram-username');
+  const isHandle=()=>/^(?:@|https?:\/\/(?:t\.me|telegram\.me)\/)[A-Za-z0-9_]{5,32}\/?$/i.test(I.q.trim());
+  const updateStart=()=>{startTelegram.hidden=!isHandle()};updateStart();
+  startTelegram.onclick=async()=>{const username=I.q.trim();startTelegram.disabled=true;try{
+    const result=await api('POST','/api/conversations/telegram-username',{username});
+    I.q='';$('#iq').value='';I.filter='all';updateStart();await loadList();await openChat(result.conversation_id);
+  }catch(error){fail(error)}finally{startTelegram.disabled=false}};
+  let t; $("#iq").oninput = (e) => { I.q = e.target.value; updateStart();clearTimeout(t); t = setTimeout(loadList, 250); };
+
   async function loadList() {
     const d = await api("GET", `/api/inbox?filter=${I.filter}&q=${encodeURIComponent(I.q)}`);
     const list = $("#conv-list"); if (!list) return;

@@ -2554,6 +2554,12 @@ def trial_hold(con, h, user, body, q):
                          str(body.get("date") or "")[:10], str(body.get("time") or "")[:5], user)
 
 
+@route("POST", "/api/conversations/telegram-username", role="operator")
+def conversation_username(con, h, user, body, q):
+    cid = cx(comms.start_wazzup_username, con, body.get("username") or "")
+    return {"conversation_id": cid}
+
+
 @route("GET", "/api/conversations/{cid}", role="operator")
 def conv_get(con, h, user, body, q, cid):
     detail = cx(comms.conversation, con, int(cid),q.get("read")!="0")

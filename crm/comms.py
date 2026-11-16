@@ -741,7 +741,11 @@ def wz_call(con, method: str, path: str, data=None, key: str | None = None):
     code, js = http(method, f"{WAZZUP_API}/{path}", data=data, headers={"Authorization": f"Bearer {k}"})
     if code >= 300:
         err = (js.get("error") or js.get("description") or js.get("_text")) if isinstance(js, dict) else None
-        raise CommsError(f"Wazzup: {err or 'ошибка ' + str(code)}")
+        detail = js.get("description") if isinstance(js, dict) else ""
+        detail = str(detail or "").replace(k, "[скрыто]")[:300]
+        reason = str(err or 'ошибка ' + str(code)).replace(k, "[скрыто]")[:200]
+        hint = "Telegram не нашёл контакт по номеру. Попробуйте написать по @нику или попросите клиента написать первым" if "CHANNEL_TGAPI_PHONE_NOT_OCCUPIED" in reason else ""
+        raise CommsError(" · ".join(x for x in (hint, "Wazzup: " + reason, detail if detail != reason else "") if x))
     return js
 
 
@@ -917,15 +921,51 @@ def _wz_destination(con, conv):
     return {"channelId":channel_id,"chatType":chat_type}
 
 
+def _wz_recipient(conv):
+    external = conv["external_id"]
+    meta = json.loads(conv["meta"] or "{}")
+    if meta.get("resolvedChatId"):
+        return {"chatId": meta["resolvedChatId"]}
+    if external.startswith("phone:"):
+        return {"phone": external[6:]}
+    if external.startswith("username:"):
+        return {"username": external[9:]}
+    return {"chatId": external}
+
+
+def _wz_ack(con, conv, result):
+    if not isinstance(result, dict) or not result.get("messageId"):
+        raise CommsError("Wazzup не подтвердил отправку. Проверьте переписку перед повтором")
+    if result.get("chatId") and conv["external_id"].startswith(("phone:", "username:")):
+        meta = json.loads(conv["meta"] or "{}")
+        meta["resolvedChatId"] = str(result["chatId"])
+        con.execute("UPDATE conversations SET meta=? WHERE id=?", (json.dumps(meta), conv["id"]))
+    return result["messageId"]
+
+
 def _wz_send_raw(con, cid, conv: dict, text: str) -> str:
-    crm_id = uuid.uuid4().hex
-    body = _wz_destination(con, conv) | {"text": text, "crmMessageId": crm_id}
-    if conv["external_id"].startswith("phone:"):  # первое сообщение в Telegram по номеру: чата ещё нет
-        body["phone"] = conv["external_id"][6:]
-    else:
-        body["chatId"] = conv["external_id"]
-    js = wz_call(con, "POST", "message", body)
-    return (js or {}).get("messageId") or crm_id
+    body = _wz_destination(con, conv) | _wz_recipient(conv) | {"text": text, "crmMessageId": uuid.uuid4().hex}
+    return _wz_ack(con, conv, wz_call(con, "POST", "message", body))
+
+
+def start_wazzup_username(con, value):
+    handle = telegram_username(value)
+    if not handle:
+        raise CommsError("Введите Telegram-ник: @username или https://t.me/username")
+    if not status(con)["wazzup_telegram"]:
+        raise CommsError("Telegram через Wazzup не подключён")
+    channel = get(con, "wazzup_tg_channel")
+    matches = []
+    for row in con.execute("SELECT * FROM conversations WHERE channel='wazzup_telegram' AND lower(ltrim(username,'@'))=?", (handle,)):
+        meta = json.loads(row["meta"] or "{}")
+        if (meta.get("channelId") or channel) == channel:
+            matches.append(row)
+    if len(matches) > 1:
+        raise CommsError("Найдено несколько чатов с этим ником. Откройте нужную переписку из списка")
+    if matches:
+        return matches[0]["id"]
+    return upsert_conversation(con, "wazzup_telegram", "username:" + handle, username=handle,
+                               title="@" + handle, meta={"channelId":channel,"chatType":"telegram"})
 
 
 # ---------------- отправка из CRM ----------------
@@ -968,11 +1008,8 @@ def send_sticker(con, cid: int, sticker: str, user: dict) -> dict:
             ext = (((js or {}).get("message") or {}).get("body") or {}).get("mid") or ("x" + uuid.uuid4().hex)
         elif conv["channel"] == "whatsapp" or conv["channel"].startswith("wazzup_"):
             payload = _wz_destination(con, conv) | {"contentUri": url, "crmMessageId": uuid.uuid4().hex}
-            if conv["external_id"].startswith("phone:"):
-                payload["phone"] = conv["external_id"][6:]
-            else:
-                payload["chatId"] = conv["external_id"]
-            ext = (wz_call(con, "POST", "message", payload) or {}).get("messageId") or payload["crmMessageId"]
+            payload.update(_wz_recipient(conv))
+            ext = _wz_ack(con, conv, wz_call(con, "POST", "message", payload))
         else:
             raise CommsError("Этот канал не поддерживает стикеры")
     except CommsError as e:
@@ -1038,6 +1075,13 @@ def start_wazzup_telegram(con, phone: str) -> int:
     p = normalize_phone(phone)
     if len(p) < 11:
         raise CommsError("Неверный номер телефона")
+    channel = get(con, "wazzup_tg_channel")
+    matches = [row for row in con.execute("SELECT id,meta FROM conversations WHERE channel='wazzup_telegram' AND phone_norm=?", (p,))
+               if (json.loads(row["meta"] or "{}").get("channelId") or channel) == channel]
+    if len(matches) == 1:
+        return matches[0]["id"]
+    if len(matches) > 1:
+        raise CommsError("Найдено несколько Telegram-чатов с этим номером. Откройте нужную переписку из списка")
     return upsert_conversation(con, "wazzup_telegram", "phone:" + p, phone=p,
                                meta={"channelId": get(con, "wazzup_tg_channel"), "chatType": "telegram"})
 

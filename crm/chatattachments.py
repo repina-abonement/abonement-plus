@@ -128,10 +128,11 @@ def _send_wazzup_bundle(con,conv,attachment,user,text,kind,url):
     """Wazzup v3 accepts contentUri OR text. Record each confirmed part separately."""
     aid=attachment['id'];cid=conv['id']
     destination=comms._wz_destination(con,conv)
-    destination['phone' if conv['external_id'].startswith('phone:') else 'chatId']=conv['external_id'][6:] if conv['external_id'].startswith('phone:') else conv['external_id']
+    destination.update(comms._wz_recipient(conv))
     result=comms.wz_call(con,'POST','message',destination|{'contentUri':url,'crmMessageId':aid}) or {}
-    external=result.get('messageId')
-    if not external:raise comms.CommsError('Wazzup не подтвердил отправку файла')
+    external=comms._wz_ack(con,conv,result)
+    if result.get('chatId'):
+        destination.pop('phone',None);destination.pop('username',None);destination['chatId']=str(result['chatId'])
     mid=comms.add_message(con,cid,'out',attachment['filename'],kind=kind,media='attachment:'+aid,user_name=user.get('name',''),external_id=external,status='sent')
     text_mid=None
     if text:
