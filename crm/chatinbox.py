@@ -1,42 +1,11 @@
-"""Inbox presentation, five-minute unanswered queue and personal chat preferences."""
+"""Inbox presentation, manual unread and personal chat preferences."""
 import re
-from datetime import datetime,timedelta
 from . import comms
-
-REPLY_SECONDS=300
-LIVE_CHANNELS=('telegram','max','whatsapp','wazzup_telegram','wazzup_max')
 
 
 def init(con):
     con.execute('CREATE INDEX IF NOT EXISTS idx_msg_reply ON messages(conversation_id,direction,ts,id)')
     con.execute('''CREATE TABLE IF NOT EXISTS conversation_preferences(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,muted INTEGER NOT NULL DEFAULT 0,archived INTEGER NOT NULL DEFAULT 0,archived_after INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(user_id,conversation_id))''')
-
-
-def waiting(con,now=None):
-    # Read-only: opening/settings requests must not compete for the SQLite writer.
-    rows=con.execute('''WITH answers AS (
-      SELECT m.conversation_id,m.ts,m.id,ROW_NUMBER() OVER(PARTITION BY m.conversation_id ORDER BY m.ts DESC,m.id DESC) AS rank
-      FROM messages m WHERE m.direction='out' AND m.status NOT IN ('error','demo') AND m.user_name NOT IN ('Автосообщение','Автоцепочка','Бот')
-      AND NOT EXISTS(SELECT 1 FROM message_deletions d WHERE d.message_id=m.id AND d.state='deleted')
-    ), incoming AS (
-      SELECT m.conversation_id,m.ts,m.id,ROW_NUMBER() OVER(PARTITION BY m.conversation_id ORDER BY m.ts,m.id) AS rank
-      FROM messages m JOIN conversations c ON c.id=m.conversation_id
-      LEFT JOIN answers a ON a.conversation_id=m.conversation_id AND a.rank=1
-      WHERE m.direction='in' AND m.status NOT IN ('error','demo')
-      AND c.channel IN ('telegram','max','whatsapp','wazzup_telegram','wazzup_max') AND c.external_id NOT LIKE 'demo-%'
-      AND (a.id IS NULL OR (m.ts,m.id)>(a.ts,a.id))
-      AND NOT EXISTS(SELECT 1 FROM message_deletions d WHERE d.message_id=m.id AND d.state='deleted')
-    ) SELECT conversation_id,ts FROM incoming WHERE rank=1''')
-    result={}
-    for row in rows:
-        try:
-            first=datetime.fromisoformat(row['ts'].replace('Z','+00:00'))
-            current=now or datetime.now(first.tzinfo)
-            if current.tzinfo and not first.tzinfo:current=current.replace(tzinfo=None)
-            if not current.tzinfo and first.tzinfo:current=current.replace(tzinfo=first.tzinfo)
-            if current-first>=timedelta(seconds=REPLY_SECONDS):result[row['conversation_id']]=row['ts']
-        except (ValueError,TypeError):continue
-    return result
 
 
 def preferences(con,user_id):
@@ -72,7 +41,7 @@ def mark_unread(con,cid,user):
 def mark_read(con,cid):
     if not con.execute('SELECT 1 FROM conversations WHERE id=?',(cid,)).fetchone():raise comms.CommsError('Чат не найден')
     con.execute('UPDATE conversations SET unread=0 WHERE id=?',(cid,))
-    return {'ok':True,'reply_overdue':cid in waiting(con)}
+    return {'ok':True,'reply_overdue':False}
 
 
 def norm_name(value):return ' '.join(sorted(re.findall(r'[a-zа-яё]+',str(value or '').casefold().replace('ё','е'))))

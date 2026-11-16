@@ -19,7 +19,7 @@ async function pollCounts() {
     const n = c.unread + c.missed;
     document.querySelectorAll("[data-badge]").forEach((b) => { b.hidden = !n; b.textContent = n; });
     const p = S.counts;
-    if(S.view==='inbox'&&S.inbox.tab==='chats'&&p&&(p.last_in!==c.last_in||p.unread!==c.unread||p.overdue_key!==c.overdue_key))S.inbox.refresh?.().catch(()=>{});
+    if(S.view==='inbox'&&S.inbox.tab==='chats'&&p&&(p.last_in!==c.last_in||p.unread!==c.unread))S.inbox.refresh?.().catch(()=>{});
     if (p && p.last_in !== undefined) {
       const what = c.last_lead > p.last_lead ? "🔥 Заявка с сайта" : (c.last_notify_in??c.last_in) > (p.last_notify_in??p.last_in) ? "💬 Новое сообщение" : c.last_missed > p.last_missed ? "📞 Пропущенный звонок" : "";
       if (what) newInboxAlert(what);
@@ -382,7 +382,6 @@ async function chatAction(c,action){
   if(S.view==='inbox')await S.inbox.refresh?.();
   S.counts=await api('GET','/api/inbox/counts');await pollCounts();
   if(action==='unread')toast('Чат отмечен непрочитанным');
-  if(action==='read'&&c.reply_overdue)toast('Чат всё ещё ждёт ответа — красная отметка снимется после ответа');
 }
 document.addEventListener('click',async event=>{
   const button=event.target.closest('[data-chat-action]');if(!button)return;
@@ -422,9 +421,9 @@ async function renderInbox(page) {
     list.innerHTML = d.conversations.length ? d.conversations.map(c=>{
       const name=c.title||c.username||c.phone||'Без имени';
       const initials=name.trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();
-      return `<div class="list-row click conv-row ${c.unread?'unread':''} ${c.reply_overdue?'reply-overdue':''} ${I.active===c.id?'selected':''}" data-conv="${c.id}" tabindex="0" role="button" aria-label="${esc(name)}${c.unread?', непрочитанных: '+c.unread:''}">
+      return `<div class="list-row click conv-row ${c.unread?'unread':''} ${I.active===c.id?'selected':''}" data-conv="${c.id}" tabindex="0" role="button" aria-label="${esc(name)}${c.unread?', непрочитанных: '+c.unread:''}">
         <div class="conv-avatar" aria-hidden="true">${esc(initials)}${c.unread?`<span class="conv-unread-count" aria-label="Непрочитанных сообщений: ${c.unread}">${c.unread>99?'99+':c.unread}</span>`:''}</div>
-        <div class="conv-copy"><div class="conv-title"><b>${esc(name)}</b><time>${dtWhen(c.last_at)}</time></div><div class="conv-preview"><span>${c.reply_overdue?'Нет ответа 5 мин · ':''}${c.open_q?'Открытый вопрос · ':''}${esc(c.last_text||chLabel(c.channel))}</span>${c.pinned?'<span class="conv-pinned" title="Закреплён">●</span>':''}${c.muted?'<span class="conv-muted" title="Без звука" aria-label="Без звука"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4ZM16 9l5 6m0-6-5 6"/></svg></span>':''}<button type="button" class="conv-more" data-chat-more="${c.id}" aria-label="Действия с чатом">⋯</button></div></div>
+        <div class="conv-copy"><div class="conv-title"><b>${esc(name)}</b><time>${dtWhen(c.last_at)}</time></div><div class="conv-preview"><span>${c.open_q?'Открытый вопрос · ':''}${esc(c.last_text||chLabel(c.channel))}</span>${c.pinned?'<span class="conv-pinned" title="Закреплён">●</span>':''}${c.muted?'<span class="conv-muted" title="Без звука" aria-label="Без звука"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4ZM16 9l5 6m0-6-5 6"/></svg></span>':''}<button type="button" class="conv-more" data-chat-more="${c.id}" aria-label="Действия с чатом">⋯</button></div></div>
       </div>`}).join(''):'<div class="list-row muted">Переписок нет</div>';
     list.querySelectorAll('[data-chat-more]').forEach(button=>button.onclick=e=>{e.stopPropagation();const r=button.getBoundingClientRect();showChatMenu(S.chatRows[+button.dataset.chatMore],r.right,r.bottom)});
     list.querySelectorAll('[data-conv]').forEach(el=>{

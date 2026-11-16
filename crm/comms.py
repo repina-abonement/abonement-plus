@@ -1275,7 +1275,7 @@ def _lead_note(con, sid, title, details):
 
 # ---------------- ленты для интерфейса ----------------
 
-def _conv_out(con, r, overdue=None, pref=None, identity_cache=None) -> dict:
+def _conv_out(con, r, pref=None, identity_cache=None) -> dict:
     d = dict(r)
     d["meta"] = json.loads(d["meta"] or "{}")
     d["channel_label"] = CHANNEL_LABELS.get(d["channel"], d["channel"].replace("wazzup_", "").capitalize())
@@ -1291,8 +1291,7 @@ def _conv_out(con, r, overdue=None, pref=None, identity_cache=None) -> dict:
             "SELECT id, name, funnel, stage, birth, group_id, trial_at FROM students WHERE family_id=? AND archived=0 ORDER BY id", (display_family,))]
     d['original_title']=d['title']
     d['title']=chatinbox.display_title(con,d|{'family_id':display_family},d['students'])
-    d['reply_overdue']=d['id'] in (chatinbox.waiting(con) if overdue is None else overdue)
-    d['unread']=max(d['unread'],int(d['reply_overdue']))
+    d['reply_overdue']=False  # compatibility for already-open clients; reminder cancelled
     d['muted']=bool((pref or {}).get('muted'))
     d['archived']=chatinbox.archived(con,d,pref or {})
     d["demo"] = d["external_id"].startswith("demo-")
@@ -1301,10 +1300,10 @@ def _conv_out(con, r, overdue=None, pref=None, identity_cache=None) -> dict:
 
 def inbox(con, filt: str = "all", q: str = "", user=None) -> dict:
     from . import chatinbox
-    overdue=chatinbox.waiting(con);prefs=chatinbox.preferences(con,(user or {}).get('id',0))
+    prefs=chatinbox.preferences(con,(user or {}).get('id',0))
     where, args = [], []
     if filt == "unread":
-        where.append("(c.unread > 0 OR c.id IN ("+','.join(str(int(cid)) for cid in overdue or [-1])+"))")
+        where.append("c.unread > 0")
     elif filt == "nofamily":
         where.append("c.family_id IS NULL")
     elif filt == "open":
@@ -1320,13 +1319,11 @@ def inbox(con, filt: str = "all", q: str = "", user=None) -> dict:
             OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND ((?='' AND ulower(m.text) LIKE ?) OR message_phone_match(m.text,?))))""")
         args += [like,like,q,q,like,like,like,like,q,q,phone_search_digits(q) if not any(ch.isalpha() for ch in q) else '',like,q]
     sql = "SELECT c.*,CASE WHEN pins.conversation_id IS NULL THEN 0 ELSE 1 END AS pinned FROM conversations c LEFT JOIN conversation_pins pins ON pins.conversation_id=c.id AND pins.user_id=?" + (" WHERE " + " AND ".join(where) if where else "")
-    overdue_ids=",".join(str(int(cid)) for cid in overdue or [-1])
-    sql += " ORDER BY CASE WHEN c.id IN ("+overdue_ids+") THEN 0 ELSE 1 END,pinned DESC,c.last_at IS NULL,c.last_at DESC,c.id DESC LIMIT 1000"
+    sql += " ORDER BY pinned DESC,c.last_at IS NULL,c.last_at DESC,c.id DESC LIMIT 1000"
     identity_cache={}
-    items=[_conv_out(con,r,overdue,prefs.get(r['id']),identity_cache) for r in con.execute(sql,[(user or {}).get('id',0),*args])]
-    items.sort(key=lambda c:(not c["reply_overdue"],overdue.get(c["id"],"")))
+    items=[_conv_out(con,r,prefs.get(r['id']),identity_cache) for r in con.execute(sql,[(user or {}).get('id',0),*args])]
     items=[c for c in items if (c['archived'] if filt=='archived' else not c['archived'] or filt=='unread')]
-    return {"conversations":items[:200],**counts(con,user,overdue)}
+    return {"conversations":items[:200],**counts(con,user)}
 
 
 def pin_conversation(con,cid,user,pinned):
@@ -1337,14 +1334,12 @@ def pin_conversation(con,cid,user,pinned):
     return {'pinned':pinned}
 
 
-def counts(con,user=None,overdue=None) -> dict:
-    from . import chatinbox
-    overdue=chatinbox.waiting(con) if overdue is None else overdue
-    effective={r[0] for r in con.execute('SELECT id FROM conversations WHERE unread>0')}|set(overdue)
+def counts(con,user=None) -> dict:
+    effective={r[0] for r in con.execute('SELECT id FROM conversations WHERE unread>0')}
     muted={r[0] for r in con.execute('SELECT conversation_id FROM conversation_preferences WHERE user_id=? AND muted=1',((user or {}).get('id',0),))}
     notify=con.execute("SELECT COALESCE(MAX(id),0) FROM messages WHERE direction='in' AND conversation_id NOT IN ("+','.join(str(int(cid)) for cid in muted or [-1])+")").fetchone()[0]
     return {
-        "unread":len(effective),"last_notify_in":notify,"overdue":len(overdue),"overdue_key":",".join(str(cid) for cid in sorted(overdue)),
+        "unread":len(effective),"last_notify_in":notify,"overdue":0,"overdue_key":"",
         "missed": con.execute("SELECT COUNT(*) FROM calls WHERE direction='in' AND status IN ('missed','busy') AND seen=0")
                      .fetchone()[0],
         # для звука: номера последних входящих (сообщение, пропущенный звонок, заявка с сайта)
@@ -1455,9 +1450,7 @@ def history(con, family_id: int | None, phones: list[str], mark_read: bool = Tru
     """Вся история семьи (или номера, если семьи нет): переписки во всех мессенджерах и звонки одной лентой."""
     phones = [p for p in phones if p]
     ph_sql = ",".join("?" * len(phones)) or "''"
-    from . import chatinbox
-    overdue=chatinbox.waiting(con)
-    convs = [_conv_out(con, r,overdue) for r in con.execute(
+    convs = [_conv_out(con, r) for r in con.execute(
         f"SELECT * FROM conversations WHERE (family_id=? AND family_id IS NOT NULL) OR (family_id IS NULL AND phone_norm IN ({ph_sql})) ORDER BY last_at DESC",
         (family_id, *phones))]
     items = []

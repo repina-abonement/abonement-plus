@@ -1,15 +1,10 @@
-"""Manual unread, five-minute reply queue, private preferences and identified titles."""
+"""Manual unread, cancelled automatic reminders, private preferences and identified titles."""
 import tempfile,unittest
 from pathlib import Path
 from datetime import datetime,timedelta
-from unittest.mock import patch
 from crm import db,comms,chatinbox as inbox
 
 NOW=datetime(2026,11,16,12,0)
-class Clock(datetime):
-    @classmethod
-    def now(cls,tz=None):return NOW.replace(tzinfo=tz)
-
 class ChatActions(unittest.TestCase):
     def setUp(self):
         self.con=db.connect(str(Path(tempfile.mkdtemp())/'actions.sqlite3'));db.init_db(self.con)
@@ -17,8 +12,7 @@ class ChatActions(unittest.TestCase):
         uid=self.con.execute("INSERT INTO users(login,name,role,pw_hash) VALUES ('synthetic-other','Synthetic','operator','disabled')").lastrowid
         self.other={'id':uid,'role':'operator'}
         self.cid=comms.upsert_conversation(self.con,'wazzup_telegram','phone:79000000111',phone='79000000111')
-        self.clock=patch.object(inbox,'datetime',Clock);self.clock.start()
-    def tearDown(self):self.clock.stop();self.con.close()
+    def tearDown(self):self.con.close()
     def message(self,seconds,direction='in',status=''):
         return comms.add_message(self.con,self.cid,direction,'Synthetic text',status=status,ts=(NOW-timedelta(seconds=seconds)).isoformat())
     def test_manual_unread_is_idempotent_and_readonly_polling_does_not_clear_it(self):
@@ -29,17 +23,15 @@ class ChatActions(unittest.TestCase):
         for _ in range(3):self.assertEqual(comms.conversation(self.con,self.cid,False)['conversation']['unread'],1)
         self.assertEqual(comms.counts(self.con)['unread'],1);self.assertEqual([tuple(r) for r in self.con.execute('SELECT * FROM messages')],before)
         comms.conversation(self.con,self.cid,True);self.assertEqual(comms.counts(self.con)['unread'],0)
-    def test_five_minutes_from_first_unanswered_incoming_and_failed_send_does_not_clear(self):
-        self.message(600,'out');self.message(299);self.message(10)
-        self.assertNotIn(self.cid,inbox.waiting(self.con))
-        self.assertIn(self.cid,inbox.waiting(self.con,NOW+timedelta(seconds=1)))
-        self.con.execute('UPDATE messages SET ts=? WHERE id=2',((NOW-timedelta(seconds=300)).isoformat(),))
-        self.message(5,'out','error')
-        comms.add_message(self.con,self.cid,'out','Automatic greeting',user_name='Бот',ts=(NOW-timedelta(seconds=1)).isoformat())
+    def test_old_unanswered_message_stays_read_and_never_becomes_urgent(self):
+        self.message(3600,'out');self.message(1800)
         comms.conversation(self.con,self.cid,True)
-        data=comms.inbox(self.con,'unread',user=self.user)
-        self.assertTrue(data['conversations'][0]['reply_overdue']);self.assertEqual(data['unread'],1)
-        self.message(0,'out','sent');self.assertNotIn(self.cid,inbox.waiting(self.con));self.assertEqual(comms.counts(self.con)['unread'],0)
+        for _ in range(3):
+            data=comms.inbox(self.con,'unread',user=self.user)
+            self.assertEqual(data['conversations'],[]);self.assertEqual(data['unread'],0)
+            self.assertEqual(data['overdue'],0)
+            self.assertFalse(comms.conversation(self.con,self.cid,False)['conversation']['reply_overdue'])
+
     def test_archive_and_mute_are_private_new_message_restores_unmuted_chat(self):
         self.message(20)
         inbox.set_preference(self.con,self.cid,self.user,{'archived':True})
@@ -53,11 +45,12 @@ class ChatActions(unittest.TestCase):
         self.assertEqual(comms.counts(self.con,self.user)['last_notify_in'],0)
         self.assertGreater(comms.counts(self.con,self.other)['last_notify_in'],0)
         with self.assertRaises(comms.CommsError):inbox.set_preference(self.con,self.cid,self.user,{'muted':'yes'})
-    def test_unanswered_archived_muted_still_appears_in_new_and_does_not_write_on_counts(self):
+    def test_read_archived_message_stays_read_without_counter_writes(self):
         self.message(301);inbox.set_preference(self.con,self.cid,self.user,{'archived':True,'muted':True});inbox.mark_read(self.con,self.cid)
         before=self.con.total_changes
         data=comms.inbox(self.con,'unread',user=self.user)
-        self.assertEqual(data['unread'],1);self.assertTrue(data['conversations'][0]['reply_overdue']);self.assertEqual(self.con.total_changes,before)
+        self.assertEqual(data['unread'],0);self.assertEqual(data['conversations'],[]);self.assertEqual(self.con.total_changes,before)
+
     def test_title_uses_card_children_correct_parent_and_relation_without_overwriting_original(self):
         fid=self.con.execute("INSERT INTO families(name) VALUES ('Synthetic family')").lastrowid
         self.con.execute("INSERT INTO parents(family_id,name,phone,phone_norm,relation) VALUES (?,'Анна','+79000000111','79000000111','мама')",(fid,))
@@ -80,19 +73,22 @@ class ChatActions(unittest.TestCase):
         self.con.execute("INSERT INTO students(family_id,name,stage_changed_at,created_at) VALUES (?,'Тестовик Примеров','2026-11-16','2026-11-16')",(other,))
         c=comms.inbox(self.con,user=self.user)['conversations'][0]
         self.assertEqual(c['title'],'Примеров Тестовик');self.assertIsNone(c['display_family_id'])
-    def test_oldest_unanswered_rises_above_pinned_and_newer_dialogues(self):
+    def test_pinned_and_recent_chats_are_not_displaced_by_old_unanswered(self):
         self.message(700)
         recent=comms.upsert_conversation(self.con,'wazzup_telegram','newer')
         comms.add_message(self.con,recent,'in','New pending',ts=(NOW-timedelta(seconds=301)).isoformat())
         pinned=comms.upsert_conversation(self.con,'wazzup_telegram','pinned')
         comms.add_message(self.con,pinned,'out','Answered',ts=NOW.isoformat());comms.pin_conversation(self.con,pinned,self.user,True)
         items=comms.inbox(self.con,user=self.user)['conversations']
-        self.assertEqual([c['id'] for c in items],[self.cid,recent,pinned])
-        self.message(0,'out','sent')
-        self.assertEqual(comms.inbox(self.con,user=self.user)['conversations'][0]['id'],recent)
+        self.assertEqual([c['id'] for c in items],[pinned,recent,self.cid])
+        self.assertTrue(all(not c['reply_overdue'] for c in items))
 
-    def test_demo_and_archive_history_never_trigger_reply_reminder(self):
-        self.message(301);self.con.execute("UPDATE conversations SET channel='tg_archive' WHERE id=?",(self.cid,));self.assertEqual(inbox.waiting(self.con),{})
-        self.con.execute("UPDATE conversations SET channel='telegram',external_id='demo-test' WHERE id=?",(self.cid,));self.assertEqual(inbox.waiting(self.con),{})
+    def test_genuine_unread_and_manual_marks_are_preserved_after_cancellation(self):
+        self.message(3600)
+        data=comms.inbox(self.con,'unread',user=self.user)
+        self.assertEqual(data['unread'],1);self.assertFalse(data['conversations'][0]['reply_overdue'])
+        inbox.mark_read(self.con,self.cid);inbox.mark_unread(self.con,self.cid,self.user)
+        self.assertEqual(comms.counts(self.con)['unread'],1)
+
 
 if __name__=='__main__':unittest.main()
