@@ -112,6 +112,12 @@ class CommsError(Exception):
     pass
 
 
+class TelegramTransportError(CommsError):
+    """Транспортный отказ без подтверждённого ответа Telegram; отправку не повторять."""
+    def __init__(self,message,route,code=None):
+        super().__init__(message);self.route=route;self.code=code
+
+
 def ts_now() -> str:
     return datetime.now().replace(microsecond=0).isoformat(timespec="seconds")
 
@@ -428,13 +434,41 @@ def tg_api(con) -> str:
 
 def tg_call(con, method: str, payload: dict | None = None, token: str | None = None) -> dict:
     tok = token or get(con, "tg_token")
-    if not tok:
-        raise CommsError("Telegram не подключён")
-    code, js = http("POST", f"{tg_api(con)}/bot{tok}/{method}", data=payload or {})
-    if not isinstance(js, dict) or not js.get("ok"):
-        desc = (js or {}).get("description") if isinstance(js, dict) else None
-        raise CommsError(f"Telegram: {desc or 'ошибка ' + str(code)}")
-    return js.get("result")
+    if not tok:raise CommsError("Telegram не подключён")
+    relay=bool(get(con,'tg_relay'));route='relay' if relay else 'direct'
+    try:code,js=http('POST',f"{tg_api(con)}/bot{tok}/{method}",data=payload or {})
+    except CommsError:
+        raise TelegramTransportError('Нет сетевой связи с Telegram-мостом. Проверьте доступность моста с сервера CRM' if relay else 'Нет сетевой связи с Telegram с сервера CRM',route) from None
+    if not isinstance(js,dict) or not js.get('ok'):
+        desc=js.get('description') if isinstance(js,dict) else None
+        if desc:
+            # Сохраняем настоящий отказ Telegram, но не отражаем секрет/HTML пользователю.
+            safe=str(desc).replace(tok,'[скрыто]')[:400]
+            raise CommsError('Telegram: '+safe)
+        if relay and code==403:
+            message='Telegram-мост отклонил запрос (HTTP 403). Проверьте разрешённый IP сервера CRM на мосту'
+        else:message=('Telegram-мост' if relay else 'Сетевой доступ к Telegram')+f': ошибка соединения (HTTP {code})'
+        raise TelegramTransportError(message,route,code)
+    return js.get('result')
+
+
+def telegram_diagnostics(con):
+    """Только getMe по сохранённым адресам. Не меняет webhook/ключи и не пишет клиентам."""
+    tok=get(con,'tg_token');relay=bool(get(con,'tg_relay'))
+    result={'configured':bool(tok),'relay_configured':relay,'probes':[]}
+    if not tok:return result
+    routes=[('relay',tg_api(con))] if relay else []
+    routes.append(('direct',TG_API))
+    for route,base in routes:
+        try:
+            code,js=http('POST',f'{base}/bot{tok}/getMe',data={})
+            ok=isinstance(js,dict) and bool(js.get('ok'))
+            desc=js.get('description') if isinstance(js,dict) else None
+            detail=('Подключение доступно' if ok else ('Telegram: '+str(desc).replace(tok,'[скрыто]')[:300] if desc else ('Мост вернул HTTP 403: проверьте доступ CRM и разрешённые IP' if route=='relay' and code==403 else f'Сетевой ответ HTTP {code}')))
+            result['probes'].append({'route':route,'ok':ok,'http_code':code,'detail':detail})
+        except CommsError:
+            result['probes'].append({'route':route,'ok':False,'http_code':None,'detail':'Нет сетевого соединения с этого сервера'})
+    return result
 
 
 def tg_connect(con, base_url: str) -> dict:

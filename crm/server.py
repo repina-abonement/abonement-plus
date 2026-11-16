@@ -2987,6 +2987,11 @@ def sticker_image(con, h, user, body, q):
     return Raw(row["image"], row["mime"])
 
 
+@route("GET", "/api/integrations/telegram/diagnostics", role="admin")
+def int_tg_diagnostics(con,h,user,body,q):
+    return cx(comms.telegram_diagnostics,con)
+
+
 @route("POST", "/api/integrations/telegram/connect", role="admin")
 def int_tg(con, h, user, body, q):
     return cx(comms.tg_connect, con, base_url(h))

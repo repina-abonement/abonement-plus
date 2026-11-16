@@ -514,6 +514,8 @@ async function renderCommsSettings(box, users) {
       <div class="field"><label>Мост для Telegram (если сервер в России)</label><input data-k="tg_relay" value="${esc(v.tg_relay || "")}" placeholder="https://…"></div>
       ${inf.tg_bot ? `<div class="small">Бот: ${esc(inf.tg_bot)}</div>` : ""}${inf.tg_error ? `<div class="error">${esc(inf.tg_error)}</div>` : ""}
       <button class="btn sm" data-connect="telegram">Сохранить и подключить</button>
+      <button type="button" class="btn sm" data-tg-diagnostics>Проверить связь</button>
+      <div class="small muted" data-tg-diagnostics-result>Проверка сохранённого подключения без отправки сообщений.</div>
     </div>
 
     <div class="int"><div class="int-head"><b>MAX</b>${ok(st.max)}</div>
@@ -558,6 +560,12 @@ async function renderCommsSettings(box, users) {
     <details style="margin-top:12px"><summary class="small muted">Журнал входящих событий</summary><div id="hook-log" class="small"></div></details>`;
   const collect = () => Object.fromEntries([...box.querySelectorAll("[data-k]")].map((i) => [i.dataset.k, i.value]));
   $("#int-save").onclick = async () => { try { await api("PUT", "/api/integrations", collect()); S.meta = await api("GET", "/api/meta"); toast("Сохранено"); renderCommsSettings(box, users); } catch (e) { fail(e); } };
+  box.querySelector('[data-tg-diagnostics]').onclick=async()=>{
+    const button=box.querySelector('[data-tg-diagnostics]'),result=box.querySelector('[data-tg-diagnostics-result]');
+    button.disabled=true;result.textContent='Проверяю соединение…';
+    try{const report=await api('GET','/api/integrations/telegram/diagnostics');result.textContent=report.configured?report.probes.map(p=>(p.route==='relay'?'Через мост: ':'Напрямую: ')+p.detail).join(' · '):'Telegram не подключён'}
+    catch(e){result.textContent=e.message}finally{if(button.isConnected)button.disabled=false}
+  };
   box.querySelectorAll("[data-connect]").forEach((b) => (b.onclick = async () => {
     b.disabled = true;
     try {

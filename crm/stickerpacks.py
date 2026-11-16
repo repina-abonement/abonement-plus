@@ -3,7 +3,7 @@ import re
 import secrets
 from urllib.parse import quote
 from urllib.request import urlopen
-from urllib.error import HTTPError
+from urllib.error import HTTPError,URLError
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sticker_packs(name TEXT PRIMARY KEY, title TEXT NOT NULL);
@@ -35,12 +35,15 @@ def import_pack(con, value):
         if not direct:
             try:return comms.tg_call(con,method,payload)
             except comms.CommsError as error:
-                # Только чтение публичного набора: сетевой 403 моста без Telegram-description.
-                if str(error)!='Telegram: ошибка 403' or not comms.get(con,'tg_relay'):raise
+                transport=isinstance(error,comms.TelegramTransportError) or str(error)=='Telegram: ошибка 403'
+                if not transport or not comms.get(con,'tg_relay'):raise
                 direct=True
-        code,result=comms.http('POST',f"{comms.TG_API}/bot{comms.get(con,'tg_token')}/{method}",data=payload)
+        try:
+            code,result=comms.http('POST',f"{comms.TG_API}/bot{comms.get(con,'tg_token')}/{method}",data=payload)
+        except comms.CommsError:
+            raise comms.CommsError('Telegram-мост недоступен или отклонил запрос; прямое чтение Telegram с сервера CRM тоже недоступно. Проверьте сеть и разрешённый IP моста') from None
         if not isinstance(result,dict) or not result.get('ok'):
-            raise comms.CommsError('Не удалось прочитать набор: Telegram-мост вернул 403, прямое чтение Telegram также недоступно. Проверьте подключение Telegram на сервере CRM')
+            raise comms.CommsError('Не удалось прочитать набор напрямую из Telegram после отказа моста. Проверьте сохранённое подключение Telegram')
         return result['result']
     result = call('getStickerSet', {'name': name})
     stickers = result.get('stickers') or []
@@ -63,16 +66,15 @@ def import_pack(con, value):
         try:
             with urlopen(url, timeout=20) as response:
                 raw = response.read(1_000_001)
-        except HTTPError as error:
-            if error.code!=403 or direct or not comms.get(con,'tg_relay'):
-                raise comms.CommsError('Не удалось скачать изображение стикера из Telegram') from None
+        except (HTTPError,URLError,OSError,TimeoutError):
+            if direct or not comms.get(con,'tg_relay'):
+                raise comms.CommsError('Не удалось скачать стикер с сервера Telegram. Проверьте соединение с сервера CRM') from None
             direct=True
             try:
                 with urlopen(f"{comms.TG_API}/file/bot{comms.get(con,'tg_token')}/{quote(path,safe='/')}",timeout=20) as response:
                     raw=response.read(1_000_001)
-            except Exception:raise comms.CommsError('Telegram-мост запретил скачивание (403), прямое скачивание также недоступно') from None
-        except Exception:
-            raise comms.CommsError('Не удалось скачать стикеры из Telegram. Попробуйте ещё раз') from None
+            except (HTTPError,URLError,OSError,TimeoutError):
+                raise comms.CommsError('Не удалось скачать стикер: недоступны и Telegram-мост, и прямое соединение. Проверьте сеть сервера CRM') from None
         if len(raw) > 1_000_000:
             raise comms.CommsError('Изображение стикера слишком большое')
         if raw.startswith(b'\x89PNG\r\n\x1a\n'):
