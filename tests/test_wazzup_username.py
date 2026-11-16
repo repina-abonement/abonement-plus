@@ -15,6 +15,13 @@ class UsernameTest(WazzupTest):
             comms.send(self.con,cid,'Second',self.user)
             self.assertEqual(provider.call_args.args[3]['chatId'],'123456')
             self.assertNotIn('username',provider.call_args.args[3])
+    def test_incoming_reply_reuses_confirmed_username_chat(self):
+        cid=comms.start_wazzup_username(self.con,'@reply_user')
+        with patch.object(comms,'wz_call',return_value={'messageId':'sent','chatId':'123456'}):
+            comms.send(self.con,cid,'Hi',self.user)
+        comms.wz_hook(self.con,{'messages':[{'chatType':'telegram','channelId':'test-tg','chatId':'123456','messageId':'reply','text':'Hello','contact':{'username':'reply_user'}}]})
+        self.assertEqual(self.con.execute("SELECT conversation_id FROM messages WHERE external_id='reply'").fetchone()[0],cid)
+        self.assertEqual(comms.start_wazzup_username(self.con,'@reply_user'),cid)
     def test_phone_reuses_known_chat_and_attachment_uses_username(self):
         self.assertEqual(comms.start_wazzup_telegram(self.con,'+79000000111'),self.wz)
         cid=comms.start_wazzup_username(self.con,'@attachment_user')

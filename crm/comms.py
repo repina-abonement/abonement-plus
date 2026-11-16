@@ -849,7 +849,12 @@ def _wz_tg_rekey(con, chat_id: str, phone: str, echo_id: str = "") -> None:
     row = None
     if echo_id:  # эхо нашего же сообщения: по его номеру точно знаем, какая переписка «по номеру» это была
         row = con.execute("""SELECT c.id FROM conversations c JOIN messages m ON m.conversation_id=c.id
-                             WHERE c.channel='wazzup_telegram' AND c.external_id LIKE 'phone:%' AND m.external_id=?""", (echo_id,)).fetchone()
+                             WHERE c.channel='wazzup_telegram' AND (c.external_id LIKE 'phone:%' OR c.external_id LIKE 'username:%') AND m.external_id=?""", (echo_id,)).fetchone()
+    if not row:
+        candidates = [r for r in con.execute("SELECT id,meta FROM conversations WHERE channel='wazzup_telegram' AND (external_id LIKE 'phone:%' OR external_id LIKE 'username:%')")
+                      if str(json.loads(r["meta"] or "{}").get("resolvedChatId") or "") == str(chat_id)]
+        if len(candidates) == 1:
+            row = candidates[0]
     if not row and pn:
         row = con.execute("SELECT id FROM conversations WHERE channel='wazzup_telegram' AND external_id=?", ("phone:" + pn,)).fetchone()
     existing = con.execute("SELECT id FROM conversations WHERE channel='wazzup_telegram' AND external_id=?", (chat_id,)).fetchone()
