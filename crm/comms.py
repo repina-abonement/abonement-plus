@@ -762,7 +762,8 @@ def wazzup_diagnostics(con):
                           ORDER BY m.id DESC LIMIT 20""").fetchall()
     for row in rows:
         error = str(row['error'] or '').replace(key, '[скрыто]') if key else str(row['error'] or '')
-        codes = re.findall(r'(?<![A-Za-z0-9_])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+(?![A-Za-z0-9_])', error)
+        code_match = re.search(r'Wazzup: ([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)(?=$|[ ·:])', error)
+        codes = [code_match[1]] if code_match else []
         request = re.search(r'requestId=([a-zA-Z0-9-]{8,64})(?![a-zA-Z0-9-])', error)
         report['failures'].append({'transport': WZ_ROUTE[row['channel']][0], 'codes': list(dict.fromkeys(codes))[:3],
                                    'request_id': request[1] if request else ''})

@@ -5,14 +5,14 @@ from crm import comms
 
 class DiagnosticsTest(WazzupTest):
     def test_read_only_diagnostics_exclude_customer_data_and_keys(self):
-        comms.add_message(self.con,self.wz,'out','Private message for synthetic customer',status='error',error='Wazzup: POST_MESSAGE_ERROR 79000000111 Secret Name FAKE_WZ_KEY requestId=abc123456789')
+        comms.add_message(self.con,self.wz,'out','Private message for synthetic customer',status='error',error='Wazzup: POST_MESSAGE_ERROR 79000000111 Secret Name PERSONAL_NAME FAKE_WZ_KEY requestId=abc123456789')
         before=self.con.total_changes
         with patch.object(comms,'wz_call',return_value=[{'channelId':'test-tg','transport':'tgapi','state':'active','plainId':'79000000111'}]) as provider:
             report=comms.wazzup_diagnostics(self.con)
         self.assertEqual(self.con.total_changes,before)
         self.assertEqual(provider.call_args.args[1:],('GET','channels'))
         encoded=json.dumps(report)
-        for secret in ('79000000111','Secret Name','FAKE_WZ_KEY','Private message'):
+        for secret in ('79000000111','Secret Name','PERSONAL_NAME','FAKE_WZ_KEY','Private message'):
             self.assertNotIn(secret,encoded)
         self.assertEqual(report['failures'][0]['codes'],['POST_MESSAGE_ERROR'])
         self.assertEqual(report['failures'][0]['request_id'],'abc123456789')
