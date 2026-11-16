@@ -18,6 +18,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from .db import normalize_phone
+from .phonesearch import digits as phone_search_digits
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS integrations (
@@ -1237,8 +1238,8 @@ def inbox(con, filt: str = "all", q: str = "") -> dict:
             OR phone_match(c.phone_norm,?) OR phone_match(c.phone,?)
             OR c.family_id IN (SELECT id FROM families WHERE ulower(name) LIKE ?)
             OR EXISTS (SELECT 1 FROM parents p WHERE p.family_id=c.family_id AND (phone_match(p.phone_norm,?) OR phone_match(p.phone,?)))
-            OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND (ulower(m.text) LIKE ? OR phone_match(m.text,?))))""")
-        args += [like,like,q,q,like,q,q,like,q]
+            OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND ((?='' AND ulower(m.text) LIKE ?) OR message_phone_match(m.text,?))))""")
+        args += [like,like,q,q,like,q,q,phone_search_digits(q),like,q]
     sql = "SELECT c.* FROM conversations c" + (" WHERE " + " AND ".join(where) if where else "")
     sql += " ORDER BY c.last_at IS NULL, c.last_at DESC LIMIT 200"
     return {"conversations": [_conv_out(con, r) for r in con.execute(sql, args)], **counts(con)}

@@ -183,8 +183,9 @@ def connect(path: str | None = None) -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     # встроенный lower() в SQLite не понимает кириллицу
     con.create_function("ulower", 1, lambda v: v.lower() if isinstance(v, str) else v, deterministic=True)
-    from .phonesearch import matches as phone_matches
+    from .phonesearch import matches as phone_matches,message_matches
     con.create_function('phone_match',2,phone_matches,deterministic=True)
+    con.create_function('message_phone_match',2,message_matches,deterministic=True)
     con.execute("PRAGMA foreign_keys = ON")
     con.execute("PRAGMA journal_mode = WAL")
     return con

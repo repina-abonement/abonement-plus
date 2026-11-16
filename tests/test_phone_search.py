@@ -25,6 +25,21 @@ def main():
         ids={r['id'] for r in comms.inbox(con,q=q)['conversations']}
         assert {c1,c2,c3}<=ids and wrong not in ids,(q,ids)
     assert all([tuple(r) for r in con.execute('SELECT * FROM '+table)]==rows for table,rows in before.items())
+    date_chat=chat('only-date')
+    con.execute("INSERT INTO messages(conversation_id,direction,text,ts) VALUES (?,'in','Встреча 12.11.2026, сумма 1200 рублей','2026-11-16')",(date_chat,))
+    assert date_chat not in {r['id'] for r in comms.inbox(con,q='12')['conversations']}
+    assert date_chat in {r['id'] for r in comms.inbox(con,q='Встреча')['conversations']}
+    # Snapshot after the explicit fixture insertion, before the read-only searches.
+    before={table:[tuple(r) for r in con.execute('SELECT * FROM '+table)] for table in ('parents','conversations','messages')}
+    # Every two-digit combination is searchable at its actual position in the number.
+    number='79001234567'
+    for q in {number[i:i+2] for i in range(len(number)-1)}|{'89'}:
+        assert sid in {r['id'] for r in people.listing(con,q=q)['rows']},q
+        assert sid in {r['id'] for r in sv.search_students(con,q)},q
+        assert {c1,c2,c3}<={r['id'] for r in comms.inbox(con,q=q)['conversations']},q
+    assert not phonesearch.matches('79001237567','85') # A body fragment 75 is not 85.
+    assert not phonesearch.matches('79001234567','13') # Separate digits do not form a match.
+    assert all([tuple(r) for r in con.execute('SELECT * FROM '+table)]==rows for table,rows in before.items())
     # Raw legacy phone without canonical field remains searchable; identity normalizer is unchanged.
     con.execute("UPDATE parents SET phone_norm='' WHERE family_id=?",(fid,))
     assert sv.search_students(con,'89001234567')[0]['id']==sid
