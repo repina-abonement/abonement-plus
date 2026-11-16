@@ -890,6 +890,7 @@ function wireMessagePicker(selector, sendSticker, context={}) {
       select.onchange=()=>loadScripts(+select.value).catch(fail);label.append(select);root.append(label);
     }
     const channel=context.channel?context.channel():'';
+    if(typeof memoSync==='function')await memoSync();
     const d=await api('GET','/api/chat-scripts?'+new URLSearchParams({student_id:sid||'',group_id:chosenGroup||'',channel}));
     if(!panel.isConnected||request!==scriptsRequest)return;
     const rules=d.items.find(x=>x.key==='rules');

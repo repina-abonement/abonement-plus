@@ -18,6 +18,8 @@ import calendar
 from datetime import date, datetime, timedelta
 
 MAX_FLEX_CREDIT = 3
+MAKEUP_NEXT_MONTHS = 1
+MAKEUP_MIN_WEEKLY_PAID = 2
 
 WEEKDAY_NAMES = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 MONTH_NAMES = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль",
@@ -159,7 +161,7 @@ def apply_late_fee(total: int, *, enabled: bool, percent: float, today: date,
 def makeup_window(today: date) -> tuple[date, date]:
     """Пропуски, которые ещё можно отработать: текущий и прошлый месяц."""
     cur = month_of(today)
-    start, _ = month_bounds(shift_month(cur, -1))
+    start, _ = month_bounds(shift_month(cur, -MAKEUP_NEXT_MONTHS))
     _, end = month_bounds(cur)
     return start, end
 

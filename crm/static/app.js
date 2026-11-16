@@ -32,6 +32,7 @@ async function api(method, url, body) {
     throw Object.assign(new Error("Действие не выполнено: не хватает данных"), { status: 422, silent: true });
   }
   if (!r.ok) throw Object.assign(new Error((data && data.error) || "Ошибка"), { status: r.status });
+  if(method!=='GET'&&/^(\/api\/(settings|prices|programs|groups|branches|closures|discounts)(\/|$)|\/api\/tasks\/settings$)/.test(url))window.dispatchEvent(new Event('crm:rules-changed'));
   return data;
 }
 

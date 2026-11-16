@@ -654,6 +654,7 @@ def memos_png(con, h, user, body, q):
     png = memos.image(con, q.get("key", ""), fresh_only=True)
     if not png:
         raise ApiError("Памятка ещё не нарисована", 404)
+    h.extra_headers=getattr(h,"extra_headers",[])+[("Cache-Control","no-store")]
     return Raw(png, "image/png")
 
 
@@ -3161,7 +3162,8 @@ class Handler(BaseHTTPRequestHandler):
     def _send_raw(self, r: "Raw"):
         data, status = r.data, 200
         rng = re.match(r"bytes=(\d*)-(\d*)", self.headers.get("Range") or "")
-        extra = [("Accept-Ranges", "bytes"), ("Cache-Control", "private, max-age=3600")]
+        extra = [("Accept-Ranges", "bytes")]
+        if not any(k.lower()=='cache-control' for k,v in getattr(self,'extra_headers',[])):extra.append(("Cache-Control", "private, max-age=3600"))
         if getattr(r, "filename", None):
             from urllib.parse import quote as _q
             extra.append(("Content-Disposition", f"attachment; filename*=UTF-8''{_q(r.filename)}"))

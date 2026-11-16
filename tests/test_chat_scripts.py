@@ -21,7 +21,7 @@ class ScriptsTest(unittest.TestCase):
     def test_max_never_falls_back_to_telegram_or_another_branch(self):
         with patch.object(memos,'image',return_value=b'PNG'):
             rule=scripts.rules(self.con,self.sid,'wazzup_max')
-        self.assertIn('MAX',rule['reason']);self.assertNotIn('t.me',rule['text'])
+        self.assertFalse(rule['reason']);self.assertIn('max.ru/id183210983596_biz',rule['text']);self.assertIn('Написать нам в MAX:',rule['text']);self.assertNotIn('t.me',rule['text'])
         scripts.save_profiles(self.con,{'nebo':{'max':'https://max.ru/test_school_channel'}})
         with patch.object(memos,'image',return_value=b'PNG'):
             rule=scripts.rules(self.con,self.sid,'max')
@@ -54,10 +54,13 @@ class ScriptsTest(unittest.TestCase):
                 with self.assertRaises(comms.CommsError):chatattachments.send(self.con,self.cid,draft['id'],self.user,draft['text'])
             network.assert_not_called()
     def test_artwork_invalidated_by_tariff_change(self):
-        target=next(t for t in memos.targets(self.con) if t['key']=='g'+str(self.gid))
-        self.assertTrue(memos.designed_image(target).startswith(b'\x89PNG'))
-        target['data']['per_lesson']=1700
-        self.assertIsNone(memos.designed_image(target))
+        import base64
+        key='g'+str(self.gid);target=next(t for t in memos.targets(self.con) if t['key']==key)
+        self.assertIsNone(memos.image(self.con,key)) # Old fixed-price PNG cannot bypass the current hash.
+        self.assertTrue(memos.save(self.con,key,target['hash'],base64.b64encode(b'\x89PNG\r\n\x1a\nTEST').decode()))
+        self.assertIsNotNone(memos.image(self.con,key))
+        self.con.execute("INSERT INTO group_terms(group_id,valid_from,per_lesson,credit_limit) VALUES (?,'2026-11',1700,2)",(self.gid,))
+        self.assertIsNone(memos.image(self.con,key))
     def test_native_max_file_uses_upload_token_not_file_url(self):
         self.con.execute("UPDATE conversations SET channel='max' WHERE id=?",(self.cid,))
         import base64

@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 from . import comms, tasks, memos
 
 PROFILE_NAMES={'nebo':'ТРЦ «Небо»','western':'СК «Западный»','arctic':'Арктика','toddlers':'ТРЦ «Небо», группа 1,5–3 года'}
+MAX_CHANNELS={'nebo':'https://max.ru/id183210983596_biz','western':'https://max.ru/id183210983596_biz3'}
 OFFERS={'nebo':'https://msk.footbolika.ru/assets/images/offer/1846/dgw2m3.pdf','western':'https://msk.footbolika.ru/assets/images/offer/3867/8of3k6.pdf','arctic':'https://msk.footbolika.ru/assets/images/offer/4005/2zqspv.pdf'}
 RULES_TEXT='''❗️ Обязательно подпишитесь на канал «Футболики»
 👉 {channel}
@@ -21,7 +22,7 @@ RULES_TEXT='''❗️ Обязательно подпишитесь на кана
 📄 Полные условия занятий и оплаты можно посмотреть в оферте
 {offer}
 
-Если остались вопросы, напишите нам, поможем разобраться 🤗
+Если остались вопросы, напишите нам, поможем разобраться 🤗{contact}
 
 До встречи на тренировках!
 С любовью, Футболика ⚽️💚'''
@@ -34,7 +35,7 @@ def profiles(con):
     for key,label in PROFILE_NAMES.items():
         base='nebo' if key=='toddlers' else key
         v=saved.get(key,{})
-        out[key]={'name':label,'telegram':v.get('telegram','https://t.me/footbolika_deti' if base=='nebo' else ''),'max':v.get('max',''),'offer':v.get('offer',OFFERS[base]),'text':v.get('text',RULES_TEXT)}
+        out[key]={'name':label,'telegram':v.get('telegram','https://t.me/footbolika_deti' if base=='nebo' else ''),'max':v.get('max',MAX_CHANNELS.get(base,'')),'offer':v.get('offer',OFFERS[base]),'text':v.get('text',RULES_TEXT)}
     # Малыши используют каналы Неба. Оферта при необходимости задаётся отдельно.
     out['toddlers']['telegram']=out['nebo']['telegram'];out['toddlers']['max']=out['nebo']['max']
     return out
@@ -94,12 +95,13 @@ def rules(con,sid,channel,gid=None):
     if not channel:reason='Выберите мессенджер'
     elif not link:reason='Не задан канал '+('MAX' if target=='max' else 'Telegram')+' для '+p['name']
     elif not p['offer']:reason='Не задана оферта для '+p['name']
-    text=p['text'].replace('{channel}',link).replace('{branch}',('сборной «Арктика»' if key=='arctic' else 'филиала '+('«Небо»' if key in ('nebo','toddlers') else 'СК «Западный»'))).replace('{offer}',p['offer'])
+    contact=('\nНаписать нам в MAX: '+tasks.admin_link(con,channel)) if channel.endswith('max') else ''
+    text=p['text'].replace('{contact}',contact).replace('{channel}',link).replace('{branch}',('сборной «Арктика»' if key=='arctic' else 'филиала '+('«Небо»' if key in ('nebo','toddlers') else 'СК «Западный»'))).replace('{offer}',p['offer'])
     memo_key=memos.key_for_group(con,g)
     image=memos.image(con,memo_key) if memo_key else None
-    if not image and not reason:reason='Актуальная картинка правил ещё не готова. Обновите памятки в настройках'
+    if not image and not reason:reason='Актуальная картинка правил ещё формируется. Откройте скрипты повторно'
     if re.search(r'\{[a-z_]+\}',text) and not reason:reason='В тексте остались незаполненные поля'
-    return {'key':'rules','title':'Правила школы · '+p['name'],'text':text,'reason':reason,'profile':key,'image':('/api/memos/png?key='+memo_key) if image else '', 'groups':[{'id':x['id'],'name':x['name']} for x in groups], 'group_id':g['id']}
+    return {'key':'rules','title':'Правила школы · '+p['name'],'text':text,'reason':reason,'profile':key,'image':('/api/memos/png?key='+memo_key+'&h='+hashlib.sha256(image).hexdigest()[:16]) if image else '', 'groups':[{'id':x['id'],'name':x['name']} for x in groups], 'group_id':g['id']}
 
 
 def catalog(con,sid=None,channel='',gid=None):

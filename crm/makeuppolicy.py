@@ -1,7 +1,7 @@
 """Отработки дополняют оплаченный абонемент: окно двух месяцев и две тренировки за неделю."""
 from datetime import date,timedelta
 import json
-from . import services as sv,clientattendance,subscriptiondates
+from . import services as sv,clientattendance,subscriptiondates,logic
 
 
 def paid(con,sid,month):
@@ -45,7 +45,7 @@ def check(con,sid,day,cache=None):
             for e in cache[ck]:
                 if start.isoformat()<=e['date']<=end.isoformat() and e['kind']=='subscription' and covered(con,subs(ym),e):lessons.add((e['date'],e['group_id']))
         cache[key]=len(lessons)
-    if cache[key]<2:raise sv.ApiError('Отработка возможна только дополнительно к минимум двум оплаченным занятиям по абонементу на этой неделе (понедельник–воскресенье)')
+    if cache[key]<logic.MAKEUP_MIN_WEEKLY_PAID:raise sv.ApiError(f'Для отработки нужно минимум {logic.MAKEUP_MIN_WEEKLY_PAID} оплаченных занятия по абонементу на этой неделе (понедельник–воскресенье)')
     return cache[key]
 
 
@@ -54,3 +54,10 @@ def absences(con,sid,day,cache=None):
     cache=cache if cache is not None else {};ym=day[:7];key=('absences',ym)
     if key not in cache:cache[key]=sv.absence_counters(con,sid,date.fromisoformat(day))['available_ids']
     return cache[key]
+
+
+def parent_rules():
+    """The same constants drive eligibility and the rules picture."""
+    n=logic.MAKEUP_MIN_WEEKLY_PAID
+    window='В месяце пропуска или следующем за ним' if logic.MAKEUP_NEXT_MONTHS==1 else f'В месяце пропуска и в течение {logic.MAKEUP_NEXT_MONTHS} следующих месяцев'
+    return [window,'На месяц отработки нужен оплаченный абонемент',f'В неделе пн–вс минимум {n} оплаченных занятия по абонементу',f'Отработка идёт дополнительным занятием ({n+1}-м и далее)', 'Достаточно оплаты: ждать посещения двух занятий не нужно' if n==2 else 'Фактического посещения оплаченных занятий ждать не требуется','Только отмеченные пропуски, включая заранее отмеченные','Отработанные и пересчитанные пропуски повторно не используются','По предварительной записи и при наличии свободных мест']
