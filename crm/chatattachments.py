@@ -63,7 +63,10 @@ def send(con,cid,aid,user,caption=''):
     if datetime.fromisoformat(r['expires_at'])<=datetime.now(timezone.utc):raise comms.CommsError('Выберите файл заново: срок черновика истёк')
     if r['rules_json']:
         from . import chatscripts,memos
-        meta=json.loads(r['rules_json']);current=chatscripts.rules(con,meta['student_id'],conv['channel'],meta['group_id'])
+        meta=json.loads(r['rules_json'])
+        family=con.execute('SELECT family_id FROM students WHERE id=?',(meta['student_id'],)).fetchone()
+        if not family or family[0]!=conv['family_id']:raise comms.CommsError('Связь чата с семьёй изменилась. Выберите скрипт заново')
+        current=chatscripts.rules(con,meta['student_id'],conv['channel'],meta['group_id'])
         _,group,_=chatscripts.group_for(con,meta['student_id'],meta['group_id'])
         png=memos.image(con,memos.key_for_group(con,group)) if group else None
         if current['reason'] or current['text']!=meta['text'] or not png or hashlib.sha256(png).hexdigest()!=meta['image_hash']:raise comms.CommsError('Правила или ссылки изменились. Выберите скрипт заново перед отправкой')

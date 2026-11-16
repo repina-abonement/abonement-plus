@@ -218,6 +218,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   try { d = await api("GET", `/api/families/${familyId}/comms`); } catch (e) { box.innerHTML = `<h3>Связь с семьёй</h3><div class="error">${esc(e.message)}</div>`; return; }
   if ($("#comms-box") !== box) return;
   if (sameFamily) draft = $("#cm-text")?.value || "";
+  const attachmentState=sameFamily&&$('#cm-text')?{file:$('#cm-text')._attachmentFile,upload:$('#cm-text')._attachmentUpload,preview:$('#cm-text')._attachmentPreview?.innerHTML}:null;
   box.dataset.familyId = familyId;
   const st = d.status;
   const targets = d.conversations.filter((c) => c.channel !== "tg_archive").map((c) => ({ v: "c" + c.id, t: `${chLabel(c.channel)}${c.title ? " · " + c.title : ""}` }));
@@ -293,6 +294,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     await loadFamilyComms(familyId, parents, studentId, kid);
     if ($("#cm-text")) $("#cm-text").value = draft;
   },{student_id:studentId,students:kid?[kid]:[],channel:familyChannel,resolveConversation:resolveFileConversation});
+  restoreAttachmentDraft($('#cm-text'),attachmentState);
   const send = $("#cm-send");
   if (send) send.onclick = async () => {
     if(await sendComposerAttachment($('#cm-text'),resolveFileConversation,async sentCid=>{S.familySendTargets[targetKey]='c'+sentCid;await loadFamilyComms(familyId,parents,studentId,kid)}))return;
@@ -456,7 +458,7 @@ async function openChat(cid, keepScroll = false) {
     await api("POST", `/api/conversations/${to}/send`, { sticker });
     await openChat(cid);
   },{students:c.students||[],channel:()=>{const id=$('#chat-to')?+$('#chat-to').value:cid;return (d.targets||[]).find(x=>x.id===id)?.channel||(id===cid?c.channel:'')},resolveConversation:async()=>$('#chat-to')?+$('#chat-to').value:cid});
-  if(attachmentState?.file){const input=$('#chat-text');input._attachmentFile=attachmentState.file;input._attachmentUpload=attachmentState.upload;input._attachmentPreview.innerHTML=attachmentState.preview||'';}
+  restoreAttachmentDraft($('#chat-text'),attachmentState);
   const sendBtn = $("#chat-send");
   sendBtn.onclick = async () => {
     if(await sendComposerAttachment($('#chat-text'),async()=>$('#chat-to')?+$('#chat-to').value:cid,async()=>openChat(cid)))return;
@@ -800,6 +802,14 @@ function insertAdministratorGreeting(input,user=S.user) {
   if(draft!==text&&!draft.startsWith(text+'\n'))input.value=text+(draft?'\n\n'+draft:'');
   input.focus();input.setSelectionRange(input.value.length,input.value.length);
   input.dispatchEvent(new Event('input',{bubbles:true}));
+}
+
+function restoreAttachmentDraft(input,state) {
+  if(!input||!state?.file)return;
+  input._attachmentFile=state.file;input._attachmentUpload=state.upload;
+  input._attachmentPreview.innerHTML=state.preview||'';
+  const remove=input._attachmentPreview.querySelector('[data-remove-file]');
+  if(remove)remove.onclick=()=>{if(!input._attachmentBusy){input._attachmentFile=null;input._attachmentUpload=null;input._attachmentPreview.replaceChildren()}};
 }
 
 async function sendComposerAttachment(input,resolveConversation,done) {
