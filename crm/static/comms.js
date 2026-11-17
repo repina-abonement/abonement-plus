@@ -1096,6 +1096,24 @@ function emojiPickerHtml() {
 function wireEmojiPicker(panel,input) {
   const root=panel.querySelector('[data-picker-panel="emoji"]');
   let category='all';
+  const trigger=panel.querySelector('[data-picker-tab="emoji"]');
+  const floating=typeof root.showPopover==='function';
+  if(floating)root.setAttribute('popover','manual');
+  const position=()=>{
+    if(!floating||root.hidden)return;
+    const rect=trigger.getBoundingClientRect(),height=root.getBoundingClientRect().height,width=root.getBoundingClientRect().width;
+    const viewport=window.visualViewport,top=viewport?.offsetTop||0,available=viewport?.height||innerHeight;
+    root.style.left=Math.max(12,Math.min(rect.left,innerWidth-width-12))+'px';
+    root.style.top=Math.max(top+12,Math.min(rect.top-height-10,top+available-height-12))+'px';
+  };
+  const dismiss=event=>{if(!root.contains(event.target)&&!trigger.contains(event.target))root._setEmojiOpen(false)};
+  const escape=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close()}};
+  root._setEmojiOpen=opening=>{
+    document.removeEventListener('pointerdown',dismiss,true);document.removeEventListener('keydown',escape,true);window.removeEventListener('resize',position);
+    if(!opening&&floating&&root.matches(':popover-open'))root.hidePopover();
+    root.hidden=!opening;trigger.setAttribute('aria-expanded',String(opening));
+    if(opening){if(floating)root.showPopover();position();document.addEventListener('pointerdown',dismiss,true);document.addEventListener('keydown',escape,true);window.addEventListener('resize',position)}
+  };
   const normalize=value=>String(value).toLocaleLowerCase('ru').replace(/ё/g,'е').trim();
   const filter=()=>{
     const terms=normalize(root.querySelector('[data-emoji-search]').value).split(/\s+/).filter(Boolean);let found=0;
@@ -1110,7 +1128,7 @@ function wireEmojiPicker(panel,input) {
   root.querySelectorAll('[data-emoji-category]').forEach(button=>button.onclick=()=>{
     category=button.dataset.emojiCategory;root.querySelectorAll('[data-emoji-category]').forEach(tab=>tab.setAttribute('aria-pressed',String(tab===button)));filter();root.querySelector('.emoji-scroll').scrollTop=0;
   });
-  const close=()=>{root.hidden=true;panel.querySelector('[data-picker-tab="emoji"]').setAttribute('aria-expanded','false');input.focus()};
+  const close=()=>{root._setEmojiOpen(false);input.focus()};
   root.querySelector('[data-emoji-close]').onclick=close;
   root.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close()}});
   root.querySelectorAll('[data-emoji]').forEach(button=>{
@@ -1138,7 +1156,7 @@ function wireMessagePicker(selector, sendSticker, context={}) {
       if (opening && b.dataset.pickerTab === "sticker") loadCustomPacks().catch(fail);
       if (opening && b.dataset.pickerTab === "scripts") loadScripts().catch(fail);
       panel.querySelectorAll("[data-picker-tab]").forEach(x => x.setAttribute("aria-expanded", String(opening && x === b)));
-      panel.querySelectorAll("[data-picker-panel]").forEach(x => { x.hidden = !opening || x.dataset.pickerPanel !== b.dataset.pickerTab; });
+      panel.querySelectorAll("[data-picker-panel]").forEach(x => { const show=opening&&x.dataset.pickerPanel===b.dataset.pickerTab;if(x._setEmojiOpen)x._setEmojiOpen(show);else x.hidden=!show; });
     };
   });
   const editorRow=input.closest('.row');editorRow.before(panel);

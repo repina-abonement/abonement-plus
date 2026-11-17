@@ -1942,3 +1942,8 @@ html.theme-soft #comms-box .family-chat-feed{background:#182624}html.theme-soft 
 .emoji-empty{padding:24px 8px;text-align:center;color:var(--ink-2);font-size:13px}
 @media(max-width:600px){.emoji-scroll{max-height:220px}.emoji-grid button{height:36px;font-size:24px}.message-picker>.chips:first-child>.btn{padding:7px 8px;font-size:12px}}
 @media(prefers-reduced-motion:reduce){.emoji-grid button{transition:none}.emoji-grid button:hover{transform:none}}
+.message-picker .emoji-picker[popover]{position:fixed;inset:auto;margin:0;max-width:calc(100vw - 24px);z-index:1300}
+.message-picker .emoji-picker[popover]::backdrop{background:transparent;pointer-events:none}
+#inbox-chat-pane .composer .emoji-picker[popover]{max-height:none;overflow:hidden}
+.emoji-picker[popover] .emoji-scroll{max-height:min(280px,40dvh)}
+.emoji-grid button{font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}
