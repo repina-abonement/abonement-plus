@@ -29,12 +29,15 @@ def options(con,sid,group_id=None,ym=None,tariff='fixed',ofp_group_id=None,start
     student=sv.get_student_row(con,sid)
     groups=[dict(r) for r in con.execute('''SELECT g.id,g.name,g.branch_id,g.weekdays,g.time,g.day_times,g.started_on,g.program_id,g.lesson_kind,g.active,
         b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.is_makeup=0 ORDER BY b.name,g.name''')]
+    from . import groupterms
+    for group in groups:group['fixed_only']=groupterms.fixed_only(con,group['id'])
     result={'groups':groups,'components':[],'available_balance':max(0,money.balance(con,sid)['deposit']),'discounts':[dict(d) for d in con.execute('SELECT id,name,percent,rule FROM discounts WHERE active=1 ORDER BY percent DESC,name')]}
     if not group_id or not ym:return result
     try:ms,me=logic.month_bounds(ym)
     except (ValueError,TypeError):raise sv.ApiError('Выберите месяц абонемента')
     g=next((g for g in groups if g['id']==int(group_id)),None)
     if not g or g['lesson_kind']=='ofp':raise sv.ApiError('Выберите основную группу абонемента')
+    if g['fixed_only'] and tariff!='fixed':raise sv.ApiError('В этой группе доступен только негибкий тариф')
     pr=pricing.prices_for(con,ym)
     from . import groupterms
     special=groupterms.terms(con,g['id'],ym)

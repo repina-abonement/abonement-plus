@@ -1570,7 +1570,7 @@ async function openSell(d, reload) {
   const preferred=ens.find(e=>e.id===previous[0]?.enrollment_id)||ens.find(e=>e.group_id===d.student.group_id)||ens[0]||{id:null,tariff:previous[0]?.tariff||d.student.tariff||'fixed',group_id:previous[0]?.group_id,program_id:(S.meta.groups||[]).find(g=>g.id===previous[0]?.group_id)?.program_id};
   const choices=(S.meta.groups||[]).filter(g=>!g.is_makeup&&g.lesson_kind!=='ofp'&&(!ens.length||(g.program_id||null)===(preferred.program_id||null)||ens.some(e=>e.group_id===g.id))).map(g=>{
     const own=ens.find(e=>e.group_id===g.id);
-    return {...preferred,...own,id:own?.id||preferred.id,group_id:g.id,group_name:g.name,program_id:g.program_id,lesson_kind:g.lesson_kind,new_group:!own};
+    return {...preferred,...own,id:own?.id||preferred.id,group_id:g.id,group_name:g.name,program_id:g.program_id,lesson_kind:g.lesson_kind,fixed_only:g.fixed_only,new_group:!own};
   });
   ens.forEach(e=>{if(!choices.some(c=>c.group_id===e.group_id))choices.push(e)});
   if(!choices.length)return toast('Нет доступных групп для продажи',true);
@@ -1600,6 +1600,7 @@ async function openSell(d, reload) {
     $('#sl-single-invoice-field').hidden=!single()||!pendingSingles.length;
     $('#sl-month-field').hidden=single()&&!!$('#sl-single-invoice').value;
     $('#sl-tar-field').hidden=single();$('#sl-disc-field').hidden=single();
+    if(en().fixed_only&&!existing){$('#sl-tar').value='fixed';$('#sl-tar').disabled=true}
     $('#sl-admission').hidden=!en().program_id;
     $('#sl-ofp-box').hidden=single()||!en().program_id||$('#sl-tar').value!=='pkg';
     $('#sl-group-action-box').hidden=single()||!en().new_group||!ens.length;
@@ -1608,18 +1609,18 @@ async function openSell(d, reload) {
     const p=(d.program?.programs||[]).find(p=>p.id===en().program_id),plan=p?.plan;
     const effective=plan?.next&&$('#sl-month').value>=plan.next.from?plan.next:plan;
     const last=previous.find(s=>s.enrollment_id===en().id&&s.month<$('#sl-month').value);
-    $('#sl-tar').innerHTML=en().program_id?'<option value="arena_only">Только Арктика</option><option value="pkg">Арктика + ОФП</option>':'<option value="fixed">Негибкий</option><option value="flex">Гибкий</option>';
-    $('#sl-tar').value=en().program_id?effective?.tariff||last?.tariff||'arena_only':last?.tariff||en().tariff||'fixed';
+    $('#sl-tar').innerHTML=en().program_id?'<option value="arena_only">Только Арктика</option><option value="pkg">Арктика + ОФП</option>':en().fixed_only?'<option value="fixed">Негибкий</option>':'<option value="fixed">Негибкий</option><option value="flex">Гибкий</option>';
+    $('#sl-tar').value=en().fixed_only?'fixed':en().program_id?effective?.tariff||last?.tariff||'arena_only':last?.tariff||en().tariff||'fixed';
     $('#sl-ofp').innerHTML=(p?.ofp_groups||[]).map(g=>`<option value="${g.id}" ${g.id===effective?.ofp_group_id?'selected':''}>${esc(g.name)}</option>`).join('');syncFields();
   };
   const quote=async()=>{
     const request=++version;busy(true);existing=null;$('#sl-res').innerHTML='';$('#sl-q').innerHTML='Считаю…';
-    ['#sl-tar','#sl-disc','#sl-ofp'].forEach(s=>$(s).disabled=false);$('#sl-credit-box').hidden=true;
+    ['#sl-tar','#sl-disc','#sl-ofp'].forEach(s=>$(s).disabled=false);syncFields();$('#sl-credit-box').hidden=true;
     const own=ens.find(e=>e.group_id===en().group_id);
     const sub=single()?pendingSingles.find(s=>s.id===+$('#sl-single-invoice').value):d.subscriptions.find(s=>(s.group_id===en().group_id||own&&s.enrollment_id===own.id)&&s.month===$('#sl-month').value&&s.kind!=='single'&&s.status!=='cancelled');
     if(sub){
       $('#sl-exclusion-reason').closest('.field').hidden=true;existing=sub;let current;try{current=await api('GET',`/api/subscriptions/${sub.id}/payment-quote?paid_date=${encodeURIComponent($('#sl-paid-date').value)}`)}catch(e){if(request===version&&isCurrent())$('#sl-q').textContent=e.message;return}if(request!==version||!isCurrent())return;const paid=current.paid;total=current.total;
-      $('#sl-tar').value=sub.tariff;syncFields();['#sl-tar','#sl-disc','#sl-ofp'].forEach(s=>$(s).disabled=true);
+      if(![...$('#sl-tar').options].some(o=>o.value===sub.tariff))$('#sl-tar').add(new Option(sub.tariff==='flex'?'Гибкий':'Негибкий',sub.tariff));$('#sl-tar').value=sub.tariff;syncFields();['#sl-tar','#sl-disc','#sl-ofp'].forEach(s=>$(s).disabled=true);
       $('#sl-q').innerHTML=`<b>${single()?(total?'Разовое занятие уже оформлено':'Разовое занятие оплачено'):(total?'Абонемент уже оформлен':'Абонемент оплачен')}</b><div class="finance-numbers"><div><small>Стоимость</small><b>${rub(current.price)}</b></div><div><small>Оплачено</small><b>${rub(paid)}</b></div><div><small>Осталось оплатить</small><b>${rub(total)}</b></div></div><p class="small muted">На ${esc(monthLabel(sub.month))} в группу «${esc(clientGroupLabel(sub))}» уже есть ${sub.status==='paid'?'оплаченный':'оформленный'} абонемент — повторный не создаём</p>${existingSaleCalendarHtml(sub,d)}`;busy(total<=0);return;
     }
     try{

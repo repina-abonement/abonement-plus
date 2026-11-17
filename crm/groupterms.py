@@ -43,3 +43,11 @@ def provision_nebo_morning(con):
         con.execute('RELEASE morning_terms')
     except BaseException:
         con.execute('ROLLBACK TO morning_terms');con.execute('RELEASE morning_terms');raise
+
+
+def fixed_only(con,gid):
+    """The specifically requested Nebo morning group has one tariff for new sales."""
+    marked=comms.get(con,'nebo_mon_wed_morning_terms_202611_v1')
+    if marked and str(marked).isdigit():return int(marked)==int(gid)
+    row=con.execute('SELECT g.*,b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.id=?',(gid,)).fetchone()
+    return bool(row and 'небо' in row['branch'].casefold() and set(logic.parse_weekdays(row['weekdays']))=={0,2} and row['time'] in ('10:00','10:30') and not row['program_id'] and not row['is_makeup'])

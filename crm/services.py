@@ -320,6 +320,10 @@ def first_sale_trial_date(con,sid,ym):
 def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None, paid_date=None, user=None) -> dict:
     get_student_row(con, sid)
     e = sale_enrollment(con, sid, enrollment_id, group_id)
+    from . import groupterms
+    if groupterms.fixed_only(con,e['group_id']):
+        if tariff not in (None,'fixed'):raise ApiError('В этой группе доступен только негибкий тариф')
+        e=dict(e,tariff='fixed')
     if tariff is not None:
         if e.get("program_id"):
             from . import program
@@ -1355,10 +1359,13 @@ def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -
 
 
 def meta(con) -> dict:
+    from . import groupterms
+    groups=_rows(con.execute("""SELECT g.*,b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id
+        WHERE g.active=1 ORDER BY g.is_makeup,b.id,g.name"""))
+    for g in groups:g['fixed_only']=groupterms.fixed_only(con,g['id'])
     return {
         "branches": _rows(con.execute("SELECT * FROM branches WHERE active=1 ORDER BY id")),
-        "groups": _rows(con.execute("""SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id
-                                      WHERE g.active=1 ORDER BY g.is_makeup, b.id, g.name""")),
+        "groups": groups,
         "sales_stages": [{"key": k, "title": t, "auto": k in AUTO_SALES} for k, t in SALES_STAGES],
         "trial_refusals": TRIAL_REFUSALS,
         "ad": __import__("crm.sources", fromlist=["listing"]).listing(con),
