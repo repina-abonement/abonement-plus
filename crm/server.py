@@ -388,8 +388,7 @@ def public_pay_link(con,h,user,body,q,token):
     from . import paylinks
     h.extra_headers.extend([("Cache-Control","no-store"),("Referrer-Policy","no-referrer")])
     try:
-        link=paylinks.receipt_link(con,token)
-        return {"amount":link["amount"],"invoice_ready":bool(link["invoice_id"])}
+        return paylinks.payment_page(con,token)
     except paylinks.PayLinkError as error:
         raise ApiError(str(error),410)
 

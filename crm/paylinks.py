@@ -98,7 +98,7 @@ def receipt_link(con, token):
     if expired: raise PayLinkError('Срок действия ссылки истёк. Попросите администратора прислать новую')
     if link['subscription_id']:
         sub=con.execute('SELECT status,student_id,price FROM subscriptions WHERE id=?',(link['subscription_id'],)).fetchone()
-        if not sub or sub['status'] in ('cancelled','paid'):
+        if not sub or sub['student_id']!=link['student_id'] or sub['status'] in ('cancelled','paid'):
             raise PayLinkError('Абонемент отменён или уже оплачен. Уточните у администратора')
         left=max(0,sub['price']-money.balance(con,sub['student_id'])['covered'].get(link['subscription_id'],0))
         if link['amount']>left:raise PayLinkError('Сумма к оплате изменилась. Попросите администратора прислать новую ссылку')
@@ -200,3 +200,39 @@ def sync(con, today: date | None = None) -> int:
     if not first or not ready(con):
         return 0
     return apply_payments(con, fiscal.fetch_pk_payments(con, date.fromisoformat(first[:10]), today))
+
+
+def payment_page(con,token):
+    """Only details of this opaque payment link, never family contacts/history."""
+    import json
+    link=receipt_link(con,token)
+    student=con.execute('SELECT id,name,family_id FROM students WHERE id=?',(link['student_id'],)).fetchone()
+    if not student:raise PayLinkError('Ссылка недоступна')
+    email=''
+    # Once an invoice exists its fiscal address cannot silently change.
+    candidates=[link['receipt_email']] if link['invoice_id'] else []
+    if not link['invoice_id']:
+        candidates.extend(r[0] for r in con.execute("""SELECT p.receipt_email FROM pay_links p JOIN students s ON s.id=p.student_id
+            WHERE s.family_id=? AND p.receipt_email!='' AND p.checkout_state='ready'
+            ORDER BY p.id DESC""",(student['family_id'],)))
+        candidates.extend(r[0] for r in con.execute("SELECT email FROM parents WHERE family_id=? AND email!='' ORDER BY is_primary DESC,id",(student['family_id'],)))
+    for candidate in candidates:
+        try:email=receipt_email(candidate);break
+        except PayLinkError:continue
+    out={'amount':link['amount'],'invoice_ready':bool(link['invoice_id']),'email':email,'child':student['name'],'purpose':link['purpose'] or 'Оплата занятий','privacy_url':'/legal/privacy'}
+    if not link['subscription_id']:return out
+    sub=con.execute('SELECT * FROM subscriptions WHERE id=? AND student_id=?',(link['subscription_id'],student['id'])).fetchone()
+    if not sub:raise PayLinkError('Ссылка недоступна')
+    covered=min(sub['price'],max(0,money.balance(con,student['id'])['covered'].get(sub['id'],0)))
+    schedule=json.loads(sub['lesson_schedule'] or '[]') or json.loads(sub['program_selection'] or '{}').get('contract',{}).get('components',[])
+    groups=[]
+    for part in schedule:
+        group=con.execute('SELECT g.name,b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.id=?',(part.get('group_id'),)).fetchone()
+        groups.append({'name':part.get('group') or (group['name'] if group else ''),'branch':group['branch'] if group else '', 'dates':sorted(set(part.get('dates') or []))})
+    if not groups:
+        group=con.execute('SELECT g.name,b.name AS branch FROM enrollments e JOIN groups g ON g.id=e.group_id JOIN branches b ON b.id=g.branch_id WHERE e.id=?',(sub['enrollment_id'],)).fetchone()
+        if group:groups=[{'name':group['name'],'branch':group['branch'],'dates':[]}]
+    single=con.execute('SELECT date,g.name,b.name AS branch FROM single_visits v JOIN groups g ON g.id=v.group_id JOIN branches b ON b.id=g.branch_id WHERE v.subscription_id=?',(sub['id'],)).fetchone() if sub['kind']=='single' else None
+    if single:groups=[{'name':single['name'],'branch':single['branch'],'dates':[single['date']]}]
+    out['subscription']={'month':sub['month'],'kind':sub['kind'],'tariff':sub['tariff'],'lessons':sub['lessons'],'valid_from':sub['valid_from'],'valid_until':sub['valid_until'],'price':sub['price'],'paid':covered,'remaining':max(0,sub['price']-covered),'discount_name':sub['discount_name'],'discount_amount':sub['discount_amount'],'late_fee':sub['late_fee'],'groups':groups,'excluded_dates':json.loads(sub['excluded_dates'] or '[]')}
+    return out
