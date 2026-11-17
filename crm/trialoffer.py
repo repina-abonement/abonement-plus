@@ -25,6 +25,15 @@ def age_range(txt: str) -> tuple[int, int] | None:
     return nums[0], nums[-1]
 
 
+def group_age_range(group):
+    explicit=(group['age'] or '').strip()
+    if explicit:
+        return age_range(explicit)
+    # Legacy ERP groups can have their explicit age range only in the name.
+    match=re.search(r'(?<![\d:])(\d{1,2})\s*[–—-]\s*(\d{1,2})(?![\d:])',group['name'] or '')
+    return (int(match[1]),int(match[2])) if match else None
+
+
 def years(birth: str, on: date | None = None) -> int | None:
     try:
         b = date.fromisoformat(birth)
@@ -34,31 +43,41 @@ def years(birth: str, on: date | None = None) -> int | None:
     return on.year - b.year - ((on.month, on.day) < (b.month, b.day))
 
 
-def slots(con, age: int, branch_id: int | None = None, limit: int = 4, days: int = 14) -> list[dict]:
+def slots(con, age: int, branch_id: int | None = None, limit: int = 4, days: int = 14, diagnostics=None) -> list[dict]:
     from . import capacity, closures, schedule
     now = datetime.now()
     out, fill = [], {}
-    for g in con.execute("""SELECT g.*, b.name AS branch, b.address, b.lesson_limit FROM groups g JOIN branches b ON b.id=g.branch_id
-                            WHERE g.active=1 AND b.active=1 AND g.is_makeup=0 AND g.program_id IS NULL AND g.trial_ok=1"""
+    for g in con.execute("""SELECT g.*, b.name AS branch, b.address, b.lesson_limit, b.active AS branch_active FROM groups g JOIN branches b ON b.id=g.branch_id
+                            WHERE 1=1"""
                          + (" AND g.branch_id=?" if branch_id else ""), (branch_id,) if branch_id else ()).fetchall():
-        r = age_range(g["age"])
-        if not r or not r[0] <= age <= r[1] or "взросл" in (g["age"] or "").lower() or "пап" in g["name"].lower() \
-                or "ОФП" in g["name"]:  # пробное — на футбол, не на ОФП
-            continue
+        r = group_age_range(g)
+        reason = ('Группа в архиве' if not g['active'] else
+                  'Филиал в архиве' if not g['branch_active'] else
+                  'Это группа отработок' if g['is_makeup'] else
+                  'Это сборная — пробное не предусмотрено' if g['program_id'] else
+                  'В настройках группы выключена запись на пробное' if not g['trial_ok'] else
+                  'Не указан возраст группы' if not r else
+                  f'Группа для возраста {g["age"] or str(r[0])+"–"+str(r[1])}' if not r[0]<=age<=r[1] else
+                  'Это не детская футбольная группа' if 'взросл' in (g['age'] or '').lower() or 'пап' in g['name'].lower() or 'офп' in g['name'].lower() else '')
+        diag={'group':g['name'],'reason':reason,'scheduled':0,'closed':0,'full':0,'missing_time':0,'too_soon':0,'available':0}
+        if diagnostics is not None:diagnostics.append(diag)
+        if reason:continue
         for i in range(days):
             d = now.date() + timedelta(days=i)
             actual = schedule.on(con,g,d)
-            if d.weekday() not in logic.parse_weekdays(actual["weekdays"]) or closures.is_closed(con, g["id"], d):
-                continue
-            t = logic.group_time(actual, d.weekday())
-            if not t or datetime.combine(d, datetime.strptime(t, "%H:%M").time()) < now + timedelta(hours=2):
-                continue
+            if d.weekday() not in logic.parse_weekdays(actual["weekdays"]):continue
+            diag['scheduled']+=1
+            if closures.is_closed(con,g['id'],d):diag['closed']+=1;continue
+            t = logic.group_time(actual,d.weekday())
+            if not t:diag['missing_time']+=1;continue
+            if datetime.combine(d,datetime.strptime(t,'%H:%M').time())<now+timedelta(hours=2):diag['too_soon']+=1;continue
             o = capacity.occupancy(con, g["id"], d.isoformat())
             cap = o["limit"] or g["capacity"]
             free = cap - o["count"]
             if free <= 0:
-                continue
-            out.append({"group_id": g["id"], "group": g["name"], "age": g["age"], "branch_id": g["branch_id"], "branch": g["branch"],
+                diag['full']+=1;continue
+            diag['available']+=1
+            out.append({"group_id": g["id"], "group": g["name"], "age": g["age"] or f"{r[0]}–{r[1]}", "branch_id": g["branch_id"], "branch": g["branch"],
                         "address": g["address"] or "", "date": d.isoformat(), "time": t, "free": free,
                         "fill": fill.setdefault(g["id"], _fill(con, g)),
                         "label": f"{WD[d.weekday()]} {d.strftime('%d.%m')} в {t}"})
@@ -87,7 +106,8 @@ def offer(con, age: int | None, child: str = "", branch_id: int | None = None, n
     from . import comms
     if age is None:
         return {"slots": [], "text": "", "error": "Укажите возраст ребёнка"}
-    sl = slots(con, age, branch_id, n)
+    diagnostics=[]
+    sl = slots(con, age, branch_id, n, diagnostics=diagnostics)
     many_branches = len({s["branch_id"] for s in sl}) > 1
     lines = []
     for s in sl:
@@ -96,8 +116,16 @@ def offer(con, age: int | None, child: str = "", branch_id: int | None = None, n
     tpl = comms.get(con, "msg_trial_offer") or DEFAULT
     child_txt = (child.split()[0] if child and "заявка" not in child.lower() and "ребёнок" not in child.lower() else "ребёнка")
     text = tpl.replace("{child}", child_txt).replace("{slots}", "\n".join(lines)).replace("{age}", str(age))
-    return {"slots": sl, "text": text if sl else "", "age": age,
-            "error": "" if sl else "Не найдено доступных пробных на ближайшие 2 недели — проверьте возраст группы, расписание, разрешение пробных и свободные места"}
+    for item in diagnostics:
+        if not item['reason'] and not item['available']:
+            item['reason']=('Нет занятий по расписанию в ближайшие 2 недели' if not item['scheduled'] else
+                            'Все ближайшие занятия отменены' if item['closed']==item['scheduled'] else
+                            'Нет свободных мест на доступные даты' if item['full'] else
+                            'Не указано время занятий' if item['missing_time'] else 'Ближайшее занятие уже начинается — запись закрыта')
+    details=[f"{item['group']}: {item['reason']}" for item in diagnostics if item['reason']]
+    error='Не найдено доступных пробных на ближайшие 2 недели'
+    if not sl:error+='\n'+('\n'.join(details) if details else 'В выбранном филиале нет групп')
+    return {"slots":sl,"text":text if sl else "","age":age,"error":"" if sl else error,"diagnostics":diagnostics if not sl else []}
 
 
 def booking_options(con, sid: int, birth: str = '', day: str = '', branch_id: int | None = None) -> dict:
@@ -123,7 +151,7 @@ def booking_options(con, sid: int, birth: str = '', day: str = '', branch_id: in
     for group in con.execute('''SELECT g.*,b.name AS branch,b.address FROM groups g JOIN branches b ON b.id=g.branch_id
         WHERE g.active=1 AND b.active=1 AND g.is_makeup=0 AND g.program_id IS NULL AND g.trial_ok=1'''
         + (' AND g.branch_id=?' if branch_id else ''),(branch_id,) if branch_id else ()):
-        ages = age_range(group['age'])
+        ages = group_age_range(group)
         if not ages or 'взросл' in group['age'].lower() or 'пап' in group['name'].lower() or 'ОФП' in group['name']:
             continue
         for offset in range(1 if day else 28):

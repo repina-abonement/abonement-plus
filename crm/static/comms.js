@@ -945,7 +945,7 @@ function wireTrialOffer(c, textSel = "#chat-text") {
       const kidId = $("#to-kid") ? +$("#to-kid").value : (kid ? kid.id : null);
       try {
         const r = await api("GET", `/api/trial-offer?age=${age}${$("#to-br").value ? "&branch_id=" + $("#to-br").value : ""}`);
-        if (!r.slots.length) { $("#to-res").innerHTML = `<div class="small muted" style="margin-top:8px">${esc(r.error)}</div>`; return; }
+        if (!r.slots.length) { $("#to-res").innerHTML = `<div class="small muted" style="margin-top:8px">${esc(r.error).replace(/\n/g,'<br>')}</div>`; return; }
         const ta = $(textSel);
         if (ta) ta.value = r.text;
         $("#to-res").innerHTML = `<div class="small muted" style="margin:8px 0 4px">${ta ? "Текст с вариантами уже в поле сообщения: проверьте и нажмите «Отправить». " : ""}Когда родитель выберет, запишите одним нажатием:</div>
