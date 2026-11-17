@@ -85,7 +85,7 @@ class HistoricalEntryTest(unittest.TestCase):
             r=historyentry.record(self.con,self.sid,{**self.data,'email':''},self.user)
             self.assertEqual(r['remaining'],0)
             self.assertIn('email',smart.required_info(self.con,self.sid,'sale')['missing'])
-            with self.assertRaises(sv.ApiError):smart.require(self.con,self.sid,'sale')
+            smart.require(self.con,self.sid,'sale')  # Почта с 17.11 не блокирует и обычную продажу
         tasks.request_missing_data(self.con,historyentry.now().date())
         task=self.con.execute("SELECT * FROM tasks WHERE student_id=? AND kind='request_data' AND status='open'",(self.sid,)).fetchone()
         self.assertIsNotNone(task)
