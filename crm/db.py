@@ -307,6 +307,7 @@ def init_db(con: sqlite3.Connection):
     subcomposition.init(con)
     money.init(con)
     comms.init(con)
+    legal.provision_school_phone(con)
     from . import chatattachments
     chatattachments.init(con)
     ai.init(con)

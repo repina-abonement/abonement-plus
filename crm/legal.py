@@ -273,3 +273,11 @@ def set_consent(con, family_id: int, kind: str, value: bool, how: str, user: dic
     for (sid,) in con.execute("SELECT id FROM students WHERE family_id=?", (family_id,)).fetchall():
         con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
                     (sid, now, user.get("name", ""), "consent", text))
+
+
+def provision_school_phone(con):
+    """One-time public contact supplied by the owner, scoped to this legal operator."""
+    key='legal_phone_owner_20261117'
+    if comms.get(con,key) or comms.get(con,'legal_inn').strip()!='183210983596':return
+    comms.put(con,'legal_phone','+7 991 615-09-60')
+    comms.put(con,key,'done')
