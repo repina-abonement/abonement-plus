@@ -238,29 +238,48 @@ function preferredFamilyTarget(conversations,targets,primary,status) {
   return ['t','m','w'].map(prefix=>targets.find(t=>t.v===prefix+primary.id)).find(Boolean)?.v||'';
 }
 
+function messengerLogo(label) {
+  const value=String(label||'').toLowerCase();
+  let color,shape;
+  if(value.includes('telegram')) {color='#249ed9';shape='<path fill="white" d="m5 11 14-6-3 14-5-4-3 3v-5l8-6-10 5z"/>';}
+  else if(value.includes('max')) {color='#5965ed';shape='<path fill="white" d="M12 4a8 8 0 0 0-7 12l-1 4 4-1A8 8 0 1 0 12 4m0 4a4 4 0 1 1-4 4 4 4 0 0 1 4-4"/>';}
+  else if(value.includes('whatsapp')) {color='#22b969';shape='<path fill="none" stroke="white" stroke-width="1.5" d="M19 11.5a7 7 0 0 1-10 6.3L5 19l1.2-4A7 7 0 1 1 19 11.5Z"/><path fill="white" d="m9 7 2 3-1 1c1 2 2 3 3 3l1-1 3 2c-1 4-8 0-9-4-1-2 0-3 1-4"/>';}
+  else return '';
+  return `<svg class="messenger-logo" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect width="24" height="24" rx="7" fill="${color}"/>${shape}</svg>`;
+}
+
 function replyTargetSummary(label) {
   const parts=String(label||'').split(' · ').map(part=>part.trim()).filter(Boolean);
   const channel=parts.shift()||'';
   const recipient=parts.pop()||'Получатель';
-  return `<span class="reply-target-caption">Сообщение получит</span><strong class="reply-target-recipient">${esc(recipient)}</strong><span class="reply-target-details"><span class="reply-target-channel">${esc(channel)}</span>${parts.length?`<span class="reply-target-context">${esc(parts.join(' · '))}</span>`:''}</span>`;
+  return `<span class="reply-target-caption">Сообщение получит</span><strong class="reply-target-recipient">${esc(recipient)}</strong><span class="reply-target-details"><span class="reply-target-channel">${messengerLogo(channel)}${esc(channel)}</span>${parts.length?`<span class="reply-target-context">${esc(parts.join(' · '))}</span>`:''}</span>`;
 }
 
 function replyTargetHtml(id,targets,selected) {
   const current=targets.find(t=>String(t.v)===String(selected));
   targets=[...targets].sort((a,b)=>clientChannelPriority(a.channel||({t:'wazzup_telegram',m:'wazzup_max',w:'whatsapp'})[String(a.v)[0]])-clientChannelPriority(b.channel||({t:'wazzup_telegram',m:'wazzup_max',w:'whatsapp'})[String(b.v)[0]]));
-  return `<div class="reply-target"><div class="reply-target-current" ${current?'':'hidden'}><div class="reply-target-summary" id="${id==='chat-to'?'chat-channel-label':'cm-channel-label'}">${replyTargetSummary(current?.t)}</div>${targets.length>1?'<button type="button" class="linkish" data-change-reply>Изменить</button>':''}</div><select id="${id}" aria-label="Мессенджер для ответа" ${current?'hidden':''}><option value="">Выберите мессенджер для отправки</option>${targets.map(t=>`<option value="${esc(t.v)}" ${String(t.v)===String(selected)?'selected':''}>${esc(t.t)}</option>`).join('')}</select></div>`;
+  return `<div class="reply-target"><div class="reply-target-current" ${current?'':'hidden'}><div class="reply-target-summary" id="${id==='chat-to'?'chat-channel-label':'cm-channel-label'}">${replyTargetSummary(current?.t)}</div>${targets.length>1?'<button type="button" class="linkish" data-change-reply>Изменить</button>':''}</div><div class="reply-target-choices" ${current?'hidden':''} aria-label="Мессенджер для ответа">${targets.map(t=>`<button type="button" class="reply-target-choice" data-reply-choice="${esc(t.v)}" aria-pressed="${String(t.v)===String(selected)}">${messengerLogo(t.t)}<span>${esc(t.t)}</span></button>`).join('')}</div><select id="${id}" aria-label="Мессенджер для ответа" hidden><option value="">Выберите мессенджер для отправки</option>${targets.map(t=>`<option value="${esc(t.v)}" ${String(t.v)===String(selected)?'selected':''}>${esc(t.t)}</option>`).join('')}</select></div>`;
 }
 
+function showReplyTargets(select) {
+  const choices=select.closest('.reply-target').querySelector('.reply-target-choices');
+  choices.hidden=!choices.hidden;
+  if(!choices.hidden)choices.querySelector('button')?.focus();
+}
 function wireReplyTarget(select,onchange) {
   if(!select)return;
   const box=select.closest('.reply-target'),current=box.querySelector('.reply-target-current');
   const change=box.querySelector('[data-change-reply]');
-  if(change)change.onclick=()=>{select.hidden=false;select.focus()};
+  if(change)change.onclick=()=>showReplyTargets(select);
+  box.querySelectorAll('[data-reply-choice]').forEach(button=>button.onclick=()=>{select.value=button.dataset.replyChoice;select.dispatchEvent(new Event('change',{bubbles:true}))});
   select.onchange=()=>{
     const option=select.selectedOptions[0];
     current.hidden=!select.value;
     current.querySelector('.reply-target-summary').innerHTML=replyTargetSummary(option?.textContent);
-    select.hidden=!!select.value;
+    select.hidden=true;
+    box.querySelector('.reply-target-choices').hidden=!!select.value;
+    box.querySelectorAll('[data-reply-choice]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.replyChoice===select.value)));
+    change?.focus();
     onchange();
   };
 }
@@ -555,7 +574,7 @@ async function openChat(cid, keepScroll = false) {
   const back=$('.chat-back');if(back)back.onclick=()=>{rememberChatDraft();stopChatTimer();if(panel){S.inbox.active=null;document.body.classList.remove('chat-fullscreen');panel.closest('.inbox-workspace').classList.remove('chat-open');panel.innerHTML='<div class="chat-placeholder">Выберите диалог слева</div>';}else closeDrawer();S.inbox.refresh?.()};
   const feed = $("#chat-feed"); feed.scrollTop = keepScroll && !wasAtEnd ? previousScroll : feed.scrollHeight;
   const body = panel||$("#drawer-body");
-  const changeChannel=body.querySelector("[data-change-chat-channel]");if(changeChannel)changeChannel.onclick=()=>{const composer=body.querySelector(".composer");composer.classList.add("channel-choice");const select=body.querySelector("#chat-to");select.hidden=false;select.focus();changeChannel.closest("details").open=false};
+  const changeChannel=body.querySelector("[data-change-chat-channel]");if(changeChannel)changeChannel.onclick=()=>{const composer=body.querySelector(".composer");composer.classList.add("channel-choice");const select=body.querySelector("#chat-to");showReplyTargets(select);changeChannel.closest("details").open=false};
   const offerButton=body.querySelector("#to-open"),info=body.querySelector(".chat-info-menu .section");
   if(offerButton&&info)info.append(offerButton);
   body.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => { stopChatTimer(); openStudent(+b.dataset.open); }));
