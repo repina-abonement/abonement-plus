@@ -91,7 +91,7 @@ function pastGroupSearch(select) {
   const box=document.createElement('div');box.className='group-search';
   select.before(box);box.append(select);select.hidden=true;
   const input=document.createElement('input');input.type='text';input.autocomplete='off';input.placeholder='Введите день, время или филиал';input.setAttribute('role','combobox');input.setAttribute('aria-autocomplete','list');input.setAttribute('aria-expanded','false');
-  const list=document.createElement('div');list.className='group-search-list';list.hidden=true;list.setAttribute('role','listbox');list.id='past-groups-'+select.name;input.setAttribute('aria-controls',list.id);input.setAttribute('aria-label',select.closest('.field')?.querySelector('label')?.textContent||'Группа');
+  const list=document.createElement('div');list.className='group-search-list';list.hidden=true;list.setAttribute('role','listbox');list.id='group-options-'+(select.id||select.name);input.setAttribute('aria-controls',list.id);input.setAttribute('aria-label',select.closest('.field')?.querySelector('label')?.textContent||'Группа');
   box.append(input,list);let current=-1;
   const close=()=>{list.hidden=true;input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant');current=-1};
   const sync=()=>{input.value=select.selectedOptions[0]?.textContent||'';input.disabled=select.disabled;close()};

@@ -1661,7 +1661,7 @@ async function openSell(d, reload) {
       $('#sl-send').onclick=()=>{scTab('feed');const t=$('#cm-text');if(!t)return toast('Нет открытого чата: скопируйте сообщение',true);t.value=$('#sl-msg').value;t.dispatchEvent(new Event('input',{bubbles:true}));t.focus();t.scrollIntoView({block:'center',behavior:'smooth'});toast('Сообщение вставлено. Проверьте и отправьте')};$('#sl-done').onclick=reload;
     }catch(e){fail(e);if(isCurrent()){lock(false);busy(false)}}
   };
-  recommend();quote();box.scrollIntoView({block:'start',behavior:'smooth'});
+  recommend();pastGroupSearch($('#sl-en'));pastGroupSearch($('#sl-ofp'));quote();box.scrollIntoView({block:'start',behavior:'smooth'});
 }
 
 async function copyTextWithNotice(text, notice='Текст скопирован') {
