@@ -11,3 +11,17 @@
 ## Проверки
 
 Локально прошли tests.test_saleinfo, test_historical_entry, test_single_sale, test_subscription_cancellation, test_cancellation_future_period; отдельно test_trialoffer_versions, tests.test_trialoffer, tests.test_paylinks, tests.test_payment_quote. Python compileall, node --check и git diff --check. Все финансовые данные синтетические. Публикация и авторизованный рабочий сценарий учитываются отдельно
+
+## Подтверждение публикации и браузера
+
+Коммит 5a63cb0 опубликован в main. На рабочем сайте app.js побайтно совпал с исходниками; это подтверждение интерфейса, а не авторизованного сохранения/серверного HEAD. Локальный Chromium прошёл обычную продажу с фактической датой, карточку с именем/названием скидки/причиной ПУ; отдельно нулевой refund заблокирован с объяснением, balance доступен, запрос отмены не отправлялся
+
+```json
+{
+  "commit": "5a63cb0ec3f493256244f0f2e0eb1a36cd50b52e",
+  "time_moscow": "2026-11-17T18:52:14.652883+03:00",
+  "app_js_sha256": "14b85d96b6fb752d9ae7425a94bdd1ac1e504c0ea14471ad85622db1727b873e",
+  "match": true,
+  "scope": "public static file, not authenticated data or server HEAD"
+}
+```
