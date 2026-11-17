@@ -1945,5 +1945,5 @@ html.theme-soft #comms-box .family-chat-feed{background:#182624}html.theme-soft 
 .message-picker .emoji-picker[popover]{position:fixed;inset:auto;margin:0;max-width:calc(100vw - 24px);z-index:1300}
 .message-picker .emoji-picker[popover]::backdrop{background:transparent;pointer-events:none}
 #inbox-chat-pane .composer .emoji-picker[popover]{max-height:none;overflow:hidden}
-.emoji-picker[popover] .emoji-scroll{max-height:min(280px,40dvh)}
+.emoji-picker[popover] .emoji-scroll{max-height:min(280px,40dvh,var(--emoji-room,280px))}
 .emoji-grid button{font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}

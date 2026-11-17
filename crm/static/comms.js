@@ -1101,18 +1101,19 @@ function wireEmojiPicker(panel,input) {
   if(floating)root.setAttribute('popover','manual');
   const position=()=>{
     if(!floating||root.hidden)return;
-    const rect=trigger.getBoundingClientRect(),height=root.getBoundingClientRect().height,width=root.getBoundingClientRect().width;
     const viewport=window.visualViewport,top=viewport?.offsetTop||0,available=viewport?.height||innerHeight;
+    root.style.setProperty('--emoji-room',Math.max(60,available-160)+'px');
+    const rect=trigger.getBoundingClientRect(),height=root.getBoundingClientRect().height,width=root.getBoundingClientRect().width;
     root.style.left=Math.max(12,Math.min(rect.left,innerWidth-width-12))+'px';
     root.style.top=Math.max(top+12,Math.min(rect.top-height-10,top+available-height-12))+'px';
   };
   const dismiss=event=>{if(!root.contains(event.target)&&!trigger.contains(event.target))root._setEmojiOpen(false)};
   const escape=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close()}};
   root._setEmojiOpen=opening=>{
-    document.removeEventListener('pointerdown',dismiss,true);document.removeEventListener('keydown',escape,true);window.removeEventListener('resize',position);
+    document.removeEventListener('pointerdown',dismiss,true);document.removeEventListener('keydown',escape,true);window.removeEventListener('resize',position);window.visualViewport?.removeEventListener('resize',position);
     if(!opening&&floating&&root.matches(':popover-open'))root.hidePopover();
     root.hidden=!opening;trigger.setAttribute('aria-expanded',String(opening));
-    if(opening){if(floating)root.showPopover();position();document.addEventListener('pointerdown',dismiss,true);document.addEventListener('keydown',escape,true);window.addEventListener('resize',position)}
+    if(opening){if(floating)root.showPopover();position();document.addEventListener('pointerdown',dismiss,true);document.addEventListener('keydown',escape,true);window.addEventListener('resize',position);window.visualViewport?.addEventListener('resize',position)}
   };
   const normalize=value=>String(value).toLocaleLowerCase('ru').replace(/ё/g,'е').trim();
   const filter=()=>{
@@ -1122,7 +1123,7 @@ function wireEmojiPicker(panel,input) {
       section.querySelectorAll('[data-emoji]').forEach(button=>{button.hidden=!included||!terms.every(term=>normalize(button.dataset.emojiKeywords+' '+button.dataset.emoji).includes(term));if(!button.hidden)count++});
       section.hidden=!count;found+=count;
     });
-    root.querySelector('.emoji-empty').hidden=!!found;
+    root.querySelector('.emoji-empty').hidden=!!found;position();
   };
   root.querySelector('[data-emoji-search]').oninput=filter;
   root.querySelectorAll('[data-emoji-category]').forEach(button=>button.onclick=()=>{
