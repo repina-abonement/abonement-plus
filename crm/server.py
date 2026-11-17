@@ -2996,10 +2996,9 @@ def family_whatsapp(con, h, user, body, q, fid):
     start = starts[channel]
     cid = cx(start, con, p[0])
     comms.link(con, cid, int(fid))
-    if body.get("sticker"):
-        result = cx(comms.send_sticker, con, cid, body["sticker"], user)
-    else:
-        result = cx(comms.send, con, cid, body.get("text") or "", user)
+    result = conv_send(con, h, user, body, q, str(cid))
+    if isinstance(result, JsonResponse):
+        return JsonResponse(result.body | {"conversation_id": cid}, result.status)
     return result | {"conversation_id": cid}
 
 

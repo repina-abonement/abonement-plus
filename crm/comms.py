@@ -756,7 +756,7 @@ def wazzup_diagnostics(con):
     key = get(con, 'wazzup_key')
     report = {'configured': bool(key), 'channels': [], 'failures': []}
     # Extract only machine codes and request IDs; never expose provider free text here.
-    rows = con.execute("""SELECT c.channel,m.error FROM messages m JOIN conversations c ON c.id=m.conversation_id
+    rows = con.execute("""SELECT c.channel,c.external_id,c.meta,m.error,m.ts,m.user_name,m.kind FROM messages m JOIN conversations c ON c.id=m.conversation_id
                           WHERE m.direction='out' AND m.status='error'
                           AND c.channel IN ('whatsapp','wazzup_telegram','wazzup_max')
                           ORDER BY m.id DESC LIMIT 20""").fetchall()
@@ -765,8 +765,16 @@ def wazzup_diagnostics(con):
         code_match = re.search(r'Wazzup: ([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)(?=$|[ ·:])', error)
         codes = [code_match[1]] if code_match else []
         request = re.search(r'requestId=([a-zA-Z0-9-]{8,64})(?![a-zA-Z0-9-])', error)
+        try:
+            meta = json.loads(row['meta'] or '{}')
+        except (ValueError, TypeError):
+            meta = {}
+        configured_channel = get(con, WZ_ROUTE[row['channel']][1])
         report['failures'].append({'transport': WZ_ROUTE[row['channel']][0], 'codes': list(dict.fromkeys(codes))[:3],
-                                   'request_id': request[1] if request else ''})
+                                   'request_id': request[1] if request else '', 'at': row['ts'],
+                                   'employee': row['user_name'] or '', 'kind': row['kind'],
+                                   'recipient_mode': 'chatId' if meta.get('resolvedChatId') else 'phone' if row['external_id'].startswith('phone:') else 'username' if row['external_id'].startswith('username:') else 'chatId',
+                                   'uses_current_channel': not meta.get('channelId') or meta['channelId'] == configured_channel})
     if not key:
         return report
     try:

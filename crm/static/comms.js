@@ -102,7 +102,7 @@ document.addEventListener('click',async event=>{
 
 function msgHtml(m) {
   if(['requested','deleted'].includes(m.deletion_status))return `<div class="msg ${m.direction} msg-deleted"><div class="msg-text muted">${m.deletion_status==='deleted'?'Сообщение удалено':'Удаление запрошено — ждём подтверждения'}</div><div class="msg-meta">${dtWhen(m.ts)}</div></div>`;
-  const deletion=m.direction==='out'&&['admin','operator'].includes(S.user?.role)?m.deletion_status==='uncertain'?'<div class="small muted">Удаление не подтверждено — проверьте сообщение в мессенджере</div>':`<button type="button" class="msg-delete" data-delete-message="${m.id}" ${m.can_delete?'':'disabled'} title="${esc(m.can_delete?'Удалить у клиента':m.delete_reason||'Удаление недоступно')}">Удалить</button>`:'';
+  const deletion=m.direction==='out'&&['admin','operator'].includes(S.user?.role)?m.deletion_status==='uncertain'?'<div class="small muted">Удаление не подтверждено — проверьте сообщение в мессенджере</div>':`<details class="msg-actions"><summary aria-label="Действия с сообщением" title="Действия с сообщением">⋯</summary><div class="msg-actions-menu"><button type="button" class="msg-delete" data-delete-message="${m.id}" ${m.can_delete?'':'disabled'} title="${esc(m.can_delete?'Удалить у клиента':m.delete_reason||'Удаление недоступно')}">Удалить сообщение</button></div></details>`:'';
   const media = m.media ? (["image", "sticker"].includes(m.kind)
     ? `<a href="/api/messages/${m.id}/media" target="_blank" rel="noopener"><img class="msg-img${m.kind === "sticker" ? " msg-sticker" : ""}" loading="lazy" src="/api/messages/${m.id}/media" alt="${m.kind === "sticker" ? "Стикер" : "Фото"}">${m.kind === "sticker" ? `<span hidden>Стикер: открыть файл</span>` : ""}</a>`
     : m.kind === "audio" ? `<audio controls preload="none" src="/api/messages/${m.id}/media"></audio>`
@@ -111,7 +111,8 @@ function msgHtml(m) {
   const who = m.direction === "out" ? (m.user_name || "") : "";
   return `<div class="msg ${m.direction}${m.status === "error" ? " err" : ""}">
     ${deletion}${media}${m.text ? `<div class="msg-text">${esc(m.text)}</div>` : ""}${label ? `<div class="msg-text muted">${label}</div>` : ""}
-    <div class="msg-meta">${[esc(who), esc(m.channel_label||""), dtWhen(m.ts), m.status === "error" ? "не доставлено: " + esc(m.error) : "", m.status === "demo" ? "тест, не отправлено" : ""].filter(Boolean).join(" · ")}</div>
+    <div class="msg-meta">${[esc(who), esc(m.channel_label||""), dtWhen(m.ts), m.status === "error" ? "Не доставлено" : "", m.status === "demo" ? "тест, не отправлено" : ""].filter(Boolean).join(" · ")}</div>
+    ${m.status==='error'&&m.error?`<details class="msg-error-details"><summary>Подробнее об ошибке</summary><div>${esc(m.error)}</div></details>`:''}
   </div>`;
 }
 
@@ -311,17 +312,16 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   const selectedTarget = targets.some(x => x.v === S.familySendTargets[targetKey]) ? S.familySendTargets[targetKey] : primaryTarget;
   const oq = d.conversations.filter((c) => c.open_q);
   box.innerHTML = `
-    <h3>Связь с семьёй</h3>
+    <div class="family-chat-header"><h3>Переписка</h3><details class="family-contacts"><summary>Контакты</summary><div class="family-contact-list">${parents.filter(p=>p.phone).map(p=>`<button class="btn sm" data-dial="${esc(p.phone)}">📞 ${esc(p.name)}${p.relation?` · ${esc(p.relation)}`:''}<span>${esc(p.phone)}</span></button>`).join('')||'<span class="small muted">Телефон не указан</span>'}</div></details></div>
     ${oq.map((c) => `<div class="oq-on"><div class="grow"><b>❗ Открытый вопрос</b>${c.open_note ? `: ${esc(c.open_note)}` : ""}
       <div class="small muted">Вернуться к ${esc(dtShort(c.open_due))}${c.open_by ? ` · отметил(а) ${esc(c.open_by)}` : ""}</div></div>
       <button class="btn sm" data-oqchat="${c.id}">Открыть диалог</button></div>`).join("")}
-    <div class="chips" style="margin-bottom:10px">${parents.filter((p) => p.phone).map((p) => `<button class="btn sm" data-dial="${esc(p.phone)}">📞 ${esc(p.name.split(" ")[0])}${p.relation ? ` (${esc(p.relation)})` : ""} · ${esc(p.phone)}</button>`).join("")}</div>
-    <div class="feed" id="feed">${d.items.length ? chatHistoryHtml(d.items) : `<div class="muted small">Пока ни переписки, ни звонков</div>`}</div>
-    ${kid && kid.funnel === "sales" ? `<div class="to-bar" style="margin-top:10px"><button class="btn sm" id="to-open">📅 Предложить дни для пробного</button><button class="btn sm" id="to-book">✅ Записать на пробное</button></div><div id="to-panel" hidden></div>` : ""}
+    <div class="feed chat-feed family-chat-feed" id="feed">${d.items.length ? chatHistoryHtml(d.items) : `<div class="muted small">Пока ни переписки, ни звонков</div>`}</div>
+    ${kid && kid.funnel === "sales" ? `<details class="family-trial-tools"><summary>Пробное занятие <span>Подобрать время или записать</span></summary><div class="to-bar"><button type="button" class="btn sm" id="to-open">Подобрать дни</button><button type="button" class="btn sm" id="to-book">Записать на пробное</button></div><div id="to-panel" hidden></div></details>` : ""}
     ${targets.length ? `
       <div class="composer">
         ${replyTargetHtml('cm-to',targets,selectedTarget)}
-        <div class="row"><textarea id="cm-text" rows="6" placeholder="Сообщение родителю…"></textarea><button class="btn primary" id="cm-send" style="flex:0">Отправить</button></div>
+        <div class="row"><textarea id="cm-text" rows="3" placeholder="Сообщение родителю…"></textarea><button class="btn primary" id="cm-send" style="flex:0">Отправить</button></div>
       </div>` : `<div class="small muted">Написать отсюда можно, когда родитель напишет школе в Telegram или MAX${st.whatsapp || st.wazzup_telegram ? "" : ". Первыми написать можно после подключения Wazzup"}</div>`}`;
   if ($("#cm-text")) { $("#cm-text").value = draft; $("#cm-text").addEventListener("input",e=>resizeMessageInput(e.target)); resizeMessageInput($("#cm-text")); }
   const toSelect = $("#cm-to"); wireReplyTarget(toSelect,()=>{S.familySendTargets[targetKey]=toSelect.value});
@@ -367,6 +367,8 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     await loadFamilyComms(familyId, parents, studentId, kid);
     if ($("#cm-text")) $("#cm-text").value = draft;
   },{student_id:studentId,students:kid?[kid]:[],channel:familyChannel,resolveConversation:resolveFileConversation});
+  const picker=box.querySelector('.message-picker');
+  if(picker){const extras=document.createElement('details');extras.className='family-message-tools';extras.open=!!(attachmentState?.file||attachmentState?.upload);extras.innerHTML='<summary>Скрипты, смайлы и вложения</summary>';picker.before(extras);extras.append(picker);}
   restoreAttachmentDraft($('#cm-text'),attachmentState);
   const send = $("#cm-send");
   if (send) send.onclick = async () => {
@@ -754,9 +756,11 @@ async function renderCommsSettings(box, users) {
       if(report.failures?.length){
         const details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');
         summary.textContent='Последние ошибки отправки';pre.style.whiteSpace='pre-wrap';
-        pre.textContent=report.failures.map(f=>f.transport+': '+(f.codes.join(', ')||'Код не сохранён')+(f.request_id?' · requestId='+f.request_id:'')).join('\n');
+        pre.textContent=report.failures.map(f=>[f.at,f.employee,f.transport,f.kind,f.recipient_mode,f.uses_current_channel===false?'Канал отличается от выбранного в настройках':'',(f.codes.join(', ')||'Код не сохранён'),f.request_id?'requestId='+f.request_id:''].filter(Boolean).join(' · ')).join('\n');
         details.append(summary,pre);result.append(details);
       }
+      const copy=document.createElement('button');copy.type='button';copy.className='btn sm';copy.textContent='Скопировать диагностику';
+      copy.onclick=()=>navigator.clipboard.writeText(JSON.stringify(report,null,2)).then(()=>toast('Диагностика скопирована'),()=>toast('Не удалось скопировать: выделите текст результата',true));result.append(copy);
     }catch(error){result.textContent=error.message}finally{if(wzCheck.isConnected)wzCheck.disabled=false}
   };
 
