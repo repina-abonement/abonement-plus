@@ -109,8 +109,9 @@ function pastGroupSearch(select) {
   };
   input.onfocus=()=>{input.select();show('')};input.onclick=()=>{if(list.hidden)show('')};input.oninput=()=>show(input.value);
   input.onkeydown=e=>{
-    if(e.key==='Escape'){e.preventDefault();sync();return}
+    if(e.key==='Escape'){e.preventDefault();e.stopPropagation();sync();return}
     if(!['ArrowDown','ArrowUp','Enter'].includes(e.key))return;
+    e.stopPropagation();
     if(list.hidden){if(e.key==='Enter')return;show('')}
     const rows=[...list.querySelectorAll('button')];
     if(e.key==='Enter'){e.preventDefault();if(rows[current<0?0:current])rows[current<0?0:current].click();return}
