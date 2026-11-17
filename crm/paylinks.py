@@ -82,7 +82,7 @@ def create(con, sid: int, amount: int, user: dict, purpose: str = "", subscripti
                          VALUES (?,?,?,?,?,?,?,?,?,'new')""",
                       (sid,amount,orderid,url,purpose,_now(),user.get('name',''),subscription_id,receipt_token)).lastrowid
     con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
-                (sid, _now(), user.get("name", ""), "payment", f"Ссылка на оплату {amount} ₽ отправлена родителю"))
+                (sid, _now(), user.get("name", ""), "payment", f"Создана ссылка на оплату {amount} ₽; email для чека введёт клиент"))
     return {"id": lid, "url": url, "amount": amount, "purpose": purpose}
 
 

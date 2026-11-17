@@ -1619,9 +1619,9 @@ async function openSell(d, reload) {
         params.set('enrollment_id',en().id||'');params.set('tariff',$('#sl-tar').value);params.set('ofp_group_id',$('#sl-ofp').value||'');params.set('excluded_dates',[...exclusions].join(','));params.set('credit_requested',$('#sl-credit').checked?'1':'0');if($('#sl-disc').value)params.set('discount_id',$('#sl-disc').value);
       }
       const q=await api('GET',`/api/students/${id}/${single()?'single-quote':'quote'}?${params}`);if(request!==version||!isCurrent())return;
-      if(autoDates&&!q.single){autoDates=false;const defaults=(q.calendar_dates||q.dates).filter(day=>q.trial_cutoff&&day<=q.trial_cutoff);if(defaults.length){defaults.forEach(day=>exclusions.add(day));return quote()}}
+      if(autoDates&&!q.single){autoDates=false;const defaults=(q.calendar_dates||q.dates).filter(day=>q.trial_cutoff&&day<=q.trial_cutoff);if(defaults.length){defaults.forEach(day=>exclusions.add(day));if(defaults.length===new Set(q.calendar_dates||q.dates).size){q.dates=[];q.excluded_dates=[...exclusions];q.total=0;q.lessons_paid=0;q.empty_after_trial=true}else return quote()}}
       total=q.total;if(q.single)singleDay=q.dates[0];q.calendar_picker=true;
-      $('#sl-q').innerHTML=(q.single?`<div class="total">${rub(q.total)}</div><div class="small">Разовое занятие · ${dShort(singleDay)}</div>`:q.program?programQuoteHtml(q):quoteHtml(q))+saleCalendarHtml(q,$('#sl-month').value,[...(d.trial_visits||[]).map(v=>v.date),(d.student.trial_at||'').slice(0,10)]);
+      $('#sl-q').innerHTML=(q.empty_after_trial?'<p>После пробного в этом месяце нет занятий. Выберите другой месяц или отметьте согласованные занятия вручную</p>':q.single?`<div class="total">${rub(q.total)}</div><div class="small">Разовое занятие · ${dShort(singleDay)}</div>`:q.program?programQuoteHtml(q):quoteHtml(q))+saleCalendarHtml(q,$('#sl-month').value,[...(d.trial_visits||[]).map(v=>v.date),(d.student.trial_at||'').slice(0,10)]);
       $('#sl-credit-box').hidden=!q.credit_available;$('#sl-credit-info').textContent=q.credit_available?`(до ${q.credit_available} занятий)`:'';
       $('#sl-calendar').onchange=e=>{const day=e.target.dataset.saleDate;if(!day)return;if(single()){singleDay=day;quote();return}if(!e.target.checked&&!$('#sl-calendar').querySelector('input:checked')){e.target.checked=true;return toast('Оставьте хотя бы одно занятие',true)}if(e.target.checked)exclusions.delete(day);else exclusions.add(day);quote()};busy(total<=0);
     }catch(e){if(request===version&&isCurrent())$('#sl-q').textContent=e.message}
@@ -1646,7 +1646,7 @@ async function openSell(d, reload) {
     const updateAmount=()=>$('#sl-ok').textContent='Сохранить оплату '+rub($('#sl-amount').value);
     $('#sl-amount').oninput=updateAmount;
     $('#sl-payment-date').onchange=async()=>{
-      const version=++manualVersion,day=$('#sl-payment-date').value;order.paid_date=day;$('#sl-paid-date').value=day;$('#sl-ok').disabled=true;
+      const version=++manualVersion,day=$('#sl-payment-date').value;order.paid_date=day;$('#sl-paid-date').value=day;$('#sl-ok').disabled=true;$('#sl-amount').disabled=true;$('#sl-m').disabled=true;
       try{
         if(!day)throw Error('Укажите фактическую дату оплаты');
         const params=new URLSearchParams({month:order.month,group_id:order.group_id,dates_selected:'1',paid_date:day,enrollment_id:order.enrollment_id||'',tariff:order.tariff,excluded_dates:order.excluded_dates.join(','),credit_requested:order.credit_requested?'1':'0',ofp_group_id:order.ofp_group_id||'',discount_id:order.discount_id||''});
@@ -1654,19 +1654,19 @@ async function openSell(d, reload) {
         const quoted=await api('GET',order.existing_id?`/api/subscriptions/${order.existing_id}/payment-quote?paid_date=${encodeURIComponent(day)}`:`/api/students/${id}/${order.single?'single-quote':'quote'}?${params}`);
         if(version!==manualVersion||!isCurrent())return;
         if(!order.existing_id&&!order.single){$('#sl-q').innerHTML=(quoted.program?programQuoteHtml(quoted):quoteHtml(quoted))+saleCalendarHtml(quoted,order.month,[...(d.trial_visits||[]).map(v=>v.date),(d.student.trial_at||'').slice(0,10)]);$('#sl-q').querySelectorAll('input').forEach(input=>input.disabled=true)}
-        $('#sl-amount').value=quoted.total;updateAmount();$('#sl-payment-date-info').textContent=`Расчёт на ${dShort(day)}: ${rub(quoted.total)}`;$('#sl-ok').disabled=false;
-      }catch(e){if(version===manualVersion&&isCurrent())$('#sl-payment-date-info').textContent=e.message}
+        $('#sl-amount').value=quoted.total;updateAmount();$('#sl-payment-date-info').textContent=`Расчёт на ${dShort(day)}: ${rub(quoted.total)}`;$('#sl-ok').disabled=false;$('#sl-amount').disabled=false;$('#sl-m').disabled=false;
+      }catch(e){if(version===manualVersion&&isCurrent()){$('#sl-payment-date-info').textContent=e.message;$('#sl-amount').disabled=false;$('#sl-m').disabled=false}}
     };
     $('#sl-ok').onclick=async()=>{
       const amount=Number($('#sl-amount').value),method=$('#sl-m').value,day=$('#sl-payment-date').value;
       if(!Number.isInteger(amount)||amount<=0)return toast('Укажите сумму в рублях',true);
       if(!day||day>S.meta.today)return toast('Укажите фактическую дату оплаты, не позднее сегодня',true);
-      order.paid_date=day;$('#sl-ok').disabled=true;$('#sl-payment-date').disabled=true;
+      order.paid_date=day;$('#sl-ok').disabled=true;$('#sl-payment-date').disabled=true;$('#sl-amount').disabled=true;$('#sl-m').disabled=true;
       try{
         if(!prepared)prepared=await invoice(order);
         if(prepared.quote.total<=0){toast('Счёт уже оплачен с баланса');reload();return}
         await api('POST',`/api/subscriptions/${prepared.id}/pay`,{amount,method,paid_date:day,request_id:requestId});toast('Оплата сохранена');if(isCurrent())reload();
-      }catch(e){fail(e);if(isCurrent()&&$('#sl-ok')){$('#sl-ok').disabled=false;if(!prepared)$('#sl-payment-date').disabled=false}}
+      }catch(e){fail(e);if(isCurrent()&&$('#sl-ok')){$('#sl-ok').disabled=false;$('#sl-amount').disabled=false;$('#sl-m').disabled=false;if(!prepared)$('#sl-payment-date').disabled=false}}
     };
   };
   $('#sl-link').onclick=async()=>{
