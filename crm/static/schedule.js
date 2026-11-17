@@ -333,7 +333,7 @@ function groupForm(gid, branchId, d, coaches, done) {
   const days = (g.weekdays || "").split(",").filter(Boolean).map(Number);
   openDrawer(`<h2>${gid ? "Группа" : "Новая группа"}</h2>
     <form class="section" id="gf">
-      <div class="field"><label>Название</label><input name="name" required value="${esc(g.name || "")}" placeholder="Небо Пн/Чт 17:45"></div>
+      <div class="field"><label>Название формируется автоматически</label><input name="name" readonly value="${esc(g.name || "")}" placeholder="Небо Пн/Чт 17:45"></div>
       <div class="field"><label>Филиал</label><select name="branch_id">${d.branches.filter((b) => b.active).map((b) => `<option value="${b.id}" ${b.id === (g.branch_id || branchId) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>
       <div class="field"><label>Дни</label><div class="chips">${WD.map((w, i) => `<button type="button" class="chip day ${days.includes(i) ? "on" : ""}" data-gd="${i}">${w}</button>`).join("")}</div></div>
       <div class="row"><div class="field"><label>Время начала</label><input name="time" type="time" value="${esc(g.time || "")}"></div>
@@ -354,14 +354,23 @@ function groupForm(gid, branchId, d, coaches, done) {
     </form>`);
   const f = $("#gf");
   const dt = Object.fromEntries((g.day_times || "").split(",").filter((x) => x.includes("=")).map((x) => x.split("=")));
+  const namePreview=()=>{
+    const days=[...f.querySelectorAll('[data-gd].on')].map(x=>+x.dataset.gd),time=f.elements.time.value;
+    const times=[...new Set(days.map(day=>dt[day]||time))];
+    const when=times.length===1?days.map(day=>WD[day]).join('/')+' '+(times[0]||'Время не указано'):days.map(day=>WD[day]+' '+(dt[day]||time||'Время не указано')).join('/');
+    const source=g.source_name||g.name||'';
+    const kind=f.elements.is_makeup.checked?'Отработка':g.lesson_kind==='ofp'||/офп/i.test(source)?'ОФП':g.program_id||/сборная/i.test(source)?'Сборная':/пап/i.test(source)?'Папы':'';
+    f.elements.name.value=[f.elements.branch_id.selectedOptions[0]?.textContent||'Филиал не указан',when||'Дни не указаны',f.elements.age.value||'Возраст не указан',kind].filter(Boolean).join(' · ');
+  };
+  f.addEventListener('input',namePreview);f.addEventListener('change',namePreview);
   const drawDt = () => {
     const on = [...f.querySelectorAll("[data-gd].on")].map((x) => +x.dataset.gd);
     $("#g-dt").innerHTML = on.length > 1 ? `<div class="small muted" style="margin:-4px 0 6px">Если в какой-то день время другое, впишите его. Пустое поле = как время начала</div>
       <div class="row" style="flex-wrap:wrap">${on.map((i) => `<div class="field" style="flex:0 0 110px"><label>${WD[i]}</label><input type="time" data-dt="${i}" value="${esc(dt[i] || "")}"></div>`).join("")}</div>` : "";
-    f.querySelectorAll("[data-dt]").forEach((x) => (x.onchange = () => { dt[x.dataset.dt] = x.value; }));
+    f.querySelectorAll("[data-dt]").forEach((x) => (x.onchange = () => { dt[x.dataset.dt] = x.value; namePreview(); }));
   };
-  drawDt();
-  f.querySelectorAll("[data-gd]").forEach((b) => (b.onclick = () => { b.classList.toggle("on"); drawDt(); }));
+  drawDt();namePreview();
+  f.querySelectorAll("[data-gd]").forEach((b) => (b.onclick = () => { b.classList.toggle("on"); drawDt();namePreview(); }));
   f.onsubmit = async (e) => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(f));

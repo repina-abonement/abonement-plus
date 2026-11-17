@@ -362,6 +362,9 @@ def init_db(con: sqlite3.Connection):
         con.execute("INSERT INTO users(login, name, role, pw_hash) VALUES (?, ?, 'admin', ?)",
                     (login, "Администратор", hash_password(pw)))
 
+    from . import groupnames
+    groupnames.init(con)
+
 
 def sync_enrollments(con):
     """Каждому ученику с группой — запись о группе; абонементам без группы — основная группа ученика."""

@@ -109,6 +109,8 @@ def save_branch(con, data: dict, bid: int | None = None) -> int:
         con.execute("UPDATE branches SET name=?, address=? WHERE id=?", (name, addr, bid))
         if lim is not None:
             con.execute("UPDATE branches SET lesson_limit=? WHERE id=?", (lim, bid))
+        from . import groupnames
+        groupnames.sync(con,bid)
         return bid
     if lim is None:
         lim = 10 if "небо" in name.lower() else 0  # в ТЦ «Небо» не больше 10 детей на тренировку
@@ -125,8 +127,6 @@ def set_branch_active(con, bid: int, active: bool):
 
 def save_group(con, data: dict, gid: int | None = None) -> int:
     name = (data.get("name") or "").strip()
-    if not name:
-        raise SchedError("Укажите название группы")
     bid = int(data.get("branch_id") or 0)
     if not con.execute("SELECT 1 FROM branches WHERE id=? AND active=1", (bid,)).fetchone():
         raise SchedError("Выберите филиал")
@@ -144,6 +144,12 @@ def save_group(con, data: dict, gid: int | None = None) -> int:
     if isinstance(dts, str):
         dts = logic.parse_day_times(dts)
     dts = {int(k): _time(v) for k, v in dts.items() if v and str(k) in days.split(",")}
+    from . import groupnames
+    previous=con.execute("SELECT * FROM groups WHERE id=?",(gid,)).fetchone() if gid else None
+    naming=dict(previous) if previous else {}
+    naming.update(data,branch_id=bid,weekdays=days,time=_time(data.get("time")),day_times=",".join(f"{k}={v}" for k,v in sorted(dts.items())))
+    if not naming.get("source_name"):naming["source_name"]=name
+    name=groupnames.label(con,naming)
     vals = (bid, name, days, _time(data.get("time")), (data.get("age") or "").strip(),
             1 if data.get("is_makeup") else 0, coach, cap, asst, ",".join(f"{k}={v}" for k, v in sorted(dts.items())),
             (data.get("note") or "").strip()[:200])
@@ -163,6 +169,7 @@ def save_group(con, data: dict, gid: int | None = None) -> int:
         return gid
     new_id = con.execute("""INSERT INTO groups(branch_id, name, weekdays, time, age, is_makeup, coach_id, capacity,
                           assistant_id, day_times, note) VALUES (?,?,?,?,?,?,?,?,?,?,?)""", vals).lastrowid
+    con.execute("UPDATE groups SET source_name=? WHERE id=?",(naming.get("source_name") or "",new_id))
     if "trial_ok" in data:
         con.execute("UPDATE groups SET trial_ok=? WHERE id=?", (1 if data.get("trial_ok") else 0, new_id))
     return new_id
@@ -227,8 +234,8 @@ def on(con, g, d: date | str) -> dict:
     v = con.execute("""SELECT weekdays, time, day_times FROM group_versions WHERE group_id=? AND valid_from<=?
                        ORDER BY valid_from DESC LIMIT 1""", (g["id"], str(d)[:10])).fetchone()
     result=g|dict(v) if v else g
-    if g.get('started_on') and not g.get('day_times') and g.get('time') and result.get('time'):
-        result['name']=g['name'].replace(g['time'],result['time'])
+    from . import groupnames
+    result['name']=groupnames.label(con,result)
     return result
 
 
@@ -613,7 +620,7 @@ def import_schedule(con, data: dict) -> dict:
         for g in br.get("groups") or []:
             payload = dict(g, branch_id=bid, coach_id=_find_coach(con, g.get("coach"), created),
                            assistant_id=_find_coach(con, g.get("assistant"), created))
-            old = con.execute("SELECT id FROM groups WHERE branch_id=? AND lower(name)=lower(?)", (bid, g["name"])).fetchone()
+            old = con.execute("SELECT id FROM groups WHERE branch_id=? AND (lower(name)=lower(?) OR lower(source_name)=lower(?))", (bid, g["name"],g["name"])).fetchone()
             if old:
                 save_group(con, payload, old[0])
                 con.execute("UPDATE groups SET active=1 WHERE id=?", (old[0],))

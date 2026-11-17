@@ -26,6 +26,10 @@ g2 = schedule.save_group(con, {"name": "Небо 18:45 5–6", "branch_id": b, "
 day = (date.today() + timedelta(days=2)).isoformat()
 kids = [sv.create_student(con, {"name": f"Ребёнок {i}", "parent_name": "Мама", "phone": f"+7 900 000-00-{i:02d}", "funnel": "members", "group_id": g}, U)
         for i in range(10)]
+# Ordinary places are occupied by actual paid bookings, matching the daily journal.
+for sid in kids:
+ eid=sv.enrollments_of(con,sid)[0]['id']
+ con.execute("INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,price,per_lesson,status,created_at) VALUES (?,?,?,'fixed',8,8000,1000,'paid',?)",(sid,eid,day[:7],day))
 o = capacity.occupancy(con, g, day)
 assert o["count"] == 10 and o["free"] == 0, o
 m = fails(lambda: sv.create_student(con, {"name": "Лишний", "parent_name": "Мама", "phone": "+7 900 000-00-99", "funnel": "members", "group_id": g}, U), "11-й ученик не должен записаться")

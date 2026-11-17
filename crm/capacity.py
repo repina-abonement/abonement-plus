@@ -97,17 +97,32 @@ def occupancy(con, group_id: int, day: str) -> dict:
     """Сколько детей придёт на тренировку группы в дату и есть ли свободные места."""
     from . import services as sv
     j = sv.journal(con, group_id, day)
-    rows = list(j["rows"])
+    rows = [dict(r,_capacity_group=group_id) for r in j["rows"]]
     for pg in _partners(con, group_id):
         if pg != group_id:
             pj = sv.journal(con, pg, day)
             if pj["has_lesson"]:
-                rows += pj["rows"]
+                rows += [dict(r,_capacity_group=pg) for r in pj["rows"]]
+    # A permanent enrollment alone is not a booking for every future date.
+    # Keep invoices including partial/unpaid ones, trials, single visits and makeups.
+    def booked(row):
+        if row.get('makeup_id') or row.get('single_id') or row.get('status') in ('trial','present') or row.get('tag')=='single':return True
+        gid=row['_capacity_group']
+        return bool(con.execute("""SELECT 1 FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id
+            JOIN groups g ON g.id=e.group_id JOIN groups target ON target.id=?
+            WHERE x.student_id=? AND x.status!='cancelled' AND COALESCE(x.kind,'month')='month'
+              AND (x.month=? OR (x.valid_from<=? AND x.valid_until>=?))
+              AND (e.group_id=? OR (g.program_id IS NOT NULL AND g.program_id=target.program_id))""",
+            (gid,row['id'],day[:7],day,day,gid)).fetchone())
+    rows=[r for r in rows if booked(r)]
     coming, warned, vacation = 0, [], 0
     # места, которые держим для пробного, пока родитель присылает данные (кроме детей, уже записанных сюда)
     ids = {r.get("id") for r in rows}
-    coming += sum(1 for h in active_holds(con, group_id, day) if h["student_id"] not in ids)
+    coming += len({h["student_id"] for pg in _partners(con,group_id) for h in active_holds(con,pg,day) if h["student_id"] not in ids})
+    seen=set()
     for r in rows:
+        if r.get('id') in seen:continue
+        seen.add(r.get('id'))
         if r.get("status") == "vacation":
             vacation += 1
         elif r.get("warned"):
@@ -136,6 +151,9 @@ def ensure_roster(con, group_id: int, weeks: int = 6):
     lim = limit_for(con, group_id)
     if not lim:
         return
+    roster=con.execute("""SELECT COUNT(DISTINCT e.student_id) FROM enrollments e JOIN students s ON s.id=e.student_id
+                          WHERE e.group_id=? AND e.active=1 AND s.funnel='members' AND s.stage!='left' AND s.archived=0""",(group_id,)).fetchone()[0]
+    if roster>lim:raise CapacityError(f'В постоянном составе уже {lim} из {lim} детей')
     g = con.execute("SELECT weekdays FROM groups WHERE id=?", (group_id,)).fetchone()
     days = logic.parse_weekdays(g[0]) if g else []
     d = date.today()

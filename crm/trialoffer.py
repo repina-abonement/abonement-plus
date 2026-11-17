@@ -30,7 +30,7 @@ def group_age_range(group):
     if explicit:
         return age_range(explicit)
     # Legacy ERP groups can have their explicit age range only in the name.
-    match=re.search(r'(?<![\d:])(\d{1,2})\s*[–—-]\s*(\d{1,2})(?![\d:])',group['name'] or '')
+    match=re.search(r'(?<![\d:])(\d{1,2})\s*[–—-]\s*(\d{1,2})(?![\d:])',(dict(group).get('source_name') or group['name']) or '')
     return (int(match[1]),int(match[2])) if match else None
 
 
@@ -48,7 +48,7 @@ def slots(con, age: int, branch_id: int | None = None, limit: int = 4, days: int
     now = datetime.now()
     out, fill = [], {}
     for g in con.execute("""SELECT g.*, b.name AS branch, b.address, b.lesson_limit, b.active AS branch_active FROM groups g JOIN branches b ON b.id=g.branch_id
-                            WHERE 1=1"""
+                            WHERE g.active=1 AND b.active=1"""
                          + (" AND g.branch_id=?" if branch_id else ""), (branch_id,) if branch_id else ()).fetchall():
         r = group_age_range(g)
         reason = ('Группа в архиве' if not g['active'] else
