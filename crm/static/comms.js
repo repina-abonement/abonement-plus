@@ -226,18 +226,29 @@ function resizeMessageInput(input) {
   input.style.height="auto";
   input.style.height=Math.max(minimum,Math.min(input.scrollHeight+2,window.innerHeight*.6))+"px";
 }
+function clientChannelPriority(channel) {
+  return ({wazzup_telegram:0,wazzup_max:1,whatsapp:2})[channel] ?? 3;
+}
 function preferredFamilyTarget(conversations,targets,primary,status) {
-  // Existing family correspondence wins over opening a new messenger chat.
+  // Среди существующих переписок: Telegram → MAX → WhatsApp, затем свежесть.
   const existing=conversations.filter(c=>!['tg_archive','telegram'].includes(c.channel)&&targets.some(t=>t.v==='c'+c.id));
-  existing.sort((a,b)=>(b.last_at||'').localeCompare(a.last_at||'')||b.id-a.id);
+  existing.sort((a,b)=>clientChannelPriority(a.channel)-clientChannelPriority(b.channel)||(b.last_at||'').localeCompare(a.last_at||'')||b.id-a.id);
   if(existing.length)return 'c'+existing[0].id;
   if(!primary)return targets.length===1?targets[0].v:'';
-  return targets.find(t=>['t','w','m'].some(prefix=>t.v===prefix+primary.id))?.v||'';
+  return ['t','m','w'].map(prefix=>targets.find(t=>t.v===prefix+primary.id)).find(Boolean)?.v||'';
+}
+
+function replyTargetSummary(label) {
+  const parts=String(label||'').split(' · ').map(part=>part.trim()).filter(Boolean);
+  const channel=parts.shift()||'';
+  const recipient=parts.pop()||'Получатель';
+  return `<span class="reply-target-caption">Сообщение получит</span><strong class="reply-target-recipient">${esc(recipient)}</strong><span class="reply-target-details"><span class="reply-target-channel">${esc(channel)}</span>${parts.length?`<span class="reply-target-context">${esc(parts.join(' · '))}</span>`:''}</span>`;
 }
 
 function replyTargetHtml(id,targets,selected) {
   const current=targets.find(t=>String(t.v)===String(selected));
-  return `<div class="reply-target"><div class="reply-target-current" ${current?'':'hidden'}><span id="${id==='chat-to'?'chat-channel-label':'cm-channel-label'}">Ответ уйдёт: ${esc(current?.t||'')}</span>${targets.length>1?'<button type="button" class="linkish" data-change-reply>Изменить</button>':''}</div><select id="${id}" aria-label="Мессенджер для ответа" ${current?'hidden':''}><option value="">Выберите мессенджер для отправки</option>${targets.map(t=>`<option value="${esc(t.v)}" ${String(t.v)===String(selected)?'selected':''}>${esc(t.t)}</option>`).join('')}</select></div>`;
+  targets=[...targets].sort((a,b)=>clientChannelPriority(a.channel||({t:'wazzup_telegram',m:'wazzup_max',w:'whatsapp'})[String(a.v)[0]])-clientChannelPriority(b.channel||({t:'wazzup_telegram',m:'wazzup_max',w:'whatsapp'})[String(b.v)[0]]));
+  return `<div class="reply-target"><div class="reply-target-current" ${current?'':'hidden'}><div class="reply-target-summary" id="${id==='chat-to'?'chat-channel-label':'cm-channel-label'}">${replyTargetSummary(current?.t)}</div>${targets.length>1?'<button type="button" class="linkish" data-change-reply>Изменить</button>':''}</div><select id="${id}" aria-label="Мессенджер для ответа" ${current?'hidden':''}><option value="">Выберите мессенджер для отправки</option>${targets.map(t=>`<option value="${esc(t.v)}" ${String(t.v)===String(selected)?'selected':''}>${esc(t.t)}</option>`).join('')}</select></div>`;
 }
 
 function wireReplyTarget(select,onchange) {
@@ -248,7 +259,7 @@ function wireReplyTarget(select,onchange) {
   select.onchange=()=>{
     const option=select.selectedOptions[0];
     current.hidden=!select.value;
-    current.querySelector('span').textContent='Ответ уйдёт: '+(option?.textContent||'');
+    current.querySelector('.reply-target-summary').innerHTML=replyTargetSummary(option?.textContent);
     select.hidden=!!select.value;
     onchange();
   };
@@ -267,7 +278,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   box.dataset.familyId = familyId;
   box._reloadComms=()=>loadFamilyComms(familyId,parents,studentId,kid);
   const st = d.status;
-  const targets = d.conversations.filter((c) => !["tg_archive","telegram"].includes(c.channel)).map((c) => ({ v: "c" + c.id, t: `${chLabel(c.channel)}${c.title ? " · " + c.title : ""}` }));
+  const targets = d.conversations.filter((c) => !["tg_archive","telegram"].includes(c.channel)).map((c) => ({ v: "c" + c.id, channel:c.channel, t: `${chLabel(c.channel)}${c.title ? " · " + c.title : ""}` }));
   if (st.whatsapp) parents.filter((p) => p.phone && !d.conversations.some((c) => c.channel === "whatsapp" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
     .forEach((p) => targets.push({ v: "w" + p.id, t: `WhatsApp · ${p.name} (новый чат)` }));
   if (st.wazzup_telegram) parents.filter((p) => p.phone && !d.conversations.some((c) => c.channel === "wazzup_telegram" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
@@ -503,11 +514,11 @@ async function openChat(cid, keepScroll = false) {
   if(request!==S.chatOpenRequest)return;
   const c = d.conversation;
   S.chatRows=S.chatRows||{};S.chatRows[c.id]=c;
-  d.targets=(d.targets||[]).filter(x=>x.channel!=="telegram");
+  d.targets=(d.targets||[]).filter(x=>x.channel!=="telegram").sort((a,b)=>clientChannelPriority(a.channel)-clientChannelPriority(b.channel));
   S.chatSendTargets=S.chatSendTargets||{};
   const replyKey=`${S.user.id}:${cid}`,savedReply=S.chatSendTargets[replyKey];
   const validReply=id=>(d.targets||[]).some(x=>x.id===id);
-  const replyId=validReply(savedReply)?savedReply:validReply(d.preferred_reply_id)?d.preferred_reply_id:validReply(cid)?cid:0;
+  const replyId=validReply(savedReply)?savedReply:d.targets[0]?.id||0;
   const reply=(d.targets||[]).find(x=>x.id===replyId)||{id:0,channel:'',label:'Выберите мессенджер для ответа'};
   const sameChat=+($('#chat-text')?.closest('[data-chat]')?.dataset.chat||0)===cid;
   const attachmentState=sameChat&&$('#chat-text')?{file:$('#chat-text')._attachmentFile,upload:$('#chat-text')._attachmentUpload,preview:$('#chat-text')._attachmentPreview?.innerHTML,uncertain:$('#chat-text')._uncertainBundle}:S.chatDrafts?.[cid]?.attachment;
@@ -532,7 +543,7 @@ async function openChat(cid, keepScroll = false) {
       <div class="composer sticky">
         <div class="to-bar"><button class="btn sm" id="to-open">📅 Предложить ближайшие ПУ</button></div>
         <div id="to-panel" hidden></div>
-        ${replyTargetHtml('chat-to',d.targets.map(x=>({v:x.id,t:x.label})),replyId)}
+        ${replyTargetHtml('chat-to',d.targets.map(x=>({v:x.id,t:x.label,channel:x.channel})),replyId)}
 
         <div class="row"><textarea id="chat-text" rows="2" placeholder="Ответ…">${esc(draft)}</textarea><button class="btn primary" id="chat-send" aria-label="Отправить сообщение" style="flex:0">Отправить</button></div>
         ${c.channel === "telegram" && !replyId ? `<div class="small muted">Переписка бота сохранена. Для ответа выберите нужного родителя через Wazzup; если канала здесь нет, откройте карточку клиента выше.</div>` : ""}
