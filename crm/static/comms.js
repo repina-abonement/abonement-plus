@@ -1082,6 +1082,43 @@ async function sendComposerAttachment(input,resolveConversation,done) {
   return true;
 }
 
+const CHAT_EMOJI_GROUPS = [
+  ['popular','Часто нужны','💚~сердце зеленое любовь|🤍~сердце белое любовь|😊~улыбка радость|🙏~спасибо пожалуйста|👍~отлично хорошо|⚽~футбол мяч тренировка|✅~готово да галочка|❤️~сердце красное любовь|🎉~праздник поздравляем|💪~сила молодец'],
+  ['faces','Смайлы и люди','😀~улыбка радость|😃~улыбка радость|😄~смех радость|😁~улыбка|😆~смех|😅~смех пот|😂~смех слезы|🤣~смех|😉~подмигивание|😊~улыбка|🥰~любовь|😍~любовь|😘~поцелуй|😋~вкусно|😎~круто|🤩~восторг|🥳~поздравляем праздник|🙂~улыбка|🤗~объятия|🤔~думаю вопрос|🤭~ой|🥺~просьба|😢~грустно слезы|😭~плач|😴~сон|😮~удивление|😬~неловко|🙃~улыбка'],
+  ['hearts','Сердца и жесты','💚~сердце зеленое любовь|🤍~сердце белое любовь|❤️~сердце красное любовь|💛~сердце желтое|💙~сердце синее|💜~сердце фиолетовое|🩷~сердце розовое|🧡~сердце оранжевое|🫶~любовь сердце руки|💌~письмо любовь|👍~да отлично|👎~нет|👏~молодец аплодисменты|🙌~ура руки|🙏~спасибо пожалуйста|🤝~договорились|👋~привет пока|👌~хорошо ок|✌️~победа|💪~сила спорт'],
+  ['sport','Спорт и праздники','⚽~футбол мяч|🏆~кубок победа|🥇~медаль золото чемпион|🥈~медаль серебро|🥉~медаль бронза|🏅~медаль награда|🎯~цель|🏃~бег|🏟️~стадион|🎉~праздник поздравляем|🎊~праздник|🎁~подарок|🎈~шар праздник|🎂~день рождения|🌷~цветок|🌸~цветок|☀️~солнце|✨~блеск|🔥~огонь|🚀~ракета'],
+  ['symbols','Полезные символы','✅~да готово галочка|☑️~галочка|❌~нет отмена|❗~важно внимание|❓~вопрос|⚠️~внимание|📅~календарь дата|⏰~время часы|📍~адрес место|📞~телефон звонок|💬~чат сообщение|ℹ️~информация|🟢~зеленый круг|🔴~красный круг|➡️~стрелка вправо|⬇️~стрелка вниз']
+];
+function emojiPickerHtml() {
+  const tabs=[['all','Все','☰'],['faces','Смайлы','😊'],['hearts','Сердца и жесты','♡'],['sport','Спорт и праздники','⚽'],['symbols','Символы','✓']];
+  return `<div class="emoji-picker-header"><b>Эмодзи</b><button type="button" data-emoji-close aria-label="Закрыть эмодзи">×</button></div><div class="emoji-search-wrap"><input type="search" data-emoji-search placeholder="Поиск эмодзи" aria-label="Поиск эмодзи" autocomplete="off"></div><nav class="emoji-categories" aria-label="Категории эмодзи">${tabs.map(([key,label,icon])=>`<button type="button" data-emoji-category="${key}" title="${label}" aria-label="${label}" aria-pressed="${key==='all'}">${icon}</button>`).join('')}</nav><div class="emoji-scroll">${CHAT_EMOJI_GROUPS.map(([key,title,list])=>`<section data-emoji-group="${key}"><h4>${title}</h4><div class="emoji-grid">${list.split('|').map(entry=>{const [emoji,words]=entry.split('~');return `<button type="button" data-emoji="${emoji}" data-emoji-keywords="${esc(words)}" title="${esc(words)}" aria-label="${esc(words)}">${emoji}</button>`}).join('')}</div></section>`).join('')}<div class="emoji-empty" hidden>Ничего не найдено</div></div>`;
+}
+function wireEmojiPicker(panel,input) {
+  const root=panel.querySelector('[data-picker-panel="emoji"]');
+  let category='all';
+  const normalize=value=>String(value).toLocaleLowerCase('ru').replace(/ё/g,'е').trim();
+  const filter=()=>{
+    const terms=normalize(root.querySelector('[data-emoji-search]').value).split(/\s+/).filter(Boolean);let found=0;
+    root.querySelectorAll('[data-emoji-group]').forEach(section=>{
+      let count=0;const included=(category==='all'||section.dataset.emojiGroup===category)&&!(terms.length&&section.dataset.emojiGroup==='popular');
+      section.querySelectorAll('[data-emoji]').forEach(button=>{button.hidden=!included||!terms.every(term=>normalize(button.dataset.emojiKeywords+' '+button.dataset.emoji).includes(term));if(!button.hidden)count++});
+      section.hidden=!count;found+=count;
+    });
+    root.querySelector('.emoji-empty').hidden=!!found;
+  };
+  root.querySelector('[data-emoji-search]').oninput=filter;
+  root.querySelectorAll('[data-emoji-category]').forEach(button=>button.onclick=()=>{
+    category=button.dataset.emojiCategory;root.querySelectorAll('[data-emoji-category]').forEach(tab=>tab.setAttribute('aria-pressed',String(tab===button)));filter();root.querySelector('.emoji-scroll').scrollTop=0;
+  });
+  const close=()=>{root.hidden=true;panel.querySelector('[data-picker-tab="emoji"]').setAttribute('aria-expanded','false');input.focus()};
+  root.querySelector('[data-emoji-close]').onclick=close;
+  root.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close()}});
+  root.querySelectorAll('[data-emoji]').forEach(button=>{
+    button.onmousedown=event=>event.preventDefault();
+    button.onclick=()=>{input.setRangeText(button.dataset.emoji,input.selectionStart,input.selectionEnd,'end');input.focus();input.dispatchEvent(new Event('input',{bubbles:true}))};
+  });
+}
+
 /* One picker shared by the inbox and the client card. */
 function wireMessagePicker(selector, sendSticker, context={}) {
   const input = $(selector); if (!input) return;
@@ -1090,7 +1127,7 @@ function wireMessagePicker(selector, sendSticker, context={}) {
   const stickers = [["smile", "1f60a", "Улыбка"], ["thanks", "1f64f", "Спасибо"], ["yes", "1f44d", "Отлично"], ["heart", "2764", "Сердце"], ["party", "1f389", "Поздравляем"], ["football", "26bd", "Футбол"]];
   panel.innerHTML = `<div class="chips"><button type="button" class="btn sm" data-attach-file title="Прикрепить фото или файл" aria-label="Прикрепить фото или файл">📎</button><input type="file" data-attach-input hidden accept=".jpg,.jpeg,.png,.webp,.pdf,.txt,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.zip"><button type="button" class="btn sm" data-administrator-greeting>Приветствие</button><button type="button" class="btn sm" data-picker-tab="scripts" aria-expanded="false">Скрипты</button><button type="button" class="btn sm" data-picker-tab="emoji" aria-expanded="false">😊 Смайлы</button><button type="button" class="btn sm" data-picker-tab="sticker" aria-expanded="false">Стикеры</button></div>
     <div class="picker-options" data-picker-panel="scripts" hidden></div>
-    <div class="chips picker-options" data-picker-panel="emoji" hidden>${["😊", "😀", "😄", "😉", "😍", "🥰", "😘", "😎", "🤔", "😢", "😭", "😂", "👍", "👏", "🙏", "❤️", "💚", "🤍", "🎉", "⚽", "✅", "🔥", "💪"].map(x => `<button type="button" class="btn sm" data-emoji="${esc(x)}">${x}</button>`).join("")}</div>
+    <div class="picker-options emoji-picker" data-picker-panel="emoji" hidden>${emojiPickerHtml()}</div>
     <div class="picker-options" data-picker-panel="sticker" hidden><div class="sticker-grid">${stickers.map(([id, code, label]) => `<button type="button" class="sticker-choice" data-sticker="${id}" title="Отправить: ${label}" aria-label="Отправить стикер: ${label}"><img src="https://raw.githubusercontent.com/jdecked/twemoji/v15.1.0/assets/72x72/${code}.png" width="56" height="56" alt="${label}"><span>${label}</span></button>`).join("")}</div><p class="small muted">Базовые стикеры: Twemoji, CC BY 4.0.</p><div data-custom-packs></div>
       ${S.user?.role === "admin" ? `<div class="sticker-upload"><label>Название своего набора<input data-upload-pack-title value="Свои стикеры" maxlength="80"></label><label class="btn sm">Загрузить картинки<input type="file" data-upload-stickers accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden></label><p class="small muted">PNG, WEBP, JPG или GIF · можно выбрать несколько · анимация сохранится как статичная картинка · бот не нужен</p><div data-upload-status class="small muted" aria-live="polite"></div></div><details class="sticker-import"><summary>Добавить свой набор Telegram</summary><label>Ссылка на набор<input data-pack-url value="https://t.me/addstickers/Footbolika_Olya" placeholder="https://t.me/addstickers/Название"></label><button class="btn sm" type="button" data-pack-import>Добавить набор</button><div class="small muted" data-pack-status>Импорт по ссылке использует Telegram Bot API. Для переписки через Wazzup бот и мост не нужны. Уже добавленные стикеры доступны всей команде.</div></details>` : ""}
       <p class="small muted">Свои наборы: в Telegram-боте — настоящие стикеры с анимацией. Через Wazzup/MAX — изображения или статичные превью; поддержка WEBP зависит от канала.</p></div>`;
@@ -1121,10 +1158,7 @@ function wireMessagePicker(selector, sendSticker, context={}) {
     preview.querySelector('button').onclick=()=>{if(!input._attachmentBusy){input._attachmentFile=null;input._attachmentUpload=null;preview.replaceChildren()}};
   };
   panel.querySelector('[data-administrator-greeting]').onclick=()=>insertAdministratorGreeting(input);
-  panel.querySelectorAll("[data-emoji]").forEach(b => {
-    b.onmousedown = e => e.preventDefault();
-    b.onclick = () => { input.setRangeText(b.dataset.emoji, input.selectionStart, input.selectionEnd, "end"); input.focus(); input.dispatchEvent(new Event("input", { bubbles: true })); };
-  });
+  wireEmojiPicker(panel,input);
   let scriptsRequest=0;
   const loadScripts = async (chosenStudent,chosenGroup) => {
     const request=++scriptsRequest;

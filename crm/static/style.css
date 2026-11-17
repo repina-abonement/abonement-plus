@@ -1921,3 +1921,24 @@ html.theme-soft #comms-box .family-chat-feed{background:#182624}html.theme-soft 
 @media(max-width:600px){#comms-box .family-chat-header,#comms-box .composer{padding:12px}#comms-box .family-chat-feed{padding:14px 10px;max-height:55dvh}#comms-box .msg{max-width:90%}#comms-box .family-trial-tools{padding:11px 12px}.family-trial-tools>summary span{display:block;margin:3px 0 0 20px}#comms-box .composer>.row{display:flex;flex-direction:column;align-items:stretch}#comms-box .composer>.row textarea{width:100%}#comms-box .composer #cm-send{align-self:flex-end;min-width:120px}.family-contact-list{min-width:210px}}
 @media(max-width:600px){#comms-box .composer>.row{flex-wrap:nowrap}#comms-box .composer>.row textarea{flex:0 0 auto}#comms-box .composer #cm-send{flex:0 0 auto}}
 @media(prefers-color-scheme:dark){#comms-box .family-chat-feed{background:#182624}#comms-box .msg.out{background:#214b3b}#comms-box .family-trial-tools{background:#332d1c}#comms-box .family-trial-tools>summary{color:#e4cf97}#comms-box .msg.err{background:#492c2c}}
+/* Эмодзи: компактная панель по образцу Telegram */
+.message-picker>.chips:first-child{gap:4px}
+.message-picker>.chips:first-child>.btn{border:0;background:transparent;color:var(--ink-2);border-radius:9px;padding:7px 10px;box-shadow:none}
+.message-picker>.chips:first-child>.btn:hover,.message-picker [data-picker-tab][aria-expanded="true"]{background:var(--surface-2);color:var(--accent)}
+.message-picker .emoji-picker{width:352px;max-width:100%;padding:0;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 8px 28px #172b2014;overflow:hidden}
+.emoji-picker-header{display:flex;align-items:center;justify-content:space-between;padding:13px 15px 5px;font-size:14px;color:var(--accent)}
+.emoji-picker-header button{border:0;background:transparent;color:var(--ink-2);font-size:23px;line-height:1;cursor:pointer;padding:2px 5px;border-radius:6px}
+.emoji-search-wrap{padding:8px 12px}.emoji-search-wrap input{width:100%;min-height:34px;height:34px;border:0;border-radius:18px;padding:6px 12px;background:var(--surface-2);font-size:13px}
+.emoji-categories{display:flex;gap:4px;padding:0 12px 8px;border-bottom:1px solid var(--line)}
+.emoji-categories button{flex:1;border:0;border-radius:8px;background:transparent;color:var(--ink-2);font-size:21px;height:33px;cursor:pointer}
+.emoji-categories button[aria-pressed="true"]{color:var(--accent);background:var(--accent-soft)}
+.emoji-scroll{max-height:280px;overflow-y:auto;overscroll-behavior:contain;padding:7px 10px 12px;scrollbar-width:thin}
+.emoji-scroll section[hidden],.emoji-grid button[hidden],.emoji-empty[hidden]{display:none!important}
+.emoji-scroll h4{margin:7px 4px;font-size:12px;font-weight:500;color:var(--ink-2)}
+.emoji-grid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:2px}
+.emoji-grid button{display:flex;align-items:center;justify-content:center;min-width:0;height:38px;padding:0;border:0;border-radius:8px;background:transparent;font-size:26px;line-height:1;cursor:pointer;transition:background .12s,transform .12s}
+.emoji-grid button:hover{background:var(--surface-2);transform:scale(1.12)}
+.emoji-grid button:focus-visible,.emoji-categories button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.emoji-empty{padding:24px 8px;text-align:center;color:var(--ink-2);font-size:13px}
+@media(max-width:600px){.emoji-scroll{max-height:220px}.emoji-grid button{height:36px;font-size:24px}.message-picker>.chips:first-child>.btn{padding:7px 8px;font-size:12px}}
+@media(prefers-reduced-motion:reduce){.emoji-grid button{transition:none}.emoji-grid button:hover{transform:none}}
