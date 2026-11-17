@@ -65,7 +65,7 @@ ROUTES: list[tuple[str, re.Pattern, callable, str]] = []
 
 def route(method: str, pattern: str, role: str = "any"):
     # Existing IDs stay numeric. Attachment IDs/tickets are deliberately opaque.
-    parameter_types={'aid':r'[0-9a-f]{32}'} if '/attachments/' in pattern else {'ticket':r'[A-Za-z0-9_-]{43}','filename':r'[^/]+'} if pattern.startswith('/api/chat-files/') else {}
+    parameter_types={'token':r'[A-Za-z0-9_-]{43}'} if pattern.startswith('/api/public/pay-links/') else {'aid':r'[0-9a-f]{32}'} if '/attachments/' in pattern else {'ticket':r'[A-Za-z0-9_-]{43}','filename':r'[^/]+'} if pattern.startswith('/api/chat-files/') else {}
     rx = re.compile("^" + re.sub(r"\{(\w+)\}", lambda m:'(?P<'+m[1]+'>'+parameter_types.get(m[1],r'[0-9]+')+')', pattern) + "$")
 
     def deco(fn):
@@ -381,6 +381,28 @@ def paylinks_create(con, h, user, body, q, sid):
         return paylinks.create(con, int(sid), body.get("amount"), user, body.get("purpose") or "", sub, full_payment=bool(body.get("full_payment")))
     except paylinks.PayLinkError as e:
         raise ApiError(str(e))
+
+
+@route("GET", "/api/public/pay-links/{token}", role="public")
+def public_pay_link(con,h,user,body,q,token):
+    from . import paylinks
+    h.extra_headers.extend([("Cache-Control","no-store"),("Referrer-Policy","no-referrer")])
+    try:
+        link=paylinks.receipt_link(con,token)
+        return {"amount":link["amount"],"invoice_ready":bool(link["invoice_id"])}
+    except paylinks.PayLinkError as error:
+        raise ApiError(str(error),410)
+
+
+@route("POST", "/api/public/pay-links/{token}/checkout", role="public")
+def public_pay_checkout(con,h,user,body,q,token):
+    from . import paylinks
+    h.extra_headers.extend([("Cache-Control","no-store"),("Referrer-Policy","no-referrer")])
+    try:
+        return paylinks.checkout(con,token,body.get("email"))
+    except paylinks.PayLinkError as error:
+        # Keep the uncertain state if the provider may have created the invoice.
+        return JsonResponse({"error":str(error)},400)
 
 
 @route("POST", "/api/paylinks/{lid}/cancel", role="members:full")
@@ -1262,12 +1284,12 @@ def vacation_del(con, h, user, body, q, vid):
 
 @route("GET", "/api/students/{sid}/quote", role="operator")
 def quote(con, h, user, body, q, sid):
-    return sv.quote_for(con, int(sid), q.get("month"), q.get("enrollment_id"), q.get("discount_id"), q.get("tariff"), q.get("excluded_dates"), q.get("credit_requested"), q.get("group_id"), q.get("ofp_group_id"))
+    return sv.quote_for(con, int(sid), q.get("month"), q.get("enrollment_id"), q.get("discount_id"), q.get("tariff"), (q.get("excluded_dates") or []) if q.get("dates_selected")=="1" else q.get("excluded_dates"), q.get("credit_requested"), q.get("group_id"), q.get("ofp_group_id"),q.get("paid_date"))
 
 
 @route("POST", "/api/students/{sid}/invoice", role="operator")
 def invoice(con, h, user, body, q, sid):
-    return sv.create_invoice(con, int(sid), body.get("month"), user, body.get("enrollment_id"), body.get("discount_id"), body.get("tariff"), body.get("excluded_dates"), body.get("credit_requested", False), body.get("group_id"), body.get("ofp_group_id"), body.get("group_action", "transfer"))
+    return sv.create_invoice(con, int(sid), body.get("month"), user, body.get("enrollment_id"), body.get("discount_id"), body.get("tariff"), body.get("excluded_dates"), body.get("credit_requested", False), body.get("group_id"), body.get("ofp_group_id"), body.get("group_action", "transfer"),body.get("paid_date"))
 
 
 @route("POST", "/api/students/{sid}/enrollments", role="operator")
@@ -1296,12 +1318,12 @@ def enrollment_transfer(con, h, user, body, q, eid):
 
 @route("GET", "/api/subscriptions/{sub}/payment-quote", role="operator")
 def subscription_payment_quote(con,h,user,body,q,sub):
-    return sv.payment_quote(con,int(sub))
+    return sv.payment_quote(con,int(sub),q.get("paid_date"))
 
 
 @route("POST", "/api/subscriptions/{sub}/pay", role="operator")
 def pay(con, h, user, body, q, sub):
-    sv.pay_subscription(con, int(sub), user, body.get("method") or "cash", body.get("amount"))
+    sv.pay_subscription(con, int(sub), user, body.get("method") or "cash", body.get("amount"),body.get("paid_date"),body.get("request_id"))
     return {"ok": True}
 
 
@@ -3320,6 +3342,10 @@ class Handler(BaseHTTPRequestHandler):
         if lm and method in ("GET", "HEAD"):
             con = db.get_conn()
             return self._send(200, legal.page(con, lm.group(1) or "", base_url(self)).encode(), "text/html; charset=utf-8")
+        if re.fullmatch(r"/pay/[A-Za-z0-9_-]{40,64}/?",url.path) and method in ("GET","HEAD"):
+            from pathlib import Path
+            self.extra_headers.extend([("Cache-Control","no-store"),("Referrer-Policy","no-referrer"),("X-Frame-Options","DENY")])
+            return self._send(200,(Path(STATIC)/"payment.html").read_bytes(),"text/html; charset=utf-8")
         if not url.path.startswith("/api/"):
             if method in ("GET", "HEAD"):
                 return self._static(url.path)

@@ -1577,11 +1577,11 @@ async function openSell(d, reload) {
     <div class="field" id="sl-ofp-box" hidden><label>День ОФП</label><select id="sl-ofp"></select></div>
     <div class="field" id="sl-group-action-box" hidden><label>Как изменить группу с начала месяца</label><select id="sl-group-action"><option value="transfer">Перевести из прежней группы</option><option value="add">Добавить вторую, сохранить прежнюю</option></select><small class="muted">Изменение сохранится при оформлении.</small></div>
     <label class="sale-credit" id="sl-credit-box" hidden><input type="checkbox" id="sl-credit"> Клиент запросил перерасчёт пропусков прошлого месяца <span class="small muted" id="sl-credit-info"></span></label>
-    <div class="quote" id="sl-q">Считаю…</div><div class="sc-actions"><button class="btn primary" id="sl-link">Ссылка на оплату</button><button class="btn" id="sl-now">Оплачено сейчас</button></div><div id="sl-res"></div></div>`;
+    <div class="field"><label>Фактическая дата оплаты</label><input type="date" id="sl-paid-date" value="${S.meta.today}" max="${S.meta.today}" required><small class="muted">Если оплата уже была, укажите день получения денег</small></div><div class="quote" id="sl-q">Считаю…</div><div class="sc-actions"><button class="btn primary" id="sl-link">Ссылка на оплату</button><button class="btn" id="sl-now">Отметить оплату</button></div><div id="sl-res"></div></div>`;
   const en=()=>choices.find(e=>e.group_id===+$('#sl-en').value), single=()=>$('#sl-kind').value==='single';
-  let total=0,version=0,singleDay=null,existing=null;
+  let total=0,version=0,singleDay=null,existing=null,autoDates=true;
   const exclusions=new Set();
-  const busy=on=>box.querySelectorAll('.sc-actions button').forEach(b=>b.disabled=on);
+  const busy=on=>{box.querySelectorAll('.sc-actions button').forEach(b=>b.disabled=on);$('#sl-link').disabled=on||$('#sl-paid-date').value!==S.meta.today};
   const lock=on=>{box.querySelectorAll('select,input').forEach(e=>e.disabled=on);if(!on)syncFields()};
   const syncFields=()=>{
     $('#sl-kind option[value=single]').disabled=!!en().program_id&&!pendingSingles.length;
@@ -1608,46 +1608,69 @@ async function openSell(d, reload) {
     const own=ens.find(e=>e.group_id===en().group_id);
     const sub=single()?pendingSingles.find(s=>s.id===+$('#sl-single-invoice').value):own&&d.subscriptions.find(s=>s.enrollment_id===own.id&&s.month===$('#sl-month').value&&s.kind!=='single'&&s.status!=='cancelled');
     if(sub){
-      existing=sub;let current;try{current=await api('GET',`/api/subscriptions/${sub.id}/payment-quote`)}catch(e){if(request===version&&isCurrent())$('#sl-q').textContent=e.message;return}if(request!==version||!isCurrent())return;const paid=current.paid;total=current.total;
+      existing=sub;let current;try{current=await api('GET',`/api/subscriptions/${sub.id}/payment-quote?paid_date=${encodeURIComponent($('#sl-paid-date').value)}`)}catch(e){if(request===version&&isCurrent())$('#sl-q').textContent=e.message;return}if(request!==version||!isCurrent())return;const paid=current.paid;total=current.total;
       $('#sl-tar').value=sub.tariff;syncFields();['#sl-tar','#sl-disc','#sl-ofp'].forEach(s=>$(s).disabled=true);
       $('#sl-q').innerHTML=`<b>${single()?(total?'Разовое занятие уже оформлено':'Разовое занятие оплачено'):(total?'Абонемент уже оформлен':'Абонемент оплачен')}</b><div class="finance-numbers"><div><small>Стоимость</small><b>${rub(current.price)}</b></div><div><small>Оплачено</small><b>${rub(paid)}</b></div><div><small>Осталось оплатить</small><b>${rub(total)}</b></div></div><p class="small muted">Повторный абонемент создаваться не будет.</p>`;busy(total<=0);return;
     }
     try{
-      const params=new URLSearchParams({month:$('#sl-month').value,group_id:en().group_id});
+      if(!$('#sl-paid-date').value)throw Error('Укажите фактическую дату оплаты');
+      const params=new URLSearchParams({month:$('#sl-month').value,group_id:en().group_id,dates_selected:'1',paid_date:$('#sl-paid-date').value});
       if(single()){if(singleDay)params.set('date',singleDay)}else{
         params.set('enrollment_id',en().id||'');params.set('tariff',$('#sl-tar').value);params.set('ofp_group_id',$('#sl-ofp').value||'');params.set('excluded_dates',[...exclusions].join(','));params.set('credit_requested',$('#sl-credit').checked?'1':'0');if($('#sl-disc').value)params.set('discount_id',$('#sl-disc').value);
       }
       const q=await api('GET',`/api/students/${id}/${single()?'single-quote':'quote'}?${params}`);if(request!==version||!isCurrent())return;
+      if(autoDates&&!q.single){autoDates=false;const defaults=(q.calendar_dates||q.dates).filter(day=>q.trial_cutoff&&day<=q.trial_cutoff);if(defaults.length){defaults.forEach(day=>exclusions.add(day));return quote()}}
       total=q.total;if(q.single)singleDay=q.dates[0];q.calendar_picker=true;
       $('#sl-q').innerHTML=(q.single?`<div class="total">${rub(q.total)}</div><div class="small">Разовое занятие · ${dShort(singleDay)}</div>`:q.program?programQuoteHtml(q):quoteHtml(q))+saleCalendarHtml(q,$('#sl-month').value,[...(d.trial_visits||[]).map(v=>v.date),(d.student.trial_at||'').slice(0,10)]);
       $('#sl-credit-box').hidden=!q.credit_available;$('#sl-credit-info').textContent=q.credit_available?`(до ${q.credit_available} занятий)`:'';
       $('#sl-calendar').onchange=e=>{const day=e.target.dataset.saleDate;if(!day)return;if(single()){singleDay=day;quote();return}if(!e.target.checked&&!$('#sl-calendar').querySelector('input:checked')){e.target.checked=true;return toast('Оставьте хотя бы одно занятие',true)}if(e.target.checked)exclusions.delete(day);else exclusions.add(day);quote()};busy(total<=0);
     }catch(e){if(request===version&&isCurrent())$('#sl-q').textContent=e.message}
   };
-  const reset=()=>{exclusions.clear();singleDay=null;$('#sl-credit').checked=false};
+  const reset=()=>{exclusions.clear();autoDates=true;singleDay=null;$('#sl-credit').checked=false};
+  $('#sl-paid-date').onchange=()=>quote();
   $('#sl-single-invoice').onchange=()=>{reset();syncFields();quote()};
   $('#sl-kind').onchange=()=>{reset();if(single())$('#sl-month').value=d.cur_month;syncFields();quote()};
   $('#sl-month').onchange=$('#sl-en').onchange=()=>{reset();recommend();quote()};
   $('#sl-tar').onchange=()=>{reset();syncFields();quote()};$('#sl-ofp').onchange=()=>{reset();quote()};$('#sl-disc').onchange=$('#sl-credit').onchange=quote;
   $('#sl-x').onclick=()=>{version++;box.dataset.saleSession='';box.innerHTML=''};
-  const selection=()=>({single:single(),month:$('#sl-month').value,date:existing?.single_date||singleDay,group_id:en().group_id,enrollment_id:en().id,group_action:$('#sl-group-action').value,tariff:$('#sl-tar').value,ofp_group_id:$('#sl-tar').value==='pkg'?+$('#sl-ofp').value:null,excluded_dates:[...exclusions],credit_requested:$('#sl-credit').checked,discount_id:$('#sl-disc').value||null,group:existing?.group_name?clientGroupLabel(existing):existing?.kind==='single'?'':clientGroupLabel(en()),tariffLabel:single()?'Разовое занятие':$('#sl-tar').selectedOptions[0]?.textContent,existing_id:existing?.id});
+  const selection=()=>({paid_date:$('#sl-paid-date').value,single:single(),month:$('#sl-month').value,date:existing?.single_date||singleDay,group_id:en().group_id,enrollment_id:en().id,group_action:$('#sl-group-action').value,tariff:$('#sl-tar').value,ofp_group_id:$('#sl-tar').value==='pkg'?+$('#sl-ofp').value:null,excluded_dates:[...exclusions],credit_requested:$('#sl-credit').checked,discount_id:$('#sl-disc').value||null,group:existing?.group_name?clientGroupLabel(existing):existing?.kind==='single'?'':clientGroupLabel(en()),tariffLabel:single()?'Разовое занятие':$('#sl-tar').selectedOptions[0]?.textContent,existing_id:existing?.id});
   const invoice=async order=>{
     let result=order.existing_id?{id:order.existing_id,quote:{}}:await api('POST',`/api/students/${id}/${order.single?'single':'invoice'}`,order);
-    const current=await api('GET',`/api/subscriptions/${result.id}/payment-quote`);
+    const current=await api('GET',`/api/subscriptions/${result.id}/payment-quote?paid_date=${encodeURIComponent(order.paid_date)}`);
     return {...result,quote:{...result.quote,total:current.total}};
   };
   $('#sl-now').onclick=async()=>{
-    const order=selection();busy(true);lock(true);
-    try{
-      const prepared=await invoice(order);if(!isCurrent())return;
-      if(prepared.quote.total<=0){toast('Счёт уже оплачен с баланса');reload();return}
-      $('#sl-res').innerHTML=`<div class="row" style="margin-top:14px;align-items:flex-end"><div class="field"><label>Сумма, ₽</label><input type="number" id="sl-amount" min="1" step="1" value="${prepared.quote.total}"></div><div class="field"><label>Как оплатили</label><select id="sl-m">${methods.map(([k,t])=>`<option value="${k}">${t}</option>`).join('')}</select></div></div><button class="btn primary" id="sl-ok">Принять ${rub(prepared.quote.total)}</button><p class="small muted">Можно указать частичную оплату. Остаток останется к оплате.</p>`;
-      $('#sl-amount').oninput=()=>$('#sl-ok').textContent='Принять '+rub($('#sl-amount').value);
-      $('#sl-ok').onclick=async()=>{const amount=Number($('#sl-amount').value),method=$('#sl-m').value;if(!Number.isInteger(amount)||amount<=0)return toast('Укажите сумму в рублях',true);$('#sl-ok').disabled=true;try{await api('POST',`/api/subscriptions/${prepared.id}/pay`,{amount,method});toast('Оплата принята');if(isCurrent())reload()}catch(e){fail(e);if(isCurrent()&&$('#sl-ok'))$('#sl-ok').disabled=false}};
-    }catch(e){fail(e);if(isCurrent()){lock(false);busy(false)}}
+    const order=selection();busy(true);lock(true);let prepared=null,manualVersion=0;
+    const requestId=window.crypto?.randomUUID?.()||Date.now()+'-'+Math.random().toString(36).slice(2);
+    $('#sl-res').innerHTML=`<div class="row" style="margin-top:14px;align-items:flex-end"><div class="field"><label>Сумма, ₽</label><input type="number" id="sl-amount" min="1" step="1" value="${total}"></div><div class="field"><label>Как оплатили</label><select id="sl-m">${methods.map(([k,t])=>`<option value="${k}">${t}</option>`).join('')}</select></div><div class="field"><label>Фактическая дата оплаты</label><input type="date" id="sl-payment-date" required max="${S.meta.today}" value="${esc(order.paid_date)}"></div></div><div id="sl-payment-date-info" class="small muted"></div><button class="btn primary" id="sl-ok">Сохранить оплату ${rub(total)}</button><p class="small muted">Фиксируем уже полученные деньги. Можно указать частичную оплату, остаток останется к оплате.</p>`;
+    const updateAmount=()=>$('#sl-ok').textContent='Сохранить оплату '+rub($('#sl-amount').value);
+    $('#sl-amount').oninput=updateAmount;
+    $('#sl-payment-date').onchange=async()=>{
+      const version=++manualVersion,day=$('#sl-payment-date').value;order.paid_date=day;$('#sl-paid-date').value=day;$('#sl-ok').disabled=true;
+      try{
+        if(!day)throw Error('Укажите фактическую дату оплаты');
+        const params=new URLSearchParams({month:order.month,group_id:order.group_id,dates_selected:'1',paid_date:day,enrollment_id:order.enrollment_id||'',tariff:order.tariff,excluded_dates:order.excluded_dates.join(','),credit_requested:order.credit_requested?'1':'0',ofp_group_id:order.ofp_group_id||'',discount_id:order.discount_id||''});
+        if(order.single)params.set('date',order.date);
+        const quoted=await api('GET',order.existing_id?`/api/subscriptions/${order.existing_id}/payment-quote?paid_date=${encodeURIComponent(day)}`:`/api/students/${id}/${order.single?'single-quote':'quote'}?${params}`);
+        if(version!==manualVersion||!isCurrent())return;
+        if(!order.existing_id&&!order.single){$('#sl-q').innerHTML=(quoted.program?programQuoteHtml(quoted):quoteHtml(quoted))+saleCalendarHtml(quoted,order.month,[...(d.trial_visits||[]).map(v=>v.date),(d.student.trial_at||'').slice(0,10)]);$('#sl-q').querySelectorAll('input').forEach(input=>input.disabled=true)}
+        $('#sl-amount').value=quoted.total;updateAmount();$('#sl-payment-date-info').textContent=`Расчёт на ${dShort(day)}: ${rub(quoted.total)}`;$('#sl-ok').disabled=false;
+      }catch(e){if(version===manualVersion&&isCurrent())$('#sl-payment-date-info').textContent=e.message}
+    };
+    $('#sl-ok').onclick=async()=>{
+      const amount=Number($('#sl-amount').value),method=$('#sl-m').value,day=$('#sl-payment-date').value;
+      if(!Number.isInteger(amount)||amount<=0)return toast('Укажите сумму в рублях',true);
+      if(!day||day>S.meta.today)return toast('Укажите фактическую дату оплаты, не позднее сегодня',true);
+      order.paid_date=day;$('#sl-ok').disabled=true;$('#sl-payment-date').disabled=true;
+      try{
+        if(!prepared)prepared=await invoice(order);
+        if(prepared.quote.total<=0){toast('Счёт уже оплачен с баланса');reload();return}
+        await api('POST',`/api/subscriptions/${prepared.id}/pay`,{amount,method,paid_date:day,request_id:requestId});toast('Оплата сохранена');if(isCurrent())reload();
+      }catch(e){fail(e);if(isCurrent()&&$('#sl-ok')){$('#sl-ok').disabled=false;if(!prepared)$('#sl-payment-date').disabled=false}}
+    };
   };
   $('#sl-link').onclick=async()=>{
-    const order=selection();busy(true);lock(true);
+    const order=selection();if(order.paid_date!==S.meta.today)return toast('Для состоявшейся оплаты нажмите «Отметить оплату»',true);busy(true);lock(true);
     try{
       const st=await api('GET',`/api/students/${id}/paylinks`);if(!st.ready)throw Error('PayKeeper не подключён: Чеки → Подключение');
       const r=await invoice(order);if(!isCurrent())return;if(r.quote.total<=0){toast('Счёт уже оплачен с баланса');reload();return}
@@ -1655,7 +1678,7 @@ async function openSell(d, reload) {
       const previousLink=(st.links||[]).find(l=>l.status==='open'&&l.subscription_id===r.id&&l.amount===r.quote.total);
       const l=previousLink||await api('POST',`/api/students/${id}/paylinks`,{amount:r.quote.total,purpose:`${title}: ${displayChildName(d.student.name)}`,subscription_id:r.id,full_payment:true});if(!isCurrent())return;
       const msg=`${title}\n${displayChildName(d.student.name)}\n\n${order.group?'Группа: '+order.group+'\n':''}Тариф: ${order.tariffLabel}\n\nК оплате: ${rub(l.amount)}\n\nСсылка для оплаты:\n${l.url}`;
-      $('#sl-res').innerHTML=`<label style="margin-top:14px">Сообщение родителю</label><textarea id="sl-msg" rows="9">${esc(msg)}</textarea><div class="sc-actions" style="margin-top:10px"><button class="btn primary" id="sl-send">Вставить в чат с семьёй</button><button class="btn" id="sl-copy">Скопировать</button><button class="btn" id="sl-done">Готово</button></div>`;
+      $('#sl-res').innerHTML=`<p class="small muted">По ссылке родитель сам укажет email для чека перед переходом в PayKeeper</p><label style="margin-top:14px">Сообщение родителю</label><textarea id="sl-msg" rows="9">${esc(msg)}</textarea><div class="sc-actions" style="margin-top:10px"><button class="btn primary" id="sl-send">Вставить в чат с семьёй</button><button class="btn" id="sl-copy">Скопировать</button><button class="btn" id="sl-done">Готово</button></div>`;
       resizeMessageInput($('#sl-msg'));
       $('#sl-copy').onclick=()=>copyTextWithNotice($('#sl-msg').value,'Текст скопирован');
       $('#sl-send').onclick=()=>{scTab('feed');const t=$('#cm-text');if(!t)return toast('Нет открытого чата: скопируйте сообщение',true);t.value=$('#sl-msg').value;t.dispatchEvent(new Event('input',{bubbles:true}));t.focus();t.scrollIntoView({block:'center',behavior:'smooth'});toast('Сообщение вставлено. Проверьте и отправьте')};$('#sl-done').onclick=reload;

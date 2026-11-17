@@ -297,7 +297,27 @@ def sale_enrollment(con, sid, enrollment_id, group_id=None):
                 program_id=g["program_id"], lesson_kind=g["lesson_kind"], tariff=(source or {}).get("tariff") or "fixed")
 
 
-def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None) -> dict:
+def sale_payment_day(value):
+    if value in (None, ""): return None
+    try:
+        if not isinstance(value,str) or len(value)!=10: raise ValueError()
+        parsed=date.fromisoformat(value)
+    except ValueError:
+        raise ApiError("Укажите корректную фактическую дату оплаты") from None
+    if parsed>today() or parsed<date(2000,1,1):
+        raise ApiError("Дата оплаты не может быть в будущем")
+    return parsed
+
+
+def first_sale_trial_date(con,sid,ym):
+    if con.execute("SELECT 1 FROM subscriptions WHERE student_id=? AND COALESCE(kind,'month')='month' AND status!='cancelled' AND month<?",(sid,ym)).fetchone():return ''
+    student=get_student_row(con,sid)
+    dates=[student['trial_at'][:10]] if student['trial_came']==1 and (student['trial_at'] or '')[:7]==ym else []
+    dates.extend(r[0] for r in con.execute("SELECT substr(visit_at,1,10) FROM erp_trial_visits WHERE student_id=? AND came=1 AND substr(visit_at,1,7)=?",(sid,ym)))
+    return max(dates,default='')
+
+
+def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None, paid_date=None) -> dict:
     get_student_row(con, sid)
     e = sale_enrollment(con, sid, enrollment_id, group_id)
     if tariff is not None:
@@ -323,13 +343,19 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
         eligible=prev_abs if previous else []
     requested = credit_requested is True or credit_requested == "1"
     from . import closures, pricing, program, subscriptiondates
+    on = sale_payment_day(paid_date) or today()
+    cutoff = first_sale_trial_date(con,sid,ym)
     if program.program_of_group(con, e["group_id"]):
-        return program.quote(con, sid, ym, e, discount_id=discount_id, excluded_dates=excluded_dates, selection={"tariff": tariff, "ofp_group_id": ofp_group_id} if tariff is not None else None, validate_selection=True)
-    on = today()
+        q = program.quote(con, sid, ym, e, discount_id=discount_id, on=on, excluded_dates=excluded_dates, selection={"tariff": tariff, "ofp_group_id": ofp_group_id} if tariff is not None else None, validate_selection=True)
+        if cutoff and excluded_dates is None:
+            q=program.quote(con,sid,ym,e,discount_id=discount_id,on=on,excluded_dates=[d for d in q['calendar_dates'] if d<=cutoff],selection={"tariff":tariff,"ofp_group_id":ofp_group_id} if tariff is not None else None,validate_selection=True)
+        q['trial_cutoff']=cutoff
+        q['pricing_date']=on.isoformat()
+        return q
     pr = pricing.prices_for(con, ym)  # прайс оплачиваемого месяца (pricing.py)
     if special:pr=dict(pr,fixed=special['per_lesson'],flex=special['per_lesson'])
     ms, me = logic.month_bounds(ym)
-    newcomer = pricing.is_newcomer(con, sid, ym, on)
+    newcomer = pricing.is_newcomer(con, sid, ym, on) or bool(cutoff and ym==on.strftime("%Y-%m"))
     closed = closures.closed_dates(con, e["group_id"], ms, me)
     weekdays = enrollment_days(e)
     from . import schedule
@@ -338,15 +364,18 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
         real = {d.isoformat() for d in schedule.month_dates(con, g, e["weekdays"], ym)}
         weekdays = sorted({date.fromisoformat(x).weekday() for x in real} | set(weekdays))
         closed = closed | {d.isoformat() for d in logic.lesson_dates(weekdays, ym) if d.isoformat() not in real}
-    if newcomer:  # новичок в текущем месяце: только оставшиеся занятия
+    if newcomer and not cutoff:  # новичок в текущем месяце: только оставшиеся занятия
         start = pricing.newcomer_start(con, sid, on)
         closed = closed | {d.isoformat() for d in logic.lesson_dates(weekdays, ym) if d < start}
     available = [d.isoformat() for d in logic.lesson_dates(weekdays, ym)
                  if d.isoformat() not in closed and not logic.in_vacation(d, vacations_of(con, sid))]
+    if cutoff and excluded_dates is None:excluded_dates=[d for d in available if d<=cutoff]
     exceptions = subscriptiondates.validate(excluded_dates, available)
     closed = closed | set(exceptions)
     q = logic.quote(weekdays=weekdays, ym=ym, tariff=e["tariff"], prices={"fixed": pr["fixed"], "flex": pr["flex"]},
                     vacations=vacations_of(con, sid), prev_unresolved_absences=min(len(eligible), len(available) - len(exceptions)) if requested else 0, closed=closed,credit_limit=credit_limit,allow_fixed_credit=bool(special))
+    q['trial_cutoff']=cutoff
+    q['pricing_date']=on.isoformat()
     q["calendar_dates"] = available
     q["excluded_dates"] = exceptions
     q["credit_available"] = min(len(eligible), credit_limit)
@@ -384,11 +413,11 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
 
 
 def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id=None, tariff=None,
-                   excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None, group_action="transfer") -> dict:
+                   excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None, group_action="transfer", paid_date=None) -> dict:
     from . import program, transfer, smart
     smart.require(con, sid, "sale")
     e = sale_enrollment(con, sid, enrollment_id, group_id)
-    q = quote_for(con, sid, ym, enrollment_id, discount_id, tariff, excluded_dates, credit_requested, group_id, ofp_group_id)
+    q = quote_for(con, sid, ym, enrollment_id, discount_id, tariff, excluded_dates, credit_requested, group_id, ofp_group_id, paid_date)
     con.execute("SAVEPOINT sale_invoice")
     try:
         if e["id"] is None:
@@ -488,13 +517,14 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
     return {"id": sub_id, "quote": q}
 
 
-def payment_quote(con, sub_id):
-    """Сумма к оплате на сегодня; все временные изменения расчёта откатываются."""
+def payment_quote(con, sub_id, paid_date=None):
+    """Сумма к оплате на выбранную дату; временные изменения расчёта откатываются."""
     from . import program, pricing, money
+    on=sale_payment_day(paid_date)
     con.execute("SAVEPOINT payment_preview")
     try:
-        program.reprice(con,sub_id)
-        pricing.reprice(con,sub_id)
+        program.reprice(con,sub_id,on=on)
+        pricing.reprice(con,sub_id,on=on)
         row=con.execute("SELECT * FROM subscriptions WHERE id=? AND status!='cancelled'",(sub_id,)).fetchone()
         if not row:
             raise ApiError("Счёт не найден или отменён",404)
@@ -505,10 +535,21 @@ def payment_quote(con, sub_id):
         con.execute("RELEASE payment_preview")
 
 
-def pay_subscription(con, sub_id: int, user, method: str = "cash", amount=None) -> None:
+def pay_subscription(con, sub_id: int, user, method: str = "cash", amount=None, paid_date=None, request_id=None) -> None:
     from . import money
+    import hashlib
+    signature=hashlib.sha256(json.dumps([sub_id,method,amount,paid_date],ensure_ascii=False).encode()).hexdigest()
+    if request_id:
+        if not isinstance(request_id,str) or not 8<=len(request_id)<=100:raise ApiError("Обновите форму оплаты")
+        previous=con.execute("SELECT signature FROM manual_payment_requests WHERE request_key=?",(request_id,)).fetchone()
+        if previous:
+            if previous[0]!=signature:raise ApiError("Этот запрос оплаты уже использован с другими данными")
+            return
     try:
-        money.pay_subscription(con, sub_id, method, user, int(amount) if amount else None)
+        day=sale_payment_day(paid_date)
+        if day and method not in money.MANUAL_METHODS:raise ValueError("Для фактической оплаты выберите ручной способ; PayKeeper зачисляется автоматически")
+        payment_id=money.pay_subscription(con, sub_id, method, user, int(amount) if amount else None, paid_at=day.isoformat() if day else None)
+        if request_id:con.execute("INSERT INTO manual_payment_requests(request_key,signature,payment_id,created_at) VALUES (?,?,?,?)",(request_id,signature,payment_id,now_iso()))
     except ValueError as e:
         raise ApiError(str(e))
 

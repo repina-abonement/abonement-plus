@@ -23,6 +23,8 @@ MANUAL_METHODS = ('cash','card_branch','sber_qr_branch','tochka_qr_link','transf
 INTERNAL = ("unknown", "balance", "refund", "refund_pending")  # их не выбирают при приёме оплаты: ставит сама CRM
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS manual_payment_requests(request_key TEXT PRIMARY KEY,signature TEXT NOT NULL,payment_id INTEGER,created_at TEXT NOT NULL);
+
 CREATE TABLE IF NOT EXISTS payments (
     id INTEGER PRIMARY KEY,
     student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -270,18 +272,24 @@ def ledger(con, sid: int) -> list[dict]:
     return ev[::-1]
 
 
-def pay_subscription(con, sub_id: int, method: str, user: dict, amount: int | None = None) -> int:
+def pay_subscription(con, sub_id: int, method: str, user: dict, amount: int | None = None, paid_at: str | None = None) -> int:
     from . import pricing, program
-    program.reprice(con, sub_id)  # сборная: цена зависит от даты оплаты
-    pricing.reprice(con, sub_id)  # обычные группы: тоже (+5% и без скидки после 25 числа)
+    on=date.fromisoformat(paid_at[:10]) if paid_at else None
+    program.reprice(con, sub_id,on=on)  # фактическая дата оплаты
+    pricing.reprice(con, sub_id,on=on)  # обычные группы: тоже (+5% и без скидки после 25 числа)
     sub = con.execute("SELECT * FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
     if not sub or sub["status"] == "cancelled":
         raise ValueError("Счёт не найден или отменён")
     left = sub["price"] - balance(con, sub["student_id"])["covered"].get(sub_id, 0)
     if left <= 0:
         raise ValueError("Этот счёт уже оплачен")
-    return add_payment(con, sub["student_id"], amount or left, method, user, subscription_id=sub_id,
+    payment_id = add_payment(con, sub["student_id"], amount or left, method, user, subscription_id=sub_id,paid_at=paid_at,
                        comment=f"Абонемент на {logic.month_label(sub['month'])}" if sub["kind"] == "month" else "Разовое занятие")
+
+    if paid_at and con.execute("SELECT status FROM subscriptions WHERE id=?",(sub_id,)).fetchone()[0]=='paid':
+        latest=con.execute("SELECT MAX(paid_at) FROM payments WHERE subscription_id=? AND cancelled=0 AND confirmed=1",(sub_id,)).fetchone()[0]
+        con.execute("UPDATE subscriptions SET paid_at=? WHERE id=?",(latest or paid_at,sub_id))
+    return payment_id
 
 
 def cancel_payment(con, pid: int, user: dict) -> None:
