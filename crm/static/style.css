@@ -1860,3 +1860,5 @@ select:not([multiple]):not([size]){appearance:none;-webkit-appearance:none;paddi
 @media(max-width:900px){body.chat-fullscreen .toast{bottom:auto;top:calc(env(safe-area-inset-top) + 72px)}}
 
 .conv-muted svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.7}
+
+.sale-cal-day.has-trial{opacity:1;border-color:#cab4ee}.sale-trial-marker{display:block;flex-basis:100%;font-size:11px;line-height:1.4;text-align:center;color:#7041a5;background:#f1e8ff;border-radius:5px;padding:2px}.sale-trial-note{color:#7041a5;font-size:13px;margin:7px 0}

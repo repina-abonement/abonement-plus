@@ -26,6 +26,7 @@ class TrialCardTest(unittest.TestCase):
   server.historical_trial_mark(self.con,None,self.u,self.body()|{'visit_id':tid},{},str(self.sid))
   e=next(e for e in clientattendance.calendar(self.con,self.sid,'2026-11')['events'] if e.get('trial_visit_id')==tid)
   self.assertTrue(e['trial_editable']);self.assertEqual(e['status'],'present')
+  self.assertTrue(any(v['date']=='2026-11-16' for v in sv.student_detail(self.con,self.sid)['trial_visits']))
   self.assertIsNone(sv.get_student_row(self.con,self.sid)['trial_came'])
   self.assertEqual(self.con.execute('SELECT count(*) FROM attendance').fetchone()[0],0)
   self.assertTrue(any(r.get('historical_trial_id')==tid and r['trial_came']==1 for r in sv.journal(self.con,self.g,'2026-11-16')['rows']))

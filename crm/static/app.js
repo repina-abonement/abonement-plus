@@ -1536,15 +1536,16 @@ async function ensureRequired(sid, kind) {
   const info = await api("GET", `/api/students/${sid}/required?for=${kind}`).catch(() => null);
   return !info || !info.missing.some(k=>!info.optional?.includes(k)) || await askRequired(info);
 }
-function saleCalendarHtml(q, ym) {
+function saleCalendarHtml(q, ym, trialDates = []) {
+  const trials = new Set(trialDates.filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d)&&d.startsWith(ym+"-")));
   const dates = new Set(q.calendar_dates || q.dates), selected = new Set(q.dates), excluded = new Set(q.excluded_dates || []);
   const [year, month] = ym.split('-').map(Number), offset = (new Date(year, month - 1, 1).getDay() + 6) % 7;
   const cells = Array(offset).fill('<span></span>');
   for (let day = 1; day <= new Date(year, month, 0).getDate(); day++) {
-    const iso = `${ym}-${String(day).padStart(2,'0')}`, checked = q.single ? selected.has(iso) : !excluded.has(iso);
-    cells.push(dates.has(iso) ? `<label class="sale-cal-day ${checked ? 'selected' : q.single ? 'available' : 'excluded'}"><span>${day}</span><input type="${q.single ? 'radio' : 'checkbox'}" name="sale-lesson" data-sale-date="${iso}" ${checked ? 'checked' : ''} aria-label="Занятие ${dShort(iso)}"><small>${checked ? 'занятие' : q.single ? 'выбрать' : 'исключено'}</small></label>` : `<span class="sale-cal-day off">${day}</span>`);
+    const iso = `${ym}-${String(day).padStart(2,'0')}`, trial = trials.has(iso), badge = trial ? '<span class="sale-trial-marker">Пробное</span>' : '', checked = q.single ? selected.has(iso) : !excluded.has(iso);
+    cells.push(dates.has(iso) ? `<label class="sale-cal-day ${trial?'has-trial':''} ${checked ? 'selected' : q.single ? 'available' : 'excluded'}"><span>${day}</span><input type="${q.single ? 'radio' : 'checkbox'}" name="sale-lesson" data-sale-date="${iso}" ${checked ? 'checked' : ''} aria-label="Занятие ${dShort(iso)}"><small>${checked ? 'занятие' : q.single ? 'выбрать' : 'исключено'}</small>${badge}</label>` : `<span class="sale-cal-day off ${trial?'has-trial':''}">${day}${badge}</span>`);
   }
-  return `<div class="sale-calendar" id="sl-calendar"><b>${esc(monthLabel(ym))}</b><div class="small muted">${q.single ? 'Выберите одно занятие.' : 'Отмеченные дни входят в абонемент. Снимайте отметки только для согласованных исключений.'}</div><div class="sale-cal-grid">${WD.map(d=>`<b class="sale-cal-week">${d}</b>`).join('')}${cells.join('')}</div><div class="small">Выбрано занятий: <b>${q.dates.length}</b>${excluded.size ? ` · исключено: ${excluded.size}` : ''}</div></div>`;
+  return `<div class="sale-calendar" id="sl-calendar"><b>${esc(monthLabel(ym))}</b>${trials.size?`<div class="sale-trial-note">Пробное: ${[...trials].sort().map(dShort).join(", ")}</div>`:''}<div class="small muted">${q.single ? 'Выберите одно занятие.' : 'Отмеченные дни входят в абонемент. Снимайте отметки только для согласованных исключений.'}</div><div class="sale-cal-grid">${WD.map(d=>`<b class="sale-cal-week">${d}</b>`).join('')}${cells.join('')}</div><div class="small">Выбрано занятий: <b>${q.dates.length}</b>${excluded.size ? ` · исключено: ${excluded.size}` : ''}</div></div>`;
 }
 const clientGroupLabel = e => e.lesson_kind === 'arena' || /сборная.*арктика/i.test(e.group_name || e.name || '') ? 'Сборная Арктика' : e.group_name || e.name || '';
 async function openSell(d, reload) {
@@ -1618,7 +1619,7 @@ async function openSell(d, reload) {
       }
       const q=await api('GET',`/api/students/${id}/${single()?'single-quote':'quote'}?${params}`);if(request!==version||!isCurrent())return;
       total=q.total;if(q.single)singleDay=q.dates[0];q.calendar_picker=true;
-      $('#sl-q').innerHTML=(q.single?`<div class="total">${rub(q.total)}</div><div class="small">Разовое занятие · ${dShort(singleDay)}</div>`:q.program?programQuoteHtml(q):quoteHtml(q))+saleCalendarHtml(q,$('#sl-month').value);
+      $('#sl-q').innerHTML=(q.single?`<div class="total">${rub(q.total)}</div><div class="small">Разовое занятие · ${dShort(singleDay)}</div>`:q.program?programQuoteHtml(q):quoteHtml(q))+saleCalendarHtml(q,$('#sl-month').value,[...(d.trial_visits||[]).map(v=>v.date),(d.student.trial_at||'').slice(0,10)]);
       $('#sl-credit-box').hidden=!q.credit_available;$('#sl-credit-info').textContent=q.credit_available?`(до ${q.credit_available} занятий)`:'';
       $('#sl-calendar').onchange=e=>{const day=e.target.dataset.saleDate;if(!day)return;if(single()){singleDay=day;quote();return}if(!e.target.checked&&!$('#sl-calendar').querySelector('input:checked')){e.target.checked=true;return toast('Оставьте хотя бы одно занятие',true)}if(e.target.checked)exclusions.delete(day);else exclusions.add(day);quote()};busy(total<=0);
     }catch(e){if(request===version&&isCurrent())$('#sl-q').textContent=e.message}

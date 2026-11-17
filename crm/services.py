@@ -897,6 +897,7 @@ def student_detail(con, sid: int) -> dict:
                                      (sid, (today() - timedelta(days=92)).isoformat()))),
     }
     from . import smart
+    out["trial_visits"] = _rows(con.execute("SELECT substr(visit_at,1,10) AS date,group_id,came FROM erp_trial_visits WHERE student_id=? ORDER BY visit_at DESC LIMIT 120", (sid,)))
     out["lead_score"] = smart.lead_score(con, s)
     out["next_step"] = smart.next_step(con, s, out)
     out["stage_tip"] = smart.tips(con).get(s["stage"]) if s["funnel"] == "sales" else None

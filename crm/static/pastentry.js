@@ -43,7 +43,7 @@ async function openPastEntry(d,root,reload) {
           const trialCutoff=f.record_trial.checked?f.trial_date.value:existingDay;
           const excluded=c.dates.filter(day=>trialCutoff&&day<=trialCutoff);
           const selected=c.dates.filter(day=>!excluded.includes(day));
-          return `<h4>${esc(pastGroupLabel(groups.find(g=>g.id===c.group_id)||{name:c.group,active:1}))}</h4>`+saleCalendarHtml({calendar_dates:c.dates,dates:selected,excluded_dates:excluded},f.month.value)
+          return `<h4>${esc(pastGroupLabel(groups.find(g=>g.id===c.group_id)||{name:c.group,active:1}))}</h4>`+saleCalendarHtml({calendar_dates:c.dates,dates:selected,excluded_dates:excluded},f.month.value,[trialCutoff,...(d.trial_visits||[]).map(v=>v.date)])
             .replace('id="sl-calendar"',`data-past-component="${c.group_id}"`)
             .replaceAll('name="sale-lesson"',`name="past-lesson-${c.group_id}"`)
             .replace(/data-sale-date="([^"]+)"/g,(_,day)=>`data-past-lesson data-group="${c.group_id}" value="${day}"`)
