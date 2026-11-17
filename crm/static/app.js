@@ -44,9 +44,9 @@ function askRequired(need) {
     const wrap = document.createElement("div");
     wrap.className = "need-wrap";
     wrap.innerHTML = `<form class="need-card"><h3>${need.kind === "sale" ? "Перед продажей абонемента" : "Перед записью на пробное"}</h3>
-      <p class="small muted">${need.kind === "sale" ? "Заполните данные клиента. На почту PayKeeper пришлёт родителю чек" : "Уточните у родителя и заполните. Без этого на пробное не записать"}</p>
-      ${need.fields.map((k) => `<div class="field ${need.missing.includes(k) ? "need-miss" : ""}"><label>${esc(need.labels[k])}${need.missing.includes(k) ? " · нужно заполнить" : ""}</label>
-        <input name="${k}" type="${types[k]}" value="${esc(need.values[k] || "")}" placeholder="${esc(ph[k] || "")}" ${k === "email" ? 'autocomplete="off"' : ""} required></div>`).join("")}
+      <p class="small muted">${need.kind === "sale" ? "Заполните данные клиента. Если почты пока нет, её можно добавить позже" : "Уточните у родителя и заполните. Без этого на пробное не записать"}</p>
+      ${need.fields.map((k) => `<div class="field ${need.missing.includes(k)&&!need.optional?.includes(k) ? "need-miss" : ""}"><label>${esc(need.labels[k])}${need.optional?.includes(k) ? " · можно позже" : need.missing.includes(k) ? " · нужно заполнить" : ""}</label>
+        <input name="${k}" type="${types[k]}" value="${esc(need.values[k] || "")}" placeholder="${esc(ph[k] || "")}" ${k === "email" ? 'autocomplete="off"' : ""} ${need.optional?.includes(k)?"":"required"}></div>`).join("")}
       <div class="need-err small"></div>
       <div class="row" style="gap:10px;margin-top:6px"><button class="btn primary" style="flex:1">Сохранить и продолжить</button><button type="button" class="btn" data-ncancel style="flex:0 0 auto">Отмена</button></div>
       <button type="button" class="btn ghost" data-nask style="width:100%;margin-top:8px">💬 Данных нет: попросить у родителя</button></form>`;
@@ -1534,7 +1534,7 @@ function quoteHtml(q) {
 /* перед продажей и ссылкой на оплату: все данные клиента и почта для чека */
 async function ensureRequired(sid, kind) {
   const info = await api("GET", `/api/students/${sid}/required?for=${kind}`).catch(() => null);
-  return !info || !info.missing.length || await askRequired(info);
+  return !info || !info.missing.some(k=>!info.optional?.includes(k)) || await askRequired(info);
 }
 function saleCalendarHtml(q, ym) {
   const dates = new Set(q.calendar_dates || q.dates), selected = new Set(q.dates), excluded = new Set(q.excluded_dates || []);

@@ -323,7 +323,7 @@ def merge_families(con, keep: int, drop: int, user: dict) -> dict:
 
 # ---------------- обязательные данные (Юлия, 31.10) ----------------
 # Перед записью на пробное: имя и фамилия ребёнка, дата рождения, имя и телефон родителя.
-# Перед продажей абонемента и ссылкой на оплату: ещё почта родителя (туда PayKeeper шлёт чек). Без исключений.
+# Почта нужна для чека/запроса данных, но с 17.11 не блокирует продажу; её можно указать позже.
 
 import re as _re
 
@@ -360,7 +360,7 @@ def required_info(con, sid: int, kind: str) -> dict:
         miss.append("email")
     return {"kind": kind, "student_id": sid, "missing": miss, "values": vals,
             "fields": ["child_name", "birth", "parent_name", "phone"] + (["email"] if kind == "sale" else []),
-            "labels": FIELD_LABELS}
+            "labels": FIELD_LABELS, "optional": ["email"] if kind == "sale" else []}
 
 
 REQUIRE = True  # старые автотесты выключают проверку (tests/test_crm.py), её проверяет tests/test_required.py
@@ -370,9 +370,11 @@ def require(con, sid: int, kind: str):
     if not REQUIRE:
         return
     info = required_info(con, sid, kind)
-    if info["missing"]:
+    blocking = [k for k in info["missing"] if not (kind == "sale" and k == "email")]
+    info["optional"] = ["email"] if kind == "sale" else []
+    if blocking:
         from .services import ApiError
-        what = ", ".join(FIELD_LABELS[k].lower() for k in info["missing"])
+        what = ", ".join(FIELD_LABELS[k].lower() for k in blocking)
         msg = ("Чтобы записать на пробное" if kind == "trial" else "Чтобы продать абонемент") + f", заполните: {what}"
         raise ApiError(msg, 422, {"need": info})
 
@@ -395,7 +397,7 @@ def fill_required(con, sid: int, data: dict, user: dict):
         if not (date(2000, 1, 1) < b < date.today()):
             raise ApiError("Проверьте дату рождения")
     email = str(data.get("email", "") or "").strip()
-    if "email" in data and not EMAIL_RE.match(email):
+    if "email" in data and email and not EMAIL_RE.match(email):
         raise ApiError("Проверьте почту: например, ivanova@mail.ru")
     phone = str(data.get("phone", "") or "").strip()
     if "phone" in data and len(normalize_phone(phone)) < 11:

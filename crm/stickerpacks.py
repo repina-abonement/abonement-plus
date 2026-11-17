@@ -100,3 +100,45 @@ def catalog(con):
          'image': '/api/sticker-image?t=' + r['id']}
         for r in con.execute('SELECT id,emoji,animated FROM custom_stickers WHERE pack=? ORDER BY rowid', (p['name'],))]}
         for p in con.execute('SELECT name,title FROM sticker_packs ORDER BY rowid')]}
+
+
+def upload_image(con, title, encoded):
+    """Browser converts supported images to PNG; no Telegram access or credentials."""
+    import base64, hashlib, struct, zlib
+    from .comms import CommsError
+    title = str(title or "").strip()
+    if not title or len(title) > 80:
+        raise CommsError('Название набора: от 1 до 80 символов')
+    if not isinstance(encoded, str) or len(encoded) > 1_400_000:
+        raise CommsError('Стикер слишком большой')
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (ValueError, TypeError):
+        raise CommsError('Не удалось прочитать изображение') from None
+    if len(raw) > 1_000_000 or len(raw) < 45 or raw[:8] != b'\x89PNG\r\n\x1a\n' or raw[12:16] != b'IHDR':
+        raise CommsError('Выберите изображение PNG, WEBP, JPG или GIF')
+    width, height = struct.unpack('>II', raw[16:24])
+    if not (0 < width <= 512 and 0 < height <= 512):
+        raise CommsError('Максимальный размер стикера 512 × 512')
+    offset = 8; ended = False
+    while offset < len(raw):
+        if offset + 12 > len(raw): raise CommsError('Изображение повреждено')
+        length = struct.unpack('>I', raw[offset:offset+4])[0]
+        end = offset + 12 + length
+        if end > len(raw) or zlib.crc32(raw[offset+4:end-4]) & 0xffffffff != struct.unpack('>I',raw[end-4:end])[0]:
+            raise CommsError('Изображение повреждено')
+        if raw[offset+4:offset+8] == b'IEND':
+            ended = end == len(raw); break
+        offset = end
+    if not ended: raise CommsError('Изображение повреждено')
+    pack = 'upload_' + hashlib.sha256(title.casefold().encode()).hexdigest()[:24]
+    file_id = 'upload:' + hashlib.sha256(raw).hexdigest()
+    existing = con.execute('SELECT id FROM custom_stickers WHERE pack=? AND file_id=?', (pack,file_id)).fetchone()
+    if existing: return {'id':'custom:'+existing[0], 'added':0, 'name':pack}
+    if con.execute('SELECT count(*) FROM custom_stickers WHERE pack=?',(pack,)).fetchone()[0] >= 120:
+        raise CommsError('В наборе уже 120 стикеров')
+    sticker_id = secrets.token_hex(16)
+    con.execute('INSERT INTO sticker_packs(name,title) VALUES (?,?) ON CONFLICT(name) DO NOTHING',(pack,title))
+    con.execute('INSERT INTO custom_stickers(id,pack,file_id,emoji,animated,image,mime) VALUES (?,?,?,?,0,?,?)',
+                (sticker_id,pack,file_id,'',raw,'image/png'))
+    return {'id':'custom:'+sticker_id, 'added':1, 'name':pack}

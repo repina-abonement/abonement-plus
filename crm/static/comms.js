@@ -1048,7 +1048,7 @@ function wireMessagePicker(selector, sendSticker, context={}) {
     <div class="picker-options" data-picker-panel="scripts" hidden></div>
     <div class="chips picker-options" data-picker-panel="emoji" hidden>${["😊", "😀", "😄", "😉", "😍", "🥰", "😘", "😎", "🤔", "😢", "😭", "😂", "👍", "👏", "🙏", "❤️", "🎉", "⚽", "✅", "🔥", "💪"].map(x => `<button type="button" class="btn sm" data-emoji="${esc(x)}">${x}</button>`).join("")}</div>
     <div class="picker-options" data-picker-panel="sticker" hidden><div class="sticker-grid">${stickers.map(([id, code, label]) => `<button type="button" class="sticker-choice" data-sticker="${id}" title="Отправить: ${label}" aria-label="Отправить стикер: ${label}"><img src="https://raw.githubusercontent.com/jdecked/twemoji/v15.1.0/assets/72x72/${code}.png" width="56" height="56" alt="${label}"><span>${label}</span></button>`).join("")}</div><p class="small muted">Базовые стикеры: Twemoji, CC BY 4.0.</p><div data-custom-packs></div>
-      ${S.user?.role === "admin" ? `<details class="sticker-import"><summary>Добавить свой набор Telegram</summary><label>Ссылка на набор<input data-pack-url value="https://t.me/addstickers/Footbolika_Olya" placeholder="https://t.me/addstickers/Название"></label><button class="btn sm" type="button" data-pack-import>Добавить набор</button><div class="small muted" data-pack-status>Импорт по ссылке использует Telegram Bot API. Для переписки через Wazzup бот и мост не нужны. Уже добавленные стикеры доступны всей команде.</div></details>` : ""}
+      ${S.user?.role === "admin" ? `<div class="sticker-upload"><label>Название своего набора<input data-upload-pack-title value="Свои стикеры" maxlength="80"></label><label class="btn sm">Загрузить картинки<input type="file" data-upload-stickers accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden></label><p class="small muted">PNG, WEBP, JPG или GIF · можно выбрать несколько · анимация сохранится как статичная картинка · бот не нужен</p><div data-upload-status class="small muted" aria-live="polite"></div></div><details class="sticker-import"><summary>Добавить свой набор Telegram</summary><label>Ссылка на набор<input data-pack-url value="https://t.me/addstickers/Footbolika_Olya" placeholder="https://t.me/addstickers/Название"></label><button class="btn sm" type="button" data-pack-import>Добавить набор</button><div class="small muted" data-pack-status>Импорт по ссылке использует Telegram Bot API. Для переписки через Wazzup бот и мост не нужны. Уже добавленные стикеры доступны всей команде.</div></details>` : ""}
       <p class="small muted">Свои наборы: в Telegram-боте — настоящие стикеры с анимацией. Через Wazzup/MAX — изображения или статичные превью; поддержка WEBP зависит от канала.</p></div>`;
   panel.querySelectorAll("[data-picker-tab]").forEach(b => {
     b.onmousedown = e => e.preventDefault();
@@ -1146,6 +1146,24 @@ function wireMessagePicker(selector, sendSticker, context={}) {
       await loadCustomPacks(); status.textContent = `Набор добавлен: ${result.total} стикеров`;
     } catch (e) { status.textContent = e.message; }
     finally { importer.disabled = false; }
+  };
+  const uploads=panel.querySelector('[data-upload-stickers]');
+  if(uploads)uploads.onchange=async()=>{
+    const files=Array.from(uploads.files||[]),status=panel.querySelector('[data-upload-status]'),title=panel.querySelector('[data-upload-pack-title]').value.trim();
+    if(!files.length)return;if(!title){status.textContent='Укажите название набора';uploads.value='';return}
+    if(files.length>120){status.textContent='Выберите не больше 120 картинок';uploads.value='';return}
+    uploads.disabled=true;let added=0,duplicates=0,failed=0;
+    for(let i=0;i<files.length;i++){
+      status.textContent=`Загружаю ${i+1} из ${files.length}`;
+      try{
+        const file=files[i];if(file.size>10_000_000||!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type))throw new Error('Выберите PNG, WEBP, JPG или GIF размером до 10 МБ');
+        const image=await createImageBitmap(file);let data;
+        try{const scale=Math.min(1,512/image.width,512/image.height),canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.width*scale));canvas.height=Math.max(1,Math.round(image.height*scale));canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);data=canvas.toDataURL('image/png').split(',')[1]}finally{image.close()}
+        const r=await api('POST','/api/sticker-packs/upload',{title,data});if(r.added)added++;else duplicates++;
+      }catch(error){failed++;status.dataset.lastError=error.message}
+    }
+    status.textContent=`Добавлено: ${added}${duplicates?`, уже были: ${duplicates}`:''}${failed?`, не загружено: ${failed} · ${status.dataset.lastError}`:''}`;
+    uploads.disabled=false;uploads.value='';try{await loadCustomPacks()}catch(error){fail(error)}
   };
   panel.addEventListener("click", async (e) => {
     const b = e.target.closest("[data-sticker]"); if (!b || b.disabled) return;

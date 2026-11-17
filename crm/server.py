@@ -3111,6 +3111,15 @@ def sticker_pack_add(con, h, user, body, q):
     return cx(stickerpacks.import_pack, con, body.get("url") or "")
 
 
+@route("POST", "/api/sticker-packs/upload", role="admin")
+def sticker_pack_upload(con, h, user, body, q):
+    from . import stickerpacks
+    result = cx(stickerpacks.upload_image, con, body.get("title"), body.get("data"))
+    if result["added"]:
+        sv.audit(con, user, "stickers.upload", result["name"])
+    return result
+
+
 @route("GET", "/api/sticker-image", role="public")
 def sticker_image(con, h, user, body, q):
     row = con.execute("SELECT image,mime FROM custom_stickers WHERE id=?", (q.get("t") or "",)).fetchone()
@@ -3329,7 +3338,7 @@ class Handler(BaseHTTPRequestHandler):
                     if method != "DELETE" and "application/json" not in (self.headers.get("Content-Type") or ""):
                         raise ApiError("Ожидается JSON", 415)
                     n = int(self.headers.get("Content-Length") or 0)
-                    if n > (21_000_000 if url.path.startswith("/api/offers") else 40_000_000 if url.path.startswith("/api/erp") else 80_000_000 if url.path.startswith("/api/import/telegram") else 8_000_000 if re.fullmatch(r'/api/conversations/[0-9]+/attachments',url.path) else 8_000_000 if url.path.startswith("/api/memos") else 14_000_000 if url.path.startswith("/api/posts") else 1_000_000):
+                    if n > (1_500_000 if url.path == "/api/sticker-packs/upload" else 21_000_000 if url.path.startswith("/api/offers") else 40_000_000 if url.path.startswith("/api/erp") else 80_000_000 if url.path.startswith("/api/import/telegram") else 8_000_000 if re.fullmatch(r'/api/conversations/[0-9]+/attachments',url.path) else 8_000_000 if url.path.startswith("/api/memos") else 14_000_000 if url.path.startswith("/api/posts") else 1_000_000):
                         raise ApiError("Слишком большой запрос", 413)
                     if n:
                         body = json.loads(self.rfile.read(n) or b"{}")

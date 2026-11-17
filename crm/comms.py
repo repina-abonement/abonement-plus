@@ -1025,11 +1025,11 @@ def send_sticker(con, cid: int, sticker: str, user: dict) -> dict:
         if demo:
             ext = "demo" + uuid.uuid4().hex
         elif conv["channel"] == "telegram":
-            payload = {"chat_id": int(conv["external_id"]), **({"sticker": custom["file_id"]} if custom else {"photo": url})}
+            payload = {"chat_id": int(conv["external_id"]), **({"sticker": custom["file_id"]} if custom and not custom["file_id"].startswith("upload:") else {"photo": url})}
             meta = json.loads(conv["meta"] or "{}")
             if meta.get("biz"):
                 payload["business_connection_id"] = meta["biz"]
-            ext = str(tg_call(con, "sendSticker" if custom else "sendPhoto", payload).get("message_id"))
+            ext = str(tg_call(con, "sendSticker" if custom and not custom["file_id"].startswith("upload:") else "sendPhoto", payload).get("message_id"))
         elif conv["channel"] == "max":
             js = max_call(con, "POST", "messages", query={"chat_id": conv["external_id"]},
                           data={"attachments": [{"type": "image", "payload": {"url": url}}]})
