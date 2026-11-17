@@ -68,7 +68,7 @@ def calendar(con, sid, ym):
         if (day, gid) not in marks:
             events.pop((day, gid, 'subscription'), None)
         events[(day, gid, 'trial', trial['id'])] = {'date':day,'group_id':gid,'kind':'trial',
-            'status':'present' if trial['came'] else 'absent','trial_time':trial['visit_at'][11:16]}
+            'status':'present' if trial['came'] else 'absent','trial_time':trial['visit_at'][11:16], 'trial_visit_id':trial['id']}
     result=[]
     for event in events.values():
         g=groups.get(event['group_id'],{})
@@ -76,6 +76,8 @@ def calendar(con, sid, ym):
         event.update(group=schedule.on(con,g,day).get('name','') if g else '',branch=g.get('branch',''),time=logic.group_time(schedule.on(con,g,day),day.weekday()) if g else '',future=event['date']>sv.today().isoformat())
         result.append(event)
     for event in result:
+        if event['kind']=='trial':
+            event['trial_editable'] = bool(event.get('trial_visit_id')) or (event['date']==trial_day and event['group_id']==(student.get('trial_group_id') or student['group_id']) and not event.get('trial_time'))
         if event.get('trial_time'):
             event['time'] = event['trial_time']
     result.sort(key=lambda x:(x['date'],x['time'],x['kind']))

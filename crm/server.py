@@ -2482,12 +2482,43 @@ def dashboard(con, h, user, body, q):
 @route("POST", "/api/students/{sid}/trial")
 def trial_mark(con, h, user, body, q, sid):
     s = sv.get_student_row(con, int(sid))
-    if s["group_id"]:
-        coach_guard(con, user, s["group_id"])
+    group_id = s["trial_group_id"] or s["group_id"]
+    if group_id:
+        coach_guard(con, user, group_id)
+    if "expected_date" in body:
+        if (s["trial_at"] or "")[:10] != body["expected_date"] or group_id != body.get("expected_group_id"):
+            raise ApiError("Пробное занятие изменилось. Обновите карточку")
+        if body["expected_date"] > sv.today().isoformat():
+            raise ApiError("Нельзя отметить будущее пробное занятие")
+        if not isinstance(body.get("came"), bool):
+            raise ApiError("Выберите: был или пропуск")
     if body.get("came") is None:  # «Встречаю детей»: сняли отметку «пришёл»
         sv.clear_trial_mark(con, int(sid), user)
     else:
         sv.mark_trial(con, int(sid), bool(body.get("came")), user)
+    return {"ok": True}
+
+
+@route("POST", "/api/students/{sid}/trial-visit", role="operator")
+def historical_trial_mark(con, h, user, body, q, sid):
+    row = con.execute("SELECT * FROM erp_trial_visits WHERE id=? AND student_id=?",
+                      (int(body.get("visit_id") or 0), int(sid))).fetchone()
+    if not row:
+        raise ApiError("Пробное занятие не найдено")
+    day = row["visit_at"][:10]
+    if day != body.get("expected_date") or row["group_id"] != body.get("expected_group_id"):
+        raise ApiError("Пробное занятие изменилось. Обновите карточку")
+    if day > sv.today().isoformat():
+        raise ApiError("Нельзя отметить будущее пробное занятие")
+    if not isinstance(body.get("came"), bool):
+        raise ApiError("Выберите: был или пропуск")
+    came = int(body["came"])
+    if row["came"] != came:
+        con.execute("UPDATE erp_trial_visits SET came=? WHERE id=?", (came, row["id"]))
+        student = sv.get_student_row(con, int(sid))
+        if (student["trial_at"] or "")[:10] == day and (student["trial_group_id"] or student["group_id"]) == row["group_id"]:
+            sv.mark_trial(con, int(sid), bool(came), user)
+        sv.log(con, int(sid), "Пробное " + day + (": был" if came else ": пропуск"), user, "attendance")
     return {"ok": True}
 
 
