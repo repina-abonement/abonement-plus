@@ -45,7 +45,7 @@ def main():
     q = sv.quote_for(con, b, "2026-12")
     check(q["discount"] and q["total"] == 12150 - 2430, "До 25-го брату скидка 20% от обычной цены")
     sv.today = lambda: date(2026, 11, 26)
-    q = sv.quote_for(con, b, "2026-12", discount_id=con.execute("SELECT id FROM discounts WHERE name LIKE 'Многодет%'").fetchone()[0])
+    q = sv.quote_for(con, b, "2026-12", discount_id=con.execute("SELECT id FROM discounts WHERE name LIKE 'Многодет%'").fetchone()[0],user=OP)
     check(q["discount"] is None and q["total"] == 12758, "После 25-го ни автоматической, ни ручной скидки, только +5%")
 
     print("Тариф в окне продажи")

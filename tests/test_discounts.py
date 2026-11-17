@@ -13,7 +13,7 @@ s2 = sv.create_student(con, {"name": "Катя", "family_id": fam, "funnel": "me
 assert sv.quote_for(con, s1, "2026-12")["discount"] is None, "первому ребёнку скидки нет"
 assert sv.quote_for(con, s2, "2026-12")["discount"]["percent"] == 20, "второму 20%"
 many = con.execute("SELECT id FROM discounts WHERE name LIKE 'Многодет%'").fetchone()[0]
-assert sv.quote_for(con, s2, "2026-12", None, many)["discount"]["percent"] == 20, "не суммируются, берём большую"
-assert sv.quote_for(con, s1, "2026-12", None, many)["discount"]["percent"] == 10, "многодетным 10%"
+assert sv.quote_for(con, s2, "2026-12", None, many,user=u)["discount"]["percent"] == 10, "ручная скидка заменяет автоматическую"
+assert sv.quote_for(con, s1, "2026-12", None, many,user=u)["discount"]["percent"] == 10, "многодетным 10%"
 assert con.execute("SELECT value FROM settings WHERE key='price_single'").fetchone()[0] == "2500"
 print("ok")

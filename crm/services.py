@@ -317,7 +317,7 @@ def first_sale_trial_date(con,sid,ym):
     return max(dates,default='')
 
 
-def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None, paid_date=None) -> dict:
+def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None, paid_date=None, user=None) -> dict:
     get_student_row(con, sid)
     e = sale_enrollment(con, sid, enrollment_id, group_id)
     if tariff is not None:
@@ -346,9 +346,9 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
     on = sale_payment_day(paid_date) or today()
     cutoff = first_sale_trial_date(con,sid,ym)
     if program.program_of_group(con, e["group_id"]):
-        q = program.quote(con, sid, ym, e, discount_id=discount_id, on=on, excluded_dates=excluded_dates, selection={"tariff": tariff, "ofp_group_id": ofp_group_id} if tariff is not None else None, validate_selection=True)
+        q = program.quote(con, sid, ym, e, discount_id=discount_id, on=on, excluded_dates=excluded_dates, selection={"tariff": tariff, "ofp_group_id": ofp_group_id} if tariff is not None else None, validate_selection=True,user=user)
         if cutoff and excluded_dates is None:
-            q=program.quote(con,sid,ym,e,discount_id=discount_id,on=on,excluded_dates=[d for d in q['calendar_dates'] if d<=cutoff],selection={"tariff":tariff,"ofp_group_id":ofp_group_id} if tariff is not None else None,validate_selection=True)
+            q=program.quote(con,sid,ym,e,discount_id=discount_id,on=on,excluded_dates=[d for d in q['calendar_dates'] if d<=cutoff],selection={"tariff":tariff,"ofp_group_id":ofp_group_id} if tariff is not None else None,validate_selection=True,user=user)
         q['trial_cutoff']=cutoff
         q['pricing_date']=on.isoformat()
         return q
@@ -394,14 +394,12 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
     q["pricing"] = {"late": late, "late_pct": pr["late_pct"], "deadline": dl.isoformat(), "newcomer": newcomer,
                     "late_total": q["total"] + pricing.late_fee(q["total"], pr["late_pct"])}
     from . import money
-    manual = None
-    if discount_id and not late:
-        r = con.execute("SELECT * FROM discounts WHERE id=? AND active=1", (int(discount_id),)).fetchone()
-        manual = dict(r) if r else None
-    disc = None if late else money.best_discount([manual, *money.auto_discounts(con, sid, on)])  # скидки не суммируются, берём большую
+    disc=money.choose_discount(con,sid,on,discount_id,user)
+    if late:
+        disc=None
     total, off = money.apply_discount(total, disc)
     q["discount"] = {"id": disc["id"], "name": disc["name"], "percent": disc["percent"], "amount": off,
-                     "auto": disc["rule"] != "manual"} if disc else None
+                     "auto": discount_id in (None,'')} if disc else None
     q["total"] = total
     q["waitlist"] = con.execute("SELECT COUNT(*) FROM waitlist WHERE group_id=? AND status IN ('queued','offered')",
                                 (e["group_id"],)).fetchone()[0] if fee else 0
@@ -417,7 +415,7 @@ def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id
     from . import program, transfer, smart
     smart.require(con, sid, "sale")
     e = sale_enrollment(con, sid, enrollment_id, group_id)
-    q = quote_for(con, sid, ym, enrollment_id, discount_id, tariff, excluded_dates, credit_requested, group_id, ofp_group_id, paid_date)
+    q = quote_for(con, sid, ym, enrollment_id, discount_id, tariff, excluded_dates, credit_requested, group_id, ofp_group_id, paid_date,user=user)
     con.execute("SAVEPOINT sale_invoice")
     try:
         if e["id"] is None:
@@ -480,7 +478,7 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
                            (sid,ym,e["id"],e["group_id"])).fetchone()
     if existing:
         raise ApiError(f"На {logic.month_label(ym)} в группу {e['group_name']} уже есть абонемент")
-    q = quote or quote_for(con, sid, ym, e["id"], discount_id, tariff, excluded_dates, credit_requested)
+    q = quote or quote_for(con, sid, ym, e["id"], discount_id, tariff, excluded_dates, credit_requested,user=user)
     d = q.get("discount") or {}
     from . import money
     available_before = max(0, money.balance(con,sid)['deposit'])
@@ -929,7 +927,7 @@ def student_detail(con, sid: int) -> dict:
         "ledger": __import__("crm.money", fromlist=["ledger"]).ledger(con, sid),
         "family_kids": _rows(con.execute("SELECT id, name FROM students WHERE family_id=? AND id!=? AND archived=0", (s["family_id"], sid))),
         "payments": __import__("crm.money",fromlist=["payments_for_student"]).payments_for_student(con,sid),
-        "discounts": _rows(con.execute("SELECT id, name, percent, rule FROM discounts WHERE active=1 AND rule='manual' ORDER BY name")),
+        "discounts": _rows(con.execute("SELECT id, name, percent, rule FROM discounts WHERE active=1 ORDER BY name")),
         "stage_label": stage_label,
         "next_month": logic.shift_month(cur, 1), "cur_month": cur,
         "program": _program_out(con, sid),

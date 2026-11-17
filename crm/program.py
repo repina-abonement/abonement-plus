@@ -189,7 +189,7 @@ def is_newcomer(con, sid: int, pid: int, ym: str) -> bool:
 
 # ---------------- расчёт абонемента ----------------
 
-def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = None, excluded_dates=None, selection=None, validate_selection=False) -> dict:
+def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = None, excluded_dates=None, selection=None, validate_selection=False,user=None) -> dict:
     from . import money, subscriptiondates
     on = on or date.today()
     g = con.execute("SELECT * FROM groups WHERE id=?", (e["group_id"],)).fetchone()
@@ -240,18 +240,16 @@ def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = N
     late_total = len(arena_dates) * la + len(ofp_dates) * lo     # при оплате после срока
     use_a, use_o = (la, lo) if late else (pa, po)
     gross = len(arena_dates) * use_a + len(ofp_dates) * use_o
-    # скидки: только «второму ребёнку», только при оплате до срока, одна
+    # Автоматически — второму ребёнку; ручной выбор заменяет её. Только одна скидка до срока.
     disc, off, disc_note = None, 0, ""
-    if discount_id:
-        r = con.execute("SELECT * FROM discounts WHERE id=? AND active=1", (int(discount_id),)).fetchone()
-        if r and r["rule"] != "sibling":
-            disc_note = "В сборной действует только скидка второму ребёнку"
-    sib = next((d for d in money.auto_discounts(con, sid, on) if d["rule"] == "sibling"), None)
+    automatic=[d for d in money.auto_discounts(con,sid,on) if d['rule']=='sibling']
+    chosen=money.choose_discount(con,sid,on,discount_id,user,candidates=automatic)
+    sib=chosen
     if sib and not late:
-        disc = sib
-        off = math.floor(base * int(sib["percent"]) / 100 + 1e-9)
+        disc=sib
+        off=math.floor(base*int(sib['percent'])/100+1e-9)
     elif sib and late:
-        disc_note = "Оплата после срока: скидка второму ребёнку не действует"
+        disc_note='Оплата после срока: скидки не действуют'
     total = gross - off
     ofp_g = con.execute("SELECT name, weekdays FROM groups WHERE id=?", (ofp_gid,)).fetchone() if ofp_gid else None
     lines = [{"label": f"Арктика{' (только Арктика)' if tariff == 'arena_only' else ''}", "n": len(arena_dates), "price": use_a,
@@ -264,7 +262,7 @@ def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = N
         "month": ym, "month_label": logic.month_label(ym), "per_lesson": use_a, "lessons_total": len(arena_dates) + len(ofp_dates),
         "vacation_lessons": 0, "lessons_paid": len(arena_dates) + len(ofp_dates), "base": base, "credit_lessons": 0, "credit": 0,
         "credit_absence_ids": [], "credit_absence_dates": [], "total": total, "late_fee": (gross - base) if late else 0,
-        "discount": {"id": disc["id"], "name": disc["name"], "percent": disc["percent"], "amount": off, "auto": True} if disc else None,
+        "discount": {"id": disc["id"], "name": disc["name"], "percent": disc["percent"], "amount": off, "auto": discount_id in (None,'')} if disc else None,
         "tariff": tariff, "group": e.get("group_name") or g["name"], "enrollment_id": e["id"], "days_label": "",
         "calendar_dates": available, "excluded_dates": exceptions,
         "components": [{"kind":"arena","group_id":g["id"],"rate":pa,"dates":[d.isoformat() for d in arena_dates]},

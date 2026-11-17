@@ -1283,7 +1283,7 @@ def vacation_del(con, h, user, body, q, vid):
 
 @route("GET", "/api/students/{sid}/quote", role="operator")
 def quote(con, h, user, body, q, sid):
-    return sv.quote_for(con, int(sid), q.get("month"), q.get("enrollment_id"), q.get("discount_id"), q.get("tariff"), (q.get("excluded_dates") or []) if q.get("dates_selected")=="1" else q.get("excluded_dates"), q.get("credit_requested"), q.get("group_id"), q.get("ofp_group_id"),q.get("paid_date"))
+    return sv.quote_for(con, int(sid), q.get("month"), q.get("enrollment_id"), q.get("discount_id"), q.get("tariff"), (q.get("excluded_dates") or []) if q.get("dates_selected")=="1" else q.get("excluded_dates"), q.get("credit_requested"), q.get("group_id"), q.get("ofp_group_id"),q.get("paid_date"),user=user)
 
 
 @route("POST", "/api/students/{sid}/invoice", role="operator")
@@ -2747,7 +2747,7 @@ def waitlist_funnel(con, h, user, body, q):
 @route("GET", "/api/students/{sid}/past-entry-options", role="operator")
 def past_entry_options(con,h,user,body,q,sid):
     from . import historyentry
-    return historyentry.options(con,int(sid),q.get('group_id'),q.get('month'),q.get('tariff') or 'fixed',q.get('ofp_group_id'),q.get('start_date'),q.get('paid_date'),q.get('trial_date'),q.get('discount_id'))
+    return historyentry.options(con,int(sid),q.get('group_id'),q.get('month'),q.get('tariff') or 'fixed',q.get('ofp_group_id'),q.get('start_date'),q.get('paid_date'),q.get('trial_date'),q.get('discount_id'),user=user)
 
 
 @route("POST", "/api/students/{sid}/past-entry", role="operator")

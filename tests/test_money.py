@@ -68,7 +68,7 @@ def main():
         money.date = date
     con.execute("INSERT INTO discounts(name, percent, created_at) VALUES ('Многодетным', 10, '2026-10-20')")
     did = con.execute("SELECT id FROM discounts WHERE name='Многодетным'").fetchone()[0]
-    q3 = sv.quote_for(con, lead, "2026-12", None, did)
+    q3 = sv.quote_for(con, lead, "2026-12", None, did,user=ADMIN)
     check(q3["discount"]["amount"] == round((q3["total"] + q3["discount"]["amount"]) * 0.1), "Ручная скидка 10% применяется")
 
     print("Разовое занятие")

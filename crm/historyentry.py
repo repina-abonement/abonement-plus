@@ -25,7 +25,7 @@ def now():
     return datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None)
 
 
-def options(con,sid,group_id=None,ym=None,tariff='fixed',ofp_group_id=None,start_date=None, paid_date=None, trial_date=None, discount_id=None):
+def options(con,sid,group_id=None,ym=None,tariff='fixed',ofp_group_id=None,start_date=None, paid_date=None, trial_date=None, discount_id=None,user=None):
     student=sv.get_student_row(con,sid)
     groups=[dict(r) for r in con.execute('''SELECT g.id,g.name,g.branch_id,g.weekdays,g.time,g.day_times,g.started_on,g.program_id,g.lesson_kind,g.active,
         b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.is_makeup=0 ORDER BY b.name,g.name''')]
@@ -65,14 +65,10 @@ def options(con,sid,group_id=None,ym=None,tariff='fixed',ofp_group_id=None,start
         first=con.execute("SELECT * FROM discounts WHERE rule='first_on_trial_day' AND active=1").fetchone()
         if first:discounts.append(dict(first))
     if g['program_id']:discounts=[d for d in discounts if d['rule']=='sibling']
-    if discount_id and str(discount_id)!='none':
-        selected_discount=con.execute('SELECT * FROM discounts WHERE id=? AND active=1',(int(discount_id),)).fetchone()
-        if not selected_discount:raise sv.ApiError('Выберите действующую скидку')
-        if late:raise sv.ApiError('После срока оплаты скидки не действуют')
-        if g['program_id'] and selected_discount['rule']!='sibling':raise sv.ApiError('В сборной действует только скидка второму ребёнку')
-        discount=dict(selected_discount)
-    elif discount_id=='none':discount=None
-    else:discount=None if late else money.best_discount(discounts)
+    discount=money.choose_discount(con,sid,on,discount_id,user,candidates=discounts)
+    if late:
+        if discount_id not in (None,'','none'):raise sv.ApiError('После срока оплаты скидки не действуют')
+        discount=None
     result['calculation']={'discount_percent':int(discount['percent']) if discount else 0,
         'discount_name':discount['name'] if discount else '', 'late_pct':float(late_pct) if late else 0,
         'unit_late':bool(g['program_id']), 'deadline':deadline.isoformat()}
@@ -162,7 +158,7 @@ def record(con,sid,data,user):
             amount=int(data.get('amount') or 0);method=str(data.get('method') or '')
             if amount and paid_day<sale_day:raise sv.ApiError('Дата оплаты раньше продажи. Предоплату учтите отдельным существующим платежом')
             if amount and method not in ('cash','card','sbp','transfer','card_branch','sber_qr_branch','tochka_qr_link'):raise sv.ApiError('Онлайн-оплату нельзя дублировать вручную: используйте уже учтённый платёж')
-            quoted=options(con,sid,gid,ym,tariff,data.get('ofp_group_id'),paid_date=paid_day.isoformat(),trial_date=at.date().isoformat() if at else None,discount_id=data.get('discount_id'))
+            quoted=options(con,sid,gid,ym,tariff,data.get('ofp_group_id'),paid_date=paid_day.isoformat(),trial_date=at.date().isoformat() if at else None,discount_id=data.get('discount_id'),user=user)
             available={(c['group_id'],d) for c in quoted['components'] for d in c['dates']}
             chosen=set()
             for item in data.get('lessons') or []:

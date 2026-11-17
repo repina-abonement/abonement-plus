@@ -380,17 +380,37 @@ def _sibling_applies(con, sid: int) -> bool:
     return bool(others) and (sid not in ids or ids.index(sid) > 0)
 
 
+def large_family_discount(discount):
+    return discount.get('rule')=='large_family' or 'многодет' in str(discount.get('name') or '').casefold().replace('ё','е')
+
+
+def choose_discount(con,sid,on=None,selected_id=None,user=None,candidates=None):
+    """One discount: an explicit permitted choice wins; otherwise existing maximum-percent priority."""
+    from .services import ApiError
+    if selected_id=='none':return None
+    if selected_id not in (None,''):
+        if isinstance(selected_id,bool) or not str(selected_id).isdigit():raise ApiError('Выберите одну действующую скидку')
+        selected=con.execute('SELECT * FROM discounts WHERE id=? AND active=1',(int(selected_id),)).fetchone()
+        if not selected:raise ApiError('Выберите действующую скидку')
+        selected=dict(selected)
+        if large_family_discount(selected) and (user or {}).get('role') not in ('admin','operator'):
+            raise ApiError('Скидку «Многодетная семья» может выбрать только администратор',403)
+        return selected
+    automatic=auto_discounts(con,sid,on) if candidates is None else candidates
+    return best_discount([d for d in automatic if not large_family_discount(d)])
+
+
 def auto_discounts(con, sid: int, today: date | None = None) -> list[dict]:
     """Скидки, которые ставятся сами: первый абонемент в день пробного; второй и следующие дети в семье."""
     today = today or date.today()
     out = []
-    d = con.execute("SELECT * FROM discounts WHERE rule='first_on_trial_day' AND active=1").fetchone()
+    d = next((r for r in con.execute("SELECT * FROM discounts WHERE rule='first_on_trial_day' AND active=1 ORDER BY id") if not large_family_discount(dict(r))),None)
     if d:
         s = con.execute("SELECT trial_at FROM students WHERE id=?", (sid,)).fetchone()
         had = con.execute("SELECT 1 FROM subscriptions WHERE student_id=? AND status != 'cancelled'", (sid,)).fetchone()
         if s and s["trial_at"] and s["trial_at"][:10] == today.isoformat() and not had:
             out.append(dict(d))
-    d = con.execute("SELECT * FROM discounts WHERE rule='sibling' AND active=1").fetchone()
+    d = next((r for r in con.execute("SELECT * FROM discounts WHERE rule='sibling' AND active=1 ORDER BY id") if not large_family_discount(dict(r))),None)
     if d and _sibling_applies(con, sid):
         out.append(dict(d))
     return out
