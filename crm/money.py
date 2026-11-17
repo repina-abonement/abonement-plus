@@ -441,6 +441,8 @@ def sell_single(con, sid: int, user: dict, group_id: int | None = None) -> int:
     sub = con.execute("""INSERT INTO subscriptions(student_id, enrollment_id, month, tariff, lessons, per_lesson, price, status,
                          created_at, kind) VALUES (?,?,?,?,?,?,?,'invoiced',?, 'single')""",
                       (sid, None, logic.month_of(date.today()), "single", 1, int(price), int(price), _now())).lastrowid
+    from . import saleinfo
+    saleinfo.record(con,sub,user)
     reconcile(con, sid)
     con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
                 (sid, _now(), user.get("name", ""), "payment", f"Выставлено разовое занятие: {price} ₽"))

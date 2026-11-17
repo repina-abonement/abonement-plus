@@ -35,7 +35,7 @@ def years(birth: str, on: date | None = None) -> int | None:
 
 
 def slots(con, age: int, branch_id: int | None = None, limit: int = 4, days: int = 14) -> list[dict]:
-    from . import capacity, closures
+    from . import capacity, closures, schedule
     now = datetime.now()
     out, fill = [], {}
     for g in con.execute("""SELECT g.*, b.name AS branch, b.address, b.lesson_limit FROM groups g JOIN branches b ON b.id=g.branch_id
@@ -45,12 +45,12 @@ def slots(con, age: int, branch_id: int | None = None, limit: int = 4, days: int
         if not r or not r[0] <= age <= r[1] or "взросл" in (g["age"] or "").lower() or "пап" in g["name"].lower() \
                 or "ОФП" in g["name"]:  # пробное — на футбол, не на ОФП
             continue
-        wd = logic.parse_weekdays(g["weekdays"])
         for i in range(days):
             d = now.date() + timedelta(days=i)
-            if d.weekday() not in wd or closures.is_closed(con, g["id"], d):
+            actual = schedule.on(con,g,d)
+            if d.weekday() not in logic.parse_weekdays(actual["weekdays"]) or closures.is_closed(con, g["id"], d):
                 continue
-            t = logic.group_time(dict(g), d.weekday())
+            t = logic.group_time(actual, d.weekday())
             if not t or datetime.combine(d, datetime.strptime(t, "%H:%M").time()) < now + timedelta(hours=2):
                 continue
             o = capacity.occupancy(con, g["id"], d.isoformat())
@@ -97,7 +97,7 @@ def offer(con, age: int | None, child: str = "", branch_id: int | None = None, n
     child_txt = (child.split()[0] if child and "заявка" not in child.lower() and "ребёнок" not in child.lower() else "ребёнка")
     text = tpl.replace("{child}", child_txt).replace("{slots}", "\n".join(lines)).replace("{age}", str(age))
     return {"slots": sl, "text": text if sl else "", "age": age,
-            "error": "" if sl else "Нет свободных мест для этого возраста на ближайшие 2 недели"}
+            "error": "" if sl else "Не найдено доступных пробных на ближайшие 2 недели — проверьте возраст группы, расписание, разрешение пробных и свободные места"}
 
 
 def booking_options(con, sid: int, birth: str = '', day: str = '', branch_id: int | None = None) -> dict:

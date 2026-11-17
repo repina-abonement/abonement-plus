@@ -201,6 +201,7 @@ def record(con,sid,data,user):
             subid=con.execute('''INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,per_lesson,price,status,
                 created_at,corrected,ledger_managed,lesson_schedule,historical_sale) VALUES (?,?,?,?,?,?,?,'invoiced',?,1,1,?,1)''',
                 (sid,eid,ym,tariff,len(chosen),price//len(chosen),price,sale_day.isoformat(),json.dumps(components))).lastrowid
+            from . import saleinfo
             con.execute('UPDATE subscriptions SET calculation_reason=? WHERE id=?',(reason,subid))
             undiscounted=calculated_total({**quoted,'calculation':{**quoted['calculation'],'discount_percent':0}},chosen)
             con.execute('UPDATE subscriptions SET discount_name=?,discount_amount=? WHERE id=?',
@@ -208,6 +209,8 @@ def record(con,sid,data,user):
             all_dates={d for c in quoted['components'] for d in c['dates']}
             excluded=sorted(all_dates-{d for _,d in chosen})
             con.execute('UPDATE subscriptions SET excluded_dates=? WHERE id=?',(json.dumps(excluded),subid))
+            trial=sv.first_sale_trial_date(con,sid,ym)
+            saleinfo.record(con,subid,user,{'excluded_dates':excluded,'trial_cutoff':trial},reason)
             con.execute("UPDATE students SET funnel='members',stage='active',stage_changed_at=? WHERE id=?",(sale_day.isoformat(),sid))
             if amount:
                 money.add_payment(con,sid,amount,method,user,subscription_id=subid,paid_at=paid_day.isoformat(),comment='Оплата состоявшейся покупки, внесено задним числом')

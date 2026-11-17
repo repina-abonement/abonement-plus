@@ -1289,7 +1289,7 @@ def quote(con, h, user, body, q, sid):
 
 @route("POST", "/api/students/{sid}/invoice", role="operator")
 def invoice(con, h, user, body, q, sid):
-    return sv.create_invoice(con, int(sid), body.get("month"), user, body.get("enrollment_id"), body.get("discount_id"), body.get("tariff"), body.get("excluded_dates"), body.get("credit_requested", False), body.get("group_id"), body.get("ofp_group_id"), body.get("group_action", "transfer"),body.get("paid_date"))
+    return sv.create_invoice(con, int(sid), body.get("month"), user, body.get("enrollment_id"), body.get("discount_id"), body.get("tariff"), body.get("excluded_dates"), body.get("credit_requested", False), body.get("group_id"), body.get("ofp_group_id"), body.get("group_action", "transfer"),body.get("paid_date"),str(body.get("exclusion_reason") or "")[:1000])
 
 
 @route("POST", "/api/students/{sid}/enrollments", role="operator")

@@ -413,7 +413,7 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
 
 
 def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id=None, tariff=None,
-                   excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None, group_action="transfer", paid_date=None) -> dict:
+                   excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None, group_action="transfer", paid_date=None, exclusion_reason="") -> dict:
     from . import program, transfer, smart
     smart.require(con, sid, "sale")
     e = sale_enrollment(con, sid, enrollment_id, group_id)
@@ -457,6 +457,8 @@ def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id
                 program.set_plan(con, sid, e["program_id"], selected["tariff"], selected["ofp_group_id"], user)
         q["enrollment_id"] = eid
         result = _create_invoice(con, sid, ym, user, eid, quote=q)
+        from . import saleinfo
+        saleinfo.record(con,result["id"],user,q,exclusion_reason)
         con.execute("RELEASE sale_invoice")
         return result
     except BaseException:
@@ -484,6 +486,8 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
            late_fee, price, status, created_at, discount_name, discount_amount) VALUES (?,?,?,?,?,?,?,?,?,'invoiced',?,?,?)""",
         (sid, e["id"], ym, q["tariff"], q["lessons_paid"], q["per_lesson"], q["credit_lessons"], q["late_fee"],
          q["total"], now_iso(), d.get("name", ""), d.get("amount", 0))).lastrowid
+    from . import saleinfo
+    saleinfo.record(con,sub_id,user,q)
     snapshot = {"tariff":q["tariff"],"ofp_group_id":q["program"].get("ofp_group_id"),
                 "contract":{"base":q["base"],"on_time_total":q["program"]["on_time_total"],"late_total":q["program"]["late_total"],
                             "deadline":q["program"]["deadline"],"lessons":q["lessons_paid"],"components":q["components"]}} if q.get("program") else None
