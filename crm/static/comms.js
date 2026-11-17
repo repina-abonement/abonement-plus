@@ -918,6 +918,15 @@ function aiSettingsHtml(v, inf, st) {
 }
 
 
+// Не определяем пол по окончанию: Никита и Илья не должны стать «чемпионкой»
+function trialAgeQuestion(kid = {}) {
+  const girls = new Set('агата аглая ада аделина адель азалия айлин аксинья александра алина алиса алия алла альбина амелия амина анастасия ангелина анжелика анна аня ариана арина ася афина валентина валерия варвара варя василиса вера вероника виктория вика виолетта галина дарина дарья даша диана ева евгения евдокия екатерина елена елизавета есения жанна злата зоя инна ирина карина катя кира кристина ксения ксюша лада лариса лера лиза лилия любовь людмила майя маргарита марианна марина мария марта маша милана милена мила мия надежда наталья нелли ника нина олеся ольга оля полина регина рита роза сабина светлана серафима софия софья соня стефания таисия тамара татьяна ульяна эвелина элина элла эмилия эмма юлия юля яна ярослава'.split(' '));
+  const words = String(kid.first_name || kid.name || '').toLocaleLowerCase('ru').replace(/ё/g, 'е').split(/[\s-]+/);
+  const female = kid.gender === 'female' || words.some(word => girls.has(word));
+  const address = female ? 'вашей чемпионке' : 'вашему чемпиону';
+  return `Здравствуйте! Подскажите, пожалуйста, сколько лет ${address}? Подберём группу по возрасту и ближайшие свободные тренировки ⚽`;
+}
+
 /* «Предложить ближайшие ПУ»: подбор групп по возрасту и ближайших дат со свободными местами, текст сразу в поле ответа */
 function wireTrialOffer(c, textSel = "#chat-text") {
   const root=document.querySelector(textSel)?.closest(".chat,#comms-box")||document;
@@ -969,7 +978,8 @@ function wireTrialOffer(c, textSel = "#chat-text") {
     // шаг 1: возраст неизвестен, сначала спрашиваем его
     $("#to-ask-age").onclick = () => {
       const ta = $(textSel);
-      const text = "Здравствуйте! Подскажите, пожалуйста, сколько лет вашему чемпиону? Подберём группу по возрасту и ближайшие свободные тренировки ⚽";
+      const selectedId = $("#to-kid") ? +$("#to-kid").value : kid?.id;
+      const text = trialAgeQuestion(leads.find(child => child.id === selectedId) || kid || {});
       if (ta) { ta.value = text; ta.focus(); toast("Вопрос вставлен в поле ответа: нажмите «Отправить»"); }
       else navigator.clipboard.writeText(text).then(() => toast("Текст скопирован"), () => prompt("Скопируйте текст", text));
     };
@@ -1046,7 +1056,7 @@ function wireMessagePicker(selector, sendSticker, context={}) {
   const stickers = [["smile", "1f60a", "Улыбка"], ["thanks", "1f64f", "Спасибо"], ["yes", "1f44d", "Отлично"], ["heart", "2764", "Сердце"], ["party", "1f389", "Поздравляем"], ["football", "26bd", "Футбол"]];
   panel.innerHTML = `<div class="chips"><button type="button" class="btn sm" data-attach-file title="Прикрепить фото или файл" aria-label="Прикрепить фото или файл">📎</button><input type="file" data-attach-input hidden accept=".jpg,.jpeg,.png,.webp,.pdf,.txt,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.zip"><button type="button" class="btn sm" data-administrator-greeting>Приветствие</button><button type="button" class="btn sm" data-picker-tab="scripts" aria-expanded="false">Скрипты</button><button type="button" class="btn sm" data-picker-tab="emoji" aria-expanded="false">😊 Смайлы</button><button type="button" class="btn sm" data-picker-tab="sticker" aria-expanded="false">Стикеры</button></div>
     <div class="picker-options" data-picker-panel="scripts" hidden></div>
-    <div class="chips picker-options" data-picker-panel="emoji" hidden>${["😊", "😀", "😄", "😉", "😍", "🥰", "😘", "😎", "🤔", "😢", "😭", "😂", "👍", "👏", "🙏", "❤️", "🎉", "⚽", "✅", "🔥", "💪"].map(x => `<button type="button" class="btn sm" data-emoji="${esc(x)}">${x}</button>`).join("")}</div>
+    <div class="chips picker-options" data-picker-panel="emoji" hidden>${["😊", "😀", "😄", "😉", "😍", "🥰", "😘", "😎", "🤔", "😢", "😭", "😂", "👍", "👏", "🙏", "❤️", "💚", "🤍", "🎉", "⚽", "✅", "🔥", "💪"].map(x => `<button type="button" class="btn sm" data-emoji="${esc(x)}">${x}</button>`).join("")}</div>
     <div class="picker-options" data-picker-panel="sticker" hidden><div class="sticker-grid">${stickers.map(([id, code, label]) => `<button type="button" class="sticker-choice" data-sticker="${id}" title="Отправить: ${label}" aria-label="Отправить стикер: ${label}"><img src="https://raw.githubusercontent.com/jdecked/twemoji/v15.1.0/assets/72x72/${code}.png" width="56" height="56" alt="${label}"><span>${label}</span></button>`).join("")}</div><p class="small muted">Базовые стикеры: Twemoji, CC BY 4.0.</p><div data-custom-packs></div>
       ${S.user?.role === "admin" ? `<div class="sticker-upload"><label>Название своего набора<input data-upload-pack-title value="Свои стикеры" maxlength="80"></label><label class="btn sm">Загрузить картинки<input type="file" data-upload-stickers accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden></label><p class="small muted">PNG, WEBP, JPG или GIF · можно выбрать несколько · анимация сохранится как статичная картинка · бот не нужен</p><div data-upload-status class="small muted" aria-live="polite"></div></div><details class="sticker-import"><summary>Добавить свой набор Telegram</summary><label>Ссылка на набор<input data-pack-url value="https://t.me/addstickers/Footbolika_Olya" placeholder="https://t.me/addstickers/Название"></label><button class="btn sm" type="button" data-pack-import>Добавить набор</button><div class="small muted" data-pack-status>Импорт по ссылке использует Telegram Bot API. Для переписки через Wazzup бот и мост не нужны. Уже добавленные стикеры доступны всей команде.</div></details>` : ""}
       <p class="small muted">Свои наборы: в Telegram-боте — настоящие стикеры с анимацией. Через Wazzup/MAX — изображения или статичные превью; поддержка WEBP зависит от канала.</p></div>`;
