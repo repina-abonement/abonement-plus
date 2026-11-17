@@ -989,6 +989,9 @@ def create_student(con, data: dict, user) -> int:
     name = (data.get("name") or "").strip()
     if not name:
         raise ApiError("Укажите имя ребёнка")
+    comment=data.get('comment') or ''
+    if not isinstance(comment,str) or len(comment)>2000:raise ApiError('Комментарий должен быть текстом не длиннее 2000 символов')
+    comment=comment.strip()
     family_id = data.get("family_id")
     if family_id:
         if not con.execute("SELECT 1 FROM families WHERE id=?", (family_id,)).fetchone():
@@ -1021,6 +1024,7 @@ def create_student(con, data: dict, user) -> int:
         from . import capacity
         capacity.ensure_roster(con, int(data["group_id"]))
     log(con, sid, "Карточка создана", user, "system")
+    if comment:log(con,sid,comment,user,'note')
     audit(con, user, "student.create", str(sid))
     return sid
 

@@ -87,24 +87,28 @@ function pastGroupLabel(g) {
   return [branch,name].filter(Boolean).join(' · ')+(g.active?'':' · архив');
 }
 
+let searchSelectSequence=0;
 function pastGroupSearch(select) {
+  if(!select||select.dataset.searchSelect==='ready'||(select.multiple||select.size>1))return;
+  select.dataset.searchSelect='ready';
   const box=document.createElement('div');box.className='group-search';
   select.before(box);box.append(select);select.hidden=true;
-  const input=document.createElement('input');input.type='text';input.autocomplete='off';input.placeholder='Введите день, время или филиал';input.setAttribute('role','combobox');input.setAttribute('aria-autocomplete','list');input.setAttribute('aria-expanded','false');
-  const list=document.createElement('div');list.className='group-search-list';list.hidden=true;list.setAttribute('role','listbox');list.id='group-options-'+(select.id||select.name);input.setAttribute('aria-controls',list.id);input.setAttribute('aria-label',select.closest('.field')?.querySelector('label')?.textContent||'Группа');
+  const input=document.createElement('input');input.type='text';input.autocomplete='off';input.placeholder='Введите название или часть текста';input.setAttribute('role','combobox');input.setAttribute('aria-autocomplete','list');input.setAttribute('aria-expanded','false');
+  const list=document.createElement('div');list.className='group-search-list';list.hidden=true;list.setAttribute('role','listbox');list.id='search-select-options-'+(++searchSelectSequence);input.id=list.id+'-input';input.setAttribute('aria-controls',list.id);input.setAttribute('aria-label',select.closest('.field')?.querySelector('label')?.textContent||select.getAttribute('aria-label')||'Выбор варианта');
   box.append(input,list);let current=-1;
   const close=()=>{list.hidden=true;input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant');current=-1};
-  const sync=()=>{input.value=select.selectedOptions[0]?.textContent||'';input.disabled=select.disabled;close()};
+  const sync=()=>{input.value=select.selectedOptions[0]?.textContent||'';input.disabled=select.disabled;input.setCustomValidity('');close()};
   const choose=option=>{select.value=option.value;sync();select.dispatchEvent(new Event('change',{bubbles:true}))};
   const show=query=>{
-    const terms=query.toLocaleLowerCase('ru').trim().split(/\s+/).filter(Boolean);
-    const options=[...select.options].filter(o=>!o.disabled&&terms.every(t=>o.textContent.toLocaleLowerCase('ru').includes(t)));
+    const normalize=value=>value.toLocaleLowerCase('ru').replace(/ё/g,'е').replace(/[·/–—-]+/g,' ').replace(/\s+/g,' ').trim();
+    const terms=normalize(query).split(/\s+/).filter(Boolean);
+    const options=[...select.options].filter(o=>!o.disabled&&terms.every(t=>normalize(o.textContent).includes(t)));
     list.replaceChildren();current=-1;input.removeAttribute('aria-activedescendant');
     for(const [index,option] of options.entries()){
       const row=document.createElement('button');row.type='button';row.className='group-search-option';row.textContent=option.textContent;row.setAttribute('role','option');row.setAttribute('aria-selected',String(option.selected));row.id=list.id+'-'+index;row.tabIndex=-1;
       row.onmousedown=e=>e.preventDefault();row.onclick=()=>{choose(option);input.focus();close()};list.append(row);
     }
-    if(!options.length){const empty=document.createElement('div');empty.className='muted small';empty.textContent='Группы не найдены';list.append(empty)}
+    if(!options.length){const empty=document.createElement('div');empty.className='muted small';empty.textContent='Ничего не найдено';list.append(empty)}
     list.hidden=false;input.setAttribute('aria-expanded','true');
   };
   input.onfocus=()=>{input.select();show('')};input.onclick=()=>{if(list.hidden)show('')};input.oninput=()=>show(input.value);
@@ -120,6 +124,28 @@ function pastGroupSearch(select) {
   };
   input.onblur=()=>setTimeout(()=>{if(!box.contains(document.activeElement))sync()},0);
   select.addEventListener('change',sync);
+  select.addEventListener('invalid',event=>{event.preventDefault();input.setCustomValidity(select.validationMessage||'Выберите вариант из списка');input.reportValidity()});
+  select.form?.addEventListener('reset',()=>setTimeout(sync,0));
+  const label=select.closest('.field')?.querySelector('label');if(label?.htmlFor===select.id&&select.id)label.htmlFor=input.id;
   new MutationObserver(sync).observe(select,{childList:true,subtree:true,attributes:true,attributeFilter:['disabled']});
   sync();
 }
+
+
+/* Entity selectors share typed search, including lists inserted after navigation or a branch change. */
+function enableSearchableLists(root=document){
+  const selects=[...(root.matches?.('select')?[root]:[]),...(root.querySelectorAll?.('select')||[])];
+  for(const select of selects){
+    if(select.multiple||select.dataset.searchSelect==='ready'||select.dataset.searchSelect==='off')continue;
+    const key=(select.id+' '+select.name).toLowerCase();
+    if(/action|tariff|month|mode|status|kind|type|method/.test(key))continue;
+    const label=select.closest('.field')?.querySelector('label')?.textContent||'';
+    if(/(?:^|[-_ ])(?:group|branch)(?:[-_ ]|$)/.test(key)||/групп|филиал/i.test(label)||select.hasAttribute('data-gmap'))pastGroupSearch(select);
+  }
+}
+let searchableScanPending=false;
+new MutationObserver(records=>{
+  if(searchableScanPending||!records.some(r=>r.addedNodes.length))return;
+  searchableScanPending=true;queueMicrotask(()=>{searchableScanPending=false;enableSearchableLists()});
+}).observe(document.body,{childList:true,subtree:true});
+enableSearchableLists();

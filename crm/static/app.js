@@ -2201,6 +2201,7 @@ function openNewClient(preset = {}) {
       <div class="field"><label>Тариф</label><select name="tariff"><option value="fixed">Негибкий</option><option value="flex">Гибкий</option></select></div>
       <div class="field"><label>Откуда узнали</label>${sourceSelect("source_id", null)}</div>
     </div>
+    <div class="field"><label>Комментарий · необязательно</label><textarea name="comment" rows="3" maxlength="2000" placeholder="Что важно знать о клиенте">${esc(preset.comment||'')}</textarea></div>
     <button class="btn primary">Создать</button>
   </form>`);
   let familyId = preset.family_id || null;
@@ -2368,7 +2369,9 @@ async function renderJournal(page) {
     try { await api("POST", `/api/makeups/${b.dataset.mk}/status`, { status: b.dataset.st }); render(); } catch (e) { fail(e); }
   }));
   page.querySelectorAll("[data-trial]").forEach((b) => (b.onclick = async () => {
-    try { await api("POST", `/api/students/${b.dataset.sid}/trial`, { came: b.dataset.trial === "1" }); render(); } catch (e) { fail(e); }
+    if(b.getAttribute('aria-pressed')==='true'){toast(b.dataset.trial==='1'?'Уже отмечено: пришёл':'Уже отмечено: не пришёл');return;}
+    const buttons=[...b.closest('.mark').querySelectorAll('button')];buttons.forEach(button=>button.disabled=true);
+    try { await api("POST", `/api/students/${b.dataset.sid}/trial`, { came: b.dataset.trial === "1",expected_date:S.journal.date,expected_group_id:S.journal.group }); toast(b.dataset.trial==='1'?'Отмечено: пришёл':'Отмечено: не пришёл'); render(); } catch (e) { fail(e); } finally {buttons.forEach(button=>button.disabled=false);}
   }));
 }
 
@@ -2398,7 +2401,7 @@ function journalRow(r, before) {
   if (r.status === "vacation") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)}</div><span class="pill yellow">Отпуск</span></div>`;
   if (r.historical_trial_id) return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill jt-trial">ПУ ${esc(r.trial_at.slice(11,16))}</span></div><span>${r.trial_came ? 'Пришёл' : 'Не пришёл'}</span></div>`;
   if (r.status === "trial") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill jt-trial">ПУ ${r.trial_at.slice(11, 16)}</span></div>
-    <div class="mark"><button data-trial="1" data-sid="${r.id}" class="${r.trial_came === 1 ? "on-present" : ""}">Пришёл</button><button data-trial="0" data-sid="${r.id}" class="${r.trial_came === 0 ? "on-absent" : ""}">Не пришёл</button></div></div>`;
+    <div class="mark"><button data-trial="1" data-sid="${r.id}" aria-pressed="${r.trial_came === 1}" class="${r.trial_came === 1 ? "on-present" : ""}">Пришёл</button><button data-trial="0" data-sid="${r.id}" aria-pressed="${r.trial_came === 0}" class="${r.trial_came === 0 ? "on-absent" : ""}">Не пришёл</button></div></div>`;
   const unpaidPill = r.unpaid ? ` <span class="pill unpaid-flag">не оплачен, не допускать</span>` : "";
   const locked = r.resolved ? `<span class="pill">${r.resolved === "credit" ? "в перерасчёте" : "отработан"}</span>` : "";
   if (before) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} ${jTag(r)} ${unpaidPill}</div>
