@@ -1,8 +1,11 @@
 from unittest.mock import patch
-from tests.test_sale_paid_date import SaleDateTest
+import unittest
+from tests import test_sale_paid_date as sale_fixture
 from crm import services as sv,historyentry,smart
 
-class MorningFixedTest(SaleDateTest):
+class MorningFixedTest(unittest.TestCase):
+ setUp=sale_fixture.SaleDateTest.setUp
+ quote=sale_fixture.SaleDateTest.quote
  def test_fixed_only_metadata_and_flex_rejected_without_writing(self):
   group=next(g for g in sv.meta(self.con)['groups'] if g['id']==self.gid)
   self.assertTrue(group['fixed_only'])
