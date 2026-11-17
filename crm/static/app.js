@@ -1616,7 +1616,7 @@ async function openSell(d, reload) {
     const request=++version;busy(true);existing=null;$('#sl-res').innerHTML='';$('#sl-q').innerHTML='Считаю…';
     ['#sl-tar','#sl-disc','#sl-ofp'].forEach(s=>$(s).disabled=false);$('#sl-credit-box').hidden=true;
     const own=ens.find(e=>e.group_id===en().group_id);
-    const sub=single()?pendingSingles.find(s=>s.id===+$('#sl-single-invoice').value):own&&d.subscriptions.find(s=>s.enrollment_id===own.id&&s.month===$('#sl-month').value&&s.kind!=='single'&&s.status!=='cancelled');
+    const sub=single()?pendingSingles.find(s=>s.id===+$('#sl-single-invoice').value):d.subscriptions.find(s=>(s.group_id===en().group_id||own&&s.enrollment_id===own.id)&&s.month===$('#sl-month').value&&s.kind!=='single'&&s.status!=='cancelled');
     if(sub){
       $('#sl-exclusion-reason').closest('.field').hidden=true;existing=sub;let current;try{current=await api('GET',`/api/subscriptions/${sub.id}/payment-quote?paid_date=${encodeURIComponent($('#sl-paid-date').value)}`)}catch(e){if(request===version&&isCurrent())$('#sl-q').textContent=e.message;return}if(request!==version||!isCurrent())return;const paid=current.paid;total=current.total;
       $('#sl-tar').value=sub.tariff;syncFields();['#sl-tar','#sl-disc','#sl-ofp'].forEach(s=>$(s).disabled=true);

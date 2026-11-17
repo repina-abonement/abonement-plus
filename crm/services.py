@@ -473,8 +473,11 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
     e = _pick_enrollment(con, sid, enrollment_id)
     from . import subscriptiondates
     subscriptiondates.guard_duplicate(con,sid,e["group_id"],ym)
-    existing = con.execute("SELECT 1 FROM subscriptions WHERE enrollment_id=? AND month=? AND status != 'cancelled'",
-                           (e["id"], ym)).fetchone()
+    existing = con.execute("""SELECT 1 FROM subscriptions x LEFT JOIN enrollments old_e ON old_e.id=x.enrollment_id
+                            WHERE x.student_id=? AND x.month=? AND x.status!='cancelled'
+                              AND COALESCE(x.kind,'month')='month'
+                              AND (x.enrollment_id=? OR old_e.group_id=?)""",
+                           (sid,ym,e["id"],e["group_id"])).fetchone()
     if existing:
         raise ApiError(f"На {logic.month_label(ym)} в группу {e['group_name']} уже есть абонемент")
     q = quote or quote_for(con, sid, ym, e["id"], discount_id, tariff, excluded_dates, credit_requested)

@@ -19,3 +19,11 @@ class SaleInfoTest(SaleDateTest):
  def test_legacy_unknown_not_guessed(self):
   with patch.object(smart,'REQUIRE',False):r=sv.create_invoice(self.con,self.sid,'2026-11',None,group_id=self.gid)
   self.assertEqual(self.con.execute('SELECT issued_by_name FROM subscriptions WHERE id=?',(r['id'],)).fetchone()[0],'')
+
+ def test_same_group_month_cannot_be_sold_under_second_enrollment(self):
+  with patch.object(smart,'REQUIRE',False):
+   sv.create_invoice(self.con,self.sid,'2026-11',self.u,group_id=self.gid)
+   second=self.con.execute("INSERT INTO enrollments(student_id,group_id,tariff,created_at) VALUES (?,?,'fixed','2026-11-17')",(self.sid,self.gid)).lastrowid
+   with self.assertRaises(sv.ApiError):
+    sv.create_invoice(self.con,self.sid,'2026-11',self.u,enrollment_id=second)
+  self.assertEqual(self.con.execute('SELECT COUNT(*) FROM subscriptions').fetchone()[0],1)
