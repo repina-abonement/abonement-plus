@@ -1343,7 +1343,6 @@ function cardHtml(k, draggable) {
     <div class="meta">${esc(sub)}</div>
     ${meta2 ? `<div class="meta">${esc(meta2)}</div>` : ""}
     ${k.badge ? `<span class="badge">${esc(k.badge)}</span>` : ""}
-    ${k.score ? `<span class="score ${k.score}">${{ hot: "🔥 горячий", warm: "🌤 тёплый", cold: "❄ холодный" }[k.score]}</span>` : ""}
     ${k.due ? `<div class="due ${k.due_color || ""}" title="${esc(k.due_title || "")}">⏰ ${dueText(k.due)}</div>` : ""}
   </article>`;
 }
@@ -1830,7 +1829,7 @@ async function openStudent(id, options = {}) {
   const html = `
   <div class="sc-head">
     <div class="sc-title"><h2>${full?`<button type="button" class="profile-text-edit" data-profile-edit="name" title="Изменить имя">${esc(displayChildName(s.name))}</button>`:esc(displayChildName(s.name))}</h2></div>
-    <div class="sc-status" ${full?'data-profile-open tabindex="0" role="button" title="Изменить данные клиента"':''}>${s.birth?esc(ageText(s.birth))+' · ':''}${esc((s.erp_status||'').trim()||'Статус ERP не перенесён')}${s.archived?' · в архиве':''}${d.lead_score?` · ${esc(d.lead_score.label)}`:''}</div>
+    <div class="sc-status" ${full?'data-profile-open tabindex="0" role="button" title="Изменить данные клиента"':''}>${s.birth?esc(ageText(s.birth))+' · ':''}${esc((s.erp_status||'').trim()||'Статус ERP не перенесён')}${s.archived?' · в архиве':''}</div>
     ${d.siblings.length ? `<div class="chips sc-kids"><span class="chip on">${esc(displayChildName(s.name))}</span>${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join("")}</div>` : ""}
     <div class="sc-meta" ${full?'data-head-group tabindex="0" role="button" title="Изменить группу"':''}>${isMember ? (regular.length ? regular.map((e) => `<span class="pill">${esc(e.group_name)}</span>`).join(" ") : `<span class="muted small">Группа не выбрана</span>`)
       : `${s.trial_at ? `<span class="pill">Пробное ${dtShort(s.trial_at)}</span>` : ""}`}</div>
