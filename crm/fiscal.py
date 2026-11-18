@@ -156,6 +156,11 @@ def init(con):
     con.executescript(SCHEMA)
     from . import fiscalcheck
     fiscalcheck.init(con)
+    con.execute('CREATE TABLE IF NOT EXISTS fiscal_ofd_days(day TEXT PRIMARY KEY,checked_at TEXT NOT NULL,ok INTEGER NOT NULL)')
+    columns = {r[1] for r in con.execute('PRAGMA table_info(fx_receipts)')}
+    for key in ('fiscal_fn', 'fiscal_fd', 'fiscal_fp'):
+        if key not in columns:
+            con.execute(f"ALTER TABLE fx_receipts ADD COLUMN {key} TEXT NOT NULL DEFAULT ''")
 
 
 def _now() -> datetime:
@@ -392,10 +397,15 @@ def fetch_ofd_kkts(con) -> list[str]:
 
 def fetch_ofd_receipts(con, d_from: date, d_to: date) -> list[dict]:
     out = []
-    for rnm in fetch_ofd_kkts(con):
+    kkts = fetch_ofd_kkts(con)
+    if not kkts:
+        raise FxError('ОФД не вернул доступных касс: полнота сверки не подтверждена')
+    for rnm in kkts:
         js = ofd_get(con, "/receipts", {"dateFrom": f"{d_from} 00:00:00", "dateTo": f"{d_to} 23:59:59",
                                         "dateType": 1, "kktRegId": rnm})
-        for r in js.get("receipts") or []:
+        if not isinstance(js,dict) or not isinstance(js.get('receipts'),list):
+            raise FxError('Неподтверждённая структура списка чеков ОФД')
+        for r in js['receipts']:
             r.setdefault("kktRegId", rnm)
             out.append(r)
     return out
@@ -435,11 +445,17 @@ def store_pk(con, pays: list[dict], recs: list[dict], now: datetime):
                     (str(p["id"]), ts[:10], ts, kop(p.get("pay_amount"))))
     for r in recs:
         amt = sum(kop(r.get(k)) for k in ("sum_cashless", "sum_cash", "sum_advance", "sum_credit"))
-        con.execute("""INSERT INTO fx_receipts(source, ext_id, kkt, ts, amount, ecash, op, pk_payment, pk_status)
-                       VALUES ('paykeeper',?,?,?,?,?,1,?,?)
-                       ON CONFLICT(source, ext_id) DO UPDATE SET pk_status=excluded.pk_status, kkt=excluded.kkt""",
+        op = 2 if r.get('type') == 'refund' else 1
+        con.execute("""INSERT INTO fx_receipts(source, ext_id, kkt, ts, amount, ecash, op, pk_payment, pk_status,
+                           fiscal_fn,fiscal_fd,fiscal_fp)
+                       VALUES ('paykeeper',?,?,?,?,?,?,?,?,?,?,?)
+                       ON CONFLICT(source, ext_id) DO UPDATE SET
+                           pk_status=excluded.pk_status,kkt=excluded.kkt,amount=excluded.amount,
+                           ecash=excluded.ecash,op=excluded.op,pk_payment=excluded.pk_payment,
+                           fiscal_fn=excluded.fiscal_fn,fiscal_fd=excluded.fiscal_fd,fiscal_fp=excluded.fiscal_fp""",
                     (str(r["id"]), str(r.get("fn") or ""), (r.get("obtain_datetime") or r.get("request_datetime") or _iso(now))[:19],
-                     amt, kop(r.get("sum_cashless")), str(r.get("payment_id") or ""), r.get("status") or ""))
+                     amt, kop(r.get("sum_cashless")), op, str(r.get("payment_id") or ""), r.get("status") or "",
+                     str(r.get('fn') or ''), str(r.get('fnd') or ''), str(r.get('fpd') or '')))
 
 
 def store_ofd(con, recs: list[dict]):
@@ -449,10 +465,16 @@ def store_ofd(con, recs: list[dict]):
         if not fd:
             continue
         op = int(r.get("operationType") or 1)
-        con.execute("""INSERT OR IGNORE INTO fx_receipts(source, ext_id, kkt, ts, amount, ecash, op)
-                       VALUES ('ofd',?,?,?,?,?,?)""",
+        con.execute("""INSERT INTO fx_receipts(source, ext_id, kkt, ts, amount, ecash, op,
+                           fiscal_fn,fiscal_fd,fiscal_fp)
+                       VALUES ('ofd',?,?,?,?,?,?,?,?,?)
+                       ON CONFLICT(source,ext_id) DO UPDATE SET
+                           fiscal_fn=excluded.fiscal_fn,fiscal_fd=excluded.fiscal_fd,
+                           fiscal_fp=excluded.fiscal_fp,amount=excluded.amount,ecash=excluded.ecash,op=excluded.op""",
                     (f"{fn}:{fd}", fn or str(r.get("kktRegId") or ""), _ofd_ts(r),
-                     int(r.get("totalSum") or 0), int(r.get("ecashTotalSum") or 0), op))
+                     int(r.get("totalSum") or 0), int(r.get("ecashTotalSum") or 0), op,
+                     fn, fd, str(r.get('fiscalSign') or r.get('fiscalDocumentSign') or '')))
+
 
 
 # ======================= сверка =======================
@@ -661,6 +683,8 @@ def start_worker(connect):
                 try:
                     from . import fiscalcheck
                     fiscalcheck.run_automatic(con)
+                    from . import reconciliation
+                    reconciliation.run_ofd_backlog(con)
                     run(con)
                     con.execute("COMMIT")
                 except BaseException:

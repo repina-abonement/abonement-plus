@@ -31,7 +31,7 @@ function fxList(box, d) {
   const empty = !on.length ? "Сверка не подключена: проверить чеки пока не по чему"
     : on.some(([, r]) => r && !r.ok) ? "Список пуст, но последняя проверка прошла с ошибкой: данные могут быть неполными"
     : on.every(([, r]) => !r) ? "Проверок ещё не было: данных пока нет"
-    : "Всё в порядке: по всем поступлениям есть чеки";
+    : "В текущем списке нет выявленных проблем. Полнота банковской сверки и наличие чеков в ОФД этим не подтверждены";
   const rows = C.filter === "problems" ? d.rows.filter((r) => r.status === "missing" || r.status === "wait" || (r.need === -1 && r.status !== "skip")) : d.rows;
   box.innerHTML = `<div class="chips" style="margin-bottom:10px">${runs}</div>
     <div class="seg" style="margin-bottom:12px"><button data-ff="problems" class="${C.filter === "problems" ? "active" : ""}">Требуют внимания (${d.problems})</button>

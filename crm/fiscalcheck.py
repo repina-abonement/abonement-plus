@@ -29,14 +29,15 @@ def check(con,pid,user):
                 raise ValueError('Unverified receipt response')
             receipts=[r for r in receipts if r.get('type') in ('sale',None)]
             result['source_available']=True
-            confirmed=[r for r in receipts if r.get('status')=='success' and all(r.get(k) for k in ('fn','fnd','fpd'))]
+            confirmed=[r for r in receipts if r.get('status')=='success' and all(r.get(k) for k in ('fn','fnd','fpd'))
+                       and sum(fiscal.kop(r.get(k)) for k in ('sum_cashless','sum_cash','sum_advance','sum_credit'))==fiscal.kop(payment['amount'])]
             if confirmed:
                 fiscal.store_pk(con,[],confirmed,datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None))
                 r=confirmed[-1];result.update(status='confirmed',label='Чек пробит',receipt_id=str(r['id']))
             elif any(r.get('status') in ('created','sending','request_sent') for r in receipts):result.update(status='pending',label='Чек формируется')
             elif any(r.get('status') in ('failed','timeout') for r in receipts):result.update(status='failed',label='Ошибка фискализации')
             elif not receipts:result.update(status='not_found',label='Чек не найден на момент проверки')
-            else:result['note']='API не подтвердил полный набор фискальных реквизитов'
+            else:result['note']='API не подтвердил фискальные реквизиты и сумму этой оплаты'
         except Exception:
             result.update(status='unavailable',label='Источник недоступен',source_available=False,note='Не удалось получить и проверить ответ API PayKeeper. Новый чек не создавался')
     con.execute('INSERT INTO fiscal_payment_checks VALUES (?,?,?,?) ON CONFLICT(payment_id) DO UPDATE SET checked_at=excluded.checked_at,status=excluded.status,result=excluded.result',(pid,stamp,result['status'],json.dumps(result,ensure_ascii=False)))
@@ -53,7 +54,7 @@ def run_automatic(con,now=None,limit=30):
     rows=con.execute('''SELECT DISTINCT p.id FROM payments p JOIN pay_links l ON l.payment_id=p.id
         LEFT JOIN fiscal_payment_checks c ON c.payment_id=p.id
         WHERE p.cancelled=0 AND p.amount>0 AND l.pk_payment_id!=''
-          AND (c.payment_id IS NULL OR (c.status!='confirmed' AND c.checked_at<=?))
+          AND (c.payment_id IS NULL OR (c.checked_at<=? AND (c.status!='confirmed' OR NOT EXISTS (SELECT 1 FROM fx_receipts r WHERE r.source='paykeeper' AND r.pk_payment=l.pk_payment_id AND r.fiscal_fn!='' AND r.fiscal_fd!='' AND r.fiscal_fp!=''))))
         ORDER BY c.checked_at IS NOT NULL,c.checked_at,p.id LIMIT ?''',(cutoff,max(0,min(int(limit),100)))).fetchall()
     result={'checked':0,'confirmed':0,'unavailable':0}
     for row in rows:

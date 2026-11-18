@@ -27,7 +27,7 @@ class SubscriptionPaymentDetails(unittest.TestCase):
         self.assertEqual(money.subscription_payment_details(self.con,self.sid)[sub][0]['receipt']['status'],'pending')
         self.con.execute("UPDATE fx_receipts SET pk_status='failed' WHERE ext_id='receipt-one'")
         self.assertEqual(money.subscription_payment_details(self.con,self.sid)[sub][0]['receipt']['status'],'failed')
-        self.con.execute("UPDATE fx_receipts SET pk_status='success' WHERE ext_id='receipt-one'")
+        self.con.execute("UPDATE fx_receipts SET pk_status='success',fiscal_fn='fn',fiscal_fd='fd',fiscal_fp='fp' WHERE ext_id='receipt-one'")
         info=money.subscription_payment_details(self.con,self.sid)[sub][0]
         self.assertEqual(info['receipt']['status'],'confirmed')
         self.assertEqual(info['receipt']['receipt_id'],'receipt-one')

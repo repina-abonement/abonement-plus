@@ -476,12 +476,10 @@ def _payment_receipt_info(con,payment):
         return {'status':'unknown','label':'Чек не подтверждён'}
     provider_id=link['pk_payment_id']
     rows=list(con.execute("SELECT * FROM fx_receipts WHERE source='paykeeper' AND pk_payment=? AND op=1 ORDER BY id DESC",(provider_id,)))
-    receipt=next((r for r in rows if r['pk_status']=='success'),None)
-    if not receipt:
-        matched=con.execute("""SELECT r.* FROM fx_payments p JOIN fx_receipts r ON r.id=p.receipt_id
-            WHERE p.source='paykeeper' AND p.ext_id=? AND p.status='ok' AND r.op=1
-            AND (r.source='ofd' OR r.pk_status='success')""",(provider_id,)).fetchone()
-        receipt=matched
+    from . import fiscal
+    receipt=next((r for r in rows if r['pk_status']=='success'
+                  and all(r[k] for k in ('fiscal_fn','fiscal_fd','fiscal_fp'))
+                  and r['amount']==fiscal.kop(payment['amount'])),None)
     if receipt:return {'status':'confirmed','label':'Чек пробит','receipt_id':receipt['ext_id'],'receipt_at':receipt['ts']}
     if any(r['pk_status'] in ('failed','timeout') for r in rows):return {'status':'failed','label':'Ошибка фискализации'}
     if any(r['pk_status'] in ('created','sending','request_sent') for r in rows):return {'status':'pending','label':'Чек формируется'}
@@ -496,7 +494,8 @@ def payment_receipt_info(con,payment):
     if check:
         latest=json.loads(check['result'])
         if result['status']=='confirmed':result.update({k:latest[k] for k in ('checked_at','source_available','note') if k in latest})
-        else:result.update(latest)
+        elif latest.get('status')!='confirmed':result.update(latest)
+        else:result.update({k:latest[k] for k in ('checked_at','source_available') if k in latest})
     return result
 
 
@@ -509,6 +508,7 @@ def subscription_payment_details(con,sid):
         if p['amount']<=0 or not budget:continue
         available=min(p['amount'],budget);budget-=available
         sources.append([p,available])
+    from . import reconciliation
     details={};index=0
     for sub in obligations(con,sid):
         need=sub['price'];rows=[]
@@ -517,7 +517,8 @@ def subscription_payment_details(con,sid):
             if amount:
                 rows.append({'payment_id':p['id'],'amount':amount,'payment_total':p['amount'],
                     'method':payment_method(con,p),'method_label':METHODS.get(payment_method(con,p),p['method']),
-                    'paid_at':p['paid_at'],'created_at':p['created_at'],'receipt':payment_receipt_info(con,p)})
+                    'paid_at':p['paid_at'],'created_at':p['created_at'],'receipt':payment_receipt_info(con,p),
+                    'reconciliation':reconciliation.payment_state(con,p)})
                 need-=amount;sources[index][1]-=amount
             if sources[index][1]<=0:index+=1
         if not sub['retained']:details[sub['id']]=rows

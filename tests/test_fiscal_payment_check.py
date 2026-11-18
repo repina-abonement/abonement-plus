@@ -50,3 +50,21 @@ class FiscalPaymentCheck(unittest.TestCase):
         self.assertEqual(api.call_count,1)
         self.assertEqual(api.call_args.args[1],'/info/receipts/bypaymentid/')
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments').fetchone()[0],1)
+
+    def test_wrong_receipt_amount_does_not_confirm(self):
+        pid=self.payment()
+        receipt={'id':'wrong-amount','payment_id':'synthetic-11534','status':'success',
+                 'fn':'1','fnd':'2','fpd':'3','sum_cashless':'1351','type':'sale'}
+        with patch.object(fiscal,'pk_call',return_value=[receipt]):
+            result=fiscalcheck.check(self.con,pid,self.user)
+        self.assertNotEqual(result['status'],'confirmed')
+
+    def test_old_success_cache_without_fiscal_identity_is_rechecked(self):
+        pid=self.payment()
+        self.con.execute("INSERT INTO fx_receipts(source,ext_id,ts,amount,pk_payment,pk_status) VALUES('paykeeper','legacy','2026-11-18',135000,'synthetic-11534','success')")
+        self.con.execute("INSERT INTO fiscal_payment_checks VALUES(?, '2000-01-01T00:00','confirmed',?)",(pid,'{"status":"confirmed","label":"Чек пробит"}'))
+        self.assertNotEqual(money.payment_receipt_info(self.con,self.con.execute('SELECT * FROM payments WHERE id=?',(pid,)).fetchone())['status'],'confirmed')
+        with patch.object(fiscal,'pk_call',return_value=[]) as api:
+            result=fiscalcheck.run_automatic(self.con)
+        self.assertEqual(result['checked'],1)
+        self.assertEqual(api.call_count,1)
