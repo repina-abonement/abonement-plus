@@ -968,14 +968,14 @@ function trialAgeQuestion(kid = {}) {
 
 function wireMakeupOffer(root,students,textSel) {
   const host=root.querySelector('[data-makeup-offer]');if(!host)return;
-  host.innerHTML='<button type="button" class="btn sm makeup-offer-button">Предложить отработку</button><div class="makeup-offer-panel" hidden></div>';
+  host.innerHTML='<button type="button" class="btn sm makeup-offer-button" aria-expanded="false">Предложить отработку</button><div class="makeup-offer-panel" hidden></div>';
   const button=host.querySelector('button'),panel=host.querySelector('.makeup-offer-panel');
   let summaries=[],request=0,insertedDraft=null;
   const label=()=>{const count=summaries.reduce((sum,x)=>sum+(x.counters?.available||0),0);button.classList.toggle('has-makeups',count>0);button.textContent='Предложить отработку'+(count?' · '+count:'');button.title=count?'Есть доступные отработки':summaries.some(x=>x.error)?'Не удалось проверить остаток отработок':'Нет доступных отработок'};
   Promise.all(students.map(async kid=>{try{return {...await api('GET',`/api/students/${kid.id}/makeup-offer?summary=1`),kid}}catch(e){return {kid,error:e.message}}})).then(rows=>{if(!host.isConnected)return;summaries=rows;label()});
   button.onclick=async()=>{
     if(!students.length){toast('Сначала свяжите чат с карточкой ребёнка',true);return}
-    panel.hidden=!panel.hidden;if(panel.hidden)return;
+    panel.hidden=!panel.hidden;button.setAttribute('aria-expanded',String(!panel.hidden));if(panel.hidden)return;
     const preferred=summaries.find(x=>x.counters?.available>0)?.kid.id||students[0].id;
     panel.innerHTML=`${students.length>1?`<label>Ребёнок<select data-makeup-kid>${students.map(k=>`<option value="${k.id}" ${k.id===preferred?'selected':''}>${esc(k.name)}</option>`).join('')}</select></label>`:''}<div data-makeup-result></div>`;
     const load=async()=>{
@@ -988,8 +988,8 @@ function wireMakeupOffer(root,students,textSel) {
         result.querySelector('textarea').value=data.message;
         const input=root.querySelector(textSel);
         const insert=focus=>{if(!input)return;input.value=result.querySelector('textarea').value;insertedDraft=input.value;input.dispatchEvent(new Event('input',{bubbles:true}));if(focus)input.focus()};
-        if(input&&!panel.hidden&&(!input.value.trim()||input.value===insertedDraft)){insert(false);toast('Предложение уже в поле ответа — проверьте перед отправкой')}
-        result.querySelector('[data-use-makeup]').onclick=()=>{if(!input)return;const text=result.querySelector('textarea').value;if(input.value.trim()&&input.value!==text&&!confirm('Заменить текст в поле ответа предложением отработки?'))return;insert(true);toast('Предложение вставлено — проверьте и отправьте родителю')};
+        if(input&&!panel.hidden&&(!input.value.trim()||input.value===insertedDraft)){insert(false);if(students.length===1){panel.hidden=true;button.setAttribute('aria-expanded','false')}toast('Предложение уже в поле ответа — проверьте перед отправкой')}
+        result.querySelector('[data-use-makeup]').onclick=()=>{if(!input)return;const text=result.querySelector('textarea').value;if(input.value.trim()&&input.value!==text&&!confirm('Заменить текст в поле ответа предложением отработки?'))return;insert(true);panel.hidden=true;button.setAttribute('aria-expanded','false');toast('Предложение вставлено — проверьте и отправьте родителю')};
       }catch(error){if(version===request)result.textContent=error.message}
     };
     const select=panel.querySelector('select');if(select)select.onchange=load;
