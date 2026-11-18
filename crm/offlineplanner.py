@@ -94,3 +94,52 @@ def share_victoria_existing(con):
         con.execute('RELEASE offline_victoria_tasks')
     except BaseException:
         con.execute('ROLLBACK TO offline_victoria_tasks');con.execute('RELEASE offline_victoria_tasks');raise
+
+
+UNIFIED_KEY = 'offline_planner_unified_v2'
+
+
+def board_id(con, uid):
+    """Old personal URLs and assignments resolve to the merged board after migration."""
+    import json
+    try:
+        merged = json.loads(comms.get(con, UNIFIED_KEY) or '{}')
+    except (ValueError, TypeError):
+        return uid
+    return pool_id(con) if isinstance(merged,dict) and uid in merged.get('users', []) else uid
+
+
+def unify_requested_boards(con):
+    """18 November: one board for both named offline admins, preserving task history."""
+    import json, re
+    from . import services as sv
+    if comms.get(con, UNIFIED_KEY):
+        return
+    people = [dict(r) for r in con.execute("SELECT * FROM users WHERE active=1 AND role IN ('operator','admin')")]
+    def find(required):
+        return [r for r in people if required.issubset(set(re.findall(r'[а-яё]+', r['name'].casefold())))]
+    victoria, tatyana = find({'виктория','сафронова'}), find({'татьяна','данейкина'})
+    varya = find({'варвара','батарева'}) or [r for r in people if {'варвара','варя'}.intersection(re.findall(r'[а-яё]+', r['name'].casefold()))]
+    if any(len(rows) != 1 for rows in (victoria,tatyana,varya)):
+        return
+    users = [victoria[0]['id'],tatyana[0]['id']]
+    if len(set(users+[varya[0]['id']])) != 3 or any(r[0]['role'] != 'operator' for r in (victoria,tatyana)):
+        return
+    pool = pool_id(con)
+    con.execute('SAVEPOINT offline_unified_boards')
+    try:
+        tasks = [dict(r) for r in con.execute("SELECT id,assignee_id FROM tasks WHERE kind IN ('plan','bday') AND student_id IS NULL AND family_id IS NULL AND assignee_id IN (?,?)",users)]
+        recurring = [dict(r) for r in con.execute('SELECT id,assignee_id FROM recurring WHERE assignee_id IN (?,?)',users)]
+        for uid in users:
+            con.execute('UPDATE users SET is_offline_admin=1,is_senior=0 WHERE id=?',(uid,))
+        for row in tasks:
+            con.execute('UPDATE tasks SET assignee_id=? WHERE id=?',(pool,row['id']))
+        for row in recurring:
+            con.execute('UPDATE recurring SET assignee_id=? WHERE id=?',(pool,row['id']))
+        if varya[0]['role']=='operator':
+            comms.put(con, VIEWER_KEY, str(varya[0]['id']))
+        sv.audit(con,None,'planner.offline_unify',json.dumps({'pool':pool,'users':users,'viewer':varya[0]['id'],'tasks':tasks,'recurring':recurring},ensure_ascii=False))
+        comms.put(con,UNIFIED_KEY,json.dumps({'users':users,'pool':pool,'viewer':varya[0]['id']}))
+        con.execute('RELEASE offline_unified_boards')
+    except BaseException:
+        con.execute('ROLLBACK TO offline_unified_boards');con.execute('RELEASE offline_unified_boards');raise

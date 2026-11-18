@@ -79,9 +79,9 @@ async function renderPlanner(page) {
       <div class="small muted">${esc(r.assignee)} · ${r.rule_label}${r.rule === "weekly" ? ": " + r.weekdays.split(",").map((x) => WD_SHORT[+x]).join(", ") : r.rule === "monthly" ? `, ${r.monthday} числа` : r.rule === "yearly" ? `, ${r.yearday.slice(3)}.${r.yearday.slice(0, 2)}` : ""}${r.time ? ` в ${r.time}` : ""}</div></div>
       ${r.can_edit===false?'':`<button class="btn sm" data-rstop="${r.id}">Убрать будущие повторы</button>`}</div>`).join("")}</div>` : `<div class="muted">Повторяющихся дел нет. Поставьте задачу и выберите «Повтор»: например, «Купить воду» каждую неделю</div>`;
   } else if (C.tab === "team") {
-    const staffOpts = p.staff.filter((u) => u.role !== "coach").map((u) => `<option value="${u.id}" ${u.id === p.controller ? "selected" : ""}>${esc(u.name)}</option>`).join("");
+    const staffOpts = (p.people||p.staff).filter((u) => u.role !== "coach" && u.role !== "offline_pool").map((u) => `<option value="${u.id}" ${u.id === p.controller ? "selected" : ""}>${esc(u.name)}</option>`).join("");
     body = `${S.user.role === "admin" ? `<div class="row" style="max-width:520px;align-items:flex-end;margin-bottom:12px"><div class="field"><label>Контролёр задач команды</label><select id="pl-ctrl"><option value="">Только я</option>${staffOpts}</select></div></div>` : ""}
-      ${S.user.role==='admin'?`<div class="field" style="max-width:520px"><label>Общий Планер офлайн-администраторов — кто ещё может смотреть</label><select id="pl-offline-viewer"><option value="">Только руководитель и офлайн-администраторы</option>${p.staff.filter(u=>u.role==='operator').map(u=>`<option value="${u.id}" ${String(p.offline_viewer)===String(u.id)?'selected':''}>${esc(u.name)}</option>`).join('')}</select><span class="small muted">Выберите Варю. Доступ только на просмотр.</span></div>`:''}
+      ${S.user.role==='admin'?`<div class="field" style="max-width:520px"><label>Общий Планер офлайн-администраторов — кто ещё может смотреть</label><select id="pl-offline-viewer"><option value="">Только руководитель и офлайн-администраторы</option>${(p.people||p.staff).filter(u=>u.role==='operator').map(u=>`<option value="${u.id}" ${String(p.offline_viewer)===String(u.id)?'selected':''}>${esc(u.name)}</option>`).join('')}</select><span class="small muted">Выберите Варю. Доступ только на просмотр.</span></div>`:''}
       ${p.team.length ? p.team.map((u) => `<section class="panel" style="padding:12px 14px;margin-bottom:10px">
         <div class="team-head"><b>${esc(u.name)}</b>
           ${u.overdue.length ? `<span class="pill red">просрочено ${u.overdue.length}</span>` : ""}<span class="pill">сегодня ${u.today.length}</span><span class="pill green">сделано ${u.done_today}</span></div>
@@ -89,7 +89,7 @@ async function renderPlanner(page) {
       </section>`).join("") : `<div class="muted">У команды на сегодня всё сделано 🎉</div>`}`;
   } else if (C.tab === "bdays") {
     body = `<div class="small muted" style="margin-bottom:10px">За ${7} дней до дня рождения контролёру придёт задача «Создать чат в Telegram для сбора денег», в сам день «Поздравить»</div>
-      <div class="list">${p.staff.filter(u=>u.role!=='offline_pool').map((u) => `<div class="list-row"><span class="grow">${esc(u.name)}</span><input type="date" data-ub="${u.id}" value="${esc(u.birth || "")}" style="flex:0 0 170px"></div>`).join("")}</div>`;
+      <div class="list">${(p.people||p.staff).filter(u=>u.role!=='offline_pool').map((u) => `<div class="list-row"><span class="grow">${esc(u.name)}</span><input type="date" data-ub="${u.id}" value="${esc(u.birth || "")}" style="flex:0 0 170px"></div>`).join("")}</div>`;
   }
   page.innerHTML = `<div class="page-head"><h2 class="grow">Планер</h2><button class="btn primary" id="pl-add">+ Задача</button></div>
     <div id="pl-form"></div>

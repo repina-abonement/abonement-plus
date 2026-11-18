@@ -16,8 +16,9 @@ def main():
     print("Планер")
     u = lambda login, name, role: con.execute("INSERT INTO users(login,name,role,pw_hash) VALUES (?,?,?,'x$y')", (login, name, role)).lastrowid
     julia = {"id": con.execute("SELECT id FROM users WHERE role='admin'").fetchone()[0], "name": "Юлия Репина", "role": "admin"}
-    varya = {"id": u("v", "Варвара", "operator"), "name": "Варвара", "role": "operator"}
+    varya = {"id": u("v", "Варвара", "operator"), "name": "Варвара", "role": "operator", "is_senior": 1}
     olya = {"id": u("o", "Ольга", "operator"), "name": "Ольга", "role": "operator"}
+    con.execute("UPDATE users SET is_senior=1 WHERE id=?", (varya["id"],))
     t = date.today().isoformat()
     planner.add(con, julia, {"title": "Переписать оферту", "priority": True})
     check(tasks.my_tasks(con, julia)["groups"]["today"][0]["title"] == "Переписать оферту", "Личная задача Юлии на её столе")
@@ -40,7 +41,7 @@ def main():
     planner.generate(con)
     bt = con.execute("SELECT * FROM tasks WHERE kind='bday'").fetchone()
     check(bt and bt["assignee_id"] == varya["id"] and "Ольга" in bt["title"], "За неделю до ДР Ольги Варваре задача создать чат")
-    team = planner.team(con)
+    team = planner.team(con, varya)
     check(any(x["name"] == "Ольга" and x["today"] for x in team), "Контролёр видит задачи Ольги")
     tid = mine[0]["id"]
     tasks.complete(con, tid, olya, "обзвонила")

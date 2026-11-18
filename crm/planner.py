@@ -85,9 +85,10 @@ def can_change_plan(con,user,uid):
     return can_view_plan(con,user,uid)
 
 
-def visible_staff(con, user: dict) -> list[dict]:
+def visible_staff(con, user: dict, *, people=False) -> list[dict]:
     rows=[dict(row) for row in con.execute("SELECT id,name,role,birth FROM users WHERE active=1 ORDER BY role,name") if can_view_plan(con,user,row['id'])]
-    if offlineplanner.can_view(con,user):rows.append({'id':offlineplanner.pool_id(con),'name':'Офлайн-администраторы — общий планер','role':'offline_pool','birth':''})
+    if not people:rows=[r for r in rows if offlineplanner.board_id(con,r["id"])==r["id"]]
+    if not people and offlineplanner.can_view(con,user):rows.append({'id':offlineplanner.pool_id(con),'name':'Офлайн-администраторы — общий планер','role':'offline_pool','birth':''})
     return rows
 
 
@@ -106,7 +107,7 @@ def add(con, user: dict, data: dict) -> int:
     title = (data.get("title") or "").strip()
     if not title:
         raise PlanError("Напишите, что нужно сделать")
-    who = int(data.get("assignee_id") or user["id"])
+    who = offlineplanner.board_id(con,int(data.get("assignee_id") or user["id"]))
     if offlineplanner.member(con,user) and who==user['id']:who=offlineplanner.pool_id(con)
     if not can_change_plan(con, user, who):
         raise PlanError("Ставить задачи другим может администратор или контролёр")
@@ -213,6 +214,7 @@ def week(con, user: dict, start: str, who: int | None = None, *, rolling: bool =
     d0 = date.fromisoformat(start)
     if not rolling:
         d0 -= timedelta(days=d0.weekday())
+    who=offlineplanner.board_id(con,who) if who else who
     if who and not can_view_plan(con,user,who):
         if who==offlineplanner.pool_id(con):raise PlanError('Нет доступа к этому Планеру')
         who=None
@@ -236,7 +238,7 @@ def week(con, user: dict, start: str, who: int | None = None, *, rolling: bool =
     name = (con.execute("SELECT name FROM users WHERE id=?", (uid,)).fetchone() or [""])[0]
     return {"start": d0.isoformat(), "days": days, "overdue": overdue, "user_id": uid, "user_name": name,"can_edit":can_change_plan(con,user,uid),
             "can_manage": len(visible_staff(con,user))>1,
-            "staff": visible_staff(con, user)}
+            "staff": visible_staff(con, user), "people":visible_staff(con,user,people=True)}
 
 
 def _materialize(con, d: date):
@@ -329,7 +331,7 @@ def view(con, user: dict) -> dict:
     out = {"mine": mine, "given": given, "recurring": recurring, "today": today,
            "can_manage": user["role"] != "trainee" and (user["role"] == "admin" or bool(user.get("is_senior"))),
            "controller": controller(con), "rules": RULES,"offline_viewer":comms.get(con,offlineplanner.VIEWER_KEY) if user['role']=='admin' else None,
-           "staff": visible_staff(con, user)}
+           "staff": visible_staff(con, user), "people":visible_staff(con,user,people=True)}
     if out["can_manage"]:
         out["team"] = team(con, user)
     return out
@@ -402,7 +404,7 @@ def edit_task(con, tid: int, user: dict, data: dict) -> dict:
             datetime.strptime(tm, "%H:%M")
             if len(tm) != 5:
                 raise ValueError()
-        who = int(data.get("assignee_id") or t["assignee_id"])
+        who = offlineplanner.board_id(con,int(data.get("assignee_id") or t["assignee_id"]))
     except (ValueError, TypeError):
         raise PlanError("Проверьте дату, время и исполнителя")
     if not can_change_plan(con, user, who) or (who!=offlineplanner.pool_id(con) and not con.execute("SELECT 1 FROM users WHERE id=? AND active=1", (who,)).fetchone()):

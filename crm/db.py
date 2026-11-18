@@ -334,6 +334,7 @@ def init_db(con: sqlite3.Connection):
     from . import offlineplanner
     offlineplanner.provision_requested(con)
     offlineplanner.share_victoria_existing(con)
+    offlineplanner.unify_requested_boards(con)
     pricing.init(con)
     from . import groupterms
     groupterms.init(con)
