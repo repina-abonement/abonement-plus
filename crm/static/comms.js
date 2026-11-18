@@ -970,7 +970,7 @@ function wireMakeupOffer(root,students,textSel) {
   const host=root.querySelector('[data-makeup-offer]');if(!host)return;
   host.innerHTML='<button type="button" class="btn sm makeup-offer-button">Предложить отработку</button><div class="makeup-offer-panel" hidden></div>';
   const button=host.querySelector('button'),panel=host.querySelector('.makeup-offer-panel');
-  let summaries=[],request=0;
+  let summaries=[],request=0,insertedDraft=null;
   const label=()=>{const count=summaries.reduce((sum,x)=>sum+(x.counters?.available||0),0);button.classList.toggle('has-makeups',count>0);button.textContent='Предложить отработку'+(count?' · '+count:'');button.title=count?'Есть доступные отработки':summaries.some(x=>x.error)?'Не удалось проверить остаток отработок':'Нет доступных отработок'};
   Promise.all(students.map(async kid=>{try{return {...await api('GET',`/api/students/${kid.id}/makeup-offer?summary=1`),kid}}catch(e){return {kid,error:e.message}}})).then(rows=>{if(!host.isConnected)return;summaries=rows;label()});
   button.onclick=async()=>{
@@ -986,7 +986,10 @@ function wireMakeupOffer(root,students,textSel) {
         if(!data.message){result.textContent=data.reason;return}
         result.innerHTML=`<p class="small muted">Ближайшие варианты с учётом правил и свободных мест</p><textarea rows="8" aria-label="Предложение отработки"></textarea><button type="button" class="btn sm primary" data-use-makeup>Вставить в сообщение</button><p class="small muted">Сначала согласуйте время с родителем — это предложение, запись ещё не создана</p>`;
         result.querySelector('textarea').value=data.message;
-        result.querySelector('[data-use-makeup]').onclick=()=>{const input=root.querySelector(textSel);if(!input)return;if(input.value.trim()&&!confirm('Заменить текст в поле ответа предложением отработки?'))return;input.value=result.querySelector('textarea').value;input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();toast('Предложение вставлено — проверьте и отправьте родителю')};
+        const input=root.querySelector(textSel);
+        const insert=focus=>{if(!input)return;input.value=result.querySelector('textarea').value;insertedDraft=input.value;input.dispatchEvent(new Event('input',{bubbles:true}));if(focus)input.focus()};
+        if(input&&!panel.hidden&&(!input.value.trim()||input.value===insertedDraft)){insert(false);toast('Предложение уже в поле ответа — проверьте перед отправкой')}
+        result.querySelector('[data-use-makeup]').onclick=()=>{if(!input)return;const text=result.querySelector('textarea').value;if(input.value.trim()&&input.value!==text&&!confirm('Заменить текст в поле ответа предложением отработки?'))return;insert(true);toast('Предложение вставлено — проверьте и отправьте родителю')};
       }catch(error){if(version===request)result.textContent=error.message}
     };
     const select=panel.querySelector('select');if(select)select.onchange=load;
