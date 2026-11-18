@@ -17,8 +17,8 @@ class FiscalPaymentCheck(unittest.TestCase):
         pid=self.payment()
         with patch.object(fiscal,'pk_call',return_value=[]) as api:result=fiscalcheck.check(self.con,pid,self.user)
         self.assertEqual(result['status'],'unknown');self.assertEqual(result['label'],'Первичный чек не проверен');self.assertIn('Пустой ответ не означает',result['note']);self.assertTrue(result['checked_at'])
-        self.assertEqual(api.call_args.args[1],'/info/receipts/bypaymentid/')
-        self.assertEqual(api.call_args.args[2],{'payment_id':'synthetic-11534'})
+        self.assertIn('/info/receipts/bypaymentid/',[call.args[1] for call in api.call_args_list])
+        self.assertIn({'payment_id':'synthetic-11534'},[call.args[2] for call in api.call_args_list])
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments').fetchone()[0],1)
 
     def test_success_requires_right_payment_and_fiscal_fields(self):
@@ -47,8 +47,8 @@ class FiscalPaymentCheck(unittest.TestCase):
             second=fiscalcheck.run_automatic(self.con)
         self.assertEqual(first['checked'],1)
         self.assertEqual(second['checked'],0)
-        self.assertEqual(api.call_count,1)
-        self.assertEqual(api.call_args.args[1],'/info/receipts/bypaymentid/')
+        self.assertEqual(api.call_count,3)
+        self.assertIn('/info/receipts/bypaymentid/',[call.args[1] for call in api.call_args_list])
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments').fetchone()[0],1)
 
     def test_wrong_receipt_amount_does_not_confirm(self):
@@ -67,4 +67,4 @@ class FiscalPaymentCheck(unittest.TestCase):
         with patch.object(fiscal,'pk_call',return_value=[]) as api:
             result=fiscalcheck.run_automatic(self.con)
         self.assertEqual(result['checked'],1)
-        self.assertEqual(api.call_count,1)
+        self.assertEqual(api.call_count,3)

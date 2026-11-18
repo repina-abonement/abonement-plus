@@ -481,6 +481,14 @@ def _payment_receipt_info(con,payment):
                   and all(r[k] for k in ('fiscal_fn','fiscal_fd','fiscal_fp'))
                   and r['amount']==fiscal.kop(payment['amount'])),None)
     if receipt:return {'status':'confirmed','label':'Чек пробит','receipt_id':receipt['ext_id'],'receipt_at':receipt['ts']}
+    primary=next((r for r in rows if r['pk_status']=='fiscal_details'
+                  and all(r[k] for k in ('fiscal_fn','fiscal_fd','fiscal_fp'))
+                  and r['amount']==fiscal.kop(payment['amount'])),None)
+    if primary:
+        from . import reconciliation
+        if reconciliation.payment_state(con,payment)['ofd']['status']=='confirmed':
+            return {'status':'confirmed','label':'Чек найден в ОФД','receipt_id':primary['fiscal_fd'],'receipt_at':primary['ts']}
+        return {'status':'fiscal_details','label':'Реквизиты чека получены','receipt_id':primary['fiscal_fd'],'receipt_at':primary['ts']}
     if any(r['pk_status'] in ('failed','timeout') for r in rows):return {'status':'failed','label':'Ошибка фискализации'}
     if any(r['pk_status'] in ('created','sending','request_sent') for r in rows):return {'status':'pending','label':'Чек формируется'}
     missing=con.execute("SELECT 1 FROM fx_payments WHERE source='paykeeper' AND ext_id=? AND status='missing'",(provider_id,)).fetchone()

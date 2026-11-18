@@ -23,22 +23,41 @@ def check(con,pid,user):
         result.update(status='unavailable',label='Источник недоступен',source_available=False,note='Не настроен доступ к API PayKeeper')
     else:
         try:
-            raw=fiscal.pk_call(con,'/info/receipts/bypaymentid/',{'payment_id':link['pk_payment_id']})
-            receipts=raw.get('receipts') if isinstance(raw,dict) and set(raw).issuperset({'receipts'}) else raw
-            if not isinstance(receipts,list) or any(not isinstance(r,dict) or not r.get('id') or str(r.get('payment_id'))!=link['pk_payment_id'] for r in receipts):
-                raise ValueError('Unverified receipt response')
-            receipts=[r for r in receipts if r.get('type') in ('sale',None)]
-            result['source_available']=True
-            result['coverage']='Дополнительные чеки и окончательный расчёт; первичный чек этим методом не проверяется'
-            confirmed=[r for r in receipts if r.get('status')=='success' and all(r.get(k) for k in ('fn','fnd','fpd'))
-                       and sum(fiscal.kop(r.get(k)) for k in ('sum_cashless','sum_cash','sum_advance','sum_credit'))==fiscal.kop(payment['amount'])]
-            if confirmed:
-                fiscal.store_pk(con,[],confirmed,datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None))
-                r=confirmed[-1];result.update(status='confirmed',label='Чек пробит',receipt_id=str(r['id']))
-            elif any(r.get('status') in ('created','sending','request_sent') for r in receipts):result.update(status='pending',label='Чек формируется')
-            elif any(r.get('status') in ('failed','timeout') for r in receipts):result.update(status='failed',label='Ошибка фискализации')
-            elif not receipts:result.update(status='unknown',label='Первичный чек не проверен',note='PayKeeper receipts/bypaymentid не возвращает первый чек при получении платежа. Пустой ответ не означает отсутствие чека')
-            else:result['note']='API не подтвердил фискальные реквизиты и сумму этой оплаты'
+            # The first receipt is absent from receipts/bypaymentid. Inspect exact
+            # payment options first; this is read-only and does not claim OFD success.
+            from . import paykeepercheck
+            inspection=paykeepercheck.inspect(con,link['pk_payment_id'])
+            primary=inspection.get('primary_receipt',{})
+            if primary.get('status')=='fiscal_details':
+                fiscal.store_pk(con,[],[{'id':'primary:'+link['pk_payment_id'],
+                    'payment_id':link['pk_payment_id'],'status':'fiscal_details','type':'sale',
+                    'fn':primary['fn'],'fnd':primary['fd'],'fpd':primary['fp'],
+                    'sum_cashless':str(primary['total_minor']/100),
+                    'obtain_datetime':primary['issued_at']}],datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None))
+                result.update(status='fiscal_details',label='Реквизиты чека получены',source_available=True,note=primary['note'])
+                ofd=inspection.get('ofd',{})
+                if ofd.get('status')=='confirmed':
+                    result['note']=ofd['note']
+                    fiscal.store_ofd(con,[{'fiscalDriveNumber':ofd['fn'],'fiscalDocumentNumber':ofd['fd'],
+                        'fiscalSign':ofd['fp'],'totalSum':ofd['total_minor'],'operationType':1,
+                        'receiptDate':ofd['issued_at']}])
+
+            else:
+                additional=inspection.get('additional_receipts',{})
+                if not additional.get('available'):raise ValueError('Unverified receipt response')
+                receipts=additional['receipts']
+                receipts=[r for r in receipts if r.get('type') in ('sale',None)]
+                result['source_available']=True
+                result['coverage']='Дополнительные чеки и окончательный расчёт; первичный чек этим методом не проверяется'
+                confirmed=[r for r in receipts if r.get('status')=='success' and all(r.get(k) for k in ('fn','fnd','fpd'))
+                           and sum(fiscal.kop(r.get(k)) for k in ('sum_cashless','sum_cash','sum_advance','sum_credit'))==fiscal.kop(payment['amount'])]
+                if confirmed:
+                    fiscal.store_pk(con,[],confirmed,datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None))
+                    r=confirmed[-1];result.update(status='confirmed',label='Чек пробит',receipt_id=str(r['id']))
+                elif any(r.get('status') in ('created','sending','request_sent') for r in receipts):result.update(status='pending',label='Чек формируется')
+                elif any(r.get('status') in ('failed','timeout') for r in receipts):result.update(status='failed',label='Ошибка фискализации')
+                elif not receipts:result.update(status='unknown',label='Первичный чек не проверен',note='PayKeeper receipts/bypaymentid не возвращает первый чек при получении платежа. Пустой ответ не означает отсутствие чека')
+                else:result['note']='API не подтвердил фискальные реквизиты и сумму этой оплаты'
         except Exception:
             result.update(status='unavailable',label='Источник недоступен',source_available=False,note='Не удалось получить и проверить ответ API PayKeeper. Новый чек не создавался')
     con.execute('INSERT INTO fiscal_payment_checks VALUES (?,?,?,?) ON CONFLICT(payment_id) DO UPDATE SET checked_at=excluded.checked_at,status=excluded.status,result=excluded.result',(pid,stamp,result['status'],json.dumps(result,ensure_ascii=False)))

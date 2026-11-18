@@ -674,22 +674,28 @@ def run(con, now: datetime | None = None) -> dict:
     return res
 
 
+def run_worker_cycle(con):
+    # New read-only HTTP probes must not hold a SQLite write lock while waiting
+    # for providers: incoming messenger hooks need to save messages concurrently.
+    from . import fiscalcheck,reconciliation
+    fiscalcheck.run_automatic(con)
+    reconciliation.run_ofd_backlog(con)
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        result=run(con)
+        con.execute("COMMIT")
+        return result
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+
+
 def start_worker(connect):
     def loop():
         con = connect()
         while True:
             try:
-                con.execute("BEGIN IMMEDIATE")
-                try:
-                    from . import fiscalcheck
-                    fiscalcheck.run_automatic(con)
-                    from . import reconciliation
-                    reconciliation.run_ofd_backlog(con)
-                    run(con)
-                    con.execute("COMMIT")
-                except BaseException:
-                    con.execute("ROLLBACK")
-                    raise
+                run_worker_cycle(con)
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
             time.sleep(600)

@@ -17,7 +17,7 @@ def payment_state(con, payment):
     receipt = con.execute("""SELECT o.* FROM fx_receipts p JOIN fx_receipts o
           ON o.source='ofd' AND o.fiscal_fn=p.fiscal_fn AND o.fiscal_fd=p.fiscal_fd
              AND o.fiscal_fp=p.fiscal_fp AND o.amount=p.amount AND o.op=p.op
-          WHERE p.source='paykeeper' AND p.pk_payment=? AND p.pk_status='success' AND p.op=1
+          WHERE p.source='paykeeper' AND p.pk_payment=? AND p.pk_status IN ('success','fiscal_details') AND p.op=1
              AND p.fiscal_fn!='' AND p.fiscal_fd!='' AND p.fiscal_fp!='' AND p.amount=?
           ORDER BY o.id DESC LIMIT 1""", (link['pk_payment_id'], fiscal.kop(payment['amount']))).fetchone()
     if receipt:
@@ -45,7 +45,7 @@ def run_ofd_backlog(con, now=None):
     cutoff = (current - timedelta(minutes=10)).strftime('%Y-%m-%d %H:%M:%S')
     row = con.execute("""SELECT DISTINCT substr(p.ts,1,10) AS day, d.checked_at
         FROM fx_receipts p LEFT JOIN fiscal_ofd_days d ON d.day=substr(p.ts,1,10)
-        WHERE p.source='paykeeper' AND p.pk_status='success' AND p.op=1
+        WHERE p.source='paykeeper' AND p.pk_status IN ('success','fiscal_details') AND p.op=1
           AND p.fiscal_fn!='' AND p.fiscal_fd!='' AND p.fiscal_fp!=''
           AND NOT EXISTS(SELECT 1 FROM fx_receipts o WHERE o.source='ofd'
             AND o.fiscal_fn=p.fiscal_fn AND o.fiscal_fd=p.fiscal_fd
