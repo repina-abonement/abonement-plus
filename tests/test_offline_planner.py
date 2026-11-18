@@ -21,7 +21,7 @@ def main():
     op.provision_requested(con)
     one=dict(con.execute('SELECT * FROM users WHERE id=?',(one['id'],)).fetchone());two=dict(con.execute('SELECT * FROM users WHERE id=?',(two['id'],)).fetchone())
     assert one['is_offline_admin'] and two['is_offline_admin'] and not one['is_senior']
-    assert perms.title(one)=='Офлайн-администратор' and perms.allowed(one,'operator')
+    assert perms.title(one)=='Офлайн-администратор' and not perms.allowed(one,'operator') and perms.allowed(one,'planner')
     assert op.can_view(con,varya) and not op.can_edit(con,varya)
     pool=op.pool_id(con);assert not con.execute('SELECT active FROM users WHERE id=?',(pool,)).fetchone()[0]
     tid=planner.add(con,one,{'title':'Общая задача'})

@@ -651,13 +651,13 @@ def required_post(con, h, user, body, q, sid):
     return {"ok": True}
 
 
-@route("GET", "/api/chat-scripts", role="operator")
+@route("GET", "/api/chat-scripts", role="inbox")
 def chat_scripts_get(con, h, user, body, q):
     from . import chatscripts
     return cx(chatscripts.catalog,con, int(q['student_id']) if q.get('student_id') else None, q.get('channel',''), int(q['group_id']) if q.get('group_id') else None)
 
 
-@route("POST", "/api/conversations/{cid}/rules-draft", role="operator")
+@route("POST", "/api/conversations/{cid}/rules-draft", role="inbox")
 def chat_rules_draft(con, h, user, body, q, cid):
     from . import chatscripts
     return cx(chatscripts.stage_rules,con,int(cid),user,int(body.get('student_id') or 0),int(body['group_id']) if body.get('group_id') else None)
@@ -2692,12 +2692,12 @@ def pin_chat(con,h,user,body,q,cid):
     return cx(comms.pin_conversation,con,int(cid),user,body.get('pinned'))
 
 
-@route("GET", "/api/inbox", role="operator")
+@route("GET", "/api/inbox", role="inbox")
 def inbox(con, h, user, body, q):
     return comms.inbox(con, q.get("filter", "all"), q.get("q", ""), user)
 
 
-@route("GET", "/api/inbox/counts", role="operator")
+@route("GET", "/api/inbox/counts", role="inbox")
 def inbox_counts(con, h, user, body, q):
     return comms.counts(con,user)
 
@@ -2710,13 +2710,13 @@ def trial_hold(con, h, user, body, q):
                          str(body.get("date") or "")[:10], str(body.get("time") or "")[:5], user)
 
 
-@route("POST", "/api/conversations/telegram-username", role="operator")
+@route("POST", "/api/conversations/telegram-username", role="inbox")
 def conversation_username(con, h, user, body, q):
     cid = cx(comms.start_wazzup_username, con, body.get("username") or "")
     return {"conversation_id": cid}
 
 
-@route("GET", "/api/conversations/{cid}", role="operator")
+@route("GET", "/api/conversations/{cid}", role="inbox")
 def conv_get(con, h, user, body, q, cid):
     detail = cx(comms.conversation, con, int(cid),q.get("read")!="0")
     from . import chatinbox
@@ -2731,13 +2731,13 @@ def conv_get(con, h, user, body, q, cid):
     return detail
 
 
-@route("POST", "/api/conversations/{cid}/attachments", role="operator")
+@route("POST", "/api/conversations/{cid}/attachments", role="inbox")
 def attachment_upload(con,h,user,body,q,cid):
     from . import chatattachments
     return cx(chatattachments.upload,con,int(cid),user,body.get('filename'),body.get('data'))
 
 
-@route("POST", "/api/conversations/{cid}/attachments/{aid}/send", role="operator")
+@route("POST", "/api/conversations/{cid}/attachments/{aid}/send", role="inbox")
 def attachment_send(con,h,user,body,q,cid,aid):
     from . import chatattachments
     return cx(chatattachments.send,con,int(cid),aid,user,body.get('caption') or '')
@@ -2766,7 +2766,7 @@ def family_attachment_target(con,h,user,body,q,fid):
     return {'conversation_id':cid}
 
 
-@route("POST", "/api/conversations/{cid}/send", role="operator")
+@route("POST", "/api/conversations/{cid}/send", role="inbox")
 def conv_send(con, h, user, body, q, cid):
     try:
         if body.get("sticker"):
@@ -2778,19 +2778,19 @@ def conv_send(con, h, user, body, q, cid):
         return JsonResponse({"error": str(error)}, 400)
 
 
-@route("POST", "/api/conversations/{cid}/question", role="operator")
+@route("POST", "/api/conversations/{cid}/question", role="inbox")
 def conv_question(con, h, user, body, q, cid):
     cx(comms.set_question, con, int(cid), body.get("note") or "", body.get("due") or "", user)
     return {"ok": True}
 
 
-@route("POST", "/api/conversations/{cid}/question/close", role="operator")
+@route("POST", "/api/conversations/{cid}/question/close", role="inbox")
 def conv_question_close(con, h, user, body, q, cid):
     cx(comms.close_question, con, int(cid), user)
     return {"ok": True}
 
 
-@route("POST", "/api/conversations/{cid}/link", role="operator")
+@route("POST", "/api/conversations/{cid}/link", role="inbox")
 def conv_link(con, h, user, body, q, cid):
     cx(comms.link, con, int(cid), body.get("family_id"))
     return {"ok": True}
@@ -3089,7 +3089,7 @@ def family_patch(con, h, user, body, q, fid):
     return {"ok": True}
 
 
-@route("GET", "/api/families/{fid}/comms", role="operator")
+@route("GET", "/api/families/{fid}/comms", role="inbox")
 def family_comms(con, h, user, body, q, fid):
     return comms.family_comms(con, int(fid),q.get("read")!="0")
 
@@ -3112,40 +3112,40 @@ def family_whatsapp(con, h, user, body, q, fid):
     return result | {"conversation_id": cid}
 
 
-@route("DELETE", "/api/messages/{mid}", role="operator")
+@route("DELETE", "/api/messages/{mid}", role="inbox")
 def message_delete(con,h,user,body,q,mid):
     from . import messagedeletion
     return cx(messagedeletion.delete,con,int(mid),user)
 
 
-@route("GET", "/api/messages/{mid}/media", role="operator")
+@route("GET", "/api/messages/{mid}/media", role="inbox")
 def message_media(con, h, user, body, q, mid):
     return Raw(*cx(comms.media_for, con, int(mid)))
 
 
-@route("POST", "/api/call", role="operator")
+@route("POST", "/api/call", role="inbox")
 def make_call(con, h, user, body, q):
     sip = con.execute("SELECT sip_number FROM users WHERE id=?", (user["id"],)).fetchone()[0]
     return cx(comms.sipuni_call, con, body.get("phone") or "", sip)
 
 
-@route("GET", "/api/calls", role="operator")
+@route("GET", "/api/calls", role="inbox")
 def calls(con, h, user, body, q):
     return comms.calls_list(con, q.get("filter", "all"))
 
 
-@route("GET", "/api/calls/analytics", role="operator")
+@route("GET", "/api/calls/analytics", role="inbox")
 def calls_analytics(con, h, user, body, q):
     return callstats.analytics(con, q.get("period", "week"))
 
 
-@route("POST", "/api/calls/seen", role="operator")
+@route("POST", "/api/calls/seen", role="inbox")
 def calls_seen(con, h, user, body, q):
     comms.mark_calls_seen(con)
     return {"ok": True}
 
 
-@route("POST", "/api/calls/{cid}/seen", role="operator")
+@route("POST", "/api/calls/{cid}/seen", role="inbox")
 def call_seen(con, h, user, body, q, cid):
     r = con.execute("SELECT phone_norm FROM calls WHERE id=?", (int(cid),)).fetchone()
     if r:
@@ -3153,17 +3153,17 @@ def call_seen(con, h, user, body, q, cid):
     return {"ok": True}
 
 
-@route("GET", "/api/calls/{cid}/ai", role="operator")
+@route("GET", "/api/calls/{cid}/ai", role="inbox")
 def call_ai(con, h, user, body, q, cid):
     return cx(ai.call_ai, con, int(cid))
 
 
-@route("GET", "/api/calls/digests", role="operator")
+@route("GET", "/api/calls/digests", role="inbox")
 def call_digests(con, h, user, body, q):
     return {"items": calldigest.listing(con)}
 
 
-@route("GET", "/api/calls/digest", role="operator")
+@route("GET", "/api/calls/digest", role="inbox")
 def call_digest(con, h, user, body, q):
     d = calldigest.get(con, q.get("day") or "", q.get("operator") or "")
     if not d:
@@ -3181,7 +3181,7 @@ def call_digest_build(con, h, user, body, q):
     return d
 
 
-@route("POST", "/api/calls/{cid}/ai/retry", role="operator")
+@route("POST", "/api/calls/{cid}/ai/retry", role="inbox")
 def call_ai_retry(con, h, user, body, q, cid):
     ai.retry(con, int(cid))
     return {"ok": True}
@@ -3192,7 +3192,7 @@ def int_yandex(con, h, user, body, q):
     return cx(ai.test_connection, con)
 
 
-@route("GET", "/api/calls/{cid}/record", role="operator")
+@route("GET", "/api/calls/{cid}/record", role="inbox")
 def call_record(con, h, user, body, q, cid):
     return Raw(*cx(comms.record_for, con, int(cid)))
 
@@ -3229,7 +3229,7 @@ def integrations_put(con, h, user, body, q):
     return comms.admin_view(con, base_url(h))
 
 
-@route("GET", "/api/sticker-packs", role="operator")
+@route("GET", "/api/sticker-packs", role="inbox")
 def sticker_pack_list(con, h, user, body, q):
     from . import stickerpacks
     return stickerpacks.catalog(con, user) | {"telegram_ready": bool(comms.get(con, "tg_token"))}

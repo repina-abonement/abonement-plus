@@ -34,6 +34,9 @@ class OfflineChatAccess(unittest.TestCase):
                 for token,user in users:
                     self.assertTrue(user['is_offline_admin']);self.assertEqual(perms.title(user),'Офлайн-администратор')
                     code,meta=call(token,'GET','/api/meta');self.assertEqual(code,200);self.assertEqual(meta['user']['perms']['inbox'],'full')
+                    self.assertEqual(set(meta['user']['perms']),{'inbox','planner'})
+                    for forbidden in ['/api/board/sales','/api/students','/api/payments','/api/users']:
+                        self.assertEqual(call(token,'GET',forbidden)[0],403,forbidden)
                     for endpoint in ['/api/inbox',f'/api/conversations/{cid}',f'/api/families/{fid}/comms']:
                         self.assertEqual(call(token,'GET',endpoint)[0],200)
                     self.assertEqual(call(token,'POST',f'/api/conversations/{cid}/send',{'text':'Synthetic access test'})[0],200)

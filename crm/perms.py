@@ -49,6 +49,8 @@ def roles_of(user: dict) -> set[str]:
     base = user.get("role")
     if base == "trainee":
         return {"trainee"}
+    if base == "operator" and user.get("is_offline_admin"):
+        return {"offline"}
     out = set()
     if base == "admin":
         out.add("owner")
@@ -69,6 +71,8 @@ def level(user: dict, section: str) -> int:
             return 0
         if user.get("coach_nebo_only") and section not in ("today", "journal"):
             return 0
+    if "offline" in roles_of(user):
+        return LEVEL["full"] if section == "inbox" else LEVEL["own"] if section == "planner" else 0
     rules = SECTIONS.get(section, {})
     return max((LEVEL[rules[r]] for r in roles_of(user) if r in rules), default=0)
 
