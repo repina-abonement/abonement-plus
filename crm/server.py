@@ -3268,6 +3268,17 @@ def int_wazzup_diagnostics(con,h,user,body,q):
     return cx(comms.wazzup_diagnostics,con)
 
 
+@route("POST", "/api/integrations/wazzup/replay", role="admin")
+def int_wazzup_replay(con,h,user,body,q):
+    try:
+        hook_id = int(body.get('hook_id'))
+    except (TypeError,ValueError):
+        raise ApiError('Укажите номер сохранённого события',400)
+    result = cx(comms.replay_wazzup_hook,con,hook_id)
+    sv.audit(con,user,'wazzup.replay',str(hook_id))
+    return result
+
+
 @route("POST", "/api/integrations/wazzup/connect", role="admin")
 def int_wz(con, h, user, body, q):
     comms.put(con,"public_url",base_url(h))
@@ -3339,7 +3350,11 @@ def handle_hook(h, method: str, source: str, token: str, url) -> None:
             pass
         if source == "lead":
             return h._send(400, {"ok": False, "success": False, "error": str(e)})
-        # остальным сервисам отвечаем «принято»: ошибку видно в журнале событий, а Sipuni не отключит отправку
+        if source == "wazzup":
+            # A rolled-back event was not accepted. Let the provider retry it safely.
+            return h._send(503, {"ok": False, "success": False, "retryable": True,
+                                 "error": "wazzup_event_not_saved"})
+        # Сохраняем прежний ответ для остальных сервисов (в том числе Sipuni).
     return h._send(200, result)
 
 

@@ -796,6 +796,20 @@ def wazzup_diagnostics(con):
                                    'employee': row['user_name'] or '', 'kind': row['kind'],
                                    'recipient_mode': next(iter(_wz_recipient(dict(row) | {'id': row['conversation_id'], 'meta': json.dumps(meta)}, con))),
                                    'uses_current_channel': not meta.get('channelId') or meta['channelId'] == configured_channel})
+    incoming = []
+    for event in con.execute("SELECT id,ts,payload,error FROM hook_log WHERE source='wazzup' ORDER BY id DESC LIMIT 50"):
+        item = {'hook_id': event['id'], 'at': event['ts'], 'failed': bool(event['error']),
+                'error_type': (event['error'].split(':',1)[0] if event['error'] and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,59}',event['error'].split(':',1)[0]) else 'Ошибка обработки' if event['error'] else '')}
+        try:
+            payload = json.loads(event['payload'])
+            messages = payload.get('messages') or []
+            item['message_count'] = len(messages)
+            item['chat_types'] = sorted({m.get('chatType') if m.get('chatType') in ('whatsapp','wapi','telegram','tgapi','max','maxapi') else 'unknown' for m in messages if isinstance(m,dict)})
+        except (ValueError,TypeError,AttributeError):
+            item['payload_unreadable'] = True
+        incoming.append(item)
+    report['incoming_events'] = incoming
+    report['incoming_scope'] = 'Последние 50 сохранённых событий Wazzup; отсутствие записи не доказывает отсутствие доставки'
     if not key:
         return report
     try:
@@ -1003,6 +1017,22 @@ def wz_hook(con, payload: dict) -> None:
         dt = _utc_to_local(m.get("dateTime") or "")
         add_message(con, cid, "out" if echo else "in", m.get("text") or "", kind=kind, media=m.get("contentUri") or "",
                     external_id=m.get("messageId"), user_name="Из Wazzup" if echo else "", ts=dt)
+
+
+def replay_wazzup_hook(con, hook_id):
+    """Reprocess an authenticated saved webhook, never send to a provider/client."""
+    row = con.execute("SELECT payload FROM hook_log WHERE id=? AND source='wazzup'", (hook_id,)).fetchone()
+    if not row:
+        raise CommsError('Сохранённое событие Wazzup не найдено')
+    try:
+        payload = json.loads(row['payload'])
+    except (ValueError,TypeError):
+        raise CommsError('Событие сохранено неполностью: повторная обработка невозможна') from None
+    if not isinstance(payload,dict) or not isinstance(payload.get('messages'),list):
+        raise CommsError('В событии нет списка сообщений Wazzup')
+    before = con.execute('SELECT count(*) FROM messages').fetchone()[0]
+    wz_hook(con,payload)
+    return {'ok':True, 'added':con.execute('SELECT count(*) FROM messages').fetchone()[0]-before}
 
 
 WZ_ROUTE = {
@@ -1486,12 +1516,13 @@ def inbox(con, filt: str = "all", q: str = "", user=None) -> dict:
         like = f"%{q.strip().lower()}%"
         where.append("""(ulower(c.title) LIKE ? OR ulower(c.username) LIKE ?
             OR phone_match(c.phone_norm,?) OR phone_match(c.phone,?)
+            OR (c.channel='wazzup_max' AND c.external_id=?)
             OR c.family_id IN (SELECT id FROM families WHERE ulower(name) LIKE ?)
             OR EXISTS (SELECT 1 FROM parents p WHERE p.family_id=c.family_id AND ulower(p.name) LIKE ?)
             OR EXISTS (SELECT 1 FROM students st WHERE st.family_id=c.family_id AND (ulower(st.name) LIKE ? OR ulower(trim(substr(st.name,instr(st.name,' ')+1)||' '||substr(st.name,1,instr(st.name,' ')-1))) LIKE ?))
             OR EXISTS (SELECT 1 FROM parents p WHERE p.family_id=c.family_id AND (phone_match(p.phone_norm,?) OR phone_match(p.phone,?)))
             OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND ((?='' AND ulower(m.text) LIKE ?) OR message_phone_match(m.text,?))))""")
-        args += [like,like,q,q,like,like,like,like,q,q,phone_search_digits(q) if not any(ch.isalpha() for ch in q) else '',like,q]
+        args += [like,like,q,q,q.strip(),like,like,like,like,q,q,phone_search_digits(q) if not any(ch.isalpha() for ch in q) else '',like,q]
     sql = "SELECT c.*,CASE WHEN pins.conversation_id IS NULL THEN 0 ELSE 1 END AS pinned FROM conversations c LEFT JOIN conversation_pins pins ON pins.conversation_id=c.id AND pins.user_id=?" + (" WHERE " + " AND ".join(where) if where else "")
     sql += " ORDER BY pinned DESC,c.last_at IS NULL,c.last_at DESC,c.id DESC LIMIT 1000"
     identity_cache={}

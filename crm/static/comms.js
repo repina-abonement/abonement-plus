@@ -460,8 +460,11 @@ async function renderInbox(page) {
   }catch(error){fail(error)}finally{startTelegram.disabled=false}};
   let t; $("#iq").oninput = (e) => { I.q = e.target.value; updateStart();clearTimeout(t); t = setTimeout(loadList, 250); };
 
+  let listRequest = 0;
   async function loadList() {
-    const d = await api("GET", `/api/inbox?filter=${I.filter}&q=${encodeURIComponent(I.q)}`);
+    const request = ++listRequest, query = I.q, filter = I.filter;
+    const d = await api("GET", `/api/inbox?filter=${filter}&q=${encodeURIComponent(query)}`);
+    if (request !== listRequest || I.q !== query || I.filter !== filter || !body.isConnected) return;
     const list = $("#conv-list"); if (!list) return;
     S.chatRows=S.chatRows||{};d.conversations.forEach(c=>S.chatRows[c.id]=c);
     const badge=$('#inbox-new-count');if(badge){badge.textContent=d.unread;badge.dataset.empty=d.unread?'0':'1'}
@@ -767,6 +770,16 @@ async function renderCommsSettings(box, users) {
         const details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');
         summary.textContent='Последние ошибки отправки';pre.style.whiteSpace='pre-wrap';
         pre.textContent=report.failures.map(f=>[f.at,f.employee,f.transport,f.kind,({phone:'По номеру телефона',chatId:'По ID переписки',username:'По никнейму'}[f.recipient_mode]||f.recipient_mode),f.uses_current_channel===false?'Канал отличается от выбранного в настройках':'',(f.codes.join(', ')||'Код не сохранён'),f.request_id?'requestId='+f.request_id:''].filter(Boolean).join(' · ')).join('\n');
+        details.append(summary,pre);result.append(details);
+      }
+      if(report.incoming_events?.length){
+        const details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');
+        summary.textContent='Приём входящих событий';pre.style.whiteSpace='pre-wrap';
+        pre.textContent=report.incoming_scope+'\n'+report.incoming_events.map(e=>[
+          '№'+e.hook_id,e.at,e.failed?'Ошибка: '+e.error_type:'Обработано',
+          e.payload_unreadable?'Событие сохранено неполностью':'Сообщений: '+e.message_count,
+          (e.chat_types||[]).join(', ')
+        ].filter(Boolean).join(' · ')).join('\n');
         details.append(summary,pre);result.append(details);
       }
       const copy=document.createElement('button');copy.type='button';copy.className='btn sm';copy.textContent='Скопировать диагностику';
