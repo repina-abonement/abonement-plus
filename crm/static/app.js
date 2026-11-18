@@ -1742,17 +1742,20 @@ function clientSubscriptionsHtml(d) {
     const paid=x.status==='cancelled'&&cancellation?.period_verified?cancellation.paid_before:x.status==='paid'?x.price:Math.min(x.price,(d.balance.covered||{})[x.id]||0),left=Math.max(0,x.price-paid),cancelled=x.status==='cancelled';
     const status=cancelled?'Отменён':!left?'Оплачен':paid?'Оплачен частично':'Ожидает оплаты';
     const own=d.enrollments.find(e=>e.id===x.enrollment_id),active=own&&x.kind!=='single'&&!cancelled&&x.month>=d.cur_month;
-    return `<li class="subscription-card ${cancelled?'is-cancelled':''}"><div class="finance-card-head"><div><h4>${x.kind==='single'?`Разовое занятие${x.single_date?' · '+dShort(x.single_date):''}`:monthLabel(x.month)}</h4><div class="muted">${esc(clientGroupLabel(x))}</div></div><span class="pill ${!left&&!cancelled?'green':cancelled?'':'yellow'}">${status}</span></div>
-      <div class="small muted">Оформил(а): ${esc(x.issued_by_name||'Сотрудник не указан')}</div>
-      <div class="small muted subscription-meta">${esc(tariffs[x.tariff]||'Абонемент')} · ${x.lessons} ${plural(x.lessons,'занятие','занятия','занятий')}</div>
-      ${x.valid_from||x.valid_until?`<div class="small muted">Действует ${x.valid_from?'с '+dShort(x.valid_from):''}${x.valid_until?' по '+dShort(x.valid_until):''}</div>`:''}
-      <div class="finance-numbers"><div><small>Стоимость</small><b>${rub(x.price)}</b></div><div><small>Оплачено</small><b>${rub(paid)}</b></div><div><small>${cancelled?'Статус':'Осталось оплатить'}</small><b class="${left&&!cancelled?'finance-due':''}">${cancelled?'Отменён':rub(left)}</b></div></div>
-      ${x.credit_lessons||x.late_fee||x.discount_amount||x.corrected||x.excluded_dates&&x.excluded_dates!=='[]'?`<details class="finance-detail"><summary>Расчёт и условия</summary>${x.credit_lessons?`<div>Перерасчёт пропусков: ${x.credit_lessons}</div>`:''}${x.late_fee?`<div>Надбавка: ${rub(x.late_fee)}</div>`:''}${x.discount_amount?`<div>Скидка: ${esc(x.discount_name||'Название не указано')} · ${rub(x.discount_amount)}</div>`:''}${x.calculation_reason?`<div>Причина: ${esc(x.calculation_reason)}</div>`:x.corrected&&!x.historical_sale?'<div>Сумма скорректирована · причина в ранней записи не указана</div>':''}${x.excluded_dates&&x.excluded_dates!=='[]'?`<div>Исключены: ${JSON.parse(x.excluded_dates).map(day=>esc(dShort(day))+': '+esc((JSON.parse(x.exclusion_reasons||'{}'))[day]||'Причина не указана')).join('<br>')}</div>`:''}</details>`:''}
-      ${!cancelled&&can('members','full')?`<div class="sc-actions"><button type="button" class="btn sm danger" data-pcanc="${x.id}">Удалить абонемент</button></div><div data-sub-cancel-box="${x.id}"></div>`:''}
-      ${S.user.role==='admin'&&x.kind!=='single'?`<button type="button" class="btn sm" data-sub-period="${x.id}">Уточнить срок действия</button>`:''}
-      ${S.user.role==='admin'&&!cancelled&&S.meta.groups.some(g=>g.id===x.group_id&&g.program_id&&g.lesson_kind==='arena')?`<button type="button" class="btn sm" data-sub-composition="${x.id}">Уточнить состав Арктика + ОФП</button><div data-composition-box="${x.id}"></div>`:''}
-      ${x.composition_corrected&&x.lesson_schedule?`<div class="small muted">${JSON.parse(x.lesson_schedule).map(c=>`${esc(c.group)}: ${c.dates.length} занятий · ${rub(c.amount??c.dates.length*c.rate)}${c.erp_subscription_id?' · ERP №'+esc(c.erp_subscription_id):''}`).join('<br>')}</div>`:''}
-      ${active?`<button type="button" class="btn sm" data-sub-transfer="${x.id}">Поменять группу</button><div class="subscription-transfer" data-sub-transfer-box="${x.id}" hidden></div>`:''}</li>`;
+    const actions=[
+      !cancelled&&can('members','full')?`<button type="button" class="btn sm danger" data-pcanc="${x.id}">Удалить абонемент</button>`:'',
+      S.user.role==='admin'&&x.kind!=='single'?`<button type="button" class="btn sm" data-sub-period="${x.id}">Уточнить срок действия</button>`:'',
+      S.user.role==='admin'&&x.program_id?`<button type="button" class="btn sm" data-sub-composition="${x.id}">Уточнить состав Арктика + ОФП</button>`:'',
+      active?`<button type="button" class="btn sm" data-sub-transfer="${x.id}">Поменять группу</button>`:''
+    ].filter(Boolean).join('');
+    return `<li class="subscription-card compact-subscription ${cancelled?'is-cancelled':''}">
+      <div class="subscription-overview"><div class="subscription-identity"><h4>${x.kind==='single'?`Разовое занятие${x.single_date?' · '+dShort(x.single_date):''}`:monthLabel(x.month)}</h4><div class="subscription-group">${esc(clientGroupLabel(x))}</div><div class="small muted subscription-meta">${esc(tariffs[x.tariff]||'Абонемент')} · ${x.lessons} ${plural(x.lessons,'занятие','занятия','занятий')}${x.valid_from||x.valid_until?` · ${x.valid_from?'с '+dShort(x.valid_from):''}${x.valid_until?' по '+dShort(x.valid_until):''}`:''}</div><span class="pill ${!left&&!cancelled?'green':cancelled?'':'yellow'}">${status}</span></div>
+      <div class="finance-numbers subscription-money"><div><small>Стоимость</small><b>${rub(x.price)}</b></div><div><small>Оплачено</small><b>${rub(paid)}</b></div><div><small>${cancelled?'Статус':'Остаток'}</small><b class="${left&&!cancelled?'finance-due':''}">${cancelled?'Отменён':rub(left)}</b></div></div></div>
+      <div class="subscription-card-footer"><details class="finance-detail"><summary>Подробнее</summary><div class="small muted">Оформил(а): ${esc(x.issued_by_name||'Сотрудник не указан')}</div>${x.credit_lessons?`<div>Перерасчёт пропусков: ${x.credit_lessons}</div>`:''}${x.late_fee?`<div>Надбавка: ${rub(x.late_fee)}</div>`:''}${x.discount_amount?`<div>Скидка: ${esc(x.discount_name||'Название не указано')} · ${rub(x.discount_amount)}</div>`:''}${x.calculation_reason?`<div>Причина: ${esc(x.calculation_reason)}</div>`:x.corrected&&!x.historical_sale?'<div>Сумма скорректирована · причина в ранней записи не указана</div>':''}${x.excluded_dates&&x.excluded_dates!=='[]'?`<div>Исключены: ${JSON.parse(x.excluded_dates).map(day=>esc(dShort(day))+': '+esc((JSON.parse(x.exclusion_reasons||'{}'))[day]||'Причина не указана')).join('<br>')}</div>`:''}${x.composition_corrected&&x.lesson_schedule?`<div class="small muted">${JSON.parse(x.lesson_schedule).map(c=>`${esc(c.group)}: ${c.dates.length} занятий · ${rub(c.amount??c.dates.length*c.rate)}${c.erp_subscription_id?' · ERP №'+esc(c.erp_subscription_id):''}`).join('<br>')}</div>`:''}</details>
+      ${actions?`<details class="subscription-actions"><summary class="btn sm" aria-label="Действия с абонементом" title="Действия с абонементом">⋯</summary><div>${actions}</div></details>`:''}</div>
+      ${!cancelled&&can('members','full')?`<div data-sub-cancel-box="${x.id}"></div>`:''}
+      ${S.user.role==='admin'&&x.program_id?`<div data-composition-box="${x.id}"></div>`:''}
+      ${active?`<div class="subscription-transfer" data-sub-transfer-box="${x.id}" hidden></div>`:''}</li>`;
   };
   return `<h3>Абонементы</h3><p class="small muted">Условия и состояние оплаты каждого абонемента.</p>${d.subscriptions.length?`<ul class="sub-list ${d.subscriptions.length>3?'folded':''}">${d.subscriptions.map(card).join('')}</ul>`:'<p class="muted">Абонементов пока нет. Оформите первый кнопкой «Продать абонемент».</p>'}${d.subscriptions.length>3?`<button class="linkish" id="sub-more">Показать историю (${d.subscriptions.length})</button>`:''}${subscriptionRefundsHtml(d)}`;
 }
@@ -2048,7 +2051,7 @@ async function openStudent(id, options = {}) {
     button.onclick = async () => {
       const sub = d.subscriptions.find(item => item.id === +button.dataset.subPeriod);
       body.querySelectorAll('[data-period-editor]').forEach(el=>el.remove());
-      const box=document.createElement('div');box.dataset.periodEditor='';button.after(box);
+      const box=document.createElement('div');box.dataset.periodEditor='';button.closest('.subscription-card').append(box);
       openSubscriptionPeriod(sub,box,reload);
     };
   });
@@ -3168,3 +3171,9 @@ async function openErroneousSubscriptionCancel(subid,box,button,reload) {
     form.onsubmit=async e=>{e.preventDefault();const submit=form.querySelector('[type=submit]');submit.disabled=true;try{await api('POST',`/api/subscriptions/${subid}/error-cancel`,{token:q.token,reason:form.elements.reason.value,confirmed_error:form.elements.confirmed.checked});toast('Ошибочный абонемент отменён, платежи сохранены');reload()}catch(err){form.querySelector('.need-err').textContent=err.message;submit.disabled=false}};
   }catch(e){fail(e);button.disabled=false}
 }
+
+
+document.addEventListener('click',event=>{
+  const button=event.target.closest('.subscription-actions button');
+  if(button)button.closest('details').open=false;
+});
