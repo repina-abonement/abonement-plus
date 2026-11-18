@@ -1947,3 +1947,13 @@ html.theme-soft #comms-box .family-chat-feed{background:#182624}html.theme-soft 
 #inbox-chat-pane .composer .emoji-picker[popover]{max-height:none;overflow:hidden}
 .emoji-picker[popover] .emoji-scroll{max-height:min(280px,40dvh,var(--emoji-room,280px))}
 .emoji-grid button{font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}
+.reply-channel-shortcuts{display:flex;flex-wrap:wrap;gap:7px;margin:8px 0 0}
+.reply-channel-shortcut{display:flex;align-items:center;justify-content:center;gap:7px;padding:7px 11px;min-height:40px;border:1px solid var(--line);border-radius:11px;background:var(--surface);color:var(--ink-2);font:inherit;font-size:13px;cursor:pointer}
+.reply-channel-shortcut[aria-pressed=true]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.reply-channel-shortcut small{display:block;font-size:11px;max-width:220px;overflow-wrap:anywhere}
+.reply-channel-shortcut:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[data-makeup-offer]{padding:10px 0}.makeup-offer-button.has-makeups{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);font-weight:600}
+.makeup-offer-panel:not([hidden]){padding:12px;margin-top:8px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}
+.makeup-offer-panel textarea{width:100%;min-height:160px;margin-bottom:8px}#comms-box>[data-makeup-offer]{padding:10px 20px;background:var(--surface)}
+@media(max-width:900px){#inbox-chat-pane .composer>.reply-target{display:block!important}#inbox-chat-pane .reply-target-current{display:none}.reply-channel-shortcut{padding:6px 8px;font-size:12px}}
+@media(max-width:900px){#inbox-chat-pane .reply-target-current{display:flex;padding:2px 0;border:0;background:none}#inbox-chat-pane .reply-target-caption,#inbox-chat-pane .reply-target-details{display:none}#inbox-chat-pane .reply-target-summary{display:block}}

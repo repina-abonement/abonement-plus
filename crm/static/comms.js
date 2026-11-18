@@ -228,7 +228,7 @@ function resizeMessageInput(input) {
   input.style.height=Math.max(minimum,Math.min(input.scrollHeight+2,window.innerHeight*.6))+"px";
 }
 function clientChannelPriority(channel) {
-  return ({wazzup_telegram:0,wazzup_max:1,whatsapp:2})[channel] ?? 3;
+  return ({wazzup_telegram:0,telegram:0,wazzup_max:1,max:1,whatsapp:2})[channel] ?? 3;
 }
 function preferredFamilyTarget(conversations,targets,primary,status) {
   // Среди существующих переписок: Telegram → MAX → WhatsApp, затем свежесть.
@@ -259,12 +259,13 @@ function replyTargetSummary(label) {
 function replyTargetHtml(id,targets,selected) {
   const current=targets.find(t=>String(t.v)===String(selected));
   targets=[...targets].sort((a,b)=>clientChannelPriority(a.channel||({t:'wazzup_telegram',m:'wazzup_max',w:'whatsapp'})[String(a.v)[0]])-clientChannelPriority(b.channel||({t:'wazzup_telegram',m:'wazzup_max',w:'whatsapp'})[String(b.v)[0]]));
-  return `<div class="reply-target"><div class="reply-target-current" ${current?'':'hidden'}><div class="reply-target-summary" id="${id==='chat-to'?'chat-channel-label':'cm-channel-label'}">${replyTargetSummary(current?.t)}</div>${targets.length>1?'<button type="button" class="linkish" data-change-reply>Изменить</button>':''}</div><div class="reply-target-choices" ${current?'hidden':''} aria-label="Мессенджер для ответа">${targets.map(t=>`<button type="button" class="reply-target-choice" data-reply-choice="${esc(t.v)}" aria-pressed="${String(t.v)===String(selected)}">${messengerLogo(t.t)}<span>${esc(t.t)}</span></button>`).join('')}</div><select id="${id}" aria-label="Мессенджер для ответа" hidden><option value="">Выберите мессенджер для отправки</option>${targets.map(t=>`<option value="${esc(t.v)}" ${String(t.v)===String(selected)?'selected':''}>${esc(t.t)}</option>`).join('')}</select></div>`;
+  const counts={};targets.forEach(t=>{const channel=t.t.split(' · ')[0];counts[channel]=(counts[channel]||0)+1});
+  return `<div class="reply-target"><div class="reply-target-current" ${current?'':'hidden'}><div class="reply-target-summary" id="${id==='chat-to'?'chat-channel-label':'cm-channel-label'}">${replyTargetSummary(current?.t)}</div></div><div class="reply-target-choices reply-channel-shortcuts" aria-label="Выберите мессенджер">${targets.map(t=>{const parts=t.t.split(' · '),channel=parts[0],parent=counts[channel]>1?parts.slice(1).join(' · '):'';return `<button type="button" class="reply-channel-shortcut" data-reply-choice="${esc(t.v)}" aria-pressed="${String(t.v)===String(selected)}" title="${esc(t.t)}" aria-label="${esc(t.t)}">${messengerLogo(channel)}<span>${esc(channel.replace(' через Wazzup',''))}${parent?`<small>${esc(parent)}</small>`:''}</span></button>`}).join('')}</div><select id="${id}" aria-label="Мессенджер для ответа" hidden><option value="">Выберите мессенджер</option>${targets.map(t=>`<option value="${esc(t.v)}" ${String(t.v)===String(selected)?'selected':''}>${esc(t.t)}</option>`).join('')}</select></div>`;
 }
 
 function showReplyTargets(select) {
   const choices=select.closest('.reply-target').querySelector('.reply-target-choices');
-  choices.hidden=!choices.hidden;
+  choices.hidden=false;
   if(!choices.hidden)choices.querySelector('button')?.focus();
 }
 function wireReplyTarget(select,onchange) {
@@ -278,7 +279,7 @@ function wireReplyTarget(select,onchange) {
     current.hidden=!select.value;
     current.querySelector('.reply-target-summary').innerHTML=replyTargetSummary(option?.textContent);
     select.hidden=true;
-    box.querySelector('.reply-target-choices').hidden=!!select.value;
+    box.querySelector('.reply-target-choices').hidden=false;
     box.querySelectorAll('[data-reply-choice]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.replyChoice===select.value)));
     change?.focus();
     onchange();
@@ -318,12 +319,14 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
       <button class="btn sm" data-oqchat="${c.id}">Открыть диалог</button></div>`).join("")}
     <div class="feed chat-feed family-chat-feed" id="feed">${d.items.length ? chatHistoryHtml(d.items) : `<div class="muted small">Пока ни переписки, ни звонков</div>`}</div>
     ${kid && kid.funnel === "sales" ? `<details class="family-trial-tools"><summary>Пробное занятие <span>Подобрать время или записать</span></summary><div class="to-bar"><button type="button" class="btn sm" id="to-open">Подобрать дни</button><button type="button" class="btn sm" id="to-book">Записать на пробное</button></div><div id="to-panel" hidden></div></details>` : ""}
+    <div data-makeup-offer></div>
     ${targets.length ? `
       <div class="composer">
         ${replyTargetHtml('cm-to',targets,selectedTarget)}
         <div class="row"><textarea id="cm-text" rows="3" placeholder="Сообщение родителю…"></textarea><button class="btn primary" id="cm-send" style="flex:0">Отправить</button></div>
       </div>` : `<div class="small muted">Написать отсюда можно, когда родитель напишет школе в Telegram или MAX${st.whatsapp || st.wazzup_telegram ? "" : ". Первыми написать можно после подключения Wazzup"}</div>`}`;
   if ($("#cm-text")) { $("#cm-text").value = draft; $("#cm-text").addEventListener("input",e=>resizeMessageInput(e.target)); resizeMessageInput($("#cm-text")); }
+  wireMakeupOffer(box,kid?[kid]:[],"#cm-text");
   const toSelect = $("#cm-to"); wireReplyTarget(toSelect,()=>{S.familySendTargets[targetKey]=toSelect.value});
   const feed = $("#feed"); if (feed) feed.scrollTop = feed.scrollHeight;
   // карточка открыта: новые сообщения подтягиваем сами каждые 10 секунд (раньше были видны только после повторного открытия)
@@ -564,6 +567,7 @@ async function openChat(cid, keepScroll = false) {
       <div class="composer sticky">
         <div class="to-bar"><button class="btn sm" id="to-open">📅 Предложить ближайшие ПУ</button></div>
         <div id="to-panel" hidden></div>
+        <div data-makeup-offer></div>
         ${replyTargetHtml('chat-to',d.targets.map(x=>({v:x.id,t:x.label,channel:x.channel})),replyId)}
 
         <div class="row"><textarea id="chat-text" rows="2" placeholder="Ответ…">${esc(draft)}</textarea><button class="btn primary" id="chat-send" aria-label="Отправить сообщение" style="flex:0">Отправить</button></div>
@@ -582,6 +586,7 @@ async function openChat(cid, keepScroll = false) {
   body.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => { stopChatTimer(); openStudent(+b.dataset.open); }));
   if (c.family_id) loadWarnBox(c.family_id, body.querySelector("#warn-box"));
   wireTrialOffer(c);
+  wireMakeupOffer(body,c.students||[],"#chat-text");
   if ($("#unlink")) $("#unlink").onclick = async () => { await api("POST", `/api/conversations/${cid}/link`, { family_id: null }).catch(fail); openChat(cid); };
   if ($("#new-lead")) $("#new-lead").onclick = () => { stopChatTimer(); openNewClient({ phone: c.phone, parent_name: c.title, conversation_id: cid }); };
   if ($("#link-q")) {
@@ -959,6 +964,34 @@ function trialAgeQuestion(kid = {}) {
   const female = kid.gender === 'female' || words.some(word => girls.has(word));
   const address = female ? 'вашей чемпионке' : 'вашему чемпиону';
   return `Здравствуйте! Подскажите, пожалуйста, сколько лет ${address}? Подберём группу по возрасту и ближайшие свободные тренировки ⚽`;
+}
+
+function wireMakeupOffer(root,students,textSel) {
+  const host=root.querySelector('[data-makeup-offer]');if(!host)return;
+  host.innerHTML='<button type="button" class="btn sm makeup-offer-button">Предложить отработку</button><div class="makeup-offer-panel" hidden></div>';
+  const button=host.querySelector('button'),panel=host.querySelector('.makeup-offer-panel');
+  let summaries=[],request=0;
+  const label=()=>{const count=summaries.reduce((sum,x)=>sum+(x.counters?.available||0),0);button.classList.toggle('has-makeups',count>0);button.textContent='Предложить отработку'+(count?' · '+count:'');button.title=count?'Есть доступные отработки':summaries.some(x=>x.error)?'Не удалось проверить остаток отработок':'Нет доступных отработок'};
+  Promise.all(students.map(async kid=>{try{return {...await api('GET',`/api/students/${kid.id}/makeup-offer?summary=1`),kid}}catch(e){return {kid,error:e.message}}})).then(rows=>{if(!host.isConnected)return;summaries=rows;label()});
+  button.onclick=async()=>{
+    if(!students.length){toast('Сначала свяжите чат с карточкой ребёнка',true);return}
+    panel.hidden=!panel.hidden;if(panel.hidden)return;
+    const preferred=summaries.find(x=>x.counters?.available>0)?.kid.id||students[0].id;
+    panel.innerHTML=`${students.length>1?`<label>Ребёнок<select data-makeup-kid>${students.map(k=>`<option value="${k.id}" ${k.id===preferred?'selected':''}>${esc(k.name)}</option>`).join('')}</select></label>`:''}<div data-makeup-result></div>`;
+    const load=async()=>{
+      const version=++request,sid=+(panel.querySelector('select')?.value||students[0].id),result=panel.querySelector('[data-makeup-result]');result.textContent='Подбираю ближайшие занятия…';
+      try{
+        const data=await api('GET',`/api/students/${sid}/makeup-offer`);if(version!==request||!host.isConnected)return;
+        const row=summaries.find(x=>x.kid.id===sid);if(row)row.counters=data.counters;label();
+        if(!data.message){result.textContent=data.reason;return}
+        result.innerHTML=`<p class="small muted">Ближайшие варианты с учётом правил и свободных мест</p><textarea rows="8" aria-label="Предложение отработки"></textarea><button type="button" class="btn sm primary" data-use-makeup>Вставить в сообщение</button><p class="small muted">Сначала согласуйте время с родителем — это предложение, запись ещё не создана</p>`;
+        result.querySelector('textarea').value=data.message;
+        result.querySelector('[data-use-makeup]').onclick=()=>{const input=root.querySelector(textSel);if(!input)return;if(input.value.trim()&&!confirm('Заменить текст в поле ответа предложением отработки?'))return;input.value=result.querySelector('textarea').value;input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();toast('Предложение вставлено — проверьте и отправьте родителю')};
+      }catch(error){if(version===request)result.textContent=error.message}
+    };
+    const select=panel.querySelector('select');if(select)select.onchange=load;
+    load();
+  };
 }
 
 /* «Предложить ближайшие ПУ»: подбор групп по возрасту и ближайших дат со свободными местами, текст сразу в поле ответа */

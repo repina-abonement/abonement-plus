@@ -2093,6 +2093,14 @@ def client_makeup_suggestions(con,h,user,body,q,sid):
     return clientattendance.suggestions(con,int(sid))
 
 
+@route("GET", "/api/students/{sid}/makeup-offer", role="operator")
+def client_makeup_offer(con,h,user,body,q,sid):
+    from . import clientattendance
+    if q.get('summary')=='1':
+        return {'counters':sv.absence_counters(con,int(sid))}
+    return clientattendance.makeup_offer(con,int(sid))
+
+
 @route("POST", "/api/students/{sid}/makeups", role="operator")
 def makeup_book(con, h, user, body, q, sid):
     return sv.book_makeup(con, int(sid), int(body.get("group_id") or 0), body.get("date") or "",

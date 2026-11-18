@@ -85,7 +85,7 @@ def calendar(con, sid, ym):
             'attended':sum(x['status']=='present' for x in result),'missed':sum(x['status']=='absent' and x['kind']!='makeup' for x in result)}
 
 
-def suggestions(con,sid,days=21):
+def suggestions(con,sid,days=21,*,nearest=False):
     from . import services as sv, capacity, logic, schedule, closures, program, makeuppolicy
     student=sv.get_student_row(con,sid);counters=sv.absence_counters(con,sid)
     policy_cache={}
@@ -116,6 +116,7 @@ def suggestions(con,sid,days=21):
                     available=makeuppolicy.absences(con,sid,iso,policy_cache)
                     if not available:continue
                 except sv.ApiError:continue
+                if nearest and (warning or sp and day.weekday()==0):continue
                 occupancy=capacity.occupancy(con,g['id'],iso);limit=occupancy['limit']
                 if limit and occupancy['count']>=limit:continue
                 if con.execute("SELECT 1 FROM makeups WHERE student_id=? AND date=? AND group_id=? AND status='booked'",(sid,iso,g['id'])).fetchone():continue
@@ -123,7 +124,7 @@ def suggestions(con,sid,days=21):
                             'count':occupancy['count'],'limit':limit,'free':max(0,limit-occupancy['count']) if limit else None,
                             'age_warning':warning,'approval_required':bool(sp and day.weekday()==0),
                             'eligible_absence_ids':[a['id'] for a in available]})
-    out.sort(key=lambda x:(x['count'],x['date'],x['time'],x['group']))
+    out.sort(key=(lambda x:(x['date'],x['time'],x['count'],x['group'])) if nearest else (lambda x:(x['count'],x['date'],x['time'],x['group'])))
     out=out[:60]
     n=counters['available'];name=student['name'].split()[0]
     word='занятие' if n%10==1 and n%100!=11 else 'занятия' if n%10 in (2,3,4) and n%100 not in (12,13,14) else 'занятий'
@@ -134,3 +135,26 @@ def suggestions(con,sid,days=21):
         text+='\n\nКакой вариант вам удобнее?'
     else:text+='\n\nНапишите, какие дни вам подходят — подберём время.'
     return {'counters':counters,'slots':out,'message':text if n else ''}
+
+
+def makeup_offer(con,sid):
+    """A parent draft from eligible nearest slots; never books or sends."""
+    from . import services as sv
+    student=sv.get_student_row(con,sid)
+    counters=sv.absence_counters(con,sid)
+    if not counters['available']:
+        return {'counters':counters,'slots':[],'message':'','reason':'Нет доступных неиспользованных пропусков для отработки'}
+    if not student['birth']:
+        return {'counters':counters,'slots':[],'message':'','reason':'Укажите дату рождения ребёнка в карточке, чтобы подобрать группу по возрасту'}
+    data=suggestions(con,sid,nearest=True)
+    slots=[s for s in data['slots'] if not s['age_warning'] and not s['approval_required']][:5]
+    data['slots']=slots
+    if not data['counters']['available']:
+        data['message']='';data['reason']='Нет доступных неиспользованных пропусков для отработки'
+    elif not slots:
+        data['message']='';data['reason']='На ближайшие 21 день нет подходящих свободных занятий по правилам отработок'
+    else:
+        name=student['name']
+        data['message']='Здравствуйте!\n\nПредлагаем ближайшие варианты отработки\nРебёнок: '+name+'\n\n'+'\n'.join(f"• {s['date'][8:10]}.{s['date'][5:7]} в {s['time']} — {s['branch']}, {s['group']}" for s in slots)+'\n\nКакой вариант вам удобнее? Напишите нам, и мы подтвердим запись'
+        data['reason']=''
+    return data
