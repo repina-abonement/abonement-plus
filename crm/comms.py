@@ -138,6 +138,9 @@ def _ts_from_unix(v) -> str | None:
 
 def init(con):
     con.executescript(SCHEMA)
+    con.execute("""CREATE TABLE IF NOT EXISTS wazzup_delivery_events (
+        external_id TEXT NOT NULL,channel_id TEXT NOT NULL DEFAULT '',status TEXT NOT NULL,
+        PRIMARY KEY(external_id,channel_id))""")
     from . import messagedeletion
     messagedeletion.init(con)
     from . import chatinbox
@@ -428,6 +431,8 @@ def add_message(con, cid: int, direction: str, text: str = "", *, kind: str = "t
         con.execute("UPDATE conversations SET last_at=?, last_text=?, unread=0 WHERE id=?", (ts, preview, cid))
     else:
         con.execute("UPDATE conversations SET last_at=?, last_text=?, unread=unread+1 WHERE id=?", (ts, preview, cid))
+    if direction=='out' and external_id:
+        apply_wazzup_delivery(con,str(external_id))
     return cur.lastrowid
 
 
@@ -927,7 +932,43 @@ def _wz_tg_rekey(con, chat_id: str, phone: str, echo_id: str = "", channel_id=No
         con.execute("UPDATE conversations SET external_id=? WHERE id=?", (chat_id, row[0]))
 
 
+DELIVERY_RANK={'sent':1,'error':2,'delivered':3,'read':4}
+
+
+def apply_wazzup_delivery(con,external_id):
+    for event in con.execute('SELECT * FROM wazzup_delivery_events WHERE external_id=?',(external_id,)).fetchall():
+        candidates=[]
+        for row in con.execute("""SELECT m.id,m.status,c.channel,c.meta FROM messages m JOIN conversations c ON c.id=m.conversation_id
+            WHERE m.external_id=? AND m.direction='out' AND c.channel IN ('whatsapp','wazzup_telegram','wazzup_max')""",(external_id,)):
+            meta=json.loads(row['meta'] or '{}')
+            config=WZ_ROUTE.get(row['channel'])
+            channel=meta.get('channelId') or (get(con,config[1]) if config else '')
+            if event['channel_id'] and channel!=event['channel_id']:continue
+            candidates.append(row)
+        if len(candidates)!=1:continue
+        row=candidates[0];current=DELIVERY_RANK.get(row['status'],-1);incoming=DELIVERY_RANK[event['status']]
+        if event['status']=='error':
+            if current>=DELIVERY_RANK['delivered']:continue
+        elif incoming<current:continue
+        con.execute('UPDATE messages SET status=? WHERE id=?',(event['status'],row['id']))
+
+
+def receive_wazzup_statuses(con,payload):
+    statuses=payload.get('statuses') or []
+    if not isinstance(statuses,list):return
+    for event in statuses:
+        if not isinstance(event,dict):continue
+        external=str(event.get('messageId') or '');status=event.get('status')
+        if not external or status not in DELIVERY_RANK:continue
+        channel=str(event.get('channelId') or '')
+        old=con.execute('SELECT status FROM wazzup_delivery_events WHERE external_id=? AND channel_id=?',(external,channel)).fetchone()
+        if old and DELIVERY_RANK[old['status']]>DELIVERY_RANK[status] and not(status=='error' and old['status']=='sent'):continue
+        con.execute('INSERT INTO wazzup_delivery_events VALUES (?,?,?) ON CONFLICT(external_id,channel_id) DO UPDATE SET status=excluded.status',(external,channel,status))
+        apply_wazzup_delivery(con,external)
+
+
 def wz_hook(con, payload: dict) -> None:
+    receive_wazzup_statuses(con,payload)
     for m in payload.get("messages") or []:
         ct = {"maxapi":"max", "tgapi":"telegram", "wapi":"whatsapp"}.get(m.get("chatType"),m.get("chatType") or "")
         if ct not in ("whatsapp", "telegram", "max"):
@@ -955,6 +996,8 @@ def wz_hook(con, payload: dict) -> None:
             continue
         kind = WZ_KINDS.get(m.get("type") or "text", "other")
         echo = bool(m.get("isEcho"))
+        if echo and m.get('status') in DELIVERY_RANK:
+            receive_wazzup_statuses(con,{'statuses':[{'messageId':m.get('messageId'),'channelId':m.get('channelId'),'status':m['status']}]})
         if echo and m.get("messageId") and con.execute("SELECT 1 FROM messages WHERE external_id=?", (str(m["messageId"]),)).fetchone():
             continue  # эхо сообщения, которое CRM сама отправила: оно уже в переписке
         dt = _utc_to_local(m.get("dateTime") or "")
@@ -1133,7 +1176,7 @@ def send(con, cid: int, text: str, user: dict) -> dict:
     except CommsError as e:
         add_message(con, cid, "out", text, user_name=name, status="error", error=str(e))
         raise
-    mid = add_message(con, cid, "out", text, user_name=name, external_id=ext)
+    mid = add_message(con, cid, "out", text, user_name=name, external_id=ext, status="sent" if ext else "")
     return {"id": mid}
 
 

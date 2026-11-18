@@ -111,7 +111,7 @@ function msgHtml(m) {
   const who = m.direction === "out" ? (m.user_name || "") : "";
   return `<div class="msg ${m.direction}${m.status === "error" ? " err" : ""}">
     ${deletion}${media}${m.text ? `<div class="msg-text">${esc(m.text)}</div>` : ""}${label ? `<div class="msg-text muted">${label}</div>` : ""}
-    <div class="msg-meta">${[esc(who), esc(m.channel_label||""), dtWhen(m.ts), m.status === "error" ? "Не доставлено" : "", m.status === "demo" ? "тест, не отправлено" : ""].filter(Boolean).join(" · ")}</div>
+    <div class="msg-meta">${[esc(who), esc(m.channel_label||""), dtWhen(m.ts), m.direction==='out'?({sent:"Отправлено",delivered:"Доставлено",read:"Прочитано",error:"Ошибка отправки",demo:"тест, не отправлено"}[m.status]||""):""].filter(Boolean).join(" · ")}</div>
     ${m.status==='error'&&m.error?`<details class="msg-error-details"><summary>Подробнее об ошибке</summary><div>${esc(m.error)}</div></details>`:''}
   </div>`;
 }
@@ -329,7 +329,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   const toSelect = $("#cm-to"); wireReplyTarget(toSelect,()=>{S.familySendTargets[targetKey]=toSelect.value});
   const feed = $("#feed"); if (feed) feed.scrollTop = feed.scrollHeight;
   // карточка открыта: новые сообщения подтягиваем сами каждые 10 секунд (раньше были видны только после повторного открытия)
-  const lastKey = (items) => items.length ? items[items.length - 1].type + items[items.length - 1].id + ":" + items.length+":"+items.map(m=>m.deletion_status||"").join(",") : "";
+  const lastKey = (items) => items.length ? items[items.length - 1].type + items[items.length - 1].id + ":" + items.length+":"+items.map(m=>(m.deletion_status||"")+":"+(m.status||"")).join(",") : "";
   let seen = lastKey(d.items);
   clearInterval(S.commsTimer);
   S.commsTimer = setInterval(async () => {
@@ -650,7 +650,7 @@ async function openChat(cid, keepScroll = false) {
     const open = $(`[data-chat="${cid}"]`);
     if (!open || (!panel&&$("#drawer").hidden)) return stopChatTimer();
     const n = await api("GET", `/api/conversations/${cid}?read=0`).catch(() => null);
-    const len = (x) => (x.history || x.messages).length + ":" + JSON.stringify(((x.history || x.messages).slice(-1)[0] || {}).id)+":"+(x.history||x.messages).map(m=>m.deletion_status||"").join(",");
+    const len = (x) => (x.history || x.messages).length + ":" + JSON.stringify(((x.history || x.messages).slice(-1)[0] || {}).id)+":"+(x.history||x.messages).map(m=>(m.deletion_status||"")+":"+(m.status||"")).join(",");
     if (n && len(n) !== len(d)) { stopChatTimer(); openChat(cid, true); }
   }, 8000);
   pollCounts();
