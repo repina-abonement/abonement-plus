@@ -1590,6 +1590,8 @@ def conversation(con, cid: int, mark_read: bool = True) -> dict:
     from . import messagedeletion
     msgs = [messagedeletion.public(con,dict(x),r["channel"]) for x in con.execute(
         "SELECT * FROM (SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 200) ORDER BY id", (cid,))]
+    # Restored/late messages keep their original time, not their insertion order.
+    msgs.sort(key=lambda m:(str(m.get('ts') or '').replace(' ','T'),m['id']))
     if mark_read and r["unread"]:
         con.execute("UPDATE conversations SET unread=0 WHERE id=?", (cid,))
         r=con.execute('SELECT * FROM conversations WHERE id=?',(cid,)).fetchone()
@@ -1608,6 +1610,7 @@ def conversation(con, cid: int, mark_read: bool = True) -> dict:
     phone=normalize_phone(str(r['phone_norm'] or ''))
     items=[item for item in items if (item['type']=='msg' and item['conversation_id'] in allowed) or
            (item['type']=='call' and phone and normalize_phone(str(item.get('phone') or ''))==phone)]
+    items.sort(key=lambda item:(str(item.get('ts') or '').replace(' ','T'),item['id']))
     if mark_read:
         for c in convs:
             if c['unread']:

@@ -148,3 +148,16 @@ class DurableInbox(unittest.TestCase):
         self.assertEqual(errors,[])
         self.assertEqual(self.con.execute('SELECT count(*) FROM messages').fetchone()[0],1)
         self.assertEqual(self.con.execute('SELECT unread FROM conversations').fetchone()[0],1)
+
+    def test_recovered_unlinked_chat_history_agrees_with_latest_preview(self):
+        self.payload['messages'][0]['contact']={'name':'Synthetic parent','phone':''}
+        self.payload['messages'][0].update(dateTime='2026-11-18T10:08:00Z',isEcho=True,text='Synthetic latest reply')
+        self.hook()
+        self.payload['messages'][0].update(messageId='recovered-1255',dateTime='2026-11-18T09:55:56Z',isEcho=False,text='Synthetic recovered question')
+        self.hook()
+        cid=self.con.execute('SELECT id FROM conversations').fetchone()[0]
+        result=comms.conversation(self.con,cid,mark_read=False)
+        self.assertEqual([m['text'] for m in result['history']],['Synthetic recovered question','Synthetic latest reply'])
+        self.assertEqual([m['text'] for m in result['messages']],['Synthetic recovered question','Synthetic latest reply'])
+        self.assertEqual(result['conversation']['last_text'],'Вы: Synthetic latest reply')
+        self.assertEqual(result['conversation']['unread'],1)
