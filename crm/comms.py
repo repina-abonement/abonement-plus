@@ -876,19 +876,33 @@ def merge_wazzup_duplicates(con) -> int:
     return n
 
 
-def _wz_tg_rekey(con, chat_id: str, phone: str, echo_id: str = "") -> None:
+def _wz_resolved_candidate(con, channel, chat_id, channel_id=None):
+    """Reconnect legacy rows only through a provider-confirmed ID, never by ID length."""
+    candidates = []
+    for row in con.execute("SELECT id,meta FROM conversations WHERE channel=? AND external_id!=? AND meta LIKE '%resolvedChatId%'", (channel, str(chat_id))):
+        try:
+            meta = json.loads(row["meta"] or "{}")
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(meta, dict):
+            continue
+        if channel_id and meta.get("channelId") != channel_id:
+            continue
+        if str(meta.get("resolvedChatId") or "") == str(chat_id):
+            candidates.append(row)
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _wz_tg_rekey(con, chat_id: str, phone: str, echo_id: str = "", channel_id=None) -> None:
     """Первое сообщение в Telegram мы отправили «по номеру» (phone:…), а ответ приходит с настоящим номером чата.
     Связываем: по телефону, если Telegram его показал; или по точному ID эха. Без совпадения не объединяем."""
     pn = normalize_phone(phone) if phone else ""
     row = None
     if echo_id:  # эхо нашего же сообщения: по его номеру точно знаем, какая переписка «по номеру» это была
         row = con.execute("""SELECT c.id FROM conversations c JOIN messages m ON m.conversation_id=c.id
-                             WHERE c.channel='wazzup_telegram' AND (c.external_id LIKE 'phone:%' OR c.external_id LIKE 'username:%') AND m.external_id=?""", (echo_id,)).fetchone()
+                             WHERE c.channel='wazzup_telegram' AND m.external_id=?""", (echo_id,)).fetchone()
     if not row:
-        candidates = [r for r in con.execute("SELECT id,meta FROM conversations WHERE channel='wazzup_telegram' AND (external_id LIKE 'phone:%' OR external_id LIKE 'username:%')")
-                      if str(json.loads(r["meta"] or "{}").get("resolvedChatId") or "") == str(chat_id)]
-        if len(candidates) == 1:
-            row = candidates[0]
+        row = _wz_resolved_candidate(con, 'wazzup_telegram', chat_id, channel_id)
     if not row and pn:
         row = con.execute("SELECT id FROM conversations WHERE channel='wazzup_telegram' AND external_id=?", ("phone:" + pn,)).fetchone()
     existing = con.execute("SELECT id FROM conversations WHERE channel='wazzup_telegram' AND external_id=?", (chat_id,)).fetchone()
@@ -909,9 +923,9 @@ def wz_hook(con, payload: dict) -> None:
         contact = m.get("contact") or {}
         phone = m.get("chatId") if ct == "whatsapp" else (contact.get("phone") or "")
         if ct == "telegram":
-            _wz_tg_rekey(con, str(m.get("chatId") or ""), phone, str(m.get("messageId") or "") if m.get("isEcho") else "")
+            _wz_tg_rekey(con, str(m.get("chatId") or ""), phone, str(m.get("messageId") or "") if m.get("isEcho") else "", m.get("channelId"))
         if ct == "max":
-            _wz_max_rekey(con, str(m.get("chatId") or ""), phone, str(m.get("messageId") or "") if m.get("isEcho") else "")
+            _wz_max_rekey(con, str(m.get("chatId") or ""), phone, str(m.get("messageId") or "") if m.get("isEcho") else "", m.get("channelId"))
         ext = m.get("chatId")
         if ct == "whatsapp":  # чат, начатый из карточки, хранится по номеру 7XXXXXXXXXX: ответ должен попасть в него же
             pn = normalize_phone(str(ext or ""))
@@ -991,6 +1005,7 @@ def _wz_ack(con, conv, result):
     if result.get("chatId"):
         meta = json.loads(conv["meta"] or "{}")
         meta["resolvedChatId"] = str(result["chatId"])
+        meta["channelId"] = _wz_destination(con, conv)["channelId"]
         con.execute("UPDATE conversations SET meta=? WHERE id=?", (json.dumps(meta), conv["id"]))
     return result["messageId"]
 
@@ -1151,15 +1166,17 @@ def start_wazzup_max(con, phone: str) -> int:
                                meta={"channelId":get(con,"wazzup_max_channel"),"chatType":"max"})
 
 
-def _wz_max_rekey(con, chat_id, phone, echo_id=""):
+def _wz_max_rekey(con, chat_id, phone, echo_id="", channel_id=None):
     """Match a phone-started MAX conversation only by exact phone or sent message ID."""
     if not chat_id or chat_id.startswith("phone:"):
         return
     pn = normalize_phone(phone) if phone else ""
-    candidate = con.execute("SELECT id FROM conversations WHERE channel='wazzup_max' AND external_id=?", ("phone:"+pn,)).fetchone() if pn else None
+    candidate = _wz_resolved_candidate(con, "wazzup_max", chat_id, channel_id)
+    if not candidate:
+        candidate = con.execute("SELECT id FROM conversations WHERE channel='wazzup_max' AND external_id=?", ("phone:"+pn,)).fetchone() if pn else None
     if not candidate and echo_id:
         candidate = con.execute("""SELECT c.id FROM conversations c JOIN messages m ON m.conversation_id=c.id
-                                  WHERE c.channel='wazzup_max' AND c.external_id LIKE 'phone:%' AND m.external_id=?""", (echo_id,)).fetchone()
+                                  WHERE c.channel='wazzup_max' AND m.external_id=?""", (echo_id,)).fetchone()
     if not candidate:
         return
     existing = con.execute("SELECT id FROM conversations WHERE channel='wazzup_max' AND external_id=?", (chat_id,)).fetchone()

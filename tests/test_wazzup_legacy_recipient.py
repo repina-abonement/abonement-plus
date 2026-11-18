@@ -34,14 +34,19 @@ class LegacyRecipientTest(unittest.TestCase):
                     self.assertEqual(body['chatType'], 'telegram' if channel.endswith('telegram') else 'max')
                     self.assertEqual(body['channelId'], 'test-tg' if channel.endswith('telegram') else 'test-max')
 
-    def test_provider_ack_remembers_real_id_for_legacy_row(self):
-        cid = self.legacy('wazzup_max')
-        with patch.object(comms, 'wz_call', return_value={'messageId': 'ack', 'chatId': '29832608'}) as provider:
-            comms.send(self.con, cid, 'Synthetic first', self.user)
-            self.assertIn('phone', provider.call_args.args[3])
-            comms.send(self.con, cid, 'Synthetic next', self.user)
-            self.assertEqual(provider.call_args.args[3]['chatId'], '29832608')
-            self.assertNotIn('phone', provider.call_args.args[3])
+    def test_provider_ack_remembers_real_id_and_incoming_keeps_legacy_thread(self):
+        for channel, transport, channel_id in [('wazzup_max', 'max', 'test-max'), ('wazzup_telegram', 'telegram', 'test-tg')]:
+            with self.subTest(channel=channel):
+                cid = self.legacy(channel)
+                with patch.object(comms, 'wz_call', return_value={'messageId': channel+'ack', 'chatId': '29832608'}) as provider:
+                    comms.send(self.con, cid, 'Synthetic first', self.user)
+                    self.assertIn('phone', provider.call_args.args[3])
+                    comms.send(self.con, cid, 'Synthetic next', self.user)
+                    self.assertEqual(provider.call_args.args[3]['chatId'], '29832608')
+                    self.assertNotIn('phone', provider.call_args.args[3])
+                comms.wz_hook(self.con, {'messages': [{'chatType': transport, 'channelId': channel_id, 'chatId': '29832608', 'messageId': channel+'reply', 'text': 'Synthetic reply', 'contact': {'phone': '79000000222'}}]})
+                self.assertEqual(self.con.execute('SELECT conversation_id FROM messages WHERE external_id=?', (channel+'reply',)).fetchone()[0], cid)
+                self.assertEqual(self.con.execute('SELECT external_id FROM conversations WHERE id=?', (cid,)).fetchone()[0], '29832608')
 
     def test_real_numeric_id_is_not_classified_by_length(self):
         cid = self.chat('wazzup_max', '79000000333', '79000000222')
@@ -94,5 +99,6 @@ class LegacyRecipientTest(unittest.TestCase):
         comms.add_message(self.con, cid, 'out', 'Synthetic', status='error', error='Wazzup: POST_MESSAGE_ERROR')
         with patch.object(comms, 'wz_call', return_value=[]):
             report = comms.wazzup_diagnostics(self.con)
+        self.assertEqual(report['recipient_routing_version'], 2)
         self.assertEqual(report['failures'][0]['recipient_mode'], 'phone')
         self.assertNotIn('79000000222', json.dumps(report))
