@@ -21,8 +21,17 @@ def member(con,user):
     return bool(r and r['active'] and r['role']=='operator' and r['is_offline_admin'])
 
 
+def can_assign(con,user):
+    """Юлия и единственная подтверждённая учётная запись Вари могут поручать задачи."""
+    if user['role']=='admin':return True
+    import re
+    rows=[r for r in con.execute("SELECT id,name FROM users WHERE active=1 AND role='operator' AND is_offline_admin=0")
+          if {'варвара','батарева'}.issubset(set(re.findall(r'[а-яё]+',r['name'].casefold())))]
+    return len(rows)==1 and rows[0]['id']==user['id']
+
+
 def can_view(con,user):
-    return user['role']=='admin' or member(con,user) or comms.get(con,VIEWER_KEY)==str(user['id'])
+    return user['role']=='admin' or member(con,user) or can_assign(con,user) or comms.get(con,VIEWER_KEY)==str(user['id'])
 
 
 def can_edit(con,user):

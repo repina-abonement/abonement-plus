@@ -109,7 +109,7 @@ def add(con, user: dict, data: dict) -> int:
         raise PlanError("Напишите, что нужно сделать")
     who = offlineplanner.board_id(con,int(data.get("assignee_id") or user["id"]))
     if offlineplanner.member(con,user) and who==user['id']:who=offlineplanner.pool_id(con)
-    if not can_change_plan(con, user, who):
+    if not (can_change_plan(con, user, who) or (who==offlineplanner.pool_id(con) and offlineplanner.can_assign(con,user))):
         raise PlanError("Ставить задачи другим может администратор или контролёр")
     if who!=offlineplanner.pool_id(con) and not con.execute("SELECT 1 FROM users WHERE id=? AND active=1", (who,)).fetchone():
         raise PlanError("Сотрудник не найден")
@@ -329,7 +329,7 @@ def view(con, user: dict) -> dict:
         """SELECT r.*, u.name AS assignee FROM recurring r JOIN users u ON u.id=r.assignee_id
             WHERE r.active=1 ORDER BY u.name, r.title""") if can_view_plan(con, user, r["assignee_id"])]
     out = {"mine": mine, "given": given, "recurring": recurring, "today": today,
-           "can_manage": user["role"] != "trainee" and (user["role"] == "admin" or bool(user.get("is_senior"))),
+           "can_manage": user["role"] != "trainee" and (can_manage(con,user) or offlineplanner.can_assign(con,user)),
            "controller": controller(con), "rules": RULES,"offline_viewer":comms.get(con,offlineplanner.VIEWER_KEY) if user['role']=='admin' else None,
            "staff": visible_staff(con, user), "people":visible_staff(con,user,people=True)}
     if out["can_manage"]:
