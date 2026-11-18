@@ -3106,7 +3106,7 @@ async function openMultiMonthSale(d,id,box,reload,preset={}) {
       const q=await api('POST',`/api/students/${id}/multi-month-preview`,payload());
       if(version!==generation||!form.isConnected)return;
       checked=q;
-      output.innerHTML=q.months.map(r=>`<section class="quote"><h4>${esc(monthLabel(r.month))}</h4>${quoteHtml(r.quote)}<div class="multi-lesson-days">${(r.quote.calendar_dates||r.quote.dates).map(day=>`<label class="chip"><input type="checkbox" data-multi-day="${day}" data-month="${r.month}" ${r.excluded_dates.includes(day)?'':'checked'}>${esc(dShort(day))}</label>`).join('')}</div></section>`).join('')+`<div class="quote"><b>Всего: ${rub(q.total)}</b>${q.credit?`<p>Учтено с баланса: ${rub(q.credit)}</p>`:''}<p><b>К оплате: ${rub(q.due)}</b></p></div>`;
+      output.innerHTML='<div class="multi-month-calendars">'+q.months.map(r=>`<section class="multi-month-calendar"><h4>${esc(monthLabel(r.month))}</h4>${multiMonthCalendarHtml(r)}<div class="multi-month-calculation">${quoteHtml(r.quote)}</div></section>`).join('')+'</div>'+`<div class="quote"><b>Всего: ${rub(q.total)}</b>${q.credit?`<p>Учтено с баланса: ${rub(q.credit)}</p>`:''}<p><b>К оплате: ${rub(q.due)}</b></p></div>`;
       f.amount.value=q.due;
       output.querySelectorAll('[data-multi-day]').forEach(c=>c.onchange=()=>{
         const month=c.dataset.month;const row=q.months.find(r=>r.month===month);excluded[month]=[...row.excluded_dates];
@@ -3137,4 +3137,17 @@ async function openMultiMonthSale(d,id,box,reload,preset={}) {
     }catch(e){error.textContent=e.message;busy=false;form.querySelectorAll('input,select').forEach(x=>x.disabled=false);f.tariff.disabled=!!groups.find(g=>g.id===+f.group_id.value)?.fixed_only;buttons()}
   });
   tariffs();pastGroupSearch(f.group_id);await preview();box.scrollIntoView({block:'start',behavior:'smooth'});
+}
+
+
+function multiMonthCalendarHtml(row) {
+  const first=new Date(row.month+'-01T12:00:00'),offset=(first.getDay()+6)%7;
+  const count=new Date(first.getFullYear(),first.getMonth()+1,0).getDate();
+  const available=new Set(row.quote.calendar_dates||row.quote.dates),excluded=new Set(row.excluded_dates);
+  return '<div class="multi-month-grid">'+['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(day=>`<span class="multi-weekday">${day}</span>`).join('')+
+    Array.from({length:offset},()=>'<span aria-hidden="true"></span>').join('')+
+    Array.from({length:count},(_,i)=>{
+      const day=row.month+'-'+String(i+1).padStart(2,'0');
+      return available.has(day)?`<label class="multi-calendar-choice" title="Занятие ${esc(dShort(day))}"><input type="checkbox" data-multi-day="${day}" data-month="${row.month}" aria-label="Занятие ${esc(dShort(day))}" ${excluded.has(day)?'':'checked'}><span>${i+1}</span></label>`:`<span class="multi-calendar-empty">${i+1}</span>`;
+    }).join('')+'</div>';
 }
