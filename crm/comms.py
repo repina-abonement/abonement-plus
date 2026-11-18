@@ -1104,6 +1104,11 @@ def send_sticker(con, cid: int, sticker: str, user: dict) -> dict:
     custom = None
     if isinstance(sticker, str) and sticker.startswith("custom:"):
         custom = con.execute("SELECT * FROM custom_stickers WHERE id=?", (sticker[7:],)).fetchone()
+    if custom:
+        from . import stickerpacks
+        pack = con.execute('SELECT name,title FROM sticker_packs WHERE name=?', (custom['pack'],)).fetchone()
+        if not pack or not stickerpacks.allowed(con, pack, user):
+            raise CommsError("Этот набор недоступен для вашей учётной записи")
     if sticker not in STICKERS and not custom:
         raise CommsError("Стикер не найден")
     row = con.execute("SELECT * FROM conversations WHERE id=?", (cid,)).fetchone()

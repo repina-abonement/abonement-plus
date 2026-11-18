@@ -94,12 +94,23 @@ def import_pack(con, value):
     return {'name': name, 'added': len(fetched), 'total': len(existing) + len(fetched)}
 
 
-def catalog(con):
+def allowed(con, pack, user):
+    """Personal Olga pack: resolve the real account, never grant by caller name/role."""
+    title = pack['title'].casefold()
+    personal = (pack['name'].casefold() == 'footbolika_olya'
+                or any(word in title for word in ('ольг', 'оля', 'olya', 'olga')))
+    if not personal:
+        return True
+    rows = con.execute("SELECT id FROM users WHERE active=1 AND name='Ольга Авлахова'").fetchall()
+    return len(rows) == 1 and user is not None and user.get('id') == rows[0]['id']
+
+
+def catalog(con, user=None):
     return {'packs': [dict(p) | {'stickers': [
         {'id': 'custom:' + r['id'], 'emoji': r['emoji'], 'animated': bool(r['animated']),
          'image': '/api/sticker-image?t=' + r['id']}
         for r in con.execute('SELECT id,emoji,animated FROM custom_stickers WHERE pack=? ORDER BY rowid', (p['name'],))]}
-        for p in con.execute('SELECT name,title FROM sticker_packs ORDER BY rowid')]}
+        for p in con.execute('SELECT name,title FROM sticker_packs ORDER BY rowid') if allowed(con,p,user)]}
 
 
 def upload_image(con, title, encoded):

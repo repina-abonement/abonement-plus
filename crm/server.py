@@ -3220,7 +3220,7 @@ def integrations_put(con, h, user, body, q):
 @route("GET", "/api/sticker-packs", role="operator")
 def sticker_pack_list(con, h, user, body, q):
     from . import stickerpacks
-    return stickerpacks.catalog(con) | {"telegram_ready": bool(comms.get(con, "tg_token"))}
+    return stickerpacks.catalog(con, user) | {"telegram_ready": bool(comms.get(con, "tg_token"))}
 
 
 @route("POST", "/api/sticker-packs", role="admin")

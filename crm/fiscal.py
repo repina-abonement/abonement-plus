@@ -659,6 +659,8 @@ def start_worker(connect):
             try:
                 con.execute("BEGIN IMMEDIATE")
                 try:
+                    from . import fiscalcheck
+                    fiscalcheck.run_automatic(con)
                     run(con)
                     con.execute("COMMIT")
                 except BaseException:

@@ -17,9 +17,9 @@ def main():
             return {'file_path':'stickers/fake.webp'}
         return {'message_id':12}
     with patch.object(comms,'tg_call',side_effect=tg), patch.object(stickerpacks,'urlopen',side_effect=lambda *a,**kw:io.BytesIO(b'RIFFxxxxWEBPfake')):
-        result = stickerpacks.import_pack(con,'https://t.me/addstickers/Footbolika_Olya')
+        result = stickerpacks.import_pack(con,'https://t.me/addstickers/ExamplePack')
         assert result['total'] == 2
-        assert stickerpacks.import_pack(con,'Footbolika_Olya')['added'] == 0
+        assert stickerpacks.import_pack(con,'ExamplePack')['added'] == 0
     catalog = stickerpacks.catalog(con)
     assert len(catalog['packs']) == 1 and len(catalog['packs'][0]['stickers']) == 2
     assert 'FAKE_TOKEN' not in str(catalog) and 'fake-static' not in str(catalog)

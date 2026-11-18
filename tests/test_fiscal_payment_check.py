@@ -38,3 +38,15 @@ class FiscalPaymentCheck(unittest.TestCase):
         with patch.object(fiscal,'pk_call',return_value=[{'id':'r','payment_id':'synthetic-11534','status':'sending'}]):result=fiscalcheck.check(self.con,pid,self.user)
         self.assertEqual(result['status'],'pending')
         with self.assertRaises(Exception):fiscalcheck.check(self.con,pid,{'id':99,'role':'operator'})
+
+    def test_automatic_backlog_without_button_only_reads_and_is_bounded(self):
+        from datetime import datetime
+        pid=self.payment()
+        with patch.object(fiscal,'pk_call',return_value=[]) as api:
+            first=fiscalcheck.run_automatic(self.con)
+            second=fiscalcheck.run_automatic(self.con)
+        self.assertEqual(first['checked'],1)
+        self.assertEqual(second['checked'],0)
+        self.assertEqual(api.call_count,1)
+        self.assertEqual(api.call_args.args[1],'/info/receipts/bypaymentid/')
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments').fetchone()[0],1)

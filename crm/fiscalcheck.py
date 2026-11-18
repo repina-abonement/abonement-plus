@@ -42,3 +42,23 @@ def check(con,pid,user):
     con.execute('INSERT INTO fiscal_payment_checks VALUES (?,?,?,?) ON CONFLICT(payment_id) DO UPDATE SET checked_at=excluded.checked_at,status=excluded.status,result=excluded.result',(pid,stamp,result['status'],json.dumps(result,ensure_ascii=False)))
     from . import money
     return money.payment_receipt_info(con,payment)
+
+
+def run_automatic(con,now=None,limit=30):
+    """Continuously check actual PayKeeper payments; no printing or money movement."""
+    from datetime import timedelta
+    current=now or datetime.now(ZoneInfo('Europe/Moscow'))
+    if current.tzinfo is not None:current=current.astimezone(ZoneInfo('Europe/Moscow')).replace(tzinfo=None)
+    cutoff=(current-timedelta(minutes=10)).isoformat(timespec='minutes')
+    rows=con.execute('''SELECT DISTINCT p.id FROM payments p JOIN pay_links l ON l.payment_id=p.id
+        LEFT JOIN fiscal_payment_checks c ON c.payment_id=p.id
+        WHERE p.cancelled=0 AND p.amount>0 AND l.pk_payment_id!=''
+          AND (c.payment_id IS NULL OR (c.status!='confirmed' AND c.checked_at<=?))
+        ORDER BY c.checked_at IS NOT NULL,c.checked_at,p.id LIMIT ?''',(cutoff,max(0,min(int(limit),100)))).fetchall()
+    result={'checked':0,'confirmed':0,'unavailable':0}
+    for row in rows:
+        item=check(con,row['id'],{'id':0,'role':'admin','name':'Автопроверка фискализации'})
+        result['checked']+=1
+        if item['status']=='confirmed':result['confirmed']+=1
+        if item['status']=='unavailable':result['unavailable']+=1
+    return result
