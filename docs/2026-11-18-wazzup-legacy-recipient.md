@@ -24,9 +24,12 @@
 
 ## Проверки
 
-- unittest tests.test_wazzup_legacy_recipient, tests.test_wazzup_no_bridge, tests.test_wazzup_username, tests.test_wazzup_diagnostics, tests.test_wazzup_first_send_failure: 58 тестов OK
+- unittest tests.test_wazzup_legacy_recipient, tests.test_wazzup_no_bridge, tests.test_wazzup_username, tests.test_wazzup_diagnostics, tests.test_wazzup_first_send_failure: 59 тестов OK
 - python -m tests.test_wazzup_max_routing: HTTP/маршрутизация MAX, текст/стикеры/rekey/отсутствие перехода в WhatsApp — OK
 - compileall crm, git diff --check — OK
 - Все вызовы провайдера в тестах подменены; тесты не отправляли сообщения клиентам
 
 Рабочая доставка и серверные настройки с авторизацией не проверялись. Обращение WhatsApp остаётся открытым до отдельного подтверждения причины/результата
+
+
+Дополнительно исправлен старый WhatsApp-формат phone:номер: перед отправкой преобразуется в допустимый для WhatsApp chatId без префикса. В диагностике recipient_routing_version=2 позволяет отличить сервер с новой маршрутизацией, не раскрывая ключи или данные клиента. Сверено с официальной документацией https://wazzup24.ru/help/api/otpravka-soobshhenij/: chatId-номер для WhatsApp; phone только для Telegram/MAX

@@ -757,7 +757,7 @@ def wz_call(con, method: str, path: str, data=None, key: str | None = None):
 def wazzup_diagnostics(con):
     """Read-only, bounded provider diagnostics: no contacts, message text or credentials."""
     key = get(con, 'wazzup_key')
-    report = {'configured': bool(key), 'channels': [], 'failures': []}
+    report = {'configured': bool(key), 'channels': [], 'failures': [], 'recipient_routing_version': 2}
     # Extract only machine codes and request IDs; never expose provider free text here.
     rows = con.execute("""SELECT c.id AS conversation_id,c.channel,c.external_id,c.phone_norm,c.meta,m.error,m.ts,m.user_name,m.kind FROM messages m JOIN conversations c ON c.id=m.conversation_id
                           WHERE m.direction='out' AND m.status='error'
@@ -967,7 +967,8 @@ def _wz_recipient(conv, con=None):
     if meta.get("resolvedChatId"):
         return {"chatId": meta["resolvedChatId"]}
     if external.startswith("phone:"):
-        return {"phone": external[6:]}
+        phone = normalize_phone(external[6:])
+        return {"chatId" if conv["channel"] == "whatsapp" else "phone": phone}
     if external.startswith("username:"):
         return {"username": external[9:]}
     # Old phone-started TG/MAX rows stored the number without a phone: prefix.

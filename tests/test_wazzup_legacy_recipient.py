@@ -71,6 +71,14 @@ class LegacyRecipientTest(unittest.TestCase):
         self.assertEqual(provider.call_args.args[3]['chatId'], '79000000222')
         self.assertNotIn('phone', provider.call_args.args[3])
 
+    def test_legacy_whatsapp_phone_prefix_uses_whatsapp_format(self):
+        comms.put(self.con, 'wazzup_channel', 'test-wa')
+        cid = self.chat('whatsapp', 'phone:79000000444', '79000000444')
+        with patch.object(comms, 'wz_call', return_value={'messageId': 'ack'}) as provider:
+            comms.send(self.con, cid, 'Synthetic', self.user)
+        self.assertEqual(provider.call_args.args[3]['chatId'], '79000000444')
+        self.assertNotIn('phone', provider.call_args.args[3])
+
     def test_contact_not_found_is_error_without_retry_or_fallback(self):
         cid = self.legacy('wazzup_max')
         with patch.object(comms, 'http', return_value=(400, {'error': 'POST_MESSAGE_ERROR', 'description': 'Cannot found contact by phone', 'requestId': 'synthetic12345678'})) as provider:
