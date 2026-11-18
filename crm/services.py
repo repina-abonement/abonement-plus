@@ -992,6 +992,10 @@ def create_student(con, data: dict, user) -> int:
     comment=data.get('comment') or ''
     if not isinstance(comment,str) or len(comment)>2000:raise ApiError('Комментарий должен быть текстом не длиннее 2000 символов')
     comment=comment.strip()
+    relation = data.get("parent_relation") or ""
+    from .smart import RELATIONS
+    if not isinstance(relation,str) or (relation and relation not in RELATIONS):
+        raise ApiError("Выберите роль родителя из списка")
     family_id = data.get("family_id")
     if family_id:
         if not con.execute("SELECT 1 FROM families WHERE id=?", (family_id,)).fetchone():
@@ -1005,8 +1009,8 @@ def create_student(con, data: dict, user) -> int:
             raise ApiError("Семья с этим телефоном уже есть, добавьте ребёнка в неё", 409)
         fam_name = (data.get("family_name") or "").strip() or pname.split()[-1]
         family_id = con.execute("INSERT INTO families(name) VALUES (?)", (fam_name,)).lastrowid
-        con.execute("INSERT INTO parents(family_id, name, phone, phone_norm, messenger) VALUES (?,?,?,?,?)",
-                    (family_id, pname, phone, normalize_phone(phone), data.get("messenger") or ""))
+        con.execute("INSERT INTO parents(family_id, name, phone, phone_norm, messenger, relation) VALUES (?,?,?,?,?,?)",
+                    (family_id, pname, phone, normalize_phone(phone), data.get("messenger") or "", relation))
     funnel = "members" if data.get("funnel") == "members" else "sales"
     tariff = "flex" if data.get("tariff") == "flex" else "fixed"
     stage = "active" if funnel == "members" else "lead"

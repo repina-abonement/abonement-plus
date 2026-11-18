@@ -2182,7 +2182,6 @@ function nextSaturdays(n) {
 
 /* ---------- новый клиент ---------- */
 function openNewClient(preset = {}) {
-  const groups = S.meta.groups.filter((x) => !x.is_makeup);
   openDrawer(`
   <h2>${preset.family_id ? "Ребёнок в семью " + esc(preset.family_name) : "Новый клиент"}</h2>
   <form id="nc" class="section">
@@ -2190,17 +2189,15 @@ function openNewClient(preset = {}) {
       <div class="field"><label>Телефон родителя</label><input name="phone" type="tel" required placeholder="+7 900 000-00-00" value="${esc(preset.phone || "")}"></div>
       <div id="dup"></div>
       <div class="field"><label>Имя родителя</label><input name="parent_name" required value="${esc(preset.parent_name || "")}"></div>
-      <div class="field"><label>Мессенджер</label><select name="messenger"><option>WhatsApp</option><option>Telegram</option><option>MAX</option><option value="">—</option></select></div>`}
+      <div class="field"><label>Роль родителя</label><select name="parent_relation"><option value="">— выбрать —</option>${["мама", "папа", "бабушка", "дедушка", "тётя", "дядя", "сестра", "брат", "няня", "опекун", "другое"].map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join('')}</select></div>
+      <div class="field"><label>Мессенджер</label><select name="messenger"><option>MAX</option><option>Telegram</option><option>WhatsApp</option><option value="">—</option></select></div>`}
     <div class="field"><label>Имя ребёнка</label><input name="name" required></div>
     <div class="row">
       <div class="field"><label>Дата рождения</label><input name="birth" type="date"></div>
       <div class="field"><label>Куда</label><select name="funnel"><option value="sales">Лид (воронка продаж)</option><option value="members">Уже занимается</option></select></div>
     </div>
-    <div class="field"><label>Группа</label><select name="group_id"><option value="">— позже —</option>${groups.map((x) => `<option value="${x.id}">${esc(x.name)} · ${esc(x.age)} лет</option>`).join("")}</select></div>
-    <div class="row">
-      <div class="field"><label>Тариф</label><select name="tariff"><option value="fixed">Негибкий</option><option value="flex">Гибкий</option></select></div>
-      <div class="field"><label>Откуда узнали</label>${sourceSelect("source_id", null)}</div>
-    </div>
+    <p class="muted small">Группу, пробное занятие и абонемент можно выбрать в карточке после создания клиента</p>
+    <div class="field"><label>Откуда узнали</label>${sourceSelect("source_id", null)}</div>
     <div class="field"><label>Комментарий · необязательно</label><textarea name="comment" rows="3" maxlength="2000" placeholder="Что важно знать о клиенте">${esc(preset.comment||'')}</textarea></div>
     <button class="btn primary">Создать</button>
   </form>`);
@@ -2224,7 +2221,7 @@ function openNewClient(preset = {}) {
     if (f.source_id) f.source_id = +f.source_id; else delete f.source_id;
     if (familyId) f.family_id = familyId;
     if (preset.conversation_id) f.conversation_id = preset.conversation_id;
-    try { const r = await api("POST", "/api/students", f); toast("Клиент создан"); render(); openStudent(r.id); }
+    try { const r = await api("POST", "/api/students", f); toast("Клиент создан"); await render(); await openStudent(r.id); }
     catch (err) { fail(err); }
   };
 }
