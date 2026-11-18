@@ -745,6 +745,9 @@ def wz_call(con, method: str, path: str, data=None, key: str | None = None):
         detail = str(detail or "").replace(k, "[скрыто]")[:300]
         reason = str(err or 'ошибка ' + str(code)).replace(k, "[скрыто]")[:200]
         hint = "Telegram не нашёл контакт по номеру. Попробуйте написать по @нику или попросите клиента написать первым" if "CHANNEL_TGAPI_PHONE_NOT_OCCUPIED" in reason else ""
+        if "cannot found contact by phone" in (reason + " " + detail).lower():
+            label = "MAX" if isinstance(data, dict) and data.get("chatType") == "max" else "Мессенджер"
+            hint = label + " не нашёл контакт по этому номеру. Проверьте номер или попросите клиента написать первым"
         request_id = str(js.get("requestId") or "") if isinstance(js, dict) else ""
         request_id = request_id if re.fullmatch(r"[a-zA-Z0-9-]{8,64}", request_id) else ""
         raise CommsError(" · ".join(x for x in (hint, "Wazzup: " + reason, detail if detail != reason else "", "requestId=" + request_id if request_id else "") if x))
@@ -756,7 +759,7 @@ def wazzup_diagnostics(con):
     key = get(con, 'wazzup_key')
     report = {'configured': bool(key), 'channels': [], 'failures': []}
     # Extract only machine codes and request IDs; never expose provider free text here.
-    rows = con.execute("""SELECT c.channel,c.external_id,c.meta,m.error,m.ts,m.user_name,m.kind FROM messages m JOIN conversations c ON c.id=m.conversation_id
+    rows = con.execute("""SELECT c.id AS conversation_id,c.channel,c.external_id,c.phone_norm,c.meta,m.error,m.ts,m.user_name,m.kind FROM messages m JOIN conversations c ON c.id=m.conversation_id
                           WHERE m.direction='out' AND m.status='error'
                           AND c.channel IN ('whatsapp','wazzup_telegram','wazzup_max')
                           ORDER BY m.id DESC LIMIT 20""").fetchall()
@@ -773,7 +776,7 @@ def wazzup_diagnostics(con):
         report['failures'].append({'transport': WZ_ROUTE[row['channel']][0], 'codes': list(dict.fromkeys(codes))[:3],
                                    'request_id': request[1] if request else '', 'at': row['ts'],
                                    'employee': row['user_name'] or '', 'kind': row['kind'],
-                                   'recipient_mode': 'chatId' if meta.get('resolvedChatId') else 'phone' if row['external_id'].startswith('phone:') else 'username' if row['external_id'].startswith('username:') else 'chatId',
+                                   'recipient_mode': next(iter(_wz_recipient(dict(row) | {'id': row['conversation_id'], 'meta': json.dumps(meta)}, con))),
                                    'uses_current_channel': not meta.get('channelId') or meta['channelId'] == configured_channel})
     if not key:
         return report
@@ -917,7 +920,8 @@ def wz_hook(con, payload: dict) -> None:
                 ext = pn
         cid = upsert_conversation(con, channel, ext, title=contact.get("name") or "",
                                   username=contact.get("username") or "", phone=phone or "",
-                                  meta={"channelId": m.get("channelId"), "chatType": ct})
+                                  meta={"channelId": m.get("channelId"), "chatType": ct,
+                                        **({"resolvedChatId": str(ext)} if ext and ct in ("telegram", "max") else {})})
         if m.get("isDeleted") is True:
             from . import messagedeletion
             messagedeletion.confirmed(con,cid,m.get("messageId"))
@@ -957,7 +961,7 @@ def _wz_destination(con, conv):
     return {"channelId":channel_id,"chatType":chat_type}
 
 
-def _wz_recipient(conv):
+def _wz_recipient(conv, con=None):
     external = conv["external_id"]
     meta = json.loads(conv["meta"] or "{}")
     if meta.get("resolvedChatId"):
@@ -966,13 +970,24 @@ def _wz_recipient(conv):
         return {"phone": external[6:]}
     if external.startswith("username:"):
         return {"username": external[9:]}
+    # Old phone-started TG/MAX rows stored the number without a phone: prefix.
+    # A matching contact phone is evidence; length alone is not (IDs are numeric too).
+    if conv["channel"] in ("wazzup_telegram", "wazzup_max"):
+        phone = normalize_phone(str(conv.get("phone_norm") or conv.get("phone") or ""))
+        looks_like_phone = bool(re.fullmatch(r"[+0-9()\s-]+", str(external)))
+        if phone and len(phone) >= 11 and looks_like_phone and normalize_phone(external) == phone:
+            received = con is not None and con.execute(
+                "SELECT 1 FROM messages WHERE conversation_id=? AND direction='in' AND external_id IS NOT NULL LIMIT 1",
+                (conv["id"],)).fetchone()
+            if not received:
+                return {"phone": phone}
     return {"chatId": external}
 
 
 def _wz_ack(con, conv, result):
     if not isinstance(result, dict) or not result.get("messageId"):
         raise CommsError("Wazzup не подтвердил отправку. Проверьте переписку перед повтором")
-    if result.get("chatId") and conv["external_id"].startswith(("phone:", "username:")):
+    if result.get("chatId"):
         meta = json.loads(conv["meta"] or "{}")
         meta["resolvedChatId"] = str(result["chatId"])
         con.execute("UPDATE conversations SET meta=? WHERE id=?", (json.dumps(meta), conv["id"]))
@@ -980,7 +995,7 @@ def _wz_ack(con, conv, result):
 
 
 def _wz_send_raw(con, cid, conv: dict, text: str) -> str:
-    body = _wz_destination(con, conv) | _wz_recipient(conv) | {"text": text, "crmMessageId": uuid.uuid4().hex}
+    body = _wz_destination(con, conv) | _wz_recipient(conv, con) | {"text": text, "crmMessageId": uuid.uuid4().hex}
     return _wz_ack(con, conv, wz_call(con, "POST", "message", body))
 
 
@@ -1044,7 +1059,7 @@ def send_sticker(con, cid: int, sticker: str, user: dict) -> dict:
             ext = (((js or {}).get("message") or {}).get("body") or {}).get("mid") or ("x" + uuid.uuid4().hex)
         elif conv["channel"] == "whatsapp" or conv["channel"].startswith("wazzup_"):
             payload = _wz_destination(con, conv) | {"contentUri": url, "crmMessageId": uuid.uuid4().hex}
-            payload.update(_wz_recipient(conv))
+            payload.update(_wz_recipient(conv, con))
             ext = _wz_ack(con, conv, wz_call(con, "POST", "message", payload))
         else:
             raise CommsError("Этот канал не поддерживает стикеры")

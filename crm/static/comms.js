@@ -756,7 +756,7 @@ async function renderCommsSettings(box, users) {
       if(report.failures?.length){
         const details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');
         summary.textContent='Последние ошибки отправки';pre.style.whiteSpace='pre-wrap';
-        pre.textContent=report.failures.map(f=>[f.at,f.employee,f.transport,f.kind,f.recipient_mode,f.uses_current_channel===false?'Канал отличается от выбранного в настройках':'',(f.codes.join(', ')||'Код не сохранён'),f.request_id?'requestId='+f.request_id:''].filter(Boolean).join(' · ')).join('\n');
+        pre.textContent=report.failures.map(f=>[f.at,f.employee,f.transport,f.kind,({phone:'По номеру телефона',chatId:'По ID переписки',username:'По никнейму'}[f.recipient_mode]||f.recipient_mode),f.uses_current_channel===false?'Канал отличается от выбранного в настройках':'',(f.codes.join(', ')||'Код не сохранён'),f.request_id?'requestId='+f.request_id:''].filter(Boolean).join(' · ')).join('\n');
         details.append(summary,pre);result.append(details);
       }
       const copy=document.createElement('button');copy.type='button';copy.className='btn sm';copy.textContent='Скопировать диагностику';

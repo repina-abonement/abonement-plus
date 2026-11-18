@@ -128,7 +128,7 @@ def _send_wazzup_bundle(con,conv,attachment,user,text,kind,url):
     """Wazzup v3 accepts contentUri OR text. Record each confirmed part separately."""
     aid=attachment['id'];cid=conv['id']
     destination=comms._wz_destination(con,conv)
-    destination.update(comms._wz_recipient(conv))
+    destination.update(comms._wz_recipient(conv,con))
     result=comms.wz_call(con,'POST','message',destination|{'contentUri':url,'crmMessageId':aid}) or {}
     external=comms._wz_ack(con,conv,result)
     if result.get('chatId'):
