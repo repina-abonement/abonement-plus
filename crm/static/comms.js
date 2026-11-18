@@ -381,13 +381,17 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     if (!text) return;
     if (!to) return toast("Выберите мессенджер для отправки");
     send.disabled = true;
+    const sentValue=$('#cm-text').value;
     try {
       if (to[0] === "c") await api("POST", `/api/conversations/${to.slice(1)}/send`, { text });
       else {
         const created = await api("POST", `/api/families/${familyId}/whatsapp`, {parent_id:+to.slice(1),text,channel:to[0] === "m" ? "max" : to[0] === "t" ? "telegram" : "whatsapp"});
         if (created.conversation_id) S.familySendTargets[targetKey] = "c" + created.conversation_id;
       }
-      loadFamilyComms(familyId, parents, studentId, kid);
+      if(box.isConnected&&$('#comms-box')===box&&box.dataset.familyId===String(familyId)){
+        clearSentComposerDraft(box.querySelector('#cm-text'),sentValue);
+        await loadFamilyComms(familyId, parents, studentId, kid);
+      }
     } catch (e) { fail(e); send.disabled = false; }
   };
 }
@@ -630,13 +634,13 @@ async function openChat(cid, keepScroll = false) {
     const text = $("#chat-text").value.trim(); if (!text) return;
     if(!$("#chat-to").value)return toast("Выберите мессенджер для ответа");
     sendBtn.disabled = true;
-    const input=$('#chat-text');
+    const input=$('#chat-text'),sentValue=input.value;
     const to = $("#chat-to") ? +$("#chat-to").value : cid;
     try {
       await api("POST", `/api/conversations/${to}/send`, { text });
-      S.chatDrafts=S.chatDrafts||{};S.chatDrafts[cid]={text:'',attachment:null};
-      if(input.isConnected){input.value='';if(c.open_q&&confirm('В этом диалоге открытый вопрос — он решён?'))await api('POST',`/api/conversations/${cid}/question/close`,{});openChat(cid)}
-      else S.inbox.refresh?.();
+      S.chatDrafts=S.chatDrafts||{};
+      if(input.isConnected){clearSentComposerDraft(input,sentValue);S.chatDrafts[cid]={text:input.value,attachment:null};if(c.open_q&&confirm('В этом диалоге открытый вопрос — он решён?'))await api('POST',`/api/conversations/${cid}/question/close`,{});openChat(cid)}
+      else {if(S.chatDrafts[cid]?.text===sentValue)S.chatDrafts[cid]={text:'',attachment:null};S.inbox.refresh?.();}
     }
     catch (e) { fail(e); sendBtn.disabled = false; }
   };
@@ -1311,3 +1315,11 @@ document.addEventListener("error", e => {
     if (e.target.nextElementSibling) e.target.nextElementSibling.hidden = false;
   }
 }, true);
+
+
+function clearSentComposerDraft(input,sentValue) {
+  if(!input||input.value!==sentValue)return false;
+  input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));
+  if(typeof resizeMessageInput==='function')resizeMessageInput(input);
+  return true;
+}

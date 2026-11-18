@@ -1239,7 +1239,21 @@ def student_create(con, h, user, body, q):
 def student_get(con, h, user, body, q, sid):
     from . import recents
     recents.remember(con, user["id"], int(sid))
-    return sv.student_detail(con, int(sid))
+    from . import subcancel
+    return sv.student_detail(con, int(sid)) | {'can_delete_error':subcancel.can_cancel_error(con,user)}
+
+
+@route("GET", "/api/students/{sid}/error-delete-preview", role="operator")
+def student_error_delete_preview(con,h,user,body,q,sid):
+    from . import studentdelete
+    result=studentdelete.preview(con,int(sid),user)
+    return {key:value for key,value in result.items() if key!='state'}
+
+
+@route("DELETE", "/api/students/{sid}/error", role="operator")
+def student_error_delete(con,h,user,body,q,sid):
+    from . import studentdelete
+    return studentdelete.delete(con,int(sid),user,body)
 
 
 @route("PATCH", "/api/students/{sid}/profile", role="members:full")
@@ -2065,6 +2079,18 @@ def cancel(con, h, user, body, q, sub):
         if not perms.can(user, "payments", "view"):
             raise ApiError("Возврат оформляют руководитель или старший администратор",403)
     return subcancel.cancel(con,int(sub),user,body)
+
+
+@route("POST", "/api/subscriptions/{sub}/error-lessons-preview", role="operator")
+def subscription_error_lessons_preview(con,h,user,body,q,sub):
+    from . import subcancel
+    return subcancel.error_lesson_preview(con,int(sub),user,body.get('keep'))
+
+
+@route("POST", "/api/subscriptions/{sub}/error-lessons", role="operator")
+def subscription_error_lessons(con,h,user,body,q,sub):
+    from . import subcancel
+    return subcancel.adjust_error_lessons(con,int(sub),user,body)
 
 
 @route("GET", "/api/subscriptions/{sub}/error-cancel-preview", role="operator")

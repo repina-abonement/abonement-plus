@@ -1639,8 +1639,8 @@ async function openSell(d, reload) {
     $('#sl-tar').value=en().fixed_only?'fixed':en().program_id?effective?.tariff||last?.tariff||'arena_only':last?.tariff||en().tariff||'fixed';
     $('#sl-ofp').innerHTML=(p?.ofp_groups||[]).map(g=>`<option value="${g.id}" ${g.id===effective?.ofp_group_id?'selected':''}>${esc(g.name)}</option>`).join('');syncFields();
   };
-  const quote=async()=>{
-    const request=++version;busy(true);existing=null;$('#sl-res').innerHTML='';$('#sl-q').innerHTML='Считаю…';
+  const quote=async(preserveCalendar=false)=>{
+    const request=++version;busy(true);existing=null;$('#sl-res').innerHTML='';if(preserveCalendar!==true||!$('#sl-calendar'))$('#sl-q').innerHTML='Считаю…';
     ['#sl-tar','#sl-disc','#sl-ofp'].forEach(s=>$(s).disabled=false);syncFields();$('#sl-credit-box').hidden=true;
     const own=ens.find(e=>e.group_id===en().group_id);
     const sub=single()?pendingSingles.find(s=>s.id===+$('#sl-single-invoice').value):d.subscriptions.find(s=>(s.group_id===en().group_id||own&&s.enrollment_id===own.id)&&s.month===$('#sl-month').value&&s.kind!=='single'&&s.status!=='cancelled');
@@ -1659,9 +1659,9 @@ async function openSell(d, reload) {
       const q=await api('GET',`/api/students/${id}/${single()?'single-quote':'quote'}?${params}`);if(request!==version||!isCurrent())return;
       if(autoDates&&!q.single){autoDates=false;const defaults=(q.calendar_dates||q.dates).filter(day=>q.trial_cutoff&&day<=q.trial_cutoff);if(defaults.length){defaults.forEach(day=>exclusions.add(day));if(defaults.length===new Set(q.calendar_dates||q.dates).size){q.dates=[];q.excluded_dates=[...exclusions];q.total=0;q.lessons_paid=0;q.empty_after_trial=true}else return quote()}}
       total=q.total;if(q.single)singleDay=q.dates[0];q.calendar_picker=true;
-      $('#sl-q').innerHTML=(q.empty_after_trial?'<p>После пробного в этом месяце нет занятий. Выберите другой месяц или отметьте согласованные занятия вручную</p>':q.single?`<div class="total">${rub(q.total)}</div><div class="small">Разовое занятие · ${dShort(singleDay)}</div>`:q.program?programQuoteHtml(q):quoteHtml(q))+saleCalendarHtml(q,$('#sl-month').value,[...(d.trial_visits||[]).map(v=>v.date),(d.student.trial_at||'').slice(0,10)]);
+      updateSaleQuoteHtml($('#sl-q'),(q.empty_after_trial?'<p>После пробного в этом месяце нет занятий. Выберите другой месяц или отметьте согласованные занятия вручную</p>':q.single?`<div class="total">${rub(q.total)}</div><div class="small">Разовое занятие · ${dShort(singleDay)}</div>`:q.program?programQuoteHtml(q):quoteHtml(q))+saleCalendarHtml(q,$('#sl-month').value,[...(d.trial_visits||[]).map(v=>v.date),(d.student.trial_at||'').slice(0,10)]),preserveCalendar===true);
       $('#sl-credit-box').hidden=!q.credit_available;$('#sl-credit-info').textContent=q.credit_available?`(до ${q.credit_available} занятий)`:'';
-      $('#sl-calendar').onchange=e=>{const day=e.target.dataset.saleDate;if(!day)return;if(single()){singleDay=day;quote();return}if(!e.target.checked&&!$('#sl-calendar').querySelector('input:checked')){e.target.checked=true;return toast('Оставьте хотя бы одно занятие',true)}if(e.target.checked)exclusions.delete(day);else exclusions.add(day);quote()};busy(total<=0);
+      $('#sl-calendar').onchange=e=>{const day=e.target.dataset.saleDate;if(!day)return;if(single()){singleDay=day;quote();return}if(!e.target.checked&&!$('#sl-calendar').querySelector('input:checked')){e.target.checked=true;return toast('Оставьте хотя бы одно занятие',true)}if(e.target.checked)exclusions.delete(day);else exclusions.add(day);quote(true)};busy(total<=0);
     }catch(e){if(request===version&&isCurrent())$('#sl-q').textContent=e.message}
   };
   const reset=()=>{exclusions.clear();autoDates=true;singleDay=null;$('#sl-credit').checked=false};
@@ -1770,7 +1770,7 @@ function clientSubscriptionsHtml(d) {
     const label={empty:'Нет абонемента',cancelled:'Отменён',paid:'Оплачен',partial:'Частично',unpaid:'Ждёт оплаты'}[state];
     return `<button type="button" class="subscription-month ${state} ${month===selected?'selected':''}" data-sub-month="${month}" aria-pressed="${month===selected}"><strong>${esc(MONTHS[i])}</strong><span class="subscription-month-status">${label}</span>${live.length?`<b>${rub(total)}</b>${left?`<small>Остаток ${rub(left)}</small>`:'<small>Всё оплачено</small>'}`:'<b>—</b><small>&nbsp;</small>'}</button>`;
   }).join('');
-  return `<div class="subscription-year-head"><h3>Абонементы</h3><select id="subscription-year" aria-label="Год абонементов">${availableYears.map(y=>`<option ${y===year?'selected':''}>${y}</option>`).join('')}</select></div><div class="subscription-year-grid">${tiles}</div><h4 class="subscription-selected-month">${esc(monthLabel(selected))}</h4>${shown.length?`<ul class="sub-list">${shown.map(card).join('')}</ul>`:'<p class="muted small">В этом месяце абонементов нет</p>'}${subscriptionRefundsHtml(d)}`;
+  return `<div class="subscription-balance"><div><small>Свободный баланс</small><b>${rub(d.balance.deposit||0)}</b><span>Можно зачесть в оплату</span></div><div><small>Долг</small><b class="${d.balance.debt?'finance-due':''}">${rub(d.balance.debt||0)}</b><span>Прошлые и текущий месяц</span></div><div><small>Будущие абонементы</small><b>${rub(d.balance.upcoming||0)}</b><span>Осталось оплатить</span></div></div><div class="subscription-year-head"><h3>Абонементы</h3><select id="subscription-year" aria-label="Год абонементов">${availableYears.map(y=>`<option ${y===year?'selected':''}>${y}</option>`).join('')}</select></div><div class="subscription-year-grid">${tiles}</div><h4 class="subscription-selected-month">${esc(monthLabel(selected))}</h4>${shown.length?`<ul class="sub-list">${shown.map(card).join('')}</ul>`:'<p class="muted small">В этом месяце абонементов нет</p>'}${subscriptionRefundsHtml(d)}`;
 }
 
 function wireSubscriptionCalendar(root,d) {
@@ -1937,7 +1937,7 @@ async function openStudent(id, options = {}) {
       ${full?`<button type="button" class="btn sc-tool primary" id="act-sell" title="Продать абонемент или разовое занятие" aria-label="Продать абонемент или разовое занятие"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l3 12h11l2-8H6M9 20h.01M18 20h.01"/></svg></button>`:''}
       ${d.parents.some(p=>p.phone)?'<button type="button" class="btn sc-tool" id="act-call" title="Позвонить основному родителю" aria-label="Позвонить основному родителю"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3 4 5c-2 3 7 14 12 15l4-3-4-4-3 2-4-4 2-3Z"/></svg></button>':''}
       ${full?'<button type="button" class="btn sc-tool" data-profile-edit="name" title="Изменить данные клиента" aria-label="Изменить данные клиента"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16 12-12 4 4L8 20H4Zm10-10 4 4"/></svg></button><button type="button" class="btn sc-tool" data-client-add title="Добавить члена семьи" aria-label="Добавить родителя или ребёнка"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7" r="3"/><path d="M3 20v-3c0-5 12-5 12 0v3M19 7v8M15 11h8"/></svg></button>':''}
-      <details class="sc-extra-actions sc-tool-menu"><summary class="btn sc-tool" aria-label="Другие действия" title="Другие действия">⋯</summary><div>${isMember?'<button class="btn sm" id="act-vac">Отпуск</button>':''}${full?`<button type="button" class="btn sm" id="act-archive-card">${s.archived?"Вернуть из архива":"Перенести в архив"}</button>`:""}</div></details>
+      <details class="sc-extra-actions sc-tool-menu"><summary class="btn sc-tool" aria-label="Другие действия" title="Другие действия">⋯</summary><div>${isMember?'<button class="btn sm" id="act-vac">Отпуск</button>':''}${full?`<button type="button" class="btn sm" id="act-archive-card">${s.archived?"Вернуть из архива":"Перенести в архив"}</button>`:""}${d.can_delete_error?'<button type="button" class="btn sm danger" id="act-delete-error">Удалить ошибочную карточку</button>':''}</div></details>
     </div>
     <div id="sc-profile-edit" hidden></div>
     <div id="sc-trial-booking" hidden></div>
@@ -2199,6 +2199,7 @@ async function openStudent(id, options = {}) {
   body.querySelectorAll("[data-vdel]").forEach((b) => (b.onclick = async () => {
     try { await api("DELETE", `/api/vacations/${b.dataset.vdel}`); reload(); } catch (e) { fail(e); }
   }));
+  if($('#act-delete-error'))$('#act-delete-error').onclick=()=>openErroneousClientDelete(d,body.querySelector('#sc-profile-edit'));
   if($("#act-archive-card"))$("#act-archive-card").onclick=()=>$("#s-arch").click();
   $("#s-arch").onclick = async () => {
     if (!s.archived && !confirm("Перенести карточку в архив? Она пропадёт из воронок, вернуть можно в любой момент")) return;
@@ -3191,14 +3192,55 @@ function multiMonthCalendarHtml(row) {
 async function openErroneousSubscriptionCancel(subid,box,button,reload) {
   try{
     const q=await api('GET',`/api/subscriptions/${subid}/error-cancel-preview`);
-    box.innerHTML=`<form class="subscription-cancel-form"><h4>Отменить ошибочный / тестовый абонемент</h4><p>Можно отменить и прошедшие занятия абонемента. Запись останется в истории, платежи и отметки посещения сохранятся</p><div class="quote"><p>Учтено оплаты: <b>${rub(q.paid)}</b></p><p>Свободный баланс после отмены: <b>${rub(q.balance_after)}</b></p>${q.applied_to_other_invoices?`<p>Зачтётся в другие абонементы: ${rub(q.applied_to_other_invoices)}</p>`:''}</div><div class="field"><label>Причина</label><textarea name="reason" required minlength="5" maxlength="1000" placeholder="Например, тестовый абонемент оформлен ошибочно"></textarea></div><label class="check"><input name="confirmed" type="checkbox" required> Подтверждаю: абонемент ошибочный или тестовый</label><p class="need-err" role="alert"></p><div class="sc-actions"><button type="submit" class="btn danger">Отменить абонемент</button><button type="button" class="btn" data-error-close>Назад</button></div></form>`;
-    const form=box.querySelector('form');form.querySelector('[data-error-close]').onclick=()=>{box.replaceChildren();button.disabled=false};
-    form.onsubmit=async e=>{e.preventDefault();const submit=form.querySelector('[type=submit]');submit.disabled=true;try{await api('POST',`/api/subscriptions/${subid}/error-cancel`,{token:q.token,reason:form.elements.reason.value,confirmed_error:form.elements.confirmed.checked});toast('Ошибочный абонемент отменён, платежи сохранены');reload()}catch(err){form.querySelector('.need-err').textContent=err.message;submit.disabled=false}};
+    let plan=null;try{plan=await api('POST',`/api/subscriptions/${subid}/error-lessons-preview`,{})}catch(_){}
+    const initial=plan;
+    box.innerHTML=`<form class="subscription-cancel-form"><h4>Исправить ошибочный / тестовый абонемент</h4><p>Снимите галочки с ошибочных занятий или удалите весь абонемент. Платежи и отметки посещения сохранятся</p>${plan?`<div class="multi-month-calendars">${plan.groups.map(g=>`<section data-error-group="${g.group_id}" class="multi-month-calendar"><h4>${esc(g.name)}</h4>${multiMonthCalendarHtml({month:plan.month,quote:{calendar_dates:g.dates},excluded_dates:[]})}</section>`).join('')}</div><button type="button" class="btn sm" data-error-all>Снять все — отменить целиком</button>`:'<p class="small muted">Частичная отмена недоступна без сверки точного состава. Можно отменить ошибочный абонемент целиком</p>'}<div class="quote" data-error-totals></div><div class="field"><label>Причина</label><textarea name="reason" required minlength="5" maxlength="1000" placeholder="Например, тестовые занятия добавлены ошибочно"></textarea></div><label class="check"><input name="confirmed" type="checkbox" required> Подтверждаю: выбранные занятия ошибочные или тестовые</label><p class="need-err" role="alert"></p><div class="sc-actions"><button type="submit" class="btn danger" ${plan?'disabled':''}>${plan?'Сохранить изменения':'Отменить абонемент целиком'}</button><button type="button" class="btn" data-error-close>Назад</button></div></form>`;
+    const form=box.querySelector('form'),submit=form.querySelector('[type=submit]'),totals=form.querySelector('[data-error-totals]');
+    let version=0,busy=false;
+    const requestId=window.crypto?.randomUUID?.()||Date.now()+'-'+Math.random().toString(36).slice(2);
+    const keep=()=>[...form.querySelectorAll('[data-multi-day]:checked')].map(c=>({group_id:+c.closest('[data-error-group]').dataset.errorGroup,date:c.dataset.multiDay}));
+    const draw=()=>{const p=plan||q;totals.innerHTML=`${plan?`<p>Останется занятий: <b>${plan.remaining_lessons}</b> · Стоимость: <b>${rub(plan.new_price)}</b></p><p>Осталось оплатить: <b>${rub(plan.remaining_due)}</b></p>`:''}<p>Учтено оплаты: <b>${rub(p.paid)}</b></p><p>Свободный баланс после исправления: <b>${rub(p.balance_after)}</b></p>${p.applied_to_other_invoices?`<p>Зачтётся в другие абонементы: ${rub(p.applied_to_other_invoices)}</p>`:''}`};
+    const preview=async()=>{const current=++version;submit.disabled=true;try{const next=await api('POST',`/api/subscriptions/${subid}/error-lessons-preview`,{keep:keep()});if(current!==version)return;plan=next;draw();submit.textContent=plan.remaining_lessons?'Сохранить выбранные занятия':'Отменить абонемент целиком';submit.disabled=!plan.removed_lessons}catch(err){if(current===version)form.querySelector('.need-err').textContent=err.message}};
+    form.querySelectorAll('[data-multi-day]').forEach(c=>c.onchange=preview);
+    if(initial)form.querySelector('[data-error-all]').onclick=()=>{form.querySelectorAll('[data-multi-day]').forEach(c=>c.checked=false);preview()};
+    form.querySelector('[data-error-close]').onclick=()=>{if(!busy){version++;box.replaceChildren();button.disabled=false}};
+    draw();
+    form.onsubmit=async e=>{e.preventDefault();if(busy)return;busy=true;submit.disabled=true;form.querySelectorAll('input,button').forEach(c=>c.disabled=true);try{await api('POST',`/api/subscriptions/${subid}/${plan?'error-lessons':'error-cancel'}`,{token:plan?plan.token:q.token,keep:plan?.keep,request_id:requestId,reason:form.elements.reason.value,confirmed_error:form.elements.confirmed.checked});toast('Абонемент исправлен, платежи сохранены');reload()}catch(err){form.querySelector('.need-err').textContent=err.message;busy=false;form.querySelectorAll('input,button').forEach(c=>c.disabled=false)}};
   }catch(e){fail(e);button.disabled=false}
 }
-
 
 document.addEventListener('click',event=>{
   const button=event.target.closest('.subscription-actions button');
   if(button)button.closest('details').open=false;
 });
+
+
+function updateSaleQuoteHtml(container,html,preserveCalendar=false) {
+  const calendar=preserveCalendar&&container.querySelector('#sl-calendar');
+  if(!calendar){container.innerHTML=html;return}
+  const next=document.createElement('div');next.innerHTML=html;
+  const nextCalendar=next.querySelector('#sl-calendar');
+  if(!nextCalendar){container.innerHTML=html;return}
+  for(const input of calendar.querySelectorAll('[data-sale-date]')){
+    const updated=nextCalendar.querySelector(`[data-sale-date="${input.dataset.saleDate}"]`);if(!updated)continue;
+    input.checked=updated.checked;input.disabled=updated.disabled;
+    const label=input.closest('.sale-cal-day'),newLabel=updated.closest('.sale-cal-day');
+    label.className=newLabel.className;
+    label.querySelector('small').textContent=newLabel.querySelector('small').textContent;
+  }
+  calendar.lastElementChild.innerHTML=nextCalendar.lastElementChild.innerHTML;
+  for(const node of [...container.childNodes])if(node!==calendar)node.remove();
+  nextCalendar.remove();calendar.before(...next.childNodes);
+}
+
+
+async function openErroneousClientDelete(d,root) {
+  root.hidden=false;root.textContent='Проверяю связи карточки…';
+  try{
+    const q=await api('GET',`/api/students/${d.student.id}/error-delete-preview`);
+    root.innerHTML=`<form class="client-profile-form"><h3>Удалить ошибочную карточку</h3><p><b>Только дубликат, тест или ошибка переноса / создания</b></p><p>Нормальные карточки нельзя удалять из-за отказа, паузы или прекращения занятий — для них используйте статус или архив</p>${!q.allowed?'<p class="need-err">Есть связанные оплаты, абонементы, посещения или данные переноса. Сначала нужна сверка или объединение дубля — удалить эту карточку сейчас нельзя</p>':`<div class="field"><label>Основание</label><select name="category"><option value="duplicate">Дубликат</option><option value="test">Тестовая карточка</option><option value="import_error">Ошибка переноса из ERP</option><option value="entry_error">Ошибочное создание</option></select></div><div class="field"><label>Что именно ошибочно</label><textarea name="reason" required minlength="5" maxlength="1000"></textarea></div><label class="check"><input name="confirmed" type="checkbox" required> Подтверждаю, что это ошибочная карточка, а не отказавшийся или ушедший клиент</label>`}<p class="need-err" data-delete-error role="alert"></p><div class="sc-actions">${q.allowed?'<button type="submit" class="btn danger">Удалить карточку</button>':''}<button type="button" class="btn" data-delete-close>Отмена</button></div></form>`;
+    const form=root.querySelector('form');root.querySelector('[data-delete-close]').onclick=()=>{root.replaceChildren();root.hidden=true};
+    form.onsubmit=async e=>{e.preventDefault();if(!q.allowed)return;const submit=form.querySelector('[type=submit]');submit.disabled=true;try{await api('DELETE',`/api/students/${d.student.id}/error`,{token:q.token,category:form.elements.category.value,reason:form.elements.reason.value,confirmed_error:form.elements.confirmed.checked});toast('Ошибочная карточка удалена');closeDrawer();render()}catch(err){form.querySelector('[data-delete-error]').textContent=err.message;submit.disabled=false}};
+    root.scrollIntoView({block:'nearest',behavior:'smooth'});
+  }catch(e){root.textContent=e.message}
+}

@@ -407,3 +407,104 @@ def cancel_error(con,subid,user,data):
         return {'ok':True,**q}
     except BaseException:
         con.execute('ROLLBACK TO erroneous_cancellation');con.execute('RELEASE erroneous_cancellation');raise
+
+
+def error_lesson_preview(con,subid,user,keep=None):
+    import hashlib
+    from datetime import date
+    from .subcomposition import unit_rate
+    base=error_preview(con,subid,user);sub=_sub(con,subid)
+    saved=json.loads(sub['lesson_schedule'] or '[]') or json.loads(sub['program_selection'] or '{}').get('contract',{}).get('components',[])
+    if not saved:raise sv.ApiError('Не сохранены точные даты занятий — частичная отмена требует сверки состава')
+    entries=[];groups=[]
+    try:
+        for part in saved:
+            gid=int(part['group_id']);weight=unit_rate(part)
+            if weight<=0:raise ValueError()
+            group=con.execute('SELECT name FROM groups WHERE id=?',(gid,)).fetchone()
+            groups.append({'group_id':gid,'name':group['name'] if group else 'Группа','dates':list(part['dates'])})
+            for day in part['dates']:
+                if date.fromisoformat(day).isoformat()!=day or day[:7]!=sub['month']:raise ValueError()
+                entries.append((gid,day,weight))
+    except (ValueError,KeyError,TypeError):raise sv.ApiError('Нужно сверить проданные даты и стоимость занятий')
+    if not entries or len(entries)!=sub['lessons'] or len({(g,d) for g,d,_ in entries})!=len(entries):raise sv.ApiError('Даты не совпадают с составом абонемента — требуется сверка')
+    available={(g,d) for g,d,_ in entries}
+    if keep is None:chosen=available
+    else:
+        if not isinstance(keep,list):raise sv.ApiError('Передайте выбранные занятия')
+        try:
+            chosen={(int(x['group_id']),x['date']) for x in keep}
+        except (KeyError,TypeError,ValueError):raise sv.ApiError('Проверьте выбранные занятия')
+        if len(chosen)!=len(keep) or not chosen<=available:raise sv.ApiError('Выбрать можно только занятия этого абонемента')
+    total_weight=sum(w for _,_,w in entries);remaining=sum(w for g,d,w in entries if (g,d) in chosen)
+    new_price=sub['price']-sub['price']*(total_weight-remaining)//total_weight
+    before=money.balance(con,sub['student_id'])
+    con.execute('SAVEPOINT lesson_error_preview')
+    try:
+        con.execute("UPDATE subscriptions SET price=?,status=CASE WHEN ?=0 THEN 'cancelled' ELSE status END WHERE id=?",(new_price,len(chosen),subid))
+        after=money.balance(con,sub['student_id'])
+    finally:
+        con.execute('ROLLBACK TO lesson_error_preview');con.execute('RELEASE lesson_error_preview')
+    selected=[{'group_id':g,'date':d} for g,d in sorted(chosen)]
+    token=hashlib.sha256(json.dumps([base['token'],selected,new_price],sort_keys=True).encode()).hexdigest()
+    return {'token':token,'month':sub['month'],'groups':groups,'keep':selected,'old_price':sub['price'],'new_price':new_price,
+        'remaining_lessons':len(chosen),'removed_lessons':len(entries)-len(chosen),'balance_after':after['deposit'],
+        'paid':base['paid'],'remaining_due':max(0,new_price-after['covered'].get(subid,0)),
+        'released_to_balance':max(0,after['deposit']-before['deposit']),
+        'applied_to_other_invoices':max(0,base['paid']-after['covered'].get(subid,0)-max(0,after['deposit']-before['deposit']))}
+
+
+def adjust_error_lessons(con,subid,user,data):
+    import hashlib
+    from .subcomposition import unit_rate
+    if not can_cancel_error(con,user):raise sv.ApiError('Доступно руководителю и Варе',403)
+    con.execute('''CREATE TABLE IF NOT EXISTS subscription_lesson_adjustments (
+        request_id TEXT PRIMARY KEY,subscription_id INTEGER NOT NULL,signature TEXT NOT NULL,
+        before_json TEXT NOT NULL,after_json TEXT NOT NULL,reason TEXT NOT NULL,created_by TEXT NOT NULL,created_at TEXT NOT NULL,result TEXT NOT NULL)''')
+    key=data.get('request_id');reason=str(data.get('reason') or '').strip()
+    if not isinstance(key,str) or not 8<=len(key)<=100:raise sv.ApiError('Обновите форму')
+    signature=hashlib.sha256(json.dumps(data,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    old=con.execute('SELECT * FROM subscription_lesson_adjustments WHERE request_id=?',(key,)).fetchone()
+    if old:
+        if old['subscription_id']!=subid or old['signature']!=signature:raise sv.ApiError('Этот запрос уже использован с другими данными')
+        return json.loads(old['result'])
+    if len(reason)<5 or data.get('confirmed_error') is not True:raise sv.ApiError('Подтвердите ошибочное оформление и укажите причину')
+    q=error_lesson_preview(con,subid,user,data.get('keep'))
+    if q['token']!=data.get('token'):raise sv.ApiError('Расчёт изменился — проверьте занятия и суммы заново',409)
+    if not q['removed_lessons']:raise sv.ApiError('Не выбраны занятия для удаления')
+    before=dict(_sub(con,subid));chosen={(x['group_id'],x['date']) for x in q['keep']}
+    con.execute('SAVEPOINT adjust_error_lessons')
+    try:
+        if not chosen:
+            base=error_preview(con,subid,user)
+            cancel_error(con,subid,user,{**data,'token':base['token']})
+        else:
+            saved=json.loads(before['lesson_schedule'] or '[]') or json.loads(before['program_selection'] or '{}').get('contract',{}).get('components',[])
+            parts=[];removed=[]
+            for part in saved:
+                keep_dates=[d for d in part['dates'] if (int(part['group_id']),d) in chosen]
+                removed.extend(d for d in part['dates'] if (int(part['group_id']),d) not in chosen)
+                if keep_dates:
+                    next_part={**part,'dates':keep_dates}
+                    if 'amount' in part:next_part['amount']=unit_rate(part)*len(keep_dates)
+                    parts.append(next_part)
+            excluded=set(json.loads(before['excluded_dates'] or '[]'))
+            if len({p['group_id'] for p in saved})==1:excluded.update(removed)
+            reasons=json.loads(before['exclusion_reasons'] or '{}');reasons.update({d:reason[:1000] for d in removed})
+            ratio=q['new_price']/before['price'] if before['price'] else 0
+            con.execute('''UPDATE subscriptions SET price=?,lessons=?,lesson_schedule=?,excluded_dates=?,exclusion_reasons=?,
+                corrected=1,composition_corrected=1,calculation_reason=?,discount_amount=?,late_fee=? WHERE id=?''',
+                (q['new_price'],len(chosen),json.dumps(parts),json.dumps(sorted(excluded)),json.dumps(reasons,ensure_ascii=False),
+                 'Исправление ошибочных занятий: '+reason[:1000],round(before['discount_amount']*ratio),round(before['late_fee']*ratio),subid))
+            money.reconcile(con,before['student_id'])
+            con.execute("UPDATE pay_links SET status='expired' WHERE status='open' AND (subscription_id=? OR id IN (SELECT link_id FROM pay_link_subscriptions WHERE subscription_id=?))",(subid,subid))
+            from . import tasks
+            tasks.schedule_renewal(con,before['student_id'])
+            sv.log(con,before['student_id'],f"Исправлены занятия абонемента #{subid}: удалено {q['removed_lessons']}, осталось {len(chosen)}. Стоимость {before['price']} → {q['new_price']} ₽. Платежи и отметки сохранены. Причина: {reason}",user,'payment')
+            sv.audit(con,user,'subscription.error_lessons',str(subid))
+        result={'ok':True,**q}
+        after=dict(_sub(con,subid))
+        con.execute('INSERT INTO subscription_lesson_adjustments VALUES (?,?,?,?,?,?,?,?,?)',(key,subid,signature,json.dumps(before),json.dumps(after),reason[:1000],user.get('name',''),sv.now_iso(),json.dumps(result)))
+        con.execute('RELEASE adjust_error_lessons');return result
+    except BaseException:
+        con.execute('ROLLBACK TO adjust_error_lessons');con.execute('RELEASE adjust_error_lessons');raise
