@@ -13,9 +13,18 @@ const dtWhen = (iso) => {
 };
 S.inbox = { tab: "chats", filter: "all", q: "" };
 
+function incomingStatus(counts) {
+  const note=document.querySelector('[data-incoming-status]');if(!note)return;
+  note.hidden=!counts.incoming_delayed&&!counts.incoming_storage_error;
+  note.textContent=counts.incoming_storage_error
+    ? 'Не удалось проверить приём новых сообщений. Сообщите руководителю'
+    : 'Есть сохранённые сообщения, которые пока не появились в чатах. CRM повторяет обработку';
+}
+
 async function pollCounts() {
   try {
     const c = await api("GET", "/api/inbox/counts");
+    incomingStatus(c);
     const n = c.unread + c.missed;
     document.querySelectorAll("[data-badge]").forEach((b) => { b.hidden = !n; b.textContent = n; });
     const p = S.counts;
@@ -445,6 +454,7 @@ async function renderInbox(page) {
   if (I.tab === "stats") return renderCallStats($("#inbox-body"));
   const body = $("#inbox-body");
   body.innerHTML = `
+    <div class="note" data-incoming-status role="status" hidden></div>
     <div class="inbox-workspace"><aside class="inbox-list-panel">
       <div class="inbox-search"><input class="search" id="iq" placeholder="Имя, телефон или @ник Telegram" value="${esc(I.q)}"><button type="button" id="start-telegram-username" hidden>Написать в Telegram</button></div>
       <div class="inbox-filters">${[["all","Все"],["unread","Новые"],["open","Вопросы"],["nofamily","Без карточки"],["archived","Архив"]].map(([k,t])=>`<button data-f="${k}" class="${I.filter===k?'active':''}">${t}${k==='unread'?'<span id="inbox-new-count" class="filter-count" aria-label="Непрочитанные чаты">0</span>':''}</button>`).join('')}</div>
@@ -466,6 +476,7 @@ async function renderInbox(page) {
     const d = await api("GET", `/api/inbox?filter=${filter}&q=${encodeURIComponent(query)}`);
     if (request !== listRequest || I.q !== query || I.filter !== filter || !body.isConnected) return;
     const list = $("#conv-list"); if (!list) return;
+    incomingStatus(d);
     S.chatRows=S.chatRows||{};d.conversations.forEach(c=>S.chatRows[c.id]=c);
     const badge=$('#inbox-new-count');if(badge){badge.textContent=d.unread;badge.dataset.empty=d.unread?'0':'1'}
     list.innerHTML = d.conversations.length ? d.conversations.map(c=>{

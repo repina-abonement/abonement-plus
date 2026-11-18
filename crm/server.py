@@ -3346,6 +3346,15 @@ def handle_hook(h, method: str, source: str, token: str, url) -> None:
     if source not in HOOKS or not secrets.compare_digest(token, comms.get(con, "hook_token") or "-"):
         return h._send(403, {"error": "forbidden"})
     payload = (params | body) if isinstance(body, dict) else {"items": body, **params}
+    if source == 'wazzup':
+        from . import wazzupqueue
+        try:
+            queue_id=wazzupqueue.enqueue(con,payload)
+        except Exception as error:
+            wazzupqueue.note_save_failure()
+            print('Wazzup inbox save failed: '+type(error).__name__,flush=True)
+            return h._send(503,{'ok':False,'success':False,'error':'incoming_event_not_saved'})
+        return h._send(200,{'ok':True,'success':True,'queued':True,'queue_id':queue_id})
     result = {"ok": True, "success": True}  # Sipuni требует поле success
     con.execute("BEGIN IMMEDIATE")
     try:
@@ -3644,6 +3653,8 @@ def _startup():
     ai.start_worker(db.connect)
     tasks.start_worker(db.connect)
     fiscal.start_worker(db.connect)
+    from . import wazzupqueue
+    wazzupqueue.start_worker(db.connect)
 
 
 if __name__ == "__main__":

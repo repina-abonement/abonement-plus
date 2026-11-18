@@ -61,7 +61,13 @@ def trace(con, message_id, chat_id='', channel_id=''):
     result['replay_hook_ids']=sorted(set(result['replay_hook_ids']))
     result['incoming_message_events']=sum(e['category']=='messages' and not e['is_echo'] and not e['is_deleted'] for e in result['events'])
     result['outgoing_echo_events']=sum(e['category']=='messages' and e['is_echo'] for e in result['events'])
+    from . import wazzupqueue
+    try:result['durable_receipts']=wazzupqueue.message_receipts(con,message_id)
+    except Exception:
+        result['durable_receipts']=[]
+        result['durable_receipts_unavailable']=True
     result['state']='stored' if rows else 'event_found_not_stored' if any(e['category']=='messages' for e in result['events']) else 'not_observed_in_retained_log'
+    if not rows and any(r['state']!='done' for r in result['durable_receipts']):result['state']='saved_waiting_for_processing'
     return result
 
 

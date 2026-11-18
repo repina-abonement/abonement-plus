@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import urllib.request
 from http.cookiejar import CookieJar
 
@@ -55,6 +56,8 @@ def main():
     db.seed_demo(con)
     comms.seed_demo(con)
     con.close()
+    from crm import wazzupqueue
+    wazzupqueue.start_worker(db.connect)
     srv = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_port}"
@@ -197,7 +200,12 @@ def main():
                                                          "chatId": "79002222222", "type": "text", "isEcho": False,
                                                          "text": "Здравствуйте", "contact": {"name": "Олег"},
                                                          "dateTime": "2026-10-26T20:00:00.000"}]})
-    conv4 = [x for x in call("GET", "/api/inbox")["conversations"] if x["channel"] == "whatsapp"][0]
+    candidates=[]
+    for _ in range(40):
+        candidates=[x for x in call("GET", "/api/inbox")["conversations"] if x["channel"]=="whatsapp" and x["external_id"]=="79002222222"]
+        if candidates:break
+        time.sleep(.05)
+    conv4=candidates[0]
     check(conv4["family_name"] == "Петровы" and conv4["unread"] == 1, "WhatsApp: входящее привязалось к семье, непрочитано")
     fam = call("GET", f"/api/students/{call('GET', '/api/students?q=%D0%A2%D0%B8%D0%BC%D1%83%D1%80')[0]['id']}")["family"]["id"]
     comm = call("GET", f"/api/families/{fam}/comms")

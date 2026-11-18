@@ -428,9 +428,13 @@ def add_message(con, cid: int, direction: str, text: str = "", *, kind: str = "t
     preview = (text or "").strip().replace("\n", " ")[:120] or KIND_LABELS.get(kind, "")
     if direction == "out":
         preview = "Вы: " + preview
-        con.execute("UPDATE conversations SET last_at=?, last_text=?, unread=0 WHERE id=?", (ts, preview, cid))
+        con.execute("""UPDATE conversations SET last_at=?,last_text=?,unread=0 WHERE id=?
+            AND (julianday(last_at) IS NULL OR julianday(last_at)<=julianday(?))""",(ts,preview,cid,ts))
     else:
-        con.execute("UPDATE conversations SET last_at=?, last_text=?, unread=unread+1 WHERE id=?", (ts, preview, cid))
+        con.execute("""UPDATE conversations SET
+            last_text=CASE WHEN julianday(last_at) IS NULL OR julianday(last_at)<=julianday(?) THEN ? ELSE last_text END,
+            last_at=CASE WHEN julianday(last_at) IS NULL OR julianday(last_at)<=julianday(?) THEN ? ELSE last_at END,
+            unread=unread+1 WHERE id=?""",(ts,preview,ts,ts,cid))
     if direction=='out' and external_id:
         apply_wazzup_delivery(con,str(external_id))
     return cur.lastrowid
@@ -808,6 +812,9 @@ def wazzup_diagnostics(con):
         except (ValueError,TypeError,AttributeError):
             item['payload_unreadable'] = True
         incoming.append(item)
+    from . import wazzupqueue
+    try:report['durable_inbox']=wazzupqueue.stats(con)
+    except Exception:report['durable_inbox']={'available':False}
     report['incoming_events'] = incoming
     report['incoming_scope'] = 'Последние 50 сохранённых событий Wazzup; отсутствие записи не доказывает отсутствие доставки'
     if not key:
@@ -1540,10 +1547,12 @@ def pin_conversation(con,cid,user,pinned):
 
 
 def counts(con,user=None) -> dict:
+    from . import wazzupqueue
     effective={r[0] for r in con.execute('SELECT id FROM conversations WHERE unread>0')}
     muted={r[0] for r in con.execute('SELECT conversation_id FROM conversation_preferences WHERE user_id=? AND muted=1',((user or {}).get('id',0),))}
     notify=con.execute("SELECT COALESCE(MAX(id),0) FROM messages WHERE direction='in' AND conversation_id NOT IN ("+','.join(str(int(cid)) for cid in muted or [-1])+")").fetchone()[0]
     return {
+        **wazzupqueue.health(con),
         "unread":len(effective),"last_notify_in":notify,"overdue":0,"overdue_key":"",
         "missed": con.execute("SELECT COUNT(*) FROM calls WHERE direction='in' AND status IN ('missed','busy') AND seen=0")
                      .fetchone()[0],

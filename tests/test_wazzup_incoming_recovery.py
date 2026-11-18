@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import urlsplit
-from crm import db,comms,server
+from crm import db,comms,server,wazzupqueue
 
 
 class IncomingRecovery(unittest.TestCase):
@@ -16,24 +16,25 @@ class IncomingRecovery(unittest.TestCase):
             'messageId':'synthetic-incoming-id','dateTime':'2026-11-18T09:55:00Z','type':'text',
             'text':'Synthetic incoming message','contact':{'name':'Synthetic parent','phone':'79000007942'}}]}
 
-    def hook(self):
+    def hook(self,drain=True):
         raw=json.dumps(self.payload).encode();responses=[]
         h=SimpleNamespace(headers={'Content-Type':'application/json','Content-Length':str(len(raw))},
             rfile=io.BytesIO(raw),_send=lambda status,body:responses.append((status,body)))
         with patch.object(db,'get_conn',return_value=self.con):
             server.handle_hook(h,'POST','wazzup','synthetic-hook-token',urlsplit('/hooks/wazzup/synthetic-hook-token'))
+        if drain and responses[-1][0]==200:wazzupqueue.process_pending(self.con,force=True)
         return responses[-1]
 
-    def test_failed_transaction_not_acknowledged_and_retry_is_idempotent(self):
+    def test_failed_processing_is_durably_accepted_and_retry_is_idempotent(self):
         original=comms.wz_hook
         def fail_after_write(con,payload):
             original(con,payload)
             raise comms.CommsError('Synthetic ingest failure')
         with patch.object(comms,'wz_hook',side_effect=fail_after_write):
             status,body=self.hook()
-        self.assertEqual(status,503);self.assertFalse(body['ok'])
+        self.assertEqual(status,200);self.assertTrue(body['queued'])
         self.assertEqual(self.con.execute('SELECT count(*) FROM messages').fetchone()[0],0)
-        self.assertEqual(self.con.execute("SELECT count(*) FROM hook_log WHERE error!=''").fetchone()[0],1)
+        self.assertEqual(wazzupqueue.stats(self.con)['pending'],1)
         self.assertEqual(self.hook()[0],200);self.assertEqual(self.hook()[0],200)
         self.assertEqual(self.con.execute('SELECT count(*) FROM messages').fetchone()[0],1)
         self.assertEqual(self.con.execute('SELECT unread FROM conversations').fetchone()[0],1)
