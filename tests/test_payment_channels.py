@@ -32,6 +32,13 @@ class PaymentChannelsTest(unittest.TestCase):
             self.assertEqual(con.execute('SELECT method FROM payments WHERE id=?',(online,)).fetchone()[0],'online')
             for key in ('card_branch','sber_qr_branch','tochka_qr_link'):
                 self.assertEqual(money.registry(con,'2026-11-01','2026-11-30',key)['total'],100)
+            manual=money.add_payment(con,sid,450,'paykeeper_manual',{'id':2,'name':'Тест','role':'operator'},paid_at='2026-11-12')
+            row=con.execute('SELECT * FROM payments WHERE id=?',(manual,)).fetchone()
+            self.assertEqual(row['method'],'paykeeper_manual')
+            self.assertEqual(row['confirmed'],0)
+            self.assertIsNone(con.execute('SELECT id FROM pay_links WHERE payment_id=?',(manual,)).fetchone())
+            self.assertIn('paykeeper_manual',money.MANUAL_METHODS)
+            self.assertEqual(money.registry(con,'2026-11-01','2026-11-30','paykeeper')['total'],850)
             con.close()
 
 

@@ -12,13 +12,13 @@ from datetime import date, datetime
 
 from . import logic
 
-METHODS = {"cash": "Наличные", "paykeeper": "По ссылке PayKeeper",
+METHODS = {"cash": "Наличные", "paykeeper": "По ссылке PayKeeper", "paykeeper_manual": "По ссылке PayKeeper (внесено вручную)",
            "card_branch": "Картой на филиале", "sber_qr_branch": "По QR Сбера на филиале",
            "tochka_qr_link": "По QR/ссылке Точки от администратора",
            "card": "Картой (канал не уточнён)", "sbp": "СБП (банк не уточнён)",
            "online": "Онлайн-оплата (канал не уточнён)", "transfer": "Перевод",
            "unknown": "Перенесено", "balance": "Перенос с баланса", "refund": "Возврат", "refund_pending": "Зарезервировано для возврата"}
-MANUAL_METHODS = ('cash','card_branch','sber_qr_branch','tochka_qr_link','transfer')
+MANUAL_METHODS = ('cash','paykeeper_manual','card_branch','sber_qr_branch','tochka_qr_link','transfer')
 
 INTERNAL = ("unknown", "balance", "refund", "refund_pending")  # их не выбирают при приёме оплаты: ставит сама CRM
 
@@ -330,7 +330,7 @@ def registry(con, start: str, end: str, method: str = "", only_unconfirmed: bool
     args = [start, end + "T23:59"]
     if method:
         if method=='paykeeper':
-            where.append("(p.method='paykeeper' OR EXISTS (SELECT 1 FROM pay_links l WHERE l.payment_id=p.id AND l.pk_payment_id!=''))")
+            where.append("(p.method IN ('paykeeper','paykeeper_manual') OR EXISTS (SELECT 1 FROM pay_links l WHERE l.payment_id=p.id AND l.pk_payment_id!=''))")
         else:
             where.append("p.method=? AND NOT EXISTS (SELECT 1 FROM pay_links l WHERE l.payment_id=p.id AND l.pk_payment_id!='')")
             args.append(method)

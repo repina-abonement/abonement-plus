@@ -29,8 +29,8 @@ const monthLabel = (ym) => { const [y, m] = ym.split("-").map(Number); return `$
 const dShort = (iso) => { if (!iso) return ""; const [y, m, d] = iso.slice(0, 10).split("-"); return `${d}.${m}`; };
 const dtShort = (iso) => iso ? `${dShort(iso)} ${iso.slice(11, 16)}` : "";
 const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
-const PAY_METHODS = {cash:"Наличные",paykeeper:"По ссылке PayKeeper",card_branch:"Картой на филиале",sber_qr_branch:"По QR Сбера на филиале",tochka_qr_link:"По QR/ссылке Точки от администратора",card:"Картой (канал не уточнён)",sbp:"СБП (банк не уточнён)",online:"Онлайн-оплата (канал не уточнён)",transfer:"Перевод",unknown:"Перенесено",balance:"Перенос с баланса",refund:"Возврат",refund_pending:"Ожидает возврата"};
-const PAY_MANUAL_METHODS = ['cash','card_branch','sber_qr_branch','tochka_qr_link','transfer'];
+const PAY_METHODS = {cash:"Наличные",paykeeper:"По ссылке PayKeeper",paykeeper_manual:"По ссылке PayKeeper",card_branch:"Картой на филиале",sber_qr_branch:"По QR Сбера на филиале",tochka_qr_link:"По QR/ссылке Точки от администратора",card:"Картой (канал не уточнён)",sbp:"СБП (банк не уточнён)",online:"Онлайн-оплата (канал не уточнён)",transfer:"Перевод",unknown:"Перенесено",balance:"Перенос с баланса",refund:"Возврат",refund_pending:"Ожидает возврата"};
+const PAY_MANUAL_METHODS = ['cash','paykeeper_manual','card_branch','sber_qr_branch','tochka_qr_link','transfer'];
 const PAY_INTERNAL = ["unknown", "balance", "refund", "refund_pending"];  // ставит сама CRM, при приёме оплаты не выбираются
 
 async function api(method, url, body) {
