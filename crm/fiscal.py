@@ -172,6 +172,8 @@ def init(con):
     con.executescript(SCHEMA)
     from . import fiscalcheck
     fiscalcheck.init(con)
+    from . import bankcheck
+    bankcheck.init(con)
     con.execute('CREATE TABLE IF NOT EXISTS fiscal_ofd_days(day TEXT PRIMARY KEY,checked_at TEXT NOT NULL,ok INTEGER NOT NULL)')
     columns = {r[1] for r in con.execute('PRAGMA table_info(fx_receipts)')}
     for key in ('fiscal_fn', 'fiscal_fd', 'fiscal_fp'):
@@ -695,6 +697,8 @@ def run_worker_cycle(con):
     from . import fiscalcheck,reconciliation
     fiscalcheck.run_automatic(con)
     reconciliation.run_ofd_backlog(con)
+    from . import bankcheck
+    bankcheck.run_automatic(con)
     con.execute("BEGIN IMMEDIATE")
     try:
         result=run(con)

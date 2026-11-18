@@ -8,6 +8,9 @@ def payment_state(con, payment):
     if payment['method'] == 'cash':
         bank = {'status': 'not_applicable', 'label': 'Наличные — зачисление на счёт отдельно',
                 'note': 'Получение наличных и последующая инкассация — разные операции'}
+    if payment['method'] != 'cash':
+        from . import bankcheck
+        bank = bankcheck.state(con,payment['id']) or bank
     ofd = {'status': 'unknown', 'label': 'Чек в ОФД не подтверждён'}
     link = con.execute("SELECT pk_payment_id FROM pay_links WHERE payment_id=? AND pk_payment_id!='' ORDER BY id DESC LIMIT 1",
                        (payment['id'],)).fetchone()

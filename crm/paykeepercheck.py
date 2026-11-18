@@ -10,7 +10,7 @@ RECEIPT_FIELDS=('id','payment_id','type','is_post_sale','status','sum_cashless',
                 'sum_advance','sum_credit','sum_counter_payment','fn','fnd','fpd','ts','obtain_datetime')
 
 
-def inspect(con,provider_id,include_bank=True):
+def inspect(con,provider_id,include_bank=True,include_ofd=True):
     provider_id=str(provider_id or '').strip()
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',provider_id):
         raise sv.ApiError('Укажите ID платежа PayKeeper',400)
@@ -60,7 +60,8 @@ def inspect(con,provider_id,include_bank=True):
 
     except Exception:
         result['option_fields']={'available':False}
-    result['ofd']=primary_ofd(con,result['primary_receipt'])
+    if include_ofd:
+        result['ofd']=primary_ofd(con,result['primary_receipt'])
     if include_bank:
         from . import tochkacheck
         result['bank_settlement']=tochkacheck.inspect(con,result['payment'],result.get('sbp_identifiers',{}))
@@ -76,6 +77,10 @@ def source_status(con):
             'legacy_automation_enabled':fiscal.cfg(con,'fx_enabled')=='1',
             'automatic_reprint_enabled':fiscal.cfg(con,'fx_auto_retry')=='1',
             'note':'Доступ к источнику не подтверждает зачисление платежа или наличие конкретного чека'}
+    checks=con.execute('SELECT count(*) AS total,max(checked_at) AS last_checked_at FROM bank_payment_checks').fetchone()
+    result['automatic_bank_checks']={'enabled':all(fiscal.cfg(con,k) for k in ('fx_tochka_token','fx_pk_server','fx_pk_user','fx_pk_password')),
+        'interval_minutes':10,'batch_limit':3,'payments_checked':checks['total'],
+        'last_checked_at':checks['last_checked_at'],'settlement_confirmation_implemented':False}
     if result['tochka']['configured']:
         try:
             raw=fiscal.tochka_get(con,'/open-banking/v1.0/accounts')
