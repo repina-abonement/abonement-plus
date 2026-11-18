@@ -3268,6 +3268,12 @@ def int_wazzup_diagnostics(con,h,user,body,q):
     return cx(comms.wazzup_diagnostics,con)
 
 
+@route("GET", "/api/integrations/wazzup/message-trace", role="admin")
+def int_wazzup_message_trace(con,h,user,body,q):
+    from . import wazzuptrace
+    return cx(wazzuptrace.trace,con,q.get('message_id'),q.get('chat_id',''),q.get('channel_id',''))
+
+
 @route("POST", "/api/integrations/wazzup/replay", role="admin")
 def int_wazzup_replay(con,h,user,body,q):
     try:
@@ -3287,6 +3293,10 @@ def int_wz(con, h, user, body, q):
 
 @route("GET", "/api/integrations/log", role="admin")
 def int_log(con, h, user, body, q):
+    if q.get('id'):
+        try: event_id=int(q['id'])
+        except (TypeError,ValueError):raise ApiError('Некорректный номер события',400)
+        return [dict(r) for r in con.execute('SELECT * FROM hook_log WHERE id=?',(event_id,))]
     return [dict(r) for r in con.execute("SELECT * FROM hook_log ORDER BY id DESC LIMIT 30")]
 
 
