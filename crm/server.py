@@ -3268,6 +3268,12 @@ def int_wazzup_diagnostics(con,h,user,body,q):
     return cx(comms.wazzup_diagnostics,con)
 
 
+@route("GET", "/api/integrations/wazzup/webhook-status", role="admin")
+def int_wazzup_webhook_status(con,h,user,body,q):
+    from . import wazzuptrace
+    return cx(wazzuptrace.webhook_status,con,base_url(h))
+
+
 @route("GET", "/api/integrations/wazzup/message-trace", role="admin")
 def int_wazzup_message_trace(con,h,user,body,q):
     from . import wazzuptrace

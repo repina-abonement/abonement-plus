@@ -63,3 +63,31 @@ class MessageTrace(unittest.TestCase):
         self.assertEqual(r['chat_events'][0]['message_id'],'actual-provider-id')
         self.assertFalse(r['chat_events'][0]['is_echo'])
         self.assertEqual(r['replay_hook_ids'],[])
+
+    def test_webhook_status_reads_official_settings_without_exposing_secret(self):
+        from unittest.mock import patch
+        comms.put(self.con,'wazzup_key','SYNTHETIC-API-SECRET')
+        raw={'webhooksUri':'https://ab-plus.ru/hooks/wazzup/synthetic-hook-token',
+             'subscriptions':{'messagesAndStatuses':'true'}}
+        before=self.con.total_changes
+        with patch.object(comms,'wz_call',return_value=raw) as api:
+            result=wazzuptrace.webhook_status(self.con,'https://ab-plus.ru')
+        self.assertEqual(api.call_args.args[1:],('GET','webhooks'))
+        self.assertTrue(result['destination_matches']);self.assertTrue(result['messages_and_statuses'])
+        self.assertEqual(self.con.total_changes,before)
+        self.assertNotIn('synthetic-hook-token',str(result));self.assertNotIn('SYNTHETIC-API-SECRET',str(result))
+        raw['webhooksUri']='https://old.example/hooks/wazzup/old-secret'
+        raw['subscriptions']['messagesAndStatuses']=False
+        with patch.object(comms,'wz_call',return_value=raw):
+            result=wazzuptrace.webhook_status(self.con,'https://ab-plus.ru')
+        self.assertFalse(result['destination_matches']);self.assertFalse(result['messages_and_statuses'])
+        self.assertNotIn('old-secret',str(result))
+
+    def test_webhook_status_bad_source_is_unknown_not_disabled(self):
+        from unittest.mock import patch
+        comms.put(self.con,'wazzup_key','SYNTHETIC-API-SECRET')
+        with patch.object(comms,'wz_call',side_effect=comms.CommsError('SYNTHETIC-API-SECRET')):
+            result=wazzuptrace.webhook_status(self.con,'https://ab-plus.ru')
+        self.assertFalse(result['available'])
+        self.assertNotIn('messages_and_statuses',result)
+        self.assertNotIn('SYNTHETIC-API-SECRET',str(result))

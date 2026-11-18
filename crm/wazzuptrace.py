@@ -63,3 +63,33 @@ def trace(con, message_id, chat_id='', channel_id=''):
     result['outgoing_echo_events']=sum(e['category']=='messages' and e['is_echo'] for e in result['events'])
     result['state']='stored' if rows else 'event_found_not_stored' if any(e['category']=='messages' for e in result['events']) else 'not_observed_in_retained_log'
     return result
+
+
+def webhook_status(con, public_base):
+    """Official v3 GET /webhooks, without returning the secret destination URI."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from urllib.parse import urlsplit
+    result={'configured':bool(comms.get(con,'wazzup_key')),'available':False,
+            'checked_at':datetime.now(ZoneInfo('Europe/Moscow')).isoformat(timespec='seconds'),
+            'note':'Текущие настройки не подтверждают доставку исторического сообщения'}
+    if not result['configured']:
+        result['error']='Wazzup не подключён'
+        return result
+    try:
+        data=comms.wz_call(con,'GET','webhooks')
+        if not isinstance(data,dict) or not isinstance(data.get('webhooksUri'),str) or not isinstance(data.get('subscriptions'),dict):
+            raise ValueError('Unexpected webhook configuration')
+        actual=data['webhooksUri'];token=comms.get(con,'hook_token')
+        parts=urlsplit(actual)
+        if parts.scheme not in ('https','http') or not parts.hostname:
+            raise ValueError('Invalid webhook URL')
+        enabled=data['subscriptions'].get('messagesAndStatuses')
+        if not isinstance(enabled,bool) and enabled not in ('true','false'):
+            raise ValueError('Unverified subscription')
+        result.update(available=True,destination_host=parts.hostname,
+            destination_matches=bool(token) and actual==public_base.rstrip('/')+'/hooks/wazzup/'+token,
+            messages_and_statuses=enabled is True or enabled=='true')
+    except Exception:
+        result['error']='Не удалось проверить текущие настройки доставки Wazzup'
+    return result
