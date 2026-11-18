@@ -32,6 +32,17 @@ class SaleDateTest(unittest.TestCase):
   self.assertEqual(p['method'],'card_branch');self.assertEqual(p['amount'],5120)
   sub=self.con.execute('SELECT * FROM subscriptions WHERE id=?',(invoice['id'],)).fetchone();self.assertEqual(sub['status'],'paid');self.assertEqual(sub['paid_at'],'2026-11-16')
   with self.assertRaises(sv.ApiError):sv.pay_subscription(self.con,invoice['id'],self.u,'card_branch',4000,'2026-11-16','same-request-123')
+ def test_paid_lead_appears_in_day_and_month_journal(self):
+  with patch.object(smart,'REQUIRE',False):invoice=sv.create_invoice(self.con,self.sid,'2026-11',self.u,group_id=self.gid,paid_date='2026-11-16')
+  def ids(day):return [r['id'] for r in sv.journal(self.con,self.gid,day,paid_only=True)['rows']]
+  self.assertNotIn(self.sid,ids('2026-11-18'))
+  sv.pay_subscription(self.con,invoice['id'],self.u,'card_branch',5120,'2026-11-16','journal-paid-lead-123')
+  self.assertEqual(self.con.execute('SELECT funnel FROM students WHERE id=?',(self.sid,)).fetchone()[0],'sales')
+  self.assertIn(self.sid,ids('2026-11-18'))
+  self.assertEqual(sv.journal_month(self.con,self.gid,'2026-11')['subs']['paid'],1)
+  self.assertNotIn(self.sid,ids('2026-12-02'))
+  self.con.execute("UPDATE students SET archived=1 WHERE id=?",(self.sid,))
+  self.assertNotIn(self.sid,ids('2026-11-18'))
  def test_future_date_rejected_without_invoice(self):
   with self.assertRaises(sv.ApiError):sv.quote_for(self.con,self.sid,'2026-11',group_id=self.gid,paid_date='2026-11-18')
   self.assertEqual(self.con.execute('SELECT count(*) FROM subscriptions').fetchone()[0],0)

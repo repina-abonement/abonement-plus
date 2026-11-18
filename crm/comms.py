@@ -1471,6 +1471,17 @@ def preferred_telegram_reply(con,current,conversations):
     return candidates[0]['id'] if len(candidates)==1 else current['id']
 
 
+def same_reply_contact(current, candidate):
+    if current['id']==candidate['id']:
+        return True
+    phone=normalize_phone(str(current.get('phone_norm') or ''))
+    other=normalize_phone(str(candidate.get('phone_norm') or ''))
+    if phone and phone==other:
+        return True
+    peer=telegram_user_id(current['channel'],current.get('external_id') or '')
+    return bool(peer and peer==telegram_user_id(candidate['channel'],candidate.get('external_id') or ''))
+
+
 def conversation(con, cid: int, mark_read: bool = True) -> dict:
     r = con.execute("SELECT * FROM conversations WHERE id=?", (cid,)).fetchone()
     if not r:
@@ -1485,13 +1496,23 @@ def conversation(con, cid: int, mark_read: bool = True) -> dict:
     phones = [r["phone_norm"]] if r["phone_norm"] else []
     if r["family_id"]:
         phones += [x[0] for x in con.execute("SELECT phone_norm FROM parents WHERE family_id=? AND phone_norm != ''", (r["family_id"],))]
-    convs, items = history(con, r["family_id"], phones, mark_read)
+    convs, items = history(con, r["family_id"], phones, False)
     if not any(c["id"] == cid for c in convs):  # переписка без телефона и семьи: только она сама
         convs_label = _conv_out(con, r)["channel_label"]
         convs, items = [_conv_out(con, r)], [{"type": "msg", "channel": r["channel"], "conversation_id": cid,
                                               "channel_label": convs_label, **m} for m in msgs]
+    # Inbox is one recipient, unlike the explicitly aggregated family card.
+    convs=[c for c in convs if same_reply_contact(dict(r),c)]
+    allowed={c['id'] for c in convs}
+    phone=normalize_phone(str(r['phone_norm'] or ''))
+    items=[item for item in items if (item['type']=='msg' and item['conversation_id'] in allowed) or
+           (item['type']=='call' and phone and normalize_phone(str(item.get('phone') or ''))==phone)]
+    if mark_read:
+        for c in convs:
+            if c['unread']:
+                con.execute('UPDATE conversations SET unread=0 WHERE id=?',(c['id'],))
     return {"conversation": _conv_out(con, r), "messages": msgs, "history": items, "preferred_reply_id":preferred_telegram_reply(con,dict(r),convs),
-            "targets": [{"id": c["id"], "channel":c["channel"], "label": c["channel_label"] + (" · " + c["title"] if c["title"] else "")} for c in convs
+            "targets": [{"id": c["id"], "channel":c["channel"], "same_contact":True, "label": c["channel_label"] + (" · " + c["title"] if c["title"] else "")} for c in convs
                         if c["channel"] != "tg_archive"]}
 
 
@@ -1561,8 +1582,8 @@ def _call_summary(k) -> str:
 
 def history(con, family_id: int | None, phones: list[str], mark_read: bool = True) -> tuple[list[dict], list[dict]]:
     """Вся история семьи (или номера, если семьи нет): переписки во всех мессенджерах и звонки одной лентой."""
-    phones = [p for p in phones if p]
-    ph_sql = ",".join("?" * len(phones)) or "''"
+    phones = list(dict.fromkeys(normalize_phone(str(p)) for p in phones if p and normalize_phone(str(p))))
+    ph_sql = ",".join("?" * len(phones)) or "NULL"
     convs = [_conv_out(con, r) for r in con.execute(
         f"SELECT * FROM conversations WHERE (family_id=? AND family_id IS NOT NULL) OR (family_id IS NULL AND phone_norm IN ({ph_sql})) ORDER BY last_at DESC",
         (family_id, *phones))]

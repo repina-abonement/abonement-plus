@@ -253,14 +253,13 @@ function replyTargetSummary(label) {
   const parts=String(label||'').split(' · ').map(part=>part.trim()).filter(Boolean);
   const channel=parts.shift()||'';
   const recipient=parts.pop()||'Получатель';
-  return `<span class="reply-target-caption">Сообщение получит</span><strong class="reply-target-recipient">${esc(recipient)}</strong><span class="reply-target-details"><span class="reply-target-channel">${messengerLogo(channel)}${esc(channel)}</span>${parts.length?`<span class="reply-target-context">${esc(parts.join(' · '))}</span>`:''}</span>`;
+  return `<span class="reply-target-caption">Сообщение получит</span><strong class="reply-target-recipient">${esc(recipient)}</strong><span class="reply-target-details"><span class="reply-target-channel" title="${esc(channel)}" aria-label="${esc(channel)}">${messengerLogo(channel)}</span>${parts.length?`<span class="reply-target-context">${esc(parts.join(' · '))}</span>`:''}</span>`;
 }
 
 function replyTargetHtml(id,targets,selected) {
   const current=targets.find(t=>String(t.v)===String(selected));
   targets=[...targets].sort((a,b)=>clientChannelPriority(a.channel||({t:'wazzup_telegram',m:'wazzup_max',w:'whatsapp'})[String(a.v)[0]])-clientChannelPriority(b.channel||({t:'wazzup_telegram',m:'wazzup_max',w:'whatsapp'})[String(b.v)[0]]));
-  const counts={};targets.forEach(t=>{const channel=t.t.split(' · ')[0];counts[channel]=(counts[channel]||0)+1});
-  return `<div class="reply-target"><div class="reply-target-current" ${current?'':'hidden'}><div class="reply-target-summary" id="${id==='chat-to'?'chat-channel-label':'cm-channel-label'}">${replyTargetSummary(current?.t)}</div></div><div class="reply-target-choices reply-channel-shortcuts" aria-label="Выберите мессенджер">${targets.map(t=>{const parts=t.t.split(' · '),channel=parts[0],parent=counts[channel]>1?parts.slice(1).join(' · '):'';return `<button type="button" class="reply-channel-shortcut" data-reply-choice="${esc(t.v)}" aria-pressed="${String(t.v)===String(selected)}" title="${esc(t.t)}" aria-label="${esc(t.t)}">${messengerLogo(channel)}<span>${esc(channel.replace(' через Wazzup',''))}${parent?`<small>${esc(parent)}</small>`:''}</span></button>`}).join('')}</div><select id="${id}" aria-label="Мессенджер для ответа" hidden><option value="">Выберите мессенджер</option>${targets.map(t=>`<option value="${esc(t.v)}" ${String(t.v)===String(selected)?'selected':''}>${esc(t.t)}</option>`).join('')}</select></div>`;
+  return `<div class="reply-target"><div class="reply-target-current" ${current?'':'hidden'}><div class="reply-target-summary" id="${id==='chat-to'?'chat-channel-label':'cm-channel-label'}">${replyTargetSummary(current?.t)}</div></div><div class="reply-target-choices reply-channel-shortcuts" aria-label="Выберите мессенджер">${targets.map(t=>{const channel=t.t.split(' · ')[0];return `<button type="button" class="reply-channel-shortcut" data-reply-choice="${esc(t.v)}" aria-pressed="${String(t.v)===String(selected)}" title="${esc(t.t)}" aria-label="${esc(t.t)}">${messengerLogo(channel)}</button>`}).join('')}</div><select id="${id}" aria-label="Мессенджер для ответа" hidden><option value="">Выберите мессенджер</option>${targets.map(t=>`<option value="${esc(t.v)}" ${String(t.v)===String(selected)?'selected':''}>${esc(t.t)}</option>`).join('')}</select></div>`;
 }
 
 function showReplyTargets(select) {
@@ -537,12 +536,13 @@ async function openChat(cid, keepScroll = false) {
   try { d = await api("GET", `/api/conversations/${cid}${keepScroll ? "?read=0" : "?remember=1"}`); } catch (e) { return fail(e); }
   if(request!==S.chatOpenRequest)return;
   const c = d.conversation;
+  if(!c.family_id&&!c.phone_norm)d.history=(d.history||[]).filter(item=>item.type==='msg'&&item.conversation_id===cid);
   S.chatRows=S.chatRows||{};S.chatRows[c.id]=c;
-  d.targets=(d.targets||[]).filter(x=>x.channel!=="telegram").sort((a,b)=>clientChannelPriority(a.channel)-clientChannelPriority(b.channel));
+  d.targets=(d.targets||[]).filter(x=>x.channel!=="telegram"&&(x.id===cid||x.same_contact===true)).sort((a,b)=>clientChannelPriority(a.channel)-clientChannelPriority(b.channel));
   S.chatSendTargets=S.chatSendTargets||{};
   const replyKey=`${S.user.id}:${cid}`,savedReply=S.chatSendTargets[replyKey];
   const validReply=id=>(d.targets||[]).some(x=>x.id===id);
-  const replyId=validReply(savedReply)?savedReply:d.targets[0]?.id||0;
+  const replyId=validReply(savedReply)?savedReply:validReply(d.preferred_reply_id)?d.preferred_reply_id:validReply(cid)?cid:0;
   const reply=(d.targets||[]).find(x=>x.id===replyId)||{id:0,channel:'',label:'Выберите мессенджер для ответа'};
   const sameChat=+($('#chat-text')?.closest('[data-chat]')?.dataset.chat||0)===cid;
   const attachmentState=sameChat&&$('#chat-text')?{file:$('#chat-text')._attachmentFile,upload:$('#chat-text')._attachmentUpload,preview:$('#chat-text')._attachmentPreview?.innerHTML,uncertain:$('#chat-text')._uncertainBundle}:S.chatDrafts?.[cid]?.attachment;

@@ -1141,8 +1141,13 @@ def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpai
         # переведённые (transfer.py): в старой группе до даты перевода, в новой с неё
         for s in con.execute("""SELECT s.id, s.name, s.birth, e.weekdays FROM enrollments e JOIN students s ON s.id = e.student_id
                                 WHERE e.group_id=? AND (e.active=1 OR e.end_date > ?) AND (e.start_date = '' OR e.start_date <= ?)
-                                  AND s.funnel='members' AND s.stage != 'left' AND s.archived=0
-                                ORDER BY s.name""", (group_id, day, day)).fetchall():
+                                  AND (s.funnel='members' OR EXISTS (
+                                      SELECT 1 FROM subscriptions paid
+                                      WHERE paid.student_id=s.id AND paid.enrollment_id=e.id
+                                        AND paid.month=? AND paid.status='paid'
+                                        AND COALESCE(paid.kind,'month')='month'))
+                                  AND s.stage != 'left' AND s.archived=0
+                                ORDER BY s.name""", (group_id, day, day, day[:7])).fetchall():
             if any(row['id']==s['id'] for row in rows):
                 continue
             if s["weekdays"] and d.weekday() not in logic.parse_weekdays(s["weekdays"]):
@@ -1281,8 +1286,13 @@ def journal_month(con, group_id: int, ym: str) -> dict:
     # кто в группе в этом месяце и на чём занимается
     kids = con.execute("""SELECT DISTINCT s.id FROM enrollments e JOIN students s ON s.id=e.student_id
                           WHERE e.group_id=? AND (e.active=1 OR e.end_date > ?) AND (e.start_date='' OR e.start_date <= ?)
-                            AND s.funnel='members' AND s.stage != 'left' AND s.archived=0""",
-                       (group_id, start.isoformat(), end.isoformat())).fetchall()
+                            AND (s.funnel='members' OR EXISTS (
+                                      SELECT 1 FROM subscriptions paid
+                                      WHERE paid.student_id=s.id AND paid.enrollment_id=e.id
+                                        AND paid.month=? AND paid.status='paid'
+                                        AND COALESCE(paid.kind,'month')='month'))
+                                  AND s.stage != 'left' AND s.archived=0""",
+                       (group_id, start.isoformat(), end.isoformat(), ym)).fetchall()
     subs = {"paid": 0, "invoiced": 0, "single": 0, "none": 0}
     for (sid,) in kids:
         r = con.execute("""SELECT status FROM subscriptions WHERE student_id=? AND month=? AND COALESCE(kind,'month')='month'

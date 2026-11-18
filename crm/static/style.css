@@ -1957,3 +1957,4 @@ html.theme-soft #comms-box .family-chat-feed{background:#182624}html.theme-soft 
 .makeup-offer-panel textarea{width:100%;min-height:160px;margin-bottom:8px}#comms-box>[data-makeup-offer]{padding:10px 20px;background:var(--surface)}
 @media(max-width:900px){#inbox-chat-pane .composer>.reply-target{display:block!important}#inbox-chat-pane .reply-target-current{display:none}.reply-channel-shortcut{padding:6px 8px;font-size:12px}}
 @media(max-width:900px){#inbox-chat-pane .reply-target-current{display:flex;padding:2px 0;border:0;background:none}#inbox-chat-pane .reply-target-caption,#inbox-chat-pane .reply-target-details{display:none}#inbox-chat-pane .reply-target-summary{display:block}}
+.reply-channel-shortcut{width:42px;min-width:42px;height:40px;padding:7px;gap:0}.reply-target-channel{padding:3px;background:transparent}
