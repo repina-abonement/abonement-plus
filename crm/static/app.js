@@ -1285,6 +1285,11 @@ async function renderWorkdesk(page) {
     ${erpHtml}
     <div class="desk">
       <div class="desk-main">
+        <section class="section new-cards-today" id="dw-new-cards">
+          <div class="now-head"><h3>✨ Новые карточки сегодня</h3><span class="count">${d.new_cards_today?.cards.length||0}</span></div>
+          <p class="small muted">Приоритетная обработка · ${esc(dShort(d.new_cards_today?.date||S.meta.today))}</p>
+          <div class="new-cards-list">${(d.new_cards_today?.cards||[]).map(k=>`<button type="button" class="btn" data-new-card="${k.id}"><b>${esc(k.name)}</b><span class="small muted">${esc(k.stage==='lead'?'Новый лид':k.trial_at?'Записан на ПУ':'В работе')}</span></button>`).join('')||'<p class="muted small">Сегодня новых карточек пока нет</p>'}</div>
+        </section>
         ${hot}
         <section class="desk-funnel">
           <div class="now-head"><h3>Воронка продаж</h3></div>
@@ -1302,6 +1307,7 @@ async function renderWorkdesk(page) {
           <summary><span class="dwf-ic">${W[k].icon}</span><span class="grow">${W[k].label}</span><span class="dwf-chev">›</span></summary><div class="dw" id="dw-${k}">${W[k].html}</div></details>`).join("")}</section>` : ""}</div>
     </div>`;
   page.querySelectorAll("[data-rvclose]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/reviews/${b.dataset.rvclose}/close`, {}); render(); } catch (e) { fail(e); } }));
+  page.querySelectorAll("[data-new-card]").forEach(b=>b.onclick=()=>openStudent(+b.dataset.newCard));
   const hm = $("#hot-more"); if (hm) hm.onclick = () => { S.hotAll = !S.hotAll; render(); };
   page.querySelectorAll(".dwf").forEach((x) => x.addEventListener("toggle", () => { S.dwOpen[x.dataset.dwk] = x.open; }));
   page.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => { const el = document.getElementById(b.dataset.jump); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }));
@@ -1879,11 +1885,11 @@ async function openStudent(id, options = {}) {
     ${!isMember && d.stage_tip ? `<details class="stage-tip" ${S.tipsOpen === true ? "open" : ""}><summary>💡 Подсказка на этапе «${esc(d.stage_label)}»</summary>
       <div><b>Что сказать.</b> ${esc(d.stage_tip.say)}</div><div style="margin-top:4px"><b>Чтобы перейти дальше:</b> ${esc(d.stage_tip.next)}</div></details>` : ""}
     <div class="sc-header-tools" role="toolbar" aria-label="Действия клиента">
-      ${full?`<button type="button" class="btn sc-tool primary" id="act-sell" title="Продать абонемент или разовое занятие" aria-label="Продать абонемент или разовое занятие"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l3 12h11l2-8H6M9 20h.01M18 20h.01"/></svg></button>`:''}
       <button type="button" class="btn sc-tool" id="act-trial" title="Записать на пробное" aria-label="Записать на пробное">ПУ</button>
+      ${full?`<button type="button" class="btn sc-tool primary" id="act-sell" title="Продать абонемент или разовое занятие" aria-label="Продать абонемент или разовое занятие"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l3 12h11l2-8H6M9 20h.01M18 20h.01"/></svg></button>`:''}
       ${d.parents.some(p=>p.phone)?'<button type="button" class="btn sc-tool" id="act-call" title="Позвонить основному родителю" aria-label="Позвонить основному родителю"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3 4 5c-2 3 7 14 12 15l4-3-4-4-3 2-4-4 2-3Z"/></svg></button>':''}
       ${full?'<button type="button" class="btn sc-tool" data-profile-edit="name" title="Изменить данные клиента" aria-label="Изменить данные клиента"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16 12-12 4 4L8 20H4Zm10-10 4 4"/></svg></button><button type="button" class="btn sc-tool" data-client-add title="Добавить члена семьи" aria-label="Добавить родителя или ребёнка"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7" r="3"/><path d="M3 20v-3c0-5 12-5 12 0v3M19 7v8M15 11h8"/></svg></button>':''}
-      <details class="sc-extra-actions sc-tool-menu"><summary class="btn sc-tool" aria-label="Другие действия" title="Другие действия">⋯</summary><div>${full?'<button class="btn sm" id="act-past-entry">Внести прошедшее ПУ / покупку</button>':''}${isMember?'<button class="btn sm" id="act-vac">Отпуск</button>':''}${full?`<button type="button" class="btn sm" id="act-archive-card">${s.archived?"Вернуть из архива":"Перенести в архив"}</button>`:""}</div></details>
+      <details class="sc-extra-actions sc-tool-menu"><summary class="btn sc-tool" aria-label="Другие действия" title="Другие действия">⋯</summary><div>${isMember?'<button class="btn sm" id="act-vac">Отпуск</button>':''}${full?`<button type="button" class="btn sm" id="act-archive-card">${s.archived?"Вернуть из архива":"Перенести в архив"}</button>`:""}</div></details>
     </div>
     <div id="sc-profile-edit" hidden></div>
     <div id="sc-trial-booking" hidden></div>
@@ -2003,8 +2009,7 @@ async function openStudent(id, options = {}) {
   if ($("#act-sell")) $("#act-sell").onclick = () => openSell(d, reload);
   if ($("#act-vac")) $("#act-vac").onclick = () => openFold(body, "vac");
   if ($("#act-move")) $("#act-move").onclick = () => { openFold(body, "abon"); const b = body.querySelector("[data-entr]"); if (b) { b.click(); b.scrollIntoView({ block: "center", behavior: "smooth" }); } };
-  if ($('#act-past-entry')) $('#act-past-entry').onclick=()=>openPastEntry(d,body.querySelector('#sc-past-entry'),reload);
-  if ($("#act-trial")) $("#act-trial").onclick = () => openInlineTrialBooking(d, body.querySelector("#sc-trial-booking"), reload);
+  if ($("#act-trial")) $("#act-trial").onclick = () => openTrialBookingHub(d, body.querySelector("#sc-trial-booking"), reload);
   body.querySelectorAll('[data-sub-composition]').forEach(button=>button.onclick=()=>{
     const sub=d.subscriptions.find(x=>x.id===+button.dataset.subComposition),g=S.meta.groups.find(x=>x.id===sub.group_id),box=body.querySelector(`[data-composition-box="${sub.id}"]`);
     const groups=S.meta.groups.filter(x=>x.program_id===g.program_id),ofps=groups.filter(x=>x.lesson_kind==='ofp');
@@ -2194,7 +2199,7 @@ function openNewClient(preset = {}) {
     <div class="field"><label>Имя ребёнка</label><input name="name" required></div>
     <div class="row">
       <div class="field"><label>Дата рождения</label><input name="birth" type="date"></div>
-      <div class="field"><label>Куда</label><select name="funnel"><option value="sales">Лид (воронка продаж)</option><option value="members">Уже занимается</option></select></div>
+
     </div>
     <p class="muted small">Группу, пробное занятие и абонемент можно выбрать в карточке после создания клиента</p>
     <div class="field"><label>Откуда узнали</label>${sourceSelect("source_id", null)}</div>

@@ -218,3 +218,49 @@ def book_inline(con,sid: int,data: dict,user: dict) -> dict:
             raise sv.ApiError(error.message,422)
         raise
     return {'ok':True,'slot':chosen}
+
+
+def calendar_slots(con, sid, gid, ym, future_only=False):
+    """Scheduled trial dates only, with future availability and historical schedule versions."""
+    from . import services as sv, schedule, closures
+    from zoneinfo import ZoneInfo
+    sv.get_student_row(con,sid)
+    try:
+        first,last=logic.month_bounds(ym)
+        gid=int(gid)
+    except (ValueError,TypeError):
+        raise sv.ApiError('Выберите группу и месяц')
+    group=con.execute('''SELECT g.* FROM groups g JOIN branches b ON b.id=g.branch_id
+        WHERE g.id=? AND g.active=1 AND b.active=1 AND g.is_makeup=0
+        AND g.program_id IS NULL AND g.lesson_kind!='ofp' ''',(gid,)).fetchone()
+    if not group:
+        return {'slots':[]}
+    now=datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None)
+    slots=[]
+    day=first
+    while day<=last:
+        actual=schedule.on(con,group,day)
+        time=logic.group_time(actual,day.weekday())
+        if day.weekday() in logic.parse_weekdays(actual['weekdays']) and time and not closures.is_closed(con,gid,day):
+            at=datetime.fromisoformat(day.isoformat()+'T'+time)
+            if at<now and not future_only:
+                slots.append({'group_id':gid,'date':day.isoformat(),'time':time,'past':True})
+            elif at>=now:
+                for slot in booking_options(con,sid,day=day.isoformat(),branch_id=group['branch_id'])['slots']:
+                    if slot['group_id']==gid:
+                        slots.append({**slot,'past':False})
+        day+=timedelta(days=1)
+    return {'slots':slots}
+
+
+def book_calendar(con,sid,data,user):
+    from . import services as sv, historyentry
+    day=str(data.get('date') or '')
+    chosen=next((s for s in calendar_slots(con,sid,data.get('group_id'),day[:7],data.get('future_only') is True)['slots']
+                 if s['date']==day and s['time']==data.get('time')),None)
+    if not chosen:
+        raise sv.ApiError('Выберите занятие из календаря группы — время или места изменились')
+    if chosen['past']:
+        return historyentry.record(con,sid,{'request_id':data.get('request_id'),'record_trial':True,'sold':False,
+            'trial_date':day,'trial_time':chosen['time'],'trial_group_id':chosen['group_id']},user)
+    return book_inline(con,sid,{'date':day,'time':chosen['time'],'group_id':chosen['group_id']},user)

@@ -1107,7 +1107,7 @@ def workdesk(con, h, user, body, q):
     reds.sort(key=lambda x: x["ts"] or "", reverse=True)
     rest = [x for x in items if x["level"] != "red"]
     rest.sort(key=lambda x: x["ts"] or "", reverse=True)
-    return {"urgent": reds + rest, "board": board, "birthdays": sv.birthdays(con), "needs_subs": schedule.needs_subs(con),
+    return {"urgent": reds + rest, "board": board, "new_cards_today": sv.new_cards_today(con), "birthdays": sv.birthdays(con), "needs_subs": schedule.needs_subs(con),
             "checkins": staff.day_report(con) if checkin_reviewer(con, user) else None,
             "merch_alerts": merch_alerts(con),
             "waitlist": __import__("crm.waitlist", fromlist=["funnel"]).funnel(con),
@@ -1227,7 +1227,7 @@ def check_phone(con, h, user, body, q):
 
 @route("POST", "/api/students", role="operator")
 def student_create(con, h, user, body, q):
-    sid = sv.create_student(con, body, user)
+    sid = sv.create_new_lead(con, body, user)
     if body.get("phone"):
         comms.relink_phone(con, body["phone"], sv.get_student_row(con, sid)["family_id"])
     if body.get("conversation_id"):
@@ -2762,6 +2762,18 @@ def past_entry_options(con,h,user,body,q,sid):
 def past_entry_record(con,h,user,body,q,sid):
     from . import historyentry
     return historyentry.record(con,int(sid),body,user)
+
+
+@route("GET", "/api/students/{sid}/trial-calendar", role="operator")
+def trial_calendar(con,h,user,body,q,sid):
+    from . import trialoffer
+    return trialoffer.calendar_slots(con,int(sid),q.get('group_id'),q.get('month'),q.get('future_only')=='1')
+
+
+@route("POST", "/api/students/{sid}/trial-calendar", role="operator")
+def trial_calendar_book(con,h,user,body,q,sid):
+    from . import trialoffer
+    return trialoffer.book_calendar(con,int(sid),body,user)
 
 
 @route("GET", "/api/students/{sid}/trial-options", role="operator")

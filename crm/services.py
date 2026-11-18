@@ -612,6 +612,40 @@ def card_summary(con, s: dict, st: dict) -> dict:
     }
 
 
+def new_cards_today(con, ref=None):
+    from zoneinfo import ZoneInfo
+    tz=ZoneInfo('Europe/Moscow')
+    day=(ref or datetime.now(tz)).astimezone(tz).date()
+    cards=[]
+    for row in con.execute("SELECT * FROM students WHERE archived=0 ORDER BY created_at DESC,id DESC"):
+        try:
+            created=datetime.fromisoformat(row['created_at'])
+        except (ValueError,TypeError):
+            continue
+        if created.tzinfo is not None:
+            created=created.astimezone(tz)
+        if created.date()!=day:
+            continue
+        card=card_summary(con,dict(row),settings(con))
+        card['created_at']=row['created_at']
+        cards.append(card)
+    return {'date':day.isoformat(),'cards':cards}
+
+
+def create_new_lead(con,data,user):
+    from zoneinfo import ZoneInfo
+    from . import tasks,comms
+    stamp=datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None,second=0,microsecond=0).isoformat(timespec='minutes')
+    sid=create_student(con,{**data,'funnel':'sales'},user)
+    con.execute('UPDATE students SET created_at=?,stage_changed_at=? WHERE id=?',(stamp,stamp,sid))
+    tid=tasks.add_task(con,'call_lead',sid,stamp[:10]+'T23:59',auto_key=f'life:call_lead:{sid}',title='Новый лид',source='life')
+    if tid:
+        con.execute('UPDATE tasks SET assignee_id=NULL,priority=1 WHERE id=?',(tid,))
+    family=con.execute('SELECT family_id FROM students WHERE id=?',(sid,)).fetchone()[0]
+    comms.relink_family_conversations(con,family)
+    return sid
+
+
 def _branch_name(con, bid) -> str:
     if not bid:
         return ""

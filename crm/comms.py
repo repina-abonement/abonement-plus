@@ -323,6 +323,19 @@ def telegram_user_id(channel, external_id):
     return external_id if channel in ("telegram", "wazzup_telegram", "tg_archive") and re.fullmatch(r"[1-9][0-9]*", external_id or "") else ""
 
 
+def conversation_phone(c):
+    """Only explicit phone identities; numeric MAX/Telegram chat IDs are not phones."""
+    values=[c['phone_norm'],c['phone']]
+    ext=str(c['external_id'] or '')
+    if ext.startswith('phone:'):
+        values.append(ext[6:])
+    elif c['channel']=='whatsapp':
+        values.append(ext)
+    phones={normalize_phone(v or '') for v in values if v}
+    phones={v for v in phones if len(v)==11 and v.startswith('7')}
+    return next(iter(phones)) if len(phones)==1 else ''
+
+
 def relink_family_conversations(con, family_id):
     """Однозначные телефон, Telegram username или Telegram ID. Ручные связи сохраняем."""
     by_phone, by_handle = {}, {}
@@ -341,7 +354,7 @@ def relink_family_conversations(con, family_id):
             by_id.setdefault(identity, set()).add(c["family_id"])
     for c in con.execute("SELECT id,channel,external_id,username,phone,phone_norm FROM conversations WHERE family_id IS NULL").fetchall():
         families = set()
-        phone = normalize_phone(c["phone"] or c["phone_norm"] or "")
+        phone = conversation_phone(c)
         phone_families = by_phone.get(phone, set())
         if len(phone_families) == 1:
             families |= phone_families
@@ -354,7 +367,7 @@ def relink_family_conversations(con, family_id):
             if len(id_families) == 1:
                 families |= id_families
         if families == {family_id}:
-            con.execute("UPDATE conversations SET family_id=? WHERE id=? AND family_id IS NULL", (family_id,c["id"]))
+            con.execute("UPDATE conversations SET family_id=?,phone_norm=? WHERE id=? AND family_id IS NULL", (family_id,phone,c["id"]))
 
 
 def relink_phone(con, phone: str, family_id: int):

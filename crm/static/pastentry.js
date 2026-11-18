@@ -1,5 +1,5 @@
 "use strict";
-async function openPastEntry(d,root,reload) {
+async function openPastEntry(d,root,reload,options={}) {
   if(!root)return;root.hidden=false;
   if(root.querySelector('form')){root.scrollIntoView({block:'nearest',behavior:'smooth'});return}
   root.textContent='Загружаю форму…';
@@ -74,7 +74,14 @@ async function openPastEntry(d,root,reload) {
       try{const r=await api('POST',`/api/students/${s.id}/past-entry`,payload);toast(r.subscription_id?`Прошедшее событие и абонемент сохранены. Осталось оплатить: ${rub(r.remaining)}`:'Прошедшее ПУ сохранено');reload()}
       catch(e){error.textContent=e.message;busy=false;form.querySelectorAll('input,select,button').forEach(x=>x.disabled=false);lock()}
     };
-    splitChildNameFields(form,'child_name',true);tariffs();mode();['trial_group_id','group_id','ofp_group_id'].forEach(name=>pastGroupSearch(f[name]));root.scrollIntoView({block:'nearest',behavior:'smooth'});
+    hideTrialClientFields(form);
+    if(options.trialOnly){
+      root.querySelector('h3').textContent='Прошедшее ПУ';
+      f.sold.checked=false;f.sold.closest('label').hidden=true;
+      f.record_trial.checked=true;f.record_trial.closest('label').hidden=true;
+      submit.textContent='Сохранить прошедшее ПУ';
+    }
+    tariffs();mode();['trial_group_id','group_id','ofp_group_id'].forEach(name=>pastGroupSearch(f[name]));root.scrollIntoView({block:'nearest',behavior:'smooth'});
   }catch(e){root.textContent=e.message}
 }
 

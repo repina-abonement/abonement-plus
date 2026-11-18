@@ -47,6 +47,37 @@ class InlineBookingTest(unittest.TestCase):
         self.assertEqual(row['trial_at'],self.day.isoformat()+'T16:45')
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM subscriptions').fetchone()[0],0)
 
+    def test_calendar_offers_schedule_times_and_rejects_manual_time(self):
+        self.con.execute("UPDATE students SET name='Даниил Примеров',birth=? WHERE id=?",(self.birth,self.sid))
+        result=trialoffer.calendar_slots(self.con,self.sid,self.gid,self.day.isoformat()[:7])
+        slot=next(x for x in result['slots'] if x['date']==self.day.isoformat())
+        self.assertEqual(slot['time'],'16:45')
+        with self.assertRaises(sv.ApiError):
+            trialoffer.book_calendar(self.con,self.sid,{'group_id':self.gid,'date':self.day.isoformat(),'time':'15:01'},self.user)
+        with patch('crm.tasks.send_booked'):
+            trialoffer.book_calendar(self.con,self.sid,{**slot,'request_id':'calendar-future-123'},self.user)
+        self.assertEqual(sv.get_student_row(self.con,self.sid)['trial_at'],self.day.isoformat()+'T16:45')
+
+    def test_calendar_past_event_without_client_fields_or_money(self):
+        from crm import historyentry
+        self.con.execute("UPDATE students SET name='Даниил Примеров',birth=? WHERE id=?",(self.birth,self.sid))
+        day=self.day-timedelta(days=14)
+        result=trialoffer.calendar_slots(self.con,self.sid,self.gid,day.isoformat()[:7])
+        slot=next(x for x in result['slots'] if x['date']==day.isoformat())
+        self.assertTrue(slot['past'])
+        self.assertFalse(any(s['past'] for s in trialoffer.calendar_slots(self.con,self.sid,self.gid,day.isoformat()[:7],future_only=True)['slots']))
+        with self.assertRaises(sv.ApiError):
+            trialoffer.book_calendar(self.con,self.sid,{**slot,'future_only':True,'request_id':'reject-past-123'},self.user)
+        data={**slot,'request_id':'calendar-past-123'}
+        trialoffer.book_calendar(self.con,self.sid,data,self.user)
+        trialoffer.book_calendar(self.con,self.sid,data,self.user)
+        student=sv.get_student_row(self.con,self.sid)
+        self.assertEqual(student['trial_at'],day.isoformat()+'T16:45')
+        self.assertEqual(student['trial_came'],1)
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM subscriptions').fetchone()[0],0)
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments').fetchone()[0],0)
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM historical_entries').fetchone()[0],1)
+
     def test_invalid_details_do_not_leave_partial_booking(self):
         before=dict(sv.get_student_row(self.con,self.sid))
         with self.assertRaises(sv.ApiError):trialoffer.book_inline(self.con,self.sid,{**self.data,'parent_name':'Мама'},self.user)

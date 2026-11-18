@@ -317,7 +317,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
       <div class="small muted">Вернуться к ${esc(dtShort(c.open_due))}${c.open_by ? ` · отметил(а) ${esc(c.open_by)}` : ""}</div></div>
       <button class="btn sm" data-oqchat="${c.id}">Открыть диалог</button></div>`).join("")}
     <div class="feed chat-feed family-chat-feed" id="feed">${d.items.length ? chatHistoryHtml(d.items) : `<div class="muted small">Пока ни переписки, ни звонков</div>`}</div>
-    ${kid && kid.funnel === "sales" ? `<details class="family-trial-tools"><summary>Пробное занятие <span>Подобрать время или записать</span></summary><div class="to-bar"><button type="button" class="btn sm" id="to-open">Подобрать дни</button><button type="button" class="btn sm" id="to-book">Записать на пробное</button></div><div id="to-panel" hidden></div></details>` : ""}
+    ${kid ? `<div class="family-trial-tools"><div class="to-bar"><button type="button" class="btn sm" id="to-open">Предложить дни ПУ</button><button type="button" class="btn sm" id="to-book">Записать на пробное</button></div><div id="to-panel" hidden></div></div>` : ""}
     <div data-makeup-offer></div>
     ${targets.length ? `
       <div class="composer">
@@ -349,7 +349,10 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   }, 10000);
   box.querySelectorAll("[data-dial]").forEach((b) => (b.onclick = () => dial(b.dataset.dial)));
   box.querySelectorAll("[data-oqchat]").forEach((b) => (b.onclick = () => openChat(+b.dataset.oqchat)));
-  if (kid && kid.funnel === "sales") wireTrialOffer({ students: [kid], family_id: familyId, onBooked: kid.onBooked }, "#cm-text");
+  if (kid) wireTrialOffer({ students: [kid], family_id: familyId, onBooked: kid.onBooked }, "#cm-text");
+  if(kid&&box.querySelector('#to-book'))box.querySelector('#to-book').onclick=async()=>{
+    try{const detail=await api('GET',`/api/students/${kid.id}`);await openTrialBookingHub(detail,box.querySelector('#to-panel'),kid.onBooked||(()=>loadFamilyComms(familyId,parents,studentId,kid)),{futureOnly:true})}catch(e){fail(e)}
+  };
   const resolveFileConversation=async()=>{
     const to=$('#cm-to').value;if(!to)throw Error('Выберите мессенджер для отправки');
     if(to[0]==='c')return +to.slice(1);
@@ -369,8 +372,6 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     await loadFamilyComms(familyId, parents, studentId, kid);
     if ($("#cm-text")) $("#cm-text").value = draft;
   },{student_id:studentId,students:kid?[kid]:[],channel:familyChannel,resolveConversation:resolveFileConversation});
-  const picker=box.querySelector('.message-picker');
-  if(picker){const extras=document.createElement('details');extras.className='family-message-tools';extras.open=!!(attachmentState?.file||attachmentState?.upload);extras.innerHTML='<summary>Скрипты, смайлы и вложения</summary>';picker.before(extras);extras.append(picker);}
   restoreAttachmentDraft($('#cm-text'),attachmentState);
   const send = $("#cm-send");
   if (send) send.onclick = async () => {
@@ -1004,7 +1005,7 @@ function wireTrialOffer(c, textSel = "#chat-text") {
   const btn = $("#to-open"), panel = $("#to-panel");
   if (!btn) return;
   if ($("#to-book")) $("#to-book").onclick = () => { if (panel.hidden) btn.onclick(); };
-  const leads = (c.students || []).filter((x) => x.funnel === "sales");
+  const leads = (c.students || []).filter((x) => !x.archived);
   const ageOf = (b) => (b ? parseInt(ageText(b)) : NaN);
   btn.onclick = () => {
     panel.hidden = !panel.hidden;
@@ -1180,7 +1181,7 @@ function wireMessagePicker(selector, sendSticker, context={}) {
   const panel = document.createElement("div");
   panel.className = "message-picker";
   const stickers = [["smile", "1f60a", "Улыбка"], ["thanks", "1f64f", "Спасибо"], ["yes", "1f44d", "Отлично"], ["heart", "2764", "Сердце"], ["party", "1f389", "Поздравляем"], ["football", "26bd", "Футбол"]];
-  panel.innerHTML = `<div class="chips"><button type="button" class="btn sm" data-attach-file title="Прикрепить фото или файл" aria-label="Прикрепить фото или файл">📎</button><input type="file" data-attach-input hidden accept=".jpg,.jpeg,.png,.webp,.pdf,.txt,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.zip"><button type="button" class="btn sm" data-administrator-greeting>Приветствие</button><button type="button" class="btn sm" data-picker-tab="scripts" aria-expanded="false">Скрипты</button><button type="button" class="btn sm" data-picker-tab="emoji" aria-expanded="false">😊 Смайлы</button><button type="button" class="btn sm" data-picker-tab="sticker" aria-expanded="false">Стикеры</button></div>
+  panel.innerHTML = `<div class="chips"><button type="button" class="btn sm" data-attach-file title="Прикрепить фото или файл" aria-label="Прикрепить фото или файл">📎</button><input type="file" data-attach-input hidden accept=".jpg,.jpeg,.png,.webp,.pdf,.txt,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.zip"><button type="button" class="btn sm" data-administrator-greeting title="Приветствие" aria-label="Вставить приветствие">👋</button><button type="button" class="btn sm" data-picker-tab="scripts" title="Скрипты" aria-label="Скрипты" aria-expanded="false">📝</button><button type="button" class="btn sm" data-picker-tab="emoji" title="Смайлы" aria-label="Смайлы" aria-expanded="false">😊</button><button type="button" class="btn sm" data-picker-tab="sticker" title="Стикеры" aria-label="Стикеры" aria-expanded="false">🖼️</button></div>
     <div class="picker-options" data-picker-panel="scripts" hidden></div>
     <div class="picker-options emoji-picker" data-picker-panel="emoji" hidden>${emojiPickerHtml()}</div>
     <div class="picker-options" data-picker-panel="sticker" hidden><div class="sticker-grid">${stickers.map(([id, code, label]) => `<button type="button" class="sticker-choice" data-sticker="${id}" title="Отправить: ${label}" aria-label="Отправить стикер: ${label}"><img src="https://raw.githubusercontent.com/jdecked/twemoji/v15.1.0/assets/72x72/${code}.png" width="56" height="56" alt="${label}"><span>${label}</span></button>`).join("")}</div><p class="small muted">Базовые стикеры: Twemoji, CC BY 4.0.</p><div data-custom-packs></div>
@@ -1196,11 +1197,7 @@ function wireMessagePicker(selector, sendSticker, context={}) {
       panel.querySelectorAll("[data-picker-panel]").forEach(x => { const show=opening&&x.dataset.pickerPanel===b.dataset.pickerTab;if(x._setEmojiOpen)x._setEmojiOpen(show);else x.hidden=!show; });
     };
   });
-  const editorRow=input.closest('.row');editorRow.before(panel);
-  if(input.id==='chat-text'){
-    const toggle=document.createElement('button');toggle.type='button';toggle.className='mobile-compose-toggle';toggle.textContent='＋';toggle.setAttribute('aria-label','Инструменты сообщения');toggle.setAttribute('aria-expanded','false');editorRow.prepend(toggle);
-    toggle.onclick=()=>{const open=input.closest('.composer').classList.toggle('tools-open');toggle.setAttribute('aria-expanded',String(open));toggle.textContent=open?'×':'＋'};
-  }
+  const editorRow=input.closest('.row');editorRow.after(panel);
   const preview=document.createElement('div');preview.className='small';panel.append(preview);input._attachmentPreview=preview;
   const fileInput=panel.querySelector('[data-attach-input]');
   panel.querySelector('[data-attach-file]').onclick=()=>{if(!input._attachmentBusy)fileInput.click()};
