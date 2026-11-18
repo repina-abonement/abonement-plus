@@ -1757,7 +1757,31 @@ function clientSubscriptionsHtml(d) {
       ${S.user.role==='admin'&&x.program_id?`<div data-composition-box="${x.id}"></div>`:''}
       ${active?`<div class="subscription-transfer" data-sub-transfer-box="${x.id}" hidden></div>`:''}</li>`;
   };
-  return `<h3>Абонементы</h3><p class="small muted">Условия и состояние оплаты каждого абонемента.</p>${d.subscriptions.length?`<ul class="sub-list ${d.subscriptions.length>3?'folded':''}">${d.subscriptions.map(card).join('')}</ul>`:'<p class="muted">Абонементов пока нет. Оформите первый кнопкой «Продать абонемент».</p>'}${d.subscriptions.length>3?`<button class="linkish" id="sub-more">Показать историю (${d.subscriptions.length})</button>`:''}${subscriptionRefundsHtml(d)}`;
+  const key=String(d.student?.id||'preview');
+  S.subscriptionCalendars=S.subscriptionCalendars||{};
+  const availableYears=[...new Set([d.cur_month.slice(0,4),...d.subscriptions.map(x=>x.month.slice(0,4))])].sort().reverse();
+  let selected=S.subscriptionCalendars[key];
+  if(!selected||!availableYears.includes(selected.slice(0,4))){selected=d.subscriptions.some(x=>x.month===d.cur_month)?d.cur_month:d.subscriptions.map(x=>x.month).sort().reverse()[0]||d.cur_month;S.subscriptionCalendars[key]=selected}
+  const year=selected.slice(0,4),shown=d.subscriptions.filter(x=>x.month===selected);
+  const tiles=Array.from({length:12},(_,i)=>{
+    const month=year+'-'+String(i+1).padStart(2,'0'),all=d.subscriptions.filter(x=>x.month===month),live=all.filter(x=>x.status!=='cancelled');
+    const total=live.reduce((sum,x)=>sum+x.price,0),paid=live.reduce((sum,x)=>sum+(x.status==='paid'?x.price:Math.min(x.price,(d.balance.covered||{})[x.id]||0)),0),left=Math.max(0,total-paid);
+    const state=!all.length?'empty':!live.length?'cancelled':!left?'paid':paid?'partial':'unpaid';
+    const label={empty:'Нет абонемента',cancelled:'Отменён',paid:'Оплачен',partial:'Частично',unpaid:'Ждёт оплаты'}[state];
+    return `<button type="button" class="subscription-month ${state} ${month===selected?'selected':''}" data-sub-month="${month}" aria-pressed="${month===selected}"><strong>${esc(MONTHS[i])}</strong><span class="subscription-month-status">${label}</span>${live.length?`<b>${rub(total)}</b>${left?`<small>Остаток ${rub(left)}</small>`:'<small>Всё оплачено</small>'}`:'<b>—</b><small>&nbsp;</small>'}</button>`;
+  }).join('');
+  return `<div class="subscription-year-head"><h3>Абонементы</h3><select id="subscription-year" aria-label="Год абонементов">${availableYears.map(y=>`<option ${y===year?'selected':''}>${y}</option>`).join('')}</select></div><div class="subscription-year-grid">${tiles}</div><h4 class="subscription-selected-month">${esc(monthLabel(selected))}</h4>${shown.length?`<ul class="sub-list">${shown.map(card).join('')}</ul>`:'<p class="muted small">В этом месяце абонементов нет</p>'}${subscriptionRefundsHtml(d)}`;
+}
+
+function wireSubscriptionCalendar(root,d) {
+  const choose=month=>{S.subscriptionCalendars[String(d.student.id)]=month;openStudent(d.student.id,{tab:'abon'})};
+  root.querySelectorAll('[data-sub-month]').forEach(b=>b.onclick=()=>choose(b.dataset.subMonth));
+  const year=root.querySelector('#subscription-year');
+  if(year)year.onchange=()=>{
+    const months=d.subscriptions.filter(x=>x.month.startsWith(year.value+'-')).map(x=>x.month).sort().reverse();
+    choose(months[0]||year.value+'-01');
+  };
+
 }
 function openSubscriptionPeriod(sub, box, reload) {
   const display=value=>value?value.split('-').reverse().join('.'):'';
@@ -2138,6 +2162,7 @@ async function openStudent(id, options = {}) {
   };
   body.querySelectorAll("[data-pay]").forEach((b) => (b.onclick = () => payForm("Оплата счёта", +b.dataset.left,
     (amount, method) => api("POST", `/api/subscriptions/${b.dataset.pay}/pay`, { amount, method }))));
+  wireSubscriptionCalendar(body,d);
   if ($("#sub-more")) $("#sub-more").onclick = (e) => { body.querySelector(".sub-list").classList.remove("folded"); e.target.remove(); };
   if ($("#pay-more")) $("#pay-more").onclick = (e) => { body.querySelector(".pay-list").classList.remove("folded"); e.target.remove(); };
   loadClientPaymentLinks(id);
