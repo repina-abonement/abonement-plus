@@ -4,7 +4,7 @@ PayKeeper: возврат выполняется в кабинете, CRM тол
 До подтверждения сумма зарезервирована и не доступна для новых занятий.
 """
 import json
-from . import fiscal, money, services as sv
+from . import fiscal, money, comms, services as sv
 
 
 def init(con):
@@ -341,3 +341,69 @@ def _check_receipt(con,row,user,data=None):
 
 def cancellations(con,sid):
     return [dict(r) for r in con.execute('SELECT * FROM subscription_cancellations WHERE student_id=? ORDER BY id DESC',(sid,))]
+
+
+def can_cancel_error(con,user):
+    """Owner and the uniquely confirmed Varvara account; never all operators."""
+    if user.get('role')=='admin':return True
+    if user.get('role')!='operator':return False
+    import re
+    key='subscription_error_cancel_varya'
+    granted=comms.get(con,key)
+    if not granted:
+        matches=[r for r in con.execute("SELECT id,name FROM users WHERE active=1 AND role='operator'")
+                 if {'варвара','батарева'}.issubset(set(re.findall(r'[а-яё]+',r['name'].casefold())))]
+        if len(matches)!=1:return False
+        granted=str(matches[0]['id']);comms.put(con,key,granted)
+        sv.audit(con,None,'subscription.error_cancel_permission',granted)
+    return str(user.get('id'))==granted and bool(con.execute("SELECT 1 FROM users WHERE id=? AND active=1 AND role='operator'",(user.get('id'),)).fetchone())
+
+
+def error_preview(con,subid,user):
+    import hashlib
+    if not can_cancel_error(con,user):raise sv.ApiError('Отмена ошибочного абонемента доступна руководителю и Варе',403)
+    sub=_sub(con,subid)
+    if sub['status']=='cancelled':raise sv.ApiError('Абонемент уже отменён')
+    before=money.balance(con,sub['student_id'])
+    paid=before['covered'].get(subid,0)
+    state={'sub':dict(sub),'obligations':money.obligations(con,sub['student_id']),
+           'payments':[dict(r) for r in con.execute('SELECT * FROM payments WHERE student_id=? ORDER BY id',(sub['student_id'],))]}
+    token=hashlib.sha256(json.dumps(state,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    con.execute('SAVEPOINT erroneous_preview')
+    try:
+        con.execute("UPDATE subscriptions SET status='cancelled' WHERE id=?",(subid,))
+        after=money.balance(con,sub['student_id'])
+    finally:
+        con.execute('ROLLBACK TO erroneous_preview');con.execute('RELEASE erroneous_preview')
+    return {'token':token,'paid':paid,'balance_after':after['deposit'],'debt_after':after['debt'],
+            'released_to_balance':max(0,after['deposit']-before['deposit']),
+            'applied_to_other_invoices':max(0,paid-max(0,after['deposit']-before['deposit']))}
+
+
+def cancel_error(con,subid,user,data):
+    if not can_cancel_error(con,user):raise sv.ApiError('Отмена ошибочного абонемента доступна руководителю и Варе',403)
+    previous=con.execute('SELECT mode FROM subscription_cancellations WHERE subscription_id=?',(subid,)).fetchone()
+    if previous:
+        if previous['mode']=='error':return {'ok':True,'already_cancelled':True}
+        raise sv.ApiError('Абонемент ранее отменён другим способом')
+    reason=str(data.get('reason') or '').strip()
+    if len(reason)<5 or data.get('confirmed_error') is not True:raise sv.ApiError('Подтвердите ошибочное оформление и укажите причину')
+    q=error_preview(con,subid,user)
+    if data.get('token')!=q['token']:raise sv.ApiError('Состояние оплаты изменилось — обновите расчёт',409)
+    sub=_sub(con,subid)
+    con.execute('SAVEPOINT erroneous_cancellation')
+    try:
+        sv.cancel_subscription(con,subid,user,False,reason)
+        con.execute('''INSERT INTO subscription_cancellations(subscription_id,student_id,mode,amount,reason,approval,created_at,created_by,
+            period_verified,paid_before,balance_available,applied_to_invoices) VALUES (?,?,'error',?,?,?,?,?,1,?,?,?)''',
+            (subid,sub['student_id'],q['paid'],reason[:1000],today().isoformat(),sv.now_iso(),user.get('name',''),q['paid'],q['released_to_balance'],q['applied_to_other_invoices']))
+        con.execute("UPDATE pay_links SET status='expired' WHERE status='open' AND (subscription_id=? OR id IN (SELECT link_id FROM pay_link_subscriptions WHERE subscription_id=?))",(subid,subid))
+        sv.log(con,sub['student_id'],f"Отменён ошибочный/тестовый абонемент #{subid}, включая прошедшие даты. Причина: {reason}. Платежи и отметки посещения сохранены. Свободный баланс: {q['balance_after']} ₽",user,'payment')
+        sv.audit(con,user,'subscription.cancel_error',str(subid))
+        from . import tasks
+        if tasks.schedule_renewal(con,sub['student_id']) is None:
+            con.execute("UPDATE tasks SET status='cancelled',done_at=?,result='Ошибочный абонемент отменён' WHERE auto_key=? AND status='open'",(sv.now_iso(),f"subscription-renew:{sub['student_id']}"))
+        con.execute('RELEASE erroneous_cancellation')
+        return {'ok':True,**q}
+    except BaseException:
+        con.execute('ROLLBACK TO erroneous_cancellation');con.execute('RELEASE erroneous_cancellation');raise

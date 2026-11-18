@@ -2067,10 +2067,22 @@ def cancel(con, h, user, body, q, sub):
     return subcancel.cancel(con,int(sub),user,body)
 
 
+@route("GET", "/api/subscriptions/{sub}/error-cancel-preview", role="operator")
+def subscription_error_preview(con,h,user,body,q,sub):
+    from . import subcancel
+    return subcancel.error_preview(con,int(sub),user)
+
+
+@route("POST", "/api/subscriptions/{sub}/error-cancel", role="operator")
+def subscription_error_cancel(con,h,user,body,q,sub):
+    from . import subcancel
+    return subcancel.cancel_error(con,int(sub),user,body)
+
+
 @route("GET", "/api/subscriptions/{sub}/cancel-preview", role="operator")
 def cancel_preview(con,h,user,body,q,sub):
     from . import subcancel
-    return subcancel.preview(con,int(sub),q.get("effective_date"))
+    return subcancel.preview(con,int(sub),q.get("effective_date")) | {"can_cancel_error":subcancel.can_cancel_error(con,user)}
 
 
 @route("POST", "/api/subscription-refunds/{rid}/confirm", role="payments:view")
