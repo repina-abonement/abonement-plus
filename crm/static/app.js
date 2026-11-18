@@ -1584,7 +1584,7 @@ async function openSell(d, reload) {
   const pendingSingles=d.subscriptions.filter(s=>s.kind==='single'&&s.status==='invoiced');
   const methods=Object.entries(PAY_METHODS).filter(([k])=>PAY_MANUAL_METHODS.includes(k));
   box.innerHTML=`<div class="section sell"><div class="row" style="align-items:center"><h3 class="grow" style="margin:0">Продать абонемент</h3><button class="icon-btn" id="sl-x" title="Закрыть">✕</button></div>
-    <div class="field" style="margin-top:14px"><label>Что оформляем</label><select id="sl-kind"><option value="month">На месяц</option><option value="single">Разовое занятие</option></select></div>
+    <div class="field" style="margin-top:14px"><label>Что оформляем</label><select id="sl-kind"><option value="month">На месяц</option><option value="multi">На несколько месяцев</option><option value="single">Разовое занятие</option></select></div>
     <div class="field" id="sl-single-invoice-field" hidden><label>Разовое занятие</label><select id="sl-single-invoice"><option value="">Оформить новое занятие</option>${pendingSingles.map(s=>`<option value="${s.id}">Уже выставлено: ${s.single_date?dShort(s.single_date):monthLabel(s.month)} · ${rub(s.price)}</option>`).join('')}</select></div>
     <div class="row"><div class="field" id="sl-month-field"><label>Месяц</label><select id="sl-month">${months.map(m=>`<option value="${m}" ${m===d.next_month?'selected':''}>${monthLabel(m)}</option>`).join('')}</select></div><div class="field"><label>Группа</label><select id="sl-en">${choices.map(e=>`<option value="${e.group_id}" ${e.group_id===preferred.group_id?'selected':''}>${esc(e.group_name)}${e.new_group&&ens.length?' · другая группа':''}</option>`).join('')}</select></div></div>
     <div class="row"><div class="field" id="sl-tar-field"><label>Тариф</label><select id="sl-tar"></select></div><div class="field" id="sl-disc-field"><label>Скидка</label><select id="sl-disc"><option value="">По правилам</option>${(d.discounts||[]).map(x=>`<option value="${x.id}">${esc(x.name)}, ${x.percent}%</option>`).join('')}</select><small class="muted">Ручной выбор заменяет автоматическую скидку · «Многодетная семья» — только вручную</small></div></div>
@@ -1647,7 +1647,7 @@ async function openSell(d, reload) {
   const reset=()=>{exclusions.clear();autoDates=true;singleDay=null;$('#sl-credit').checked=false};
   $('#sl-paid-date').onchange=()=>quote();
   $('#sl-single-invoice').onchange=()=>{reset();syncFields();quote()};
-  $('#sl-kind').onchange=()=>{reset();if(single())$('#sl-month').value=d.cur_month;syncFields();quote()};
+  $('#sl-kind').onchange=()=>{if($('#sl-kind').value==='multi'){version++;openMultiMonthSale(d,id,box,reload,{group_id:en().group_id,tariff:$('#sl-tar').value,ofp_group_id:$('#sl-ofp').value});return}reset();if(single())$('#sl-month').value=d.cur_month;syncFields();quote()};
   $('#sl-month').onchange=$('#sl-en').onchange=()=>{reset();recommend();quote()};
   $('#sl-tar').onchange=()=>{reset();syncFields();quote()};$('#sl-ofp').onchange=()=>{reset();quote()};$('#sl-disc').onchange=$('#sl-credit').onchange=quote;
   $('#sl-x').onclick=()=>{version++;box.dataset.saleSession='';box.innerHTML=''};
@@ -3065,4 +3065,62 @@ async function logoutCurrentAccount() {
     // A full reload clears private in-memory data, timers and the previous user's drafts.
     location.reload();
   } catch (err) { buttons.forEach(b => b.disabled = false); fail(err); }
+}
+
+async function openMultiMonthSale(d,id,box,reload,preset={}) {
+  const groups=(S.meta.groups||[]).filter(g=>g.active!==0&&!g.is_makeup&&g.lesson_kind!=='ofp');
+  const months=Array.from({length:12},(_,i)=>{const dt=new Date(d.cur_month+'-01T12:00');dt.setMonth(dt.getMonth()+i);return isoDate(dt).slice(0,7)});
+  box.dataset.saleSession='multi-'+Date.now();
+  box.innerHTML=`<form class="section sell" data-multi-sale><div class="row"><h3 class="grow">Абонементы на несколько месяцев</h3><button type="button" class="icon-btn" data-multi-close aria-label="Закрыть">✕</button></div><p class="small muted">На каждый месяц — отдельный абонемент. Общую оплату распределим по месяцам, начиная с первого</p><div class="multi-month-choices">${months.map((m,i)=>`<label><input type="checkbox" name="months" value="${m}" ${i<2?'checked':''}>${esc(monthLabel(m))}</label>`).join('')}</div><div class="row"><div class="field"><label>Группа</label><select name="group_id">${groups.map(g=>`<option value="${g.id}" ${g.id===preset.group_id?'selected':''}>${esc(g.name)}</option>`).join('')}</select></div><div class="field"><label>Тариф</label><select name="tariff"></select></div></div><div class="field" data-multi-ofp hidden><label>Группа ОФП</label><select name="ofp_group_id"></select></div><div class="field"><label>Скидка</label><select name="discount_id"><option value="">По правилам</option>${(d.discounts||[]).map(x=>`<option value="${x.id}">${esc(x.name)}, ${x.percent}%</option>`).join('')}</select></div><p class="small muted">Ручная скидка заменяет автоматическую для каждого выбранного месяца</p><div class="field"><label>Фактическая дата оплаты</label><input name="paid_date" type="date" required value="${S.meta.today}" max="${S.meta.today}"></div><div class="field"><label>Причина исключения занятий</label><input name="exclusion_reason" maxlength="1000" placeholder="Если исключаете занятия по согласованию"></div><div data-multi-quote>Считаю…</div><div class="row"><div class="field"><label>Получено, ₽</label><input name="amount" type="number" min="1" step="1"></div><div class="field"><label>Как оплатили</label><select name="method">${Object.entries(PAY_METHODS).filter(([k])=>PAY_MANUAL_METHODS.includes(k)).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('')}</select></div></div><p class="small muted">«Отметить оплату» — только для денег, которые уже получены</p><p class="need-err" data-multi-error role="alert"></p><div class="sc-actions"><button type="button" class="btn" data-multi-save="invoice" disabled>Оформить без оплаты</button><button type="button" class="btn primary" data-multi-save="pay" disabled>Отметить оплату</button><button type="button" class="btn" data-multi-save="links" disabled>Общая ссылка на оплату</button></div><div data-multi-result></div></form>`;
+  const form=box.querySelector('form'),f=form.elements,output=form.querySelector('[data-multi-quote]'),error=form.querySelector('[data-multi-error]'),result=form.querySelector('[data-multi-result]');
+  let checked=null,generation=0,busy=false,excluded={};
+  const requestId=window.crypto?.randomUUID?.()||Date.now()+'-'+Math.random().toString(36).slice(2);
+  const payload=()=>({months:[...form.querySelectorAll('[name=months]:checked')].map(x=>x.value),group_id:+f.group_id.value,tariff:f.tariff.value,ofp_group_id:f.tariff.value==='pkg'?+f.ofp_group_id.value:null,discount_id:f.discount_id.value||null,paid_date:f.paid_date.value,exclusion_reason:f.exclusion_reason.value,excluded_by_month:excluded,group_action:'add'});
+  const buttons=()=>form.querySelectorAll('[data-multi-save]').forEach(b=>b.disabled=busy||!checked||(b.dataset.multiSave!=='invoice'&&checked.due<=0)||(b.dataset.multiSave==='links'&&f.paid_date.value!==S.meta.today));
+  const tariffs=()=>{
+    const g=groups.find(g=>g.id===+f.group_id.value),old=f.tariff.value||preset.tariff;
+    f.tariff.innerHTML=g?.program_id?'<option value="arena_only">Только Арктика</option><option value="pkg">Арктика + ОФП</option>':g?.fixed_only?'<option value="fixed">Негибкий</option>':'<option value="fixed">Негибкий</option><option value="flex">Гибкий</option>';
+    if([...f.tariff.options].some(o=>o.value===old))f.tariff.value=old;
+    f.tariff.disabled=!!g?.fixed_only;
+    const program=(d.program?.programs||[]).find(p=>p.id===g?.program_id);
+    f.ofp_group_id.innerHTML=(program?.ofp_groups||[]).map(g=>`<option value="${g.id}" ${g.id===+preset.ofp_group_id?'selected':''}>${esc(g.name)}</option>`).join('');
+    form.querySelector('[data-multi-ofp]').hidden=f.tariff.value!=='pkg';
+  };
+  const preview=async()=>{
+    const version=++generation;checked=null;buttons();error.textContent='';output.textContent='Считаю…';
+    try{
+      const q=await api('POST',`/api/students/${id}/multi-month-preview`,payload());
+      if(version!==generation||!form.isConnected)return;
+      checked=q;
+      output.innerHTML=q.months.map(r=>`<section class="quote"><h4>${esc(monthLabel(r.month))}</h4>${quoteHtml(r.quote)}<div class="multi-lesson-days">${(r.quote.calendar_dates||r.quote.dates).map(day=>`<label class="chip"><input type="checkbox" data-multi-day="${day}" data-month="${r.month}" ${r.excluded_dates.includes(day)?'':'checked'}>${esc(dShort(day))}</label>`).join('')}</div></section>`).join('')+`<div class="quote"><b>Всего: ${rub(q.total)}</b>${q.credit?`<p>Учтено с баланса: ${rub(q.credit)}</p>`:''}<p><b>К оплате: ${rub(q.due)}</b></p></div>`;
+      f.amount.value=q.due;
+      output.querySelectorAll('[data-multi-day]').forEach(c=>c.onchange=()=>{
+        const month=c.dataset.month;const row=q.months.find(r=>r.month===month);excluded[month]=[...row.excluded_dates];
+        if(c.checked)excluded[month]=excluded[month].filter(day=>day!==c.dataset.multiDay);else excluded[month].push(c.dataset.multiDay);
+        preview();
+      });buttons();
+    }catch(e){if(version===generation&&form.isConnected){output.textContent='';error.textContent=e.message}}
+  };
+  form.onsubmit=e=>e.preventDefault();
+  form.querySelector('[data-multi-close]').onclick=()=>{if(!busy){generation++;box.replaceChildren()}};
+  form.querySelectorAll('[name=months]').forEach(c=>c.onchange=preview);
+  f.group_id.onchange=()=>{excluded={};tariffs();preview()};
+  f.tariff.onchange=()=>{excluded={};form.querySelector('[data-multi-ofp]').hidden=f.tariff.value!=='pkg';preview()};
+  f.discount_id.onchange=f.paid_date.onchange=f.ofp_group_id.onchange=preview;
+  form.querySelectorAll('[data-multi-save]').forEach(b=>b.onclick=async()=>{
+    if(busy||!checked)return;const mode=b.dataset.multiSave;
+    if(mode==='pay'&&(!Number.isInteger(+f.amount.value)||+f.amount.value<1||+f.amount.value>checked.due)){error.textContent='Проверьте полученную сумму';return}
+    const order={...payload(),expected_token:checked.token,mode,request_id:requestId,...(mode==='pay'?{amount:+f.amount.value,method:f.method.value}:{})};
+    busy=true;buttons();form.querySelectorAll('input,select').forEach(x=>x.disabled=true);error.textContent='';
+    try{
+      const saved=await api('POST',`/api/students/${id}/multi-month-sale`,order);
+      const msg=`Абонементы: ${displayChildName(d.student.name)}\nГруппа: ${groups.find(g=>g.id===order.group_id)?.name||''}\n\n`+saved.subscriptions.map(s=>`${monthLabel(s.month)} — ${rub(s.price)}${s.link?'\n'+s.link.url:''}`).join('\n\n')+`\n\nВсего: ${rub(saved.total)}\nОсталось оплатить: ${rub(saved.due)}${saved.link?'\n\nОплатить все месяцы по одной ссылке:\n'+saved.link.url:''}`;
+      result.innerHTML='<h4>Абонементы оформлены</h4><textarea rows="8" readonly></textarea><div class="sc-actions"><button type="button" class="btn" data-copy>Скопировать</button><button type="button" class="btn" data-chat>Вставить в чат</button><button type="button" class="btn primary" data-done>Готово</button></div>';
+      result.querySelector('textarea').value=msg;
+      result.querySelector('[data-copy]').onclick=()=>copyTextWithNotice(msg);
+      result.querySelector('[data-chat]').onclick=()=>{scTab('feed');const t=$('#cm-text');if(!t)return toast('Откройте чат в карточке',true);t.value=msg;t.dispatchEvent(new Event('input',{bubbles:true}));t.focus()};
+      result.querySelector('[data-done]').onclick=reload;
+    }catch(e){error.textContent=e.message;busy=false;form.querySelectorAll('input,select').forEach(x=>x.disabled=false);f.tariff.disabled=!!groups.find(g=>g.id===+f.group_id.value)?.fixed_only;buttons()}
+  });
+  tariffs();pastGroupSearch(f.group_id);await preview();box.scrollIntoView({block:'start',behavior:'smooth'});
 }

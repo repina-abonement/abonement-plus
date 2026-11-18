@@ -1286,6 +1286,22 @@ def quote(con, h, user, body, q, sid):
     return sv.quote_for(con, int(sid), q.get("month"), q.get("enrollment_id"), q.get("discount_id"), q.get("tariff"), (q.get("excluded_dates") or []) if q.get("dates_selected")=="1" else q.get("excluded_dates"), q.get("credit_requested"), q.get("group_id"), q.get("ofp_group_id"),q.get("paid_date"),user=user)
 
 
+@route("POST", "/api/students/{sid}/multi-month-preview", role="members:full")
+def multi_month_preview(con,h,user,body,q,sid):
+    from . import multimonth
+    return multimonth.preview(con,int(sid),body,user)
+
+
+@route("POST", "/api/students/{sid}/multi-month-sale", role="members:full")
+def multi_month_sale(con,h,user,body,q,sid):
+    from . import multimonth
+    from . import paylinks
+    try:
+        return multimonth.create(con,int(sid),body,user)
+    except paylinks.PayLinkError as error:
+        raise ApiError(str(error))
+
+
 @route("POST", "/api/students/{sid}/invoice", role="operator")
 def invoice(con, h, user, body, q, sid):
     return sv.create_invoice(con, int(sid), body.get("month"), user, body.get("enrollment_id"), body.get("discount_id"), body.get("tariff"), body.get("excluded_dates"), body.get("credit_requested", False), body.get("group_id"), body.get("ofp_group_id"), body.get("group_action", "transfer"),body.get("paid_date"),str(body.get("exclusion_reason") or "")[:1000])

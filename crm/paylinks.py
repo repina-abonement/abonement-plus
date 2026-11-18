@@ -35,6 +35,9 @@ class PayLinkError(Exception):
 
 def init(con):
     con.executescript(SCHEMA)
+    con.execute("""CREATE TABLE IF NOT EXISTS pay_link_subscriptions (
+        link_id INTEGER NOT NULL REFERENCES pay_links(id),subscription_id INTEGER NOT NULL REFERENCES subscriptions(id),
+        amount INTEGER NOT NULL,PRIMARY KEY(link_id,subscription_id))""")
     columns = {r[1] for r in con.execute("PRAGMA table_info(pay_links)")}
     for name, definition in {'subscription_id':'INTEGER','receipt_token':"TEXT NOT NULL DEFAULT ''",'receipt_email':"TEXT NOT NULL DEFAULT ''",'invoice_url':"TEXT NOT NULL DEFAULT ''",'checkout_state':"TEXT NOT NULL DEFAULT ''"}.items():
         if name not in columns:
@@ -96,6 +99,17 @@ def receipt_link(con, token):
     try: expired = datetime.fromisoformat(link['created_at']) + timedelta(days=LIVE_DAYS) <= datetime.now()
     except (TypeError,ValueError): expired = True
     if expired: raise PayLinkError('Срок действия ссылки истёк. Попросите администратора прислать новую')
+    parts=con.execute('SELECT subscription_id,amount FROM pay_link_subscriptions WHERE link_id=?',(link['id'],)).fetchall()
+    if parts:
+        covered=money.balance(con,link['student_id'])['covered']
+        selected={p['subscription_id'] for p in parts}
+        last_month=max(con.execute('SELECT month FROM subscriptions WHERE id=?',(p['subscription_id'],)).fetchone()[0] for p in parts)
+        if any(s['id'] not in selected and s['month']<=last_month and s['price']>covered.get(s['id'],0) for s in money.obligations(con,link['student_id'])):
+            raise PayLinkError('Есть другие неоплаченные абонементы. Попросите администратора обновить общую ссылку')
+        for part in parts:
+            sub=con.execute('SELECT * FROM subscriptions WHERE id=? AND student_id=?',(part['subscription_id'],link['student_id'])).fetchone()
+            if not sub or sub['status']=='cancelled' or max(0,sub['price']-covered.get(sub['id'],0))!=part['amount']:
+                raise PayLinkError('Один из абонементов изменён или оплачен. Попросите администратора обновить общую ссылку')
     if link['subscription_id']:
         sub=con.execute('SELECT status,student_id,price FROM subscriptions WHERE id=?',(link['subscription_id'],)).fetchone()
         if not sub or sub['student_id']!=link['student_id'] or sub['status'] in ('cancelled','paid'):
@@ -177,6 +191,14 @@ def apply_payments(con, pays: list[dict]) -> int:
             continue
         amount = int(round(float(str(p.get("pay_amount") or link["amount"]).replace(",", "."))))
         paid_at = str(p.get("success_datetime") or p.get("obtain_datetime") or _now())[:16].replace(" ", "T")
+        parts=con.execute('SELECT subscription_id FROM pay_link_subscriptions WHERE link_id=?',(link['id'],)).fetchall()
+        if parts:
+            from . import program, pricing
+            try:paid_day=date.fromisoformat(paid_at[:10])
+            except ValueError:paid_day=date.today()
+            for part in parts:
+                program.reprice(con,part['subscription_id'],on=paid_day)
+                pricing.reprice(con,part['subscription_id'],on=paid_day)
         if link["subscription_id"]:
             from . import program, pricing
             try:paid_day=date.fromisoformat(paid_at[:10])
@@ -220,6 +242,15 @@ def payment_page(con,token):
         try:email=receipt_email(candidate);break
         except PayLinkError:continue
     out={'amount':link['amount'],'invoice_ready':bool(link['invoice_id']),'email':email,'child':student['name'],'purpose':link['purpose'] or 'Оплата занятий','privacy_url':'/legal/privacy'}
+    parts=con.execute('SELECT subscription_id,amount FROM pay_link_subscriptions WHERE link_id=? ORDER BY subscription_id',(link['id'],)).fetchall()
+    if parts:
+        out['subscriptions']=[]
+        for part in parts:
+            sub=con.execute('SELECT * FROM subscriptions WHERE id=?',(part['subscription_id'],)).fetchone()
+            group=con.execute('SELECT g.name,b.name AS branch FROM enrollments e JOIN groups g ON g.id=e.group_id JOIN branches b ON b.id=g.branch_id WHERE e.id=?',(sub['enrollment_id'],)).fetchone()
+            out['subscriptions'].append({'month':sub['month'],'price':sub['price'],'amount':part['amount'],'lessons':sub['lessons'],
+                'group':dict(group) if group else {},'discount_name':sub['discount_name'],'discount_amount':sub['discount_amount']})
+        return out
     if not link['subscription_id']:return out
     sub=con.execute('SELECT * FROM subscriptions WHERE id=? AND student_id=?',(link['subscription_id'],student['id'])).fetchone()
     if not sub:raise PayLinkError('Ссылка недоступна')
@@ -236,3 +267,20 @@ def payment_page(con,token):
     if single:groups=[{'name':single['name'],'branch':single['branch'],'dates':[single['date']]}]
     out['subscription']={'month':sub['month'],'kind':sub['kind'],'tariff':sub['tariff'],'lessons':sub['lessons'],'valid_from':sub['valid_from'],'valid_until':sub['valid_until'],'price':sub['price'],'paid':covered,'remaining':max(0,sub['price']-covered),'discount_name':sub['discount_name'],'discount_amount':sub['discount_amount'],'late_fee':sub['late_fee'],'groups':groups,'excluded_dates':json.loads(sub['excluded_dates'] or '[]')}
     return out
+
+
+def create_bundle(con,sid,sub_ids,user):
+    from . import services as sv, logic
+    if len(set(sub_ids))!=len(sub_ids) or len(sub_ids)<2:raise PayLinkError('Выберите несколько разных абонементов')
+    parts=[]
+    for sub_id in sub_ids:
+        sub=con.execute("SELECT * FROM subscriptions WHERE id=? AND student_id=? AND status!='cancelled'",(sub_id,sid)).fetchone()
+        if not sub:raise PayLinkError('Абонемент не найден')
+        due=sv.payment_quote(con,sub_id)['total']
+        if due:parts.append((sub_id,due,sub['month']))
+    if not parts:raise PayLinkError('Все выбранные абонементы уже оплачены')
+    child=sv.get_student_row(con,sid)['name']
+    purpose='Абонементы: '+child+' · '+', '.join(logic.month_label(m) for _,_,m in parts)
+    link=create(con,sid,sum(amount for _,amount,_ in parts),user,purpose)
+    con.executemany('INSERT INTO pay_link_subscriptions(link_id,subscription_id,amount) VALUES (?,?,?)',[(link['id'],sub,amount) for sub,amount,_ in parts])
+    return link

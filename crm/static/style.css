@@ -1965,3 +1965,5 @@ html.theme-soft #comms-box .family-chat-feed{background:#182624}html.theme-soft 
 
 .inline-trial-form .field[hidden],.inline-trial-form label[hidden]{display:none!important}
 .trial-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}.trial-calendar-day{min-height:70px;padding:5px;border:1px solid var(--line);border-radius:9px}.trial-calendar-day .btn{width:100%;padding:5px 1px;display:flex;flex-direction:column;font-size:13px}.trial-calendar-day .btn small{font-size:10px}.trial-calendar-day .on{background:var(--accent);color:white}
+
+.sell>.row{align-items:flex-start}.sell>.row>.field{flex:1 1 0;min-width:0}.sell>.row>.field>label{min-height:22px}.multi-month-choices{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}.multi-month-choices label{display:flex;gap:7px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
