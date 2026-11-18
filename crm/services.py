@@ -75,7 +75,7 @@ def vacations_of(con, sid: int) -> list[tuple[date, date]]:
 
 # ---------- пропуски и отработки ----------
 
-def absence_counters(con, sid: int, ref: date | None = None) -> dict:
+def absence_counters(con, sid: int, ref: date | None = None, group_id: int | None = None) -> dict:
     ref = ref or today()
     cur = logic.month_of(ref)
     prev = logic.shift_month(cur, -1)
@@ -89,6 +89,7 @@ def absence_counters(con, sid: int, ref: date | None = None) -> dict:
          "available_ids": [], "available_cur":0,"available_prev":0,"available_future":0,"month_cur": cur, "month_prev": prev}
     from . import subscriptiondates
     for r in rows:
+        if group_id and r["group_id"]!=group_id:continue
         if subscriptiondates.excluded(con, sid, r["group_id"], r["date"]):
             continue
         c["absent_cur" if r["date"].startswith(cur) else "absent_prev"] += 1
@@ -1451,10 +1452,19 @@ def _change(cur, old):
     return round(100 * (cur - old) / old)
 
 
-def dashboard(con, ym: str | None = None, branch_id: int | None = None) -> dict:
+def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id: int | None = None) -> dict:
     cur = ym or logic.month_of(today())
+    if group_id:
+        group=con.execute('SELECT branch_id FROM groups WHERE id=?',(group_id,)).fetchone()
+        if not group:raise ApiError('Группа не найдена',404)
+        if branch_id and group['branch_id']!=branch_id:raise ApiError('Группа не относится к выбранному филиалу')
     br_sql = " AND s.group_id IN (SELECT id FROM groups WHERE branch_id = ?)" if branch_id else ""
     br_arg = (branch_id,) if branch_id else ()
+    if group_id:
+        br_sql=" AND (s.group_id=? OR EXISTS (SELECT 1 FROM enrollments ge WHERE ge.student_id=s.id AND ge.group_id=? AND ge.active=1))"
+        br_arg=(group_id,group_id)
+    holder_sql=" AND COALESCE(e.group_id,s.group_id)=?" if group_id else (" AND COALESCE(e.group_id,s.group_id) IN (SELECT id FROM groups WHERE branch_id=?)" if branch_id else '')
+    holder_args=(group_id,) if group_id else ((branch_id,) if branch_id else ())
 
     def holders(m):
         out = {}
@@ -1462,8 +1472,8 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None) -> dict:
                 "SELECT s.id, x.price FROM subscriptions x JOIN students s ON s.id = x.student_id "
                 "LEFT JOIN enrollments e ON e.id = x.enrollment_id "
                 "WHERE x.month = ? AND x.status = 'paid'"
-                + (" AND COALESCE(e.group_id, s.group_id) IN (SELECT id FROM groups WHERE branch_id = ?)" if branch_id else ""),
-                (m, *br_arg)):
+                + holder_sql,
+                (m, *holder_args)):
             out.setdefault(sid_, []).append(price)
         return out
 
@@ -1485,7 +1495,7 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None) -> dict:
         return st
 
     seats = con.execute("SELECT COALESCE(SUM(capacity), 0) FROM groups WHERE is_makeup = 0 AND active = 1"
-                        + (" AND branch_id = ?" if branch_id else ""), br_arg).fetchone()[0]
+                        + (" AND id=?" if group_id else " AND branch_id = ?" if branch_id else ""), holder_args).fetchone()[0]
     c, m1, y1 = (month_stats(cur), month_stats(logic.shift_month(cur, -1)), month_stats(logic.shift_month(cur, -12)))
 
     def kpi(key):
@@ -1508,8 +1518,10 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None) -> dict:
     start, end = logic.month_bounds(cur)
     s_iso, e_iso = start.isoformat(), end.isoformat() + "T23:59"
 
-    def cnt(where, *args):
-        return con.execute("SELECT COUNT(*) FROM students s WHERE " + where + br_sql, (*args, *br_arg)).fetchone()[0]
+    def cnt(where, *args, trial=False):
+        scope,scope_args=br_sql,br_arg
+        if group_id and trial:scope,scope_args=' AND COALESCE(s.trial_group_id,s.group_id)=?',(group_id,)
+        return con.execute("SELECT COUNT(*) FROM students s WHERE " + where + scope, (*args, *scope_args)).fetchone()[0]
 
     lead_where = "s.created_at BETWEEN ? AND ? AND (s.funnel = 'sales' OR s.converted_at IS NOT NULL)"
     leads = cnt(lead_where, s_iso, e_iso)
@@ -1517,18 +1529,18 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None) -> dict:
     leads_came = cnt(lead_where + " AND s.trial_came = 1", s_iso, e_iso)
     leads_bought = cnt(lead_where + " AND s.converted_at IS NOT NULL", s_iso, e_iso)
     tr_where = "s.trial_at BETWEEN ? AND ?"
-    trials = cnt(tr_where, s_iso, e_iso)
-    trials_came = cnt(tr_where + " AND s.trial_came = 1", s_iso, e_iso)
-    trials_bought = cnt(tr_where + " AND s.converted_at IS NOT NULL", s_iso, e_iso)
+    trials = cnt(tr_where, s_iso, e_iso,trial=True)
+    trials_came = cnt(tr_where + " AND s.trial_came = 1", s_iso, e_iso,trial=True)
+    trials_bought = cnt(tr_where + " AND s.converted_at IS NOT NULL", s_iso, e_iso,trial=True)
 
     def day_stats(d):
         a, b = d.isoformat(), d.isoformat() + "T23:59"
         return {"leads": cnt("s.created_at BETWEEN ? AND ? AND (s.funnel='sales' OR s.converted_at IS NOT NULL)", a, b),
-                "trial_booked": cnt("s.trial_booked_at BETWEEN ? AND ?", a, b),
+                "trial_booked": cnt("s.trial_booked_at BETWEEN ? AND ?", a, b,trial=True),
                 "bought_first": cnt("s.converted_at BETWEEN ? AND ?", a, b)}
 
     t = today()
-    future_trials = cnt("s.funnel = 'sales' AND s.trial_at > ?", now().isoformat(timespec="minutes"))
+    future_trials = cnt("s.funnel = 'sales' AND s.trial_at > ?", now().isoformat(timespec="minutes"),trial=True)
 
     # графики: 12 месяцев, текущий и прошлый год
     months = [logic.shift_month(cur, -i) for i in range(11, -1, -1)]
@@ -1543,7 +1555,7 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None) -> dict:
     per = int(settings(con)["price_flex"])
     for r in con.execute("SELECT s.id, s.tariff FROM students s WHERE s.funnel='members' AND s.stage != 'left'"
                          + br_sql, br_arg).fetchall():
-        a = absence_counters(con, r[0])["available"]
+        a = absence_counters(con, r[0],group_id=group_id)["available"]
         can_make_up += a
         if r[1] == "flex":
             at_risk += min(logic.MAX_FLEX_CREDIT, a) * per

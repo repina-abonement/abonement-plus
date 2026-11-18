@@ -682,6 +682,9 @@ function donut(parts) {
 async function renderDashboard(page) {
   if (!S.dashMonth) S.dashMonth = S.meta.today.slice(0, 7);
   if (S.dashBranch === undefined) S.dashBranch = "";
+  if(S.dashGroup===undefined)S.dashGroup='';
+  const dashGroups=(S.meta.groups||[]).filter(g=>!g.is_makeup&&(!S.dashBranch||String(g.branch_id)===String(S.dashBranch)));
+  if(S.dashGroup&&!dashGroups.some(g=>String(g.id)===String(S.dashGroup)))S.dashGroup='';
   if (!S.dashSeg) S.dashSeg = "count";
   if (S.dashTab && S.dashTab !== "overview") {
     const ms = [];
@@ -695,7 +698,7 @@ async function renderDashboard(page) {
     wireAnTabs(page);
     return renderAnalytics($("#an-box"));
   }
-  const d = await api("GET", `/api/dashboard?month=${S.dashMonth}${S.dashBranch ? "&branch_id=" + S.dashBranch : ""}`);
+  const d = await api("GET", `/api/dashboard?month=${S.dashMonth}${S.dashBranch ? "&branch_id=" + S.dashBranch : ""}${S.dashGroup?"&group_id="+S.dashGroup:""}`);
   const months = [];
   for (let i = 0; i < 18; i++) { const dt = new Date(S.meta.today); dt.setDate(1); dt.setMonth(dt.getMonth() - i); months.push(isoDate(dt).slice(0, 7)); }
   const k = d.kpi, sr = d.series;
@@ -706,6 +709,7 @@ async function renderDashboard(page) {
     <div class="dash-filters">
       <select id="dash-month">${months.map((x) => `<option value="${x}" ${x === S.dashMonth ? "selected" : ""}>${monthLabel(x)}</option>`).join("")}</select>
       <select id="dash-branch"><option value="">Все филиалы</option>${S.meta.branches.map((b) => `<option value="${b.id}" ${String(b.id) === String(S.dashBranch) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>
+      <select id="dash-group" aria-label="Группа"><option value="">Все группы</option>${dashGroups.map(g=>`<option value="${g.id}" ${String(g.id)===String(S.dashGroup)?'selected':''}>${esc(g.name)}</option>`).join('')}</select>
     </div>
     ${anTabsHtml()}
 
@@ -750,8 +754,10 @@ async function renderDashboard(page) {
       </section>
     </div>`;
   $("#dash-month").onchange = (e) => { S.dashMonth = e.target.value; render(); };
-  $("#dash-branch").onchange = (e) => { S.dashBranch = e.target.value; render(); };
+  $("#dash-branch").onchange = (e) => { S.dashBranch = e.target.value; S.dashGroup=""; render(); };
   page.querySelectorAll("[data-seg]").forEach((b) => (b.onclick = () => { S.dashSeg = b.dataset.seg; render(); }));
+  $("#dash-group").onchange=e=>{S.dashGroup=e.target.value;render()};
+  if(typeof pastGroupSearch==='function')pastGroupSearch($("#dash-group"));
   wireAnTabs(page);
 }
 

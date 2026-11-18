@@ -2521,7 +2521,7 @@ def my_pay_set(con, h, user, body, q):
 
 @route("GET", "/api/dashboard", role="admin")
 def dashboard(con, h, user, body, q):
-    return sv.dashboard(con, q.get("month"), int(q["branch_id"]) if q.get("branch_id") else None)
+    return sv.dashboard(con, q.get("month"), int(q["branch_id"]) if q.get("branch_id") else None, int(q["group_id"]) if q.get("group_id") else None)
 
 
 @route("POST", "/api/students/{sid}/trial")
