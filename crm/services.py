@@ -955,6 +955,7 @@ def student_detail(con, sid: int) -> dict:
         "student": s, "family": fam, "parents": parents, "siblings": siblings, "group": grp,
         "profile_stage_reasons": {"left": __import__("crm.lifecycle",fromlist=["LEFT_REASONS"]).LEFT_REASONS, "refused": TRIAL_REFUSALS},
         "profile_token": __import__("crm.clientprofile",fromlist=["signature"]).signature(con,sid),
+        "refund_requests": __import__("crm.refundapproval",fromlist=["listing"]).listing(con,sid),
         "subscriptions": subs, "subscription_refunds": __import__("crm.subcancel",fromlist=["listing"]).listing(con,sid), "subscription_cancellations": __import__("crm.subcancel",fromlist=["cancellations"]).cancellations(con,sid), "vacations": vacs,
         "enrollments": [e | {"age_warn": "" if e["program_id"] else logic.age_warning(s["birth"], e["group_age"], e["branch_name"])} for e in enrollments_of(con, sid)],
         "trial_age_warn": logic.age_warning(s["birth"], grp["age"], _branch_name(con, grp["branch_id"])) if grp and not grp["program_id"] and s["funnel"] == "sales" else "", "makeups": makeups, "history": hist,

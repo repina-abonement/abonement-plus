@@ -821,6 +821,9 @@ def complete(con, tid: int, user: dict, result: str = "") -> None:
     t = con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
     if not t:
         raise comms.CommsError("Задача не найдена")
+    if t['source']=='refund' and str(t['auto_key'] or '').startswith('refund-control:'):
+        request=con.execute('SELECT state FROM refund_requests WHERE control_task_id=?',(tid,)).fetchone()
+        if request and request['state']!='received':raise comms.CommsError('Сначала подтвердите получение денег клиентом в заявке на возврат')
     client = bool(t["student_id"] or t["family_id"])
     if t["kind"] == "plan" and not client:
         from . import planner

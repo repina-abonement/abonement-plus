@@ -34,6 +34,9 @@ def init(con):
     if 'lesson_schedule' not in {r[1] for r in con.execute('PRAGMA table_info(subscriptions)')}:
         con.execute("ALTER TABLE subscriptions ADD COLUMN lesson_schedule TEXT NOT NULL DEFAULT ''")
 
+    from . import refundapproval
+    refundapproval.init(con)
+
 
 def today():
     from datetime import datetime
@@ -239,7 +242,7 @@ def cancel(con, subid, user, data):
         + ('Средства оставлены на балансе' if mode=='balance' else 'Ожидается фактический возврат; средства зарезервированы'),user,'payment')
     # При отмене последнего абонемента обновляем срок проверки продления.
     from . import tasks
-    if tasks.schedule_renewal(con,sub['student_id']) is None:
+    if not data.get('_preserve_other_tasks') and tasks.schedule_renewal(con,sub['student_id']) is None:
         con.execute("UPDATE tasks SET status='cancelled',done_at=?,result='Все месячные абонементы отменены' WHERE auto_key=? AND status='open'",
                     (sv.now_iso(),f"subscription-renew:{sub['student_id']}"))
     return {'ok':True,'amount':release,'balance_available':available,'applied_to_invoices':applied}

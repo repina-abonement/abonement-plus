@@ -154,6 +154,8 @@ def ssl_ctx():
 
 def init(con):
     con.executescript(SCHEMA)
+    from . import fiscalcheck
+    fiscalcheck.init(con)
 
 
 def _now() -> datetime:

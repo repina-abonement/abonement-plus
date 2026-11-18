@@ -469,7 +469,7 @@ def sell_single(con, sid: int, user: dict, group_id: int | None = None) -> int:
     return sub
 
 
-def payment_receipt_info(con,payment):
+def _payment_receipt_info(con,payment):
     """Confirmed fiscal evidence only, matched by provider payment ID, never by amount/date."""
     link=con.execute("SELECT pk_payment_id FROM pay_links WHERE payment_id=? AND pk_payment_id!='' ORDER BY id DESC LIMIT 1",(payment['id'],)).fetchone()
     if not link:
@@ -487,6 +487,17 @@ def payment_receipt_info(con,payment):
     if any(r['pk_status'] in ('created','sending','request_sent') for r in rows):return {'status':'pending','label':'Чек формируется'}
     missing=con.execute("SELECT 1 FROM fx_payments WHERE source='paykeeper' AND ext_id=? AND status='missing'",(provider_id,)).fetchone()
     return {'status':'missing' if missing else 'unknown','label':'Чек не найден' if missing else 'Чек не подтверждён'}
+
+
+def payment_receipt_info(con,payment):
+    import json
+    result=_payment_receipt_info(con,payment)
+    check=con.execute('SELECT result FROM fiscal_payment_checks WHERE payment_id=?',(payment['id'],)).fetchone()
+    if check:
+        latest=json.loads(check['result'])
+        if result['status']=='confirmed':result.update({k:latest[k] for k in ('checked_at','source_available','note') if k in latest})
+        else:result.update(latest)
+    return result
 
 
 def subscription_payment_details(con,sid):

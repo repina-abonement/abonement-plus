@@ -1107,7 +1107,7 @@ def workdesk(con, h, user, body, q):
     reds.sort(key=lambda x: x["ts"] or "", reverse=True)
     rest = [x for x in items if x["level"] != "red"]
     rest.sort(key=lambda x: x["ts"] or "", reverse=True)
-    return {"urgent": reds + rest, "board": board, "new_cards_today": sv.new_cards_today(con), "birthdays": sv.birthdays(con), "needs_subs": schedule.needs_subs(con),
+    return {"urgent": reds + rest, "board": board, "refund_requests": __import__("crm.refundapproval",fromlist=["listing"]).listing(con) if user["role"]=="admin" else [], "new_cards_today": sv.new_cards_today(con), "birthdays": sv.birthdays(con), "needs_subs": schedule.needs_subs(con),
             "checkins": staff.day_report(con) if checkin_reviewer(con, user) else None,
             "merch_alerts": merch_alerts(con),
             "waitlist": __import__("crm.waitlist", fromlist=["funnel"]).funnel(con),
@@ -1348,6 +1348,12 @@ def enrollment_transfer(con, h, user, body, q, eid):
 @route("GET", "/api/subscriptions/{sub}/payment-quote", role="operator")
 def subscription_payment_quote(con,h,user,body,q,sub):
     return sv.payment_quote(con,int(sub),q.get("paid_date"))
+
+
+@route("POST", "/api/payments/{pid}/fiscal-check", role="payments:view")
+def payment_fiscal_check(con,h,user,body,q,pid):
+    from . import fiscalcheck
+    return fiscalcheck.check(con,int(pid),user)
 
 
 @route("POST", "/api/subscriptions/{sub}/pay", role="operator")
@@ -2072,12 +2078,30 @@ def attendance_cert(con, h, user, body, q, aid):
     return {"ok": True}
 
 
+@route("POST", "/api/refund-requests/{rid}/review", role="admin")
+def refund_review(con,h,user,body,q,rid):
+    from . import refundapproval
+    return refundapproval.review(con,int(rid),user,body)
+
+
+@route("POST", "/api/refund-requests/{rid}/prepare", role="operator")
+def refund_prepare(con,h,user,body,q,rid):
+    from . import refundapproval
+    return refundapproval.prepare(con,int(rid),user)
+
+
+@route("POST", "/api/refund-requests/{rid}/received", role="operator")
+def refund_received(con,h,user,body,q,rid):
+    from . import refundapproval
+    return refundapproval.received(con,int(rid),user,body)
+
+
 @route("POST", "/api/subscriptions/{sub}/cancel", role="operator")
 def cancel(con, h, user, body, q, sub):
     from . import subcancel
     if body.get('refund') or body.get('mode')=='refund':
-        if not perms.can(user, "payments", "view"):
-            raise ApiError("Возврат оформляют руководитель или старший администратор",403)
+        from . import refundapproval
+        return refundapproval.request(con,int(sub),user,body)
     return subcancel.cancel(con,int(sub),user,body)
 
 
