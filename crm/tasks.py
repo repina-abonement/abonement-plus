@@ -162,13 +162,63 @@ def add_task(con, kind: str, student_id: int | None, due: datetime | str, *, aut
     return cur.lastrowid if cur.rowcount else None
 
 
+def subscription_renewal_plan(con, student_id):
+    from . import logic, schedule, closures
+    month=con.execute("SELECT MAX(month) FROM subscriptions WHERE student_id=? AND status!='cancelled' AND COALESCE(kind,'month')='month'",(student_id,)).fetchone()[0]
+    if not month:return None
+    plans=[]
+    for sub in con.execute("SELECT * FROM subscriptions WHERE student_id=? AND month=? AND status!='cancelled' AND COALESCE(kind,'month')='month'",(student_id,month)):
+        enrollment=con.execute('SELECT * FROM enrollments WHERE id=?',(sub['enrollment_id'],)).fetchone()
+        try:parts=json.loads(sub['lesson_schedule'] or '[]')
+        except (ValueError,TypeError):parts=[]
+        if not isinstance(parts,list):parts=[]
+        if not parts and enrollment:parts=[{'group_id':enrollment['group_id'],'dates':None}]
+        expected,actual,names=set(),set(),[]
+        try:excluded=set(json.loads(sub['excluded_dates'] or '[]'))
+        except (ValueError,TypeError):excluded=set()
+        for part in parts:
+            if not isinstance(part,dict):continue
+            group=con.execute('SELECT * FROM groups WHERE id=?',(part.get('group_id'),)).fetchone()
+            if not group:continue
+            names.append(group['name'])
+            own=enrollment['weekdays'] if enrollment and enrollment['group_id']==group['id'] else ''
+            nominal={d.isoformat() for d in schedule.month_dates(con,group,own,month) if not closures.is_closed(con,group['id'],d)}
+            expected.update((group['id'],day) for day in nominal)
+            selected=part.get('dates')
+            selected=selected if isinstance(selected,list) else nominal
+            for day in selected:
+                if not isinstance(day,str) or day[:7]!=month or day in excluded:continue
+                try:date.fromisoformat(day)
+                except ValueError:continue
+                if sub['valid_from'] and day<sub['valid_from']:continue
+                if sub['valid_until'] and day>sub['valid_until']:continue
+                actual.add((group['id'],day))
+        partial=bool(expected-actual) or bool(excluded)
+        due=month+'-20'
+        note=f"Абонемент: {logic.month_label(month)}"+(' · '+' + '.join(dict.fromkeys(names)) if names else '')
+        if actual:
+            last=max(day for _,day in actual)
+            note+=f". Последнее занятие: {date.fromisoformat(last):%d.%m.%Y}"
+            if partial:
+                due=(date.fromisoformat(last)-timedelta(days=3)).isoformat()
+                note+=f". Неполный месяц, включено занятий: {len(actual)}. Проверить продление за 3 календарных дня до последнего занятия: {date.fromisoformat(due):%d.%m.%Y}"
+        plans.append((due,note))
+    return {'due':min(due for due,_ in plans)+'T23:59','note':'\n'.join(note for _,note in plans)}
+
+
+def refresh_subscription_renewals(con):
+    # Обновляем только открытые автоматические задачи; выполненные не открываем заново.
+    for task in con.execute("SELECT * FROM tasks WHERE source='subscription' AND kind='renew' AND status='open' AND auto_key LIKE 'subscription-renew:%'").fetchall():
+        plan=subscription_renewal_plan(con,task['student_id'])
+        if plan and (task['due_at']!=plan['due'] or task['note']!=plan['note']):
+            con.execute('UPDATE tasks SET due_at=?,note=? WHERE id=?',(plan['due'],plan['note'],task['id']))
+
+
 def schedule_renewal(con, student_id: int) -> int | None:
-    """После продажи: одна общая задача на 20-е последнего месяца абонемента."""
-    month = con.execute("""SELECT MAX(month) FROM subscriptions
-        WHERE student_id=? AND status!='cancelled' AND kind!='single'""", (student_id,)).fetchone()[0]
-    if not month:
-        return None
-    due = f"{month}-20T23:59"
+    """Одна общая задача: неполный месяц — за три дня до последнего занятия."""
+    plan=subscription_renewal_plan(con,student_id)
+    if not plan:return None
+    due,note=plan['due'],plan['note']
     key = f"subscription-renew:{student_id}"
     existing = con.execute("SELECT id FROM tasks WHERE auto_key=?", (key,)).fetchone()
     # Закрываем прежние задачи продажи/продления, сохраняя историю и ручные поручения.
@@ -183,10 +233,10 @@ def schedule_renewal(con, student_id: int) -> int | None:
     if existing:
         tid = existing[0]
         con.execute("""UPDATE tasks SET kind='renew', title='Проверить продление', due_at=?,
-            assignee_id=NULL, status='open', done_at=NULL, done_by='', result='' WHERE id=?""", (due, tid))
+            assignee_id=NULL, status='open', done_at=NULL, done_by='', result='',note=? WHERE id=?""", (due,note,tid))
     else:
         tid = add_task(con, 'renew', student_id, due, title='Проверить продление',
-                       auto_key=key, source='subscription')
+                       auto_key=key, source='subscription',note=note)
         con.execute("UPDATE tasks SET assignee_id=NULL WHERE id=?", (tid,))
     return tid
 
@@ -449,6 +499,7 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     request_missing_data(con, now.date())
     planner.generate(con, now.date())
     program.apply_pending(con, now.date())
+    refresh_subscription_renewals(con)
     from . import pu, waitlist, ownerbot, lifecycle
     pu.tick(con, now)
     lifecycle.tick(con, now)  # задачи на всех этапах, где клиент может застрять

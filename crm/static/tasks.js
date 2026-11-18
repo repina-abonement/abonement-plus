@@ -172,7 +172,7 @@ function cardTasksBlock(d) {
   const late=t=>t.client_task?t.due_at.slice(0,10)<S.meta.today:t.due_at<now;
   const row = (t, main) => `<div class="ct-row ${main ? "main" : ""} ${late(t) ? "late" : ""}" data-ctask="${t.id}" role="button" tabindex="0" title="Нажмите, чтобы изменить задачу">
     <span class="ct-ico">${t.icon || "✅"}</span><div class="grow"><b>${esc(t.title)}</b> ${kindPill(t)}
-    <div class="small muted">${late(t) ? "⏰ просрочено, " : ""}${dShort(t.due_at)}${t.priority?" · 🔥 Приоритет":""}</div></div>
+    <div class="small muted">${late(t) ? "⏰ просрочено, " : ""}${dShort(t.due_at)}${t.priority?" · 🔥 Приоритет":""}</div>${t.kind==='renew'&&t.note?`<div class="small muted" style="white-space:pre-line">${esc(t.note)}</div>`:''}</div>
     <span class="ct-edit">✎</span></div>`;
   const last = (d.history || []).slice(0, 2);
   return `<div class="ct-box">
