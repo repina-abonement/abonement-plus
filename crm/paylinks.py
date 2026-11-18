@@ -61,7 +61,7 @@ def create(con, sid: int, amount: int, user: dict, purpose: str = "", subscripti
         raise PayLinkError("Укажите сумму")
     if subscription_id:
         from . import program, pricing
-        row=con.execute("SELECT student_id,status FROM subscriptions WHERE id=?",(subscription_id,)).fetchone()
+        row=con.execute("SELECT student_id,status,kind FROM subscriptions WHERE id=?",(subscription_id,)).fetchone()
         if not row or row["student_id"]!=sid or row["status"]=='cancelled':
             raise PayLinkError("Абонемент не найден или отменён")
         program.reprice(con,subscription_id)
@@ -75,7 +75,10 @@ def create(con, sid: int, amount: int, user: dict, purpose: str = "", subscripti
                        FROM students s WHERE s.id=?""", (sid,)).fetchone()
     if not s:
         raise PayLinkError("Ученик не найден")
-    purpose = (purpose or "").strip() or f"Занятия футболом: {s[0]}"
+    if subscription_id:
+        purpose=customer_payment_purpose(s[0],row['kind']=='single')
+    else:
+        purpose = (purpose or "").strip() or customer_payment_purpose(s[0])
     orderid = f"crm{sid}-{secrets.token_hex(3)}"
     from . import comms
     receipt_token = secrets.token_urlsafe(32)
@@ -280,7 +283,12 @@ def create_bundle(con,sid,sub_ids,user):
         if due:parts.append((sub_id,due,sub['month']))
     if not parts:raise PayLinkError('Все выбранные абонементы уже оплачены')
     child=sv.get_student_row(con,sid)['name']
-    purpose='Абонементы: '+child+' · '+', '.join(logic.month_label(m) for _,_,m in parts)
+    purpose=customer_payment_purpose(child)
     link=create(con,sid,sum(amount for _,amount,_ in parts),user,purpose)
     con.executemany('INSERT INTO pay_link_subscriptions(link_id,subscription_id,amount) VALUES (?,?,?)',[(link['id'],sub,amount) for sub,amount,_ in parts])
     return link
+
+
+def customer_payment_purpose(child,single=False):
+    name=' '.join(str(child or '').split())
+    return f"{'Разовое занятие' if single else 'Абонемент'} {name}. Футболика"
