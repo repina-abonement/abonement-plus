@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS fx_runs (
 SECRET_KEYS = ("fx_tochka_token", "fx_pk_password", "fx_ofd_token")
 PLAIN_KEYS = ("fx_enabled", "fx_pk_server", "fx_pk_user", "fx_inn", "fx_controller", "fx_owner",
               "fx_auto_retry", "fx_start", "fx_remind_hours")
-DEFAULTS = {"fx_enabled": "0", "fx_auto_retry": "1", "fx_remind_hours": "2"}
+DEFAULTS = {"fx_enabled": "0", "fx_auto_retry": "0", "fx_remind_hours": "2"}
 
 TOCHKA_API = "https://enter.tochka.com/uapi"
 OFD_API = "https://ofv-api-v0-1-1.evotor.ru/v1/client"

@@ -16,7 +16,7 @@ class FiscalPaymentCheck(unittest.TestCase):
     def test_no_receipt_is_time_bounded_not_fiscal_failure(self):
         pid=self.payment()
         with patch.object(fiscal,'pk_call',return_value=[]) as api:result=fiscalcheck.check(self.con,pid,self.user)
-        self.assertEqual(result['status'],'not_found');self.assertIn('на момент проверки',result['label']);self.assertTrue(result['checked_at'])
+        self.assertEqual(result['status'],'unknown');self.assertEqual(result['label'],'Первичный чек не проверен');self.assertIn('Пустой ответ не означает',result['note']);self.assertTrue(result['checked_at'])
         self.assertEqual(api.call_args.args[1],'/info/receipts/bypaymentid/')
         self.assertEqual(api.call_args.args[2],{'payment_id':'synthetic-11534'})
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments').fetchone()[0],1)

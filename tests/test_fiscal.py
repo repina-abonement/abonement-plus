@@ -36,7 +36,7 @@ def main():
     check(fiscal.run(con).get("skipped"), "Пока не включили, модуль молчит")
 
     fiscal.save_settings(con, {"fx_enabled": "1", "fx_tochka_token": "t-123456", "fx_pk_server": "https://x.paykeeper.ru",
-                               "fx_pk_user": "api", "fx_pk_password": "p", "fx_ofd_token": "o", "fx_inn": "770000000001"})
+                               "fx_pk_user": "api", "fx_pk_password": "p", "fx_auto_retry": "1", "fx_ofd_token": "o", "fx_inn": "770000000001"})
     comms.put(con, "fx_start", "2026-11-01")
     v = fiscal.settings_view(con)
     check(v["fx_tochka_token"] == "••••3456", "Токен на экране только маской")

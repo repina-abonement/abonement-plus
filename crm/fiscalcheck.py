@@ -29,6 +29,7 @@ def check(con,pid,user):
                 raise ValueError('Unverified receipt response')
             receipts=[r for r in receipts if r.get('type') in ('sale',None)]
             result['source_available']=True
+            result['coverage']='Дополнительные чеки и окончательный расчёт; первичный чек этим методом не проверяется'
             confirmed=[r for r in receipts if r.get('status')=='success' and all(r.get(k) for k in ('fn','fnd','fpd'))
                        and sum(fiscal.kop(r.get(k)) for k in ('sum_cashless','sum_cash','sum_advance','sum_credit'))==fiscal.kop(payment['amount'])]
             if confirmed:
@@ -36,7 +37,7 @@ def check(con,pid,user):
                 r=confirmed[-1];result.update(status='confirmed',label='Чек пробит',receipt_id=str(r['id']))
             elif any(r.get('status') in ('created','sending','request_sent') for r in receipts):result.update(status='pending',label='Чек формируется')
             elif any(r.get('status') in ('failed','timeout') for r in receipts):result.update(status='failed',label='Ошибка фискализации')
-            elif not receipts:result.update(status='not_found',label='Чек не найден на момент проверки')
+            elif not receipts:result.update(status='unknown',label='Первичный чек не проверен',note='PayKeeper receipts/bypaymentid не возвращает первый чек при получении платежа. Пустой ответ не означает отсутствие чека')
             else:result['note']='API не подтвердил фискальные реквизиты и сумму этой оплаты'
         except Exception:
             result.update(status='unavailable',label='Источник недоступен',source_available=False,note='Не удалось получить и проверить ответ API PayKeeper. Новый чек не создавался')

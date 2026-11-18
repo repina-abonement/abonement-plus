@@ -1758,6 +1758,18 @@ def fx(fn, *a, **kw):
         raise ApiError(str(e))
 
 
+@route("GET", "/api/fiscal/source-status", role="admin")
+def fiscal_source_status(con,h,user,body,q):
+    from . import paykeepercheck
+    return paykeepercheck.source_status(con)
+
+
+@route("GET", "/api/fiscal/paykeeper-payment", role="admin")
+def fiscal_paykeeper_payment(con,h,user,body,q):
+    from . import paykeepercheck
+    return paykeepercheck.inspect(con,q.get('provider_payment_id'))
+
+
 @route("GET", "/api/fiscal", role="fiscal")
 def fiscal_get(con, h, user, body, q):
     v = fiscal.view(con, int(q.get("days") or 30))
