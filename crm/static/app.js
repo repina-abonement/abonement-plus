@@ -1,6 +1,20 @@
 "use strict";
 /* Абонемент Плюс — интерфейс без сборки и зависимостей. */
 
+/* Календарь по нажатию на любую часть поля, включая динамические формы. */
+document.addEventListener('click', event => {
+  const input=event.target;
+  if(!(input instanceof HTMLInputElement)||!['date','month','datetime-local'].includes(input.type)
+      ||input.disabled||input.readOnly||typeof input.showPicker!=='function')return;
+  try {
+    input.focus({preventScroll:true});
+    input.showPicker();
+    event.preventDefault();
+  } catch (_) {
+    // Браузеры без разрешения на showPicker сохраняют обычное поведение поля.
+  }
+});
+
 /* Новый дизайн (проба): хранится в этом браузере, по умолчанию выключен */
 function applyTheme(t) { document.documentElement.classList.toggle("theme-soft", t === "soft"); }
 try { applyTheme(localStorage.getItem("crm.theme")); } catch (_) {}
