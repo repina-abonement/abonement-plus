@@ -467,3 +467,47 @@ def sell_single(con, sid: int, user: dict, group_id: int | None = None) -> int:
     con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
                 (sid, _now(), user.get("name", ""), "payment", f"Выставлено разовое занятие: {price} ₽"))
     return sub
+
+
+def payment_receipt_info(con,payment):
+    """Confirmed fiscal evidence only, matched by provider payment ID, never by amount/date."""
+    link=con.execute("SELECT pk_payment_id FROM pay_links WHERE payment_id=? AND pk_payment_id!='' ORDER BY id DESC LIMIT 1",(payment['id'],)).fetchone()
+    if not link:
+        return {'status':'unknown','label':'Чек не подтверждён'}
+    provider_id=link['pk_payment_id']
+    rows=list(con.execute("SELECT * FROM fx_receipts WHERE source='paykeeper' AND pk_payment=? AND op=1 ORDER BY id DESC",(provider_id,)))
+    receipt=next((r for r in rows if r['pk_status']=='success'),None)
+    if not receipt:
+        matched=con.execute("""SELECT r.* FROM fx_payments p JOIN fx_receipts r ON r.id=p.receipt_id
+            WHERE p.source='paykeeper' AND p.ext_id=? AND p.status='ok' AND r.op=1
+            AND (r.source='ofd' OR r.pk_status='success')""",(provider_id,)).fetchone()
+        receipt=matched
+    if receipt:return {'status':'confirmed','label':'Чек пробит','receipt_id':receipt['ext_id'],'receipt_at':receipt['ts']}
+    if any(r['pk_status'] in ('failed','timeout') for r in rows):return {'status':'failed','label':'Ошибка фискализации'}
+    if any(r['pk_status'] in ('created','sending','request_sent') for r in rows):return {'status':'pending','label':'Чек формируется'}
+    missing=con.execute("SELECT 1 FROM fx_payments WHERE source='paykeeper' AND ext_id=? AND status='missing'",(provider_id,)).fetchone()
+    return {'status':'missing' if missing else 'unknown','label':'Чек не найден' if missing else 'Чек не подтверждён'}
+
+
+def subscription_payment_details(con,sid):
+    """Explain the existing chronological ledger allocation; no financial writes."""
+    payments=[dict(r) for r in con.execute('SELECT * FROM payments WHERE student_id=? AND cancelled=0 ORDER BY paid_at,id',(sid,))]
+    budget=max(0,sum(p['amount'] for p in payments))
+    sources=[]
+    for p in payments:
+        if p['amount']<=0 or not budget:continue
+        available=min(p['amount'],budget);budget-=available
+        sources.append([p,available])
+    details={};index=0
+    for sub in obligations(con,sid):
+        need=sub['price'];rows=[]
+        while need>0 and index<len(sources):
+            p,available=sources[index];amount=min(need,available)
+            if amount:
+                rows.append({'payment_id':p['id'],'amount':amount,'payment_total':p['amount'],
+                    'method':payment_method(con,p),'method_label':METHODS.get(payment_method(con,p),p['method']),
+                    'paid_at':p['paid_at'],'created_at':p['created_at'],'receipt':payment_receipt_info(con,p)})
+                need-=amount;sources[index][1]-=amount
+            if sources[index][1]<=0:index+=1
+        if not sub['retained']:details[sub['id']]=rows
+    return details

@@ -966,6 +966,7 @@ def student_detail(con, sid: int) -> dict:
         "ledger": __import__("crm.money", fromlist=["ledger"]).ledger(con, sid),
         "family_kids": _rows(con.execute("SELECT id, name FROM students WHERE family_id=? AND id!=? AND archived=0", (s["family_id"], sid))),
         "payments": __import__("crm.money",fromlist=["payments_for_student"]).payments_for_student(con,sid),
+        "subscription_payment_details": __import__("crm.money",fromlist=["subscription_payment_details"]).subscription_payment_details(con,sid),
         "discounts": _rows(con.execute("SELECT id, name, percent, rule FROM discounts WHERE active=1 ORDER BY name")),
         "stage_label": stage_label,
         "next_month": logic.shift_month(cur, 1), "cur_month": cur,
