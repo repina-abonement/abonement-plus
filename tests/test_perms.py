@@ -91,7 +91,7 @@ def main():
     sid = json.loads(owner("GET", "/api/students")[1])
     sid = (sid[0] if isinstance(sid, list) else sid["items"][0])["id"]
     mark = {"student_id": sid, "group_id": gid, "date": "2026-01-01", "status": "present"}
-    check(S["olga"]("POST", "/api/attendance", mark)[0] == 403, "Администратор журнал только смотрит")
+    check(S["olga"]("POST", "/api/attendance", mark)[0] != 403, "Администратор может отмечать в журнале")
     check(S["varya"]("POST", "/api/attendance", mark)[0] != 403, "Старший администратор отмечает в журнале")
 
     print("Тренер видит своих детей")

@@ -20,7 +20,7 @@ SECTIONS: dict[str, dict[str, str]] = {
     "members": DESK | {"coach": "own"},  # тренер: дети своих групп без телефонов, только просмотр
     "today": {"owner": "full", "coach": "own"},
     "planner": {"owner": "full", "senior": "full", "operator": "own", "coach": "own", "promoter": "own", "lawyer": "own", "trainee": "own"},
-    "journal": {"owner": "full", "senior": "full", "operator": "view", "coach": "own", "journal": "full"},  # journal: отметка «отмечает журнал»
+    "journal": {"owner": "full", "senior": "full", "operator": "full", "coach": "own", "journal": "full"},  # journal: отметка «отмечает журнал»
     "schedule": {"owner": "full", "senior": "full", "operator": "view", "coach": "view", "promoter": "view"},
     "coaches": {"owner": "full", "senior": "view", "coach": "own"},
     "team": {"owner": "full", "senior": "view", "operator": "view", "coach": "view", "promoter": "view", "lawyer": "view"},

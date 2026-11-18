@@ -2410,19 +2410,19 @@ function journalRow(r, before) {
   if (r.status === "makeup" || r.makeup_id) return makeupRow({ ...r, status: r.attendance_id ? r.status : r.mk_status, home_group: "отработка" + (r.home_group ? ", из группы " + r.home_group : "") });
   if (r.erp_visit_kind) {
     const kind = r.erp_visit_kind === "makeup" ? "Отработка" : "Разовое занятие";
-    return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill">${kind}</span></div><span>${r.status === "present" ? "Был" : "Пропуск"}</span></div>`;
+    return `<div class="list-row journal-entry"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill">${kind}</span></div><span>${r.status === "present" ? "Был" : "Пропуск"}</span></div>`;
   }
-  if (r.warned) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill yellow">предупредил, не придёт</span>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ""}</div>
+  if (r.warned) return `<div class="list-row journal-entry"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill yellow">предупредил, не придёт</span>${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ""}</div>
     <div class="mark">${before ? `<button data-unwarn="${r.id}">Отменить, придёт</button>` : `<button data-att="present" data-sid="${r.id}">Всё-таки был</button>`}</div></div>`;
-  if (r.status === "vacation") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)}</div><span class="pill yellow">Отпуск</span></div>`;
-  if (r.historical_trial_id) return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill jt-trial">ПУ ${esc(r.trial_at.slice(11,16))}</span></div><span>${r.trial_came ? 'Пришёл' : 'Не пришёл'}</span></div>`;
-  if (r.status === "trial") return `<div class="list-row"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill jt-trial">ПУ ${r.trial_at.slice(11, 16)}</span></div>
+  if (r.status === "vacation") return `<div class="list-row journal-entry"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)}</div><span class="pill yellow">Отпуск</span></div>`;
+  if (r.historical_trial_id) return `<div class="list-row journal-entry"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill jt-trial">ПУ ${esc(r.trial_at.slice(11,16))}</span></div><span>${r.trial_came ? 'Пришёл' : 'Не пришёл'}</span></div>`;
+  if (r.status === "trial") return `<div class="list-row journal-entry"><div class="grow click" data-who="${r.id}">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill jt-trial">ПУ ${r.trial_at.slice(11, 16)}</span></div>
     <div class="mark"><button data-trial="1" data-sid="${r.id}" aria-pressed="${r.trial_came === 1}" class="${r.trial_came === 1 ? "on-present" : ""}">Пришёл</button><button data-trial="0" data-sid="${r.id}" aria-pressed="${r.trial_came === 0}" class="${r.trial_came === 0 ? "on-absent" : ""}">Не пришёл</button></div></div>`;
   const unpaidPill = r.unpaid ? ` <span class="pill unpaid-flag">не оплачен, не допускать</span>` : "";
   const locked = r.resolved ? `<span class="pill">${r.resolved === "credit" ? "в перерасчёте" : "отработан"}</span>` : "";
-  if (before) return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} ${jTag(r)} ${unpaidPill}</div>
+  if (before) return `<div class="list-row journal-entry"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} ${jTag(r)} ${unpaidPill}</div>
     <div class="mark"><button data-warn="${r.id}" title="Родители заранее сказали, что не придёт">🙅 Не придёт</button></div></div>`;
-  return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} ${jTag(r)} ${locked}${unpaidPill}</div>
+  return `<div class="list-row journal-entry"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} ${jTag(r)} ${locked}${unpaidPill}</div>
     <div class="mark">
       <button data-att="present" data-sid="${r.id}" class="${r.status === "present" ? "on-present" : ""}">Был</button>
       <button data-att="absent" data-sid="${r.id}" class="${r.status === "absent" ? "on-absent" : ""}">Пропуск</button>
@@ -2431,7 +2431,7 @@ function journalRow(r, before) {
 
 function makeupRow(r) {
   const mark=r.status==='present'?'done':r.status==='absent'?'missed':r.status;
-  return `<div class="list-row"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill jt-makeup">отработка</span>
+  return `<div class="list-row journal-entry"><div class="grow click" data-who="${r.id}" style="cursor:pointer">${jNum(r)}${esc(displayChildName(r.name))}${jAge(r)} <span class="pill jt-makeup">отработка</span>
       <div class="small muted">${esc(r.home_group || "")} · за пропуск ${dShort(r.absence_date)}</div></div>
     <div class="mark">
       <button data-mk="${r.makeup_id}" data-st="done" class="${mark === "done" ? "on-present" : ""}">Пришёл</button>
