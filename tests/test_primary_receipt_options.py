@@ -76,3 +76,13 @@ class PrimaryOptions(unittest.TestCase):
             fiscal.run_worker_cycle(self.con)
         self.assertEqual(len(writes),3)
         self.assertFalse(self.con.in_transaction)
+
+    def test_ofd_http_error_retains_safe_reason_not_only_unavailable(self):
+        primary=primaryreceipt.parse(self.options('order'),{'available':True,'status':'obtained'},'order',1350)
+        fiscal.comms.put(self.con,'fx_ofd_token','PRIVATE-OFD-TOKEN')
+        with patch.object(fiscal,'fetch_ofd_kkts',return_value=['synthetic-kkt']),patch.object(fiscal.comms,'http',return_value=(400,{'message':'Invalid dateFrom PRIVATE-OFD-TOKEN 79000000111'})):
+            result=paykeepercheck.primary_ofd(self.con,primary)
+        self.assertEqual(result['http_status'],400)
+        self.assertEqual(result['error_stage'],'receipts')
+        self.assertIn('Invalid dateFrom',result['provider_message'])
+        self.assertNotIn('PRIVATE-OFD-TOKEN',str(result));self.assertNotIn('79000000111',str(result))

@@ -10,13 +10,13 @@ RECEIPT_FIELDS=('id','payment_id','type','is_post_sale','status','sum_cashless',
                 'sum_advance','sum_credit','sum_counter_payment','fn','fnd','fpd','ts','obtain_datetime')
 
 
-def inspect(con,provider_id):
+def inspect(con,provider_id,include_bank=True):
     provider_id=str(provider_id or '').strip()
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',provider_id):
         raise sv.ApiError('Укажите ID платежа PayKeeper',400)
     link=con.execute("SELECT l.*,p.amount AS recorded_amount FROM pay_links l JOIN payments p ON p.id=l.payment_id WHERE l.pk_payment_id=? AND p.cancelled=0 ORDER BY l.id DESC LIMIT 1",(provider_id,)).fetchone()
     if not link:raise sv.ApiError('Связанный платёж CRM не найден',404)
-    result={'inspection_version':2,'provider_payment_id':provider_id,'crm_payment_id':link['payment_id'],
+    result={'inspection_version':3,'provider_payment_id':provider_id,'crm_payment_id':link['payment_id'],
             'checked_at':datetime.now(ZoneInfo('Europe/Moscow')).isoformat(timespec='seconds'),
             'payment':{'available':False},'additional_receipts':{'available':False},
             'primary_receipt':{'status':'unverified','note':'Метод receipts/bypaymentid не возвращает первый чек при получении платежа'},
@@ -61,6 +61,9 @@ def inspect(con,provider_id):
     except Exception:
         result['option_fields']={'available':False}
     result['ofd']=primary_ofd(con,result['primary_receipt'])
+    if include_bank:
+        from . import tochkacheck
+        result['bank_settlement']=tochkacheck.inspect(con,result['payment'],result.get('sbp_identifiers',{}))
     return result
 
 
@@ -95,6 +98,7 @@ def primary_ofd(con,primary):
     """Read exact receipt day. Unknown schema/pagination never proves absence."""
     result={'status':'unverified','note':'Наличие чека в ОФД не подтверждено'}
     if primary.get('status')!='fiscal_details' or not fiscal.cfg(con,'fx_ofd_token'):return result
+    stage='cash_registers'
     try:
         kkts=fiscal.fetch_ofd_kkts(con)
         result['cash_registers_count']=len(kkts)
@@ -102,6 +106,8 @@ def primary_ofd(con,primary):
         day=primary['issued_at'][:10]
         result['responses']=[]
         for kkt in kkts:
+            stage='receipts'
+            result['request']={'dateFrom':day+' 00:00:00','dateTo':day+' 23:59:59','dateType':1,'kkt_parameter':'kktRegId'}
             raw=fiscal.ofd_get(con,'/receipts',{'dateFrom':day+' 00:00:00','dateTo':day+' 23:59:59','dateType':1,'kktRegId':kkt})
             result['responses'].append({'shape':fiscal.shape(raw)})
             rows=raw.get('receipts') if isinstance(raw,dict) else None
@@ -118,6 +124,9 @@ def primary_ofd(con,primary):
                                'fn':fn,'fd':fd,'fp':fp,'total_minor':primary['total_minor'],
                                'issued_at':primary['issued_at']}
         result['note']='Точного совпадения в полученных ответах нет; полнота и пагинация требуют проверки'
-    except Exception:
-        result.update(status='unavailable',note='Не удалось прочитать чеки ОФД за дату первичного чека')
+    except Exception as error:
+        result.update(status='unavailable',note='Не удалось прочитать чеки ОФД за дату первичного чека',error_stage=stage,error_type=type(error).__name__)
+        if isinstance(error,fiscal.FxError):
+            result['http_status']=error.http_status
+            result['provider_message']=error.provider_message
     return result

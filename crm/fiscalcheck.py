@@ -26,7 +26,7 @@ def check(con,pid,user):
             # The first receipt is absent from receipts/bypaymentid. Inspect exact
             # payment options first; this is read-only and does not claim OFD success.
             from . import paykeepercheck
-            inspection=paykeepercheck.inspect(con,link['pk_payment_id'])
+            inspection=paykeepercheck.inspect(con,link['pk_payment_id'],include_bank=False)
             primary=inspection.get('primary_receipt',{})
             if primary.get('status')=='fiscal_details':
                 fiscal.store_pk(con,[],[{'id':'primary:'+link['pk_payment_id'],

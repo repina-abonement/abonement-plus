@@ -93,7 +93,23 @@ STATUS_LABELS = {"wait": "Ждём чек", "ok": "Есть чек", "missing": 
 
 
 class FxError(ValueError):
-    pass
+    def __init__(self,message,*,http_status=None,provider_message=''):
+        super().__init__(message)
+        self.http_status=http_status
+        self.provider_message=provider_message
+
+
+def safe_provider_message(con,body):
+    """Only error text, never whole responses or authorization/receipt URLs."""
+    if not isinstance(body,dict):return ''
+    text=' · '.join(str(body[k]) for k in ('message','description','error_description','error') if isinstance(body.get(k),str))
+    for key in SECRET_KEYS:
+        secret=cfg(con,key)
+        if secret:text=text.replace(secret,'[скрыто]')
+    text=re.sub(r'https?://\S+','[адрес скрыт]',text)
+    text=re.sub(r'[\w.+-]+@[\w.-]+','[email скрыт]',text)
+    text=re.sub(r'\d{11,}','[номер скрыт]',text)
+    return text[:500]
 
 
 # ---------- сертификат Минцифры ----------
@@ -201,8 +217,7 @@ def tochka_get(con, path: str, method: str = "GET", data=None):
     tok = cfg(con, "fx_tochka_token")
     code, js = comms.http(method, TOCHKA_API + path, data=data, headers={"Authorization": f"Bearer {tok}"}, timeout=30, context=ssl_ctx())
     if code >= 400:
-        msg = json.dumps(js, ensure_ascii=False)[:200] if js else ""
-        raise FxError(f"Точка ответила {code}{': ' + msg if msg else ''}")
+        raise FxError(f"Точка ответила {code}",http_status=code,provider_message=safe_provider_message(con,js))
     return js
 
 
@@ -351,9 +366,9 @@ def ofd_get(con, path: str, params=None):
     url = OFD_API + path + ("?" + urlencode(params) if params else "")
     code, js = comms.http("GET", url, headers={"Token": cfg(con, "fx_ofd_token"), "Accept": "application/json"}, timeout=30, context=ssl_ctx())
     if code in (401, 403):
-        raise FxError("Платформа ОФД: токен не подошёл")
+        raise FxError("Платформа ОФД: токен не подошёл",http_status=code,provider_message=safe_provider_message(con,js))
     if code >= 400:
-        raise FxError(f"Платформа ОФД ответила {code}")
+        raise FxError(f"Платформа ОФД ответила {code}",http_status=code,provider_message=safe_provider_message(con,js))
     return js or {}
 
 
