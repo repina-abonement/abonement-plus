@@ -1880,13 +1880,13 @@ async function openStudent(id, options = {}) {
       <div><b>Что сказать.</b> ${esc(d.stage_tip.say)}</div><div style="margin-top:4px"><b>Чтобы перейти дальше:</b> ${esc(d.stage_tip.next)}</div></details>` : ""}
     <div class="sc-header-tools" role="toolbar" aria-label="Действия клиента">
       ${full?`<button type="button" class="btn sc-tool primary" id="act-sell" title="Продать абонемент или разовое занятие" aria-label="Продать абонемент или разовое занятие"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l3 12h11l2-8H6M9 20h.01M18 20h.01"/></svg></button>`:''}
-      ${!isMember?'<button type="button" class="btn sc-tool" id="act-trial" title="Записать на пробное" aria-label="Записать на пробное">ПУ</button>':''}
+      <button type="button" class="btn sc-tool" id="act-trial" title="Записать на пробное" aria-label="Записать на пробное">ПУ</button>
       ${d.parents.some(p=>p.phone)?'<button type="button" class="btn sc-tool" id="act-call" title="Позвонить основному родителю" aria-label="Позвонить основному родителю"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3 4 5c-2 3 7 14 12 15l4-3-4-4-3 2-4-4 2-3Z"/></svg></button>':''}
       ${full?'<button type="button" class="btn sc-tool" data-profile-edit="name" title="Изменить данные клиента" aria-label="Изменить данные клиента"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16 12-12 4 4L8 20H4Zm10-10 4 4"/></svg></button><button type="button" class="btn sc-tool" data-client-add title="Добавить члена семьи" aria-label="Добавить родителя или ребёнка"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7" r="3"/><path d="M3 20v-3c0-5 12-5 12 0v3M19 7v8M15 11h8"/></svg></button>':''}
       <details class="sc-extra-actions sc-tool-menu"><summary class="btn sc-tool" aria-label="Другие действия" title="Другие действия">⋯</summary><div>${full?'<button class="btn sm" id="act-past-entry">Внести прошедшее ПУ / покупку</button>':''}${isMember?'<button class="btn sm" id="act-vac">Отпуск</button>':''}${full?`<button type="button" class="btn sm" id="act-archive-card">${s.archived?"Вернуть из архива":"Перенести в архив"}</button>`:""}</div></details>
     </div>
     <div id="sc-profile-edit" hidden></div>
-    ${!isMember ? '<div id="sc-trial-booking" hidden></div>' : ""}
+    <div id="sc-trial-booking" hidden></div>
     <div id="sc-past-entry" hidden></div>
   </div>
   <div class="sc-tasks">${cardTasksBlock(d)}</div>

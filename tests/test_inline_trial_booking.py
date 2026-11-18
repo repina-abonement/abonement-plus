@@ -36,6 +36,17 @@ class InlineBookingTest(unittest.TestCase):
         row=sv.get_student_row(self.con,self.sid)
         self.assertEqual(row['name'],'Даниил Примеров');self.assertEqual(row['trial_at'],self.day.isoformat()+'T16:45')
         self.assertEqual(row['group_id'],self.gid);self.assertEqual(smart.required_info(self.con,self.sid,'trial')['missing'],[])
+    def test_member_trial_preserves_main_group_and_funnel(self):
+        home=self.con.execute("INSERT INTO groups(branch_id,name,weekdays,time,age) VALUES (?,'Основная','0','10:00','3–5')",(self.bid,)).lastrowid
+        self.con.execute("UPDATE students SET funnel='members',stage='active',group_id=? WHERE id=?",(home,self.sid))
+        with patch('crm.tasks.send_booked'):
+            result=trialoffer.book_inline(self.con,self.sid,self.data,self.user)
+        self.assertTrue(result['ok'])
+        row=sv.get_student_row(self.con,self.sid)
+        self.assertEqual((row['group_id'],row['trial_group_id'],row['funnel']),(home,self.gid,'members'))
+        self.assertEqual(row['trial_at'],self.day.isoformat()+'T16:45')
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM subscriptions').fetchone()[0],0)
+
     def test_invalid_details_do_not_leave_partial_booking(self):
         before=dict(sv.get_student_row(self.con,self.sid))
         with self.assertRaises(sv.ApiError):trialoffer.book_inline(self.con,self.sid,{**self.data,'parent_name':'Мама'},self.user)

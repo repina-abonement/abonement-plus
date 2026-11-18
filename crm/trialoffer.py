@@ -185,8 +185,8 @@ def book_inline(con,sid: int,data: dict,user: dict) -> dict:
     """Save required data and the selected slot together; failed bookings leave no partial edits."""
     from . import smart, services as sv
     s = con.execute('SELECT * FROM students WHERE id=?',(sid,)).fetchone()
-    if not s or s['archived'] or s['funnel']!='sales':
-        raise sv.ApiError('Для записи выберите действующую карточку лида')
+    if not s or s['archived']:
+        raise sv.ApiError('Для записи выберите действующую карточку клиента')
     try:
         gid = int(data.get('group_id') or 0)
     except (ValueError,TypeError):
@@ -206,7 +206,11 @@ def book_inline(con,sid: int,data: dict,user: dict) -> dict:
             fields['email'] = data['email']
         smart.fill_required(con,sid,fields,user)
         smart.require(con,sid,'trial')
-        sv.update_student(con,sid,{'group_id':gid,'trial_at':day+'T'+time},user)
+        changes={'trial_at':day+'T'+time}
+        if s['funnel']=='sales':
+            changes['group_id']=gid
+        sv.update_student(con,sid,changes,user)
+        con.execute('UPDATE students SET trial_group_id=? WHERE id=?',(gid,sid))
         con.execute('RELEASE inline_trial_booking')
     except BaseException as error:
         con.execute('ROLLBACK TO inline_trial_booking');con.execute('RELEASE inline_trial_booking')
