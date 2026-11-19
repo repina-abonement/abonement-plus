@@ -101,12 +101,17 @@ async function renderPlanner(page) {
     body = `<div class="small muted" style="margin-bottom:10px">За ${7} дней до дня рождения контролёру придёт задача «Создать чат в Telegram для сбора денег», в сам день «Поздравить»</div>
       <div class="list">${(p.people||p.staff).filter(u=>u.role!=='offline_pool').map((u) => `<div class="list-row"><span class="grow">${esc(u.name)}</span><input type="date" data-ub="${u.id}" value="${esc(u.birth || "")}" style="flex:0 0 170px"></div>`).join("")}</div>`;
   }
-  page.innerHTML = `<div class="page-head"><h2 class="grow">Планер</h2><button class="btn primary" id="pl-add">+ Задача</button></div>
+  page.innerHTML = `<div class="page-head"><h2 class="grow">Планер</h2><div class="chips planner-header-actions">${["admin","operator"].includes(S.user.role)?'<button class="btn" id="pl-add-event">+ Мероприятие</button>':''}<button class="btn primary" id="pl-add">+ Задача</button></div></div>
     <div id="pl-form"></div>
     <div class="seg" style="margin-bottom:14px;flex-wrap:wrap">${tabs.map(([k, t]) => `<button data-pt="${k}" class="${C.tab === k ? "active" : ""}">${t}</button>`).join("")}</div>
     <div class="tasks-box">${body}</div>`;
   page.querySelectorAll("[data-pt]").forEach((b) => (b.onclick = () => { step(() => { C.tab = b.dataset.pt; }); }));
   $("#pl-add").onclick = () => openTaskForm($("#pl-form"), render, C.tab === "week" && C.user ? { assignee_id: C.user,date:C.layout==='day'?C.start:S.meta.today } : {});
+  const addEvent=$('#pl-add-event');if(addEvent)addEvent.onclick=()=>{
+    document.querySelectorAll('.planner-event-host').forEach(el=>el.remove());
+    const host=document.createElement('div');host.className='planner-event-host';$('#pl-form').before(host);
+    openPlannerEventForm(host,C.tab==='week'&&C.layout==='day'?C.start:S.meta.today,day=>{C.tab='week';C.start=day||C.start||S.meta.today;return render()});
+  };
   if (C.tab === "week") await renderWeek($("#pl-week"));
   wireTasks(page);
   page.querySelectorAll("[data-plan-detail]").forEach(el => {
@@ -148,7 +153,7 @@ function openPlannerEventForm(host,day,refresh,event={}){
   host.innerHTML=`<form class="planner-event-form sub-form"><h3>${event.id?'Мероприятие':'Новое мероприятие'}</h3><label>Название<input name="title" required maxlength="200" value="${esc(event.title||'')}"></label><label>Дата<input name="day" type="date" required value="${esc(event.day||day)}"></label><div class="row"><label>С<input name="start_time" type="time" value="${esc(event.start_time||'')}"></label><label>До<input name="end_time" type="time" value="${esc(event.end_time||'')}"></label></div><label>Филиал<select name="branch_id"><option value="">Не указан</option>${(S.meta.branches||[]).map(b=>`<option value="${b.id}" ${b.id===event.branch_id?'selected':''}>${esc(b.name)}</option>`).join('')}</select></label><label>Участники<input name="participants" maxlength="1000" value="${esc(event.participants||'')}" placeholder="Кто участвует"></label><label>Подробности<textarea name="note" maxlength="2000">${esc(event.note||'')}</textarea></label><p class="need-err" data-event-error></p><div class="chips"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-event-close>Закрыть</button>${event.id?'<button class="btn danger" type="button" data-event-cancel>Отменить мероприятие</button>':''}</div></form>`;
   const form=host.querySelector('form');form.querySelector('[data-event-close]').onclick=()=>host.remove();
   const cancel=form.querySelector('[data-event-cancel]');if(cancel)cancel.onclick=async()=>{if(!confirm('Отменить мероприятие? Оно останется в истории'))return;try{await api('PATCH',`/api/planner/events/${event.id}`,{cancelled:true});refresh()}catch(e){form.querySelector('[data-event-error]').textContent=e.message}};
-  form.onsubmit=async e=>{e.preventDefault();const button=form.querySelector('[type=submit]');button.disabled=true;try{const data=Object.fromEntries(new FormData(form));data.branch_id=data.branch_id?+data.branch_id:null;await api(event.id?'PATCH':'POST',`/api/planner/events${event.id?'/'+event.id:''}`,data);refresh()}catch(error){form.querySelector('[data-event-error]').textContent=error.message;button.disabled=false}};
+  form.onsubmit=async e=>{e.preventDefault();const button=form.querySelector('[type=submit]');button.disabled=true;try{const data=Object.fromEntries(new FormData(form));data.branch_id=data.branch_id?+data.branch_id:null;await api(event.id?'PATCH':'POST',`/api/planner/events${event.id?'/'+event.id:''}`,data);refresh(data.day)}catch(error){form.querySelector('[data-event-error]').textContent=error.message;button.disabled=false}};
   form.querySelector('input').focus();host.scrollIntoView({block:'nearest'});
 }
 
