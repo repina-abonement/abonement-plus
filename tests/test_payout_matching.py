@@ -151,3 +151,8 @@ class PayoutMatching(unittest.TestCase):
         self.assertTrue(json.loads(snapshot['result'])['items'])
         self.run_bank([self.credit()])
         self.assertEqual(self.states()[0]['status'],'confirmed')
+
+    def test_reversed_name_order_and_initials_on_either_side(self):
+        self.assertTrue(payoutcheck.same_name(['Иванов П.'],'Петр Иванов'))
+        self.assertTrue(payoutcheck.same_name(['Петр Иванов'],'Иванов П.С.'))
+        self.assertFalse(payoutcheck.same_name(['Иванов А.'],'Петр Иванов'))

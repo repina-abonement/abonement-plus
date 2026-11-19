@@ -158,7 +158,7 @@ def same_name(names,payer):
         if len(words)>=2 and words<=bank:return True
         if words==bank:return True
         common={word for word in words&bank if len(word)>2}
-        if common and len(words)>=2 and all(word in bank or any(len(initial)==1 and word.startswith(initial) for initial in bank) for word in words):return True
+        if common and len(words)>=2 and all(word in bank or len(word)==1 and any(other.startswith(word) for other in bank) or any(len(initial)==1 and word.startswith(initial) for initial in bank) for word in words):return True
     return False
 
 
