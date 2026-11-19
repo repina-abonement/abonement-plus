@@ -1,6 +1,6 @@
-"""Планер: личные задачи, поручения сотрудникам, повторяющиеся дела, дни рождения сотрудников, контроль.
+"""Планер: личные задачи, поручения участникам команды, повторяющиеся дела, дни рождения участников команды, контроль.
 
-Все дела живут в той же таблице tasks, что и задачи по пробным, поэтому у каждого сотрудника на рабочем столе
+Все дела живут в той же таблице tasks, что и задачи по пробным, поэтому у каждого участника команды на рабочем столе
 одно общее «на сегодня». Повторяющиеся дела описаны в recurring и раскладываются в задачи на сегодня и завтра.
 Контролёр (например, Варвара) видит задачи всей команды и может вернуть задачу на доработку.
 """
@@ -195,7 +195,7 @@ def add(con, user: dict, data: dict) -> int:
     if not can_add_plan(con,user,who):
         raise PlanError("Ставить задачи другим может администратор или контролёр")
     if who!=offlineplanner.pool_id(con) and not con.execute("SELECT 1 FROM users WHERE id=? AND active=1", (who,)).fetchone():
-        raise PlanError("Сотрудник не найден")
+        raise PlanError("Участник команды не найден")
     d = data.get("date") or date.today().isoformat()
     due = _due(d, data.get("time") or "")
     prio = 1 if data.get("priority") else 0
@@ -261,7 +261,7 @@ def _next_bday(birth: str, today: date) -> date | None:
 
 
 def generate(con, today: date | None = None) -> int:
-    """Раскладывает повторяющиеся дела и дни рождения сотрудников в задачи на сегодня и завтра."""
+    """Раскладывает повторяющиеся дела и дни рождения участников команды в задачи на сегодня и завтра."""
     today = today or date.today()
     made = 0
     now = _now().isoformat(timespec="minutes")
@@ -505,7 +505,7 @@ def edit_task(con, tid: int, user: dict, data: dict) -> dict:
     except (ValueError, TypeError):
         raise PlanError("Проверьте дату, время и исполнителя")
     if not can_change_plan(con, user, who) or (who!=offlineplanner.pool_id(con) and not con.execute("SELECT 1 FROM users WHERE id=? AND active=1", (who,)).fetchone()):
-        raise PlanError("Нельзя назначить задачу этому сотруднику")
+        raise PlanError("Нельзя назначить задачу этому участнику команды")
     mode=shift_mode(con,who,data.get("shift_mode",t.get("shift","common")))
     scope = data.get("scope") or "one"
     if scope not in ("one", "future"):

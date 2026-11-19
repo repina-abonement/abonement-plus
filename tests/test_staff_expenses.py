@@ -20,7 +20,11 @@ class StaffExpenses(unittest.TestCase):
         eid=self.create()
         payload={'amount':'400','transferred_at':'2026-11-18','method':'transfer','request_id':'synthetic-transfer-1'}
         with self.assertRaises(ex.ExpenseError):ex.reimburse(self.con,self.varya,eid,payload)
-        transfer=ex.reimburse(self.con,self.owner(),eid,payload)
+        with self.assertRaises(ex.ExpenseError):ex.reimburse(self.con,self.owner(),eid,payload)
+        # Preserve an old partial reimbursement; a repeat of that saved request is harmless.
+        rid=self.con.execute("INSERT INTO staff_reimbursements(expense_id,amount,transferred_at,method,recorded_by,recorded_at,request_id) VALUES(?,40000,'2026-11-18','transfer',?,'2026-11-18',?)",(eid,self.owner()['id'],payload['request_id'])).lastrowid
+        transfer={'id':rid}
+
         self.assertEqual(ex.reimburse(self.con,self.owner(),eid,payload),transfer)
         with self.assertRaises(ex.ExpenseError):ex.receipt_money(self.con,self.varya,transfer['id'],{'received':True})
         ex.receipt_money(self.con,self.offline,transfer['id'],{'received':True})
@@ -36,6 +40,7 @@ class StaffExpenses(unittest.TestCase):
         self.create('cash')
         result=ex.listing(self.con,self.varya);self.assertEqual(result['summary']['to_transfer'],0)
         with self.assertRaises(ex.ExpenseError):ex.listing(self.con,self.other)
+        self.assertEqual(result['funding']['cash'],'Конверт')
         self.assertTrue(perms.can(self.offline,'staffexpenses'))
         self.assertTrue(perms.can(self.varya,'staffexpenses'))
         self.assertFalse(perms.can(self.other,'staffexpenses'))
@@ -47,7 +52,7 @@ class StaffExpenses(unittest.TestCase):
         photo=ex.add_receipt(self.con,self.offline,eid,{'data':base64.b64encode(b'\x89PNG\r\n\x1a\nsynthetic').decode()})
         self.assertTrue(photo['id']);self.assertEqual(len(ex.listing(self.con,self.varya)['rows'][0]['receipts']),1)
         with self.assertRaises(ex.ExpenseError):ex.add_receipt(self.con,self.offline,eid,{'data':base64.b64encode(b'<script>bad</script>').decode()})
-        transfer=ex.reimburse(self.con,self.owner(),eid,{'amount':'100','transferred_at':'2026-11-18','method':'cash','request_id':'synthetic-transfer-1'})
+        transfer=ex.reimburse(self.con,self.owner(),eid,{'amount':'1000.50','transferred_at':'2026-11-18','method':'cash','request_id':'synthetic-transfer-1'})
         with self.assertRaises(ex.ExpenseError):ex.edit(self.con,self.varya,eid,dict(edit,version=2,amount='900'))
         ex.receipt_money(self.con,self.owner(),transfer['id'],{'voided':True})
         ex.edit(self.con,self.varya,eid,{'version':2,'cancelled':True})
@@ -79,7 +84,8 @@ class StaffExpenses(unittest.TestCase):
                 self.assertEqual(call(self.varya,'GET','/api/staff-expenses')[1]['rows'][0]['id'],eid)
                 self.assertEqual(call(self.offline,'POST',f'/api/staff-expenses/{eid}/reimburse',{'amount':100,'transferred_at':'2026-11-18','method':'cash','request_id':'http-transfer-1'})[0],400)
                 code,photo=call(self.offline,'POST',f'/api/staff-expenses/{eid}/receipts',{'data':base64.b64encode(b'\xff\xd8\xffsynthetic').decode()})
-                self.assertEqual(code,200)
+                self.assertEqual(code,404)
+                photo=ex.add_receipt(self.con,self.offline,eid,{'data':base64.b64encode(b'\xff\xd8\xffsynthetic').decode()})
                 self.assertEqual(call(self.varya,'GET',f"/api/staff-expense-receipts/{photo['id']}",raw=True)[1],b'\xff\xd8\xffsynthetic')
                 self.assertEqual(call(self.other,'GET',f"/api/staff-expense-receipts/{photo['id']}")[0],403)
                 self.assertEqual(call(self.offline,'POST',f'/api/staff-expenses/{eid}/received',{'request_id':'http-employee-received'})[0],200)
@@ -100,7 +106,8 @@ class StaffExpenses(unittest.TestCase):
         self.assertEqual(self.con.execute('SELECT count(*) FROM payments').fetchone()[0],0)
         ex.receipt_money(self.con,self.offline,first['id'],{'voided':True})
         self.assertEqual(ex.listing(self.con,self.varya)['rows'][0]['status'],'К возмещению')
-        partial=ex.mark_received(self.con,self.offline,eid,{'request_id':'received-test-2','amount':'400'})
+        with self.assertRaises(ex.ExpenseError):ex.mark_received(self.con,self.offline,eid,{'request_id':'received-test-2','amount':'400'})
+        self.con.execute("INSERT INTO staff_reimbursements(expense_id,amount,transferred_at,method,recorded_by,recorded_at,request_id) VALUES(?,40000,'2026-11-18','transfer',?,'2026-11-18','legacy-partial')",(eid,self.owner()['id']))
         self.assertEqual(ex.listing(self.con,self.varya)['rows'][0]['to_transfer'],60050)
         ex.mark_received(self.con,self.offline,eid,{'request_id':'received-test-3'})
         self.assertEqual(ex.listing(self.con,self.varya)['rows'][0]['status'],'Возмещено')

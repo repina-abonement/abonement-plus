@@ -1,4 +1,4 @@
-"""Выбранные сотрудником файлы: сначала черновик, отдельное явное действие отправки."""
+"""Выбранные участником команды файлы: сначала черновик, отдельное явное действие отправки."""
 import base64,binascii,json,re,secrets,hashlib
 from datetime import datetime,timedelta,timezone
 from urllib.parse import quote,urlsplit
@@ -57,7 +57,7 @@ def local_file(con,aid):
 def send(con,cid,aid,user,caption=''):
     conv=_conversation(con,cid)
     r=con.execute('SELECT * FROM chat_attachments WHERE id=? AND conversation_id=? AND user_id=?',(aid,cid,user['id'])).fetchone()
-    if not r:raise comms.CommsError('Выбранный файл не относится к этому чату или сотруднику')
+    if not r:raise comms.CommsError('Выбранный файл не относится к этому чату или участнику команды')
     if r['status']=='sent':return {'ok':True,'id':r['message_id'],'already_sent':True}
     if r['status']!='draft':raise comms.CommsError('Предыдущая отправка уже выполнялась. Проверьте доставку в мессенджере; повтор автоматически не выполняется')
     if datetime.fromisoformat(r['expires_at'])<=datetime.now(timezone.utc):raise comms.CommsError('Выберите файл заново: срок черновика истёк')

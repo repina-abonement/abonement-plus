@@ -42,7 +42,7 @@ def validate_viewer(con,value):
     from .planner import PlanError
     if value in (None,'',0,'0'):return ''
     try:uid=int(value)
-    except (ValueError,TypeError):raise PlanError('Выберите сотрудника для просмотра общего Планера')
+    except (ValueError,TypeError):raise PlanError('Выберите участника команды для просмотра общего Планера')
     if not con.execute("SELECT 1 FROM users WHERE id=? AND active=1 AND role='operator'",(uid,)).fetchone():raise PlanError('Для просмотра выберите действующего администратора')
     return str(uid)
 

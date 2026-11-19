@@ -1,5 +1,5 @@
 "use strict";
-/* Абонемент Плюс — планер: свои дела, поручения, повторы, дни рождения сотрудников, контроль команды. */
+/* Абонемент Плюс — планер: свои дела, поручения, повторы, дни рождения участников команды, контроль команды. */
 
 S.planner = { tab: "week", start: null, user: null, status: "all" };
 const PLAN_SHIFTS={common:'Общие задачи дня',morning:'☀️ Утренняя смена',evening:'🔵 Основная смена',both:'Обе смены'};
@@ -120,9 +120,9 @@ async function renderPlanner(page) {
     el.onkeydown = e => { if (e.target === el && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(e); } };
   });
   page.querySelectorAll("[data-tret]").forEach((b) => (b.onclick = async () => {
-    const note = prompt("Что не так? Сотрудник увидит этот комментарий");
+    const note = prompt("Что не так? Участник команды увидит этот комментарий");
     if (note === null) return;
-    try { await api("POST", `/api/planner/tasks/${b.dataset.tret}/return`, { note }); toast("Задача вернулась сотруднику"); render(); } catch (e) { fail(e); }
+    try { await api("POST", `/api/planner/tasks/${b.dataset.tret}/return`, { note }); toast("Задача вернулась участнику команды"); render(); } catch (e) { fail(e); }
   }));
   page.querySelectorAll("[data-rstop]").forEach(b=>b.onclick=()=>stopPlannerRepeat(b.dataset.rstop,b,render));
   page.querySelectorAll("[data-ub]").forEach((i) => (i.onchange = async () => {

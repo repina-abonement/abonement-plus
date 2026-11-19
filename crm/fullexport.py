@@ -85,6 +85,6 @@ def build(con, part: str = "all") -> tuple[bytes, str]:
         staff.append([r[0], "Старший администратор" if r[2] else POST.get(r[1], r[1]), "да" if r[3] else "", r[4], r[5], r[6],
                       "да" if r[7] else "архив"])
     sheets = [("Дети и родители", kids), ("Абонементы", subs), ("Оплаты", pays), ("Посещения", att),
-              ("Группы", grp), ("Сотрудники", staff)]
+              ("Группы", grp), ("Команда", staff)]
     sheets = [(n, [rows[0]] + [[_ru(v) for v in r] for r in rows[1:]]) for n, rows in sheets]
     return xlsx.build(sheets), f"abonement-plus-{now:%Y-%m-%d_%H%M}.xlsx"

@@ -130,7 +130,7 @@ function callHtml(k) {
   return `<div class="call-row ${missed ? "missed" : ""}">
     <span class="call-ico">${k.direction === "in" ? "↙" : "↗"}</span>
     <div class="grow"><b>${k.direction === "in" ? "Входящий" : "Исходящий"}</b> · ${esc(CALL_ST[k.status] || k.status)}${k.talk ? " · " + secs(k.talk) : ""}
-      <div class="small muted">${dtWhen(k.ts || k.started_at)}${k.operator ? " · сотрудник " + esc(k.operator) : ""}</div>
+      <div class="small muted">${dtWhen(k.ts || k.started_at)}${k.operator ? " · участник команды " + esc(k.operator) : ""}</div>
       ${k.summary ? `<div class="call-sum">💬 ${esc(k.summary)}</div>` : ""}
       ${k.has_record ? `<audio controls preload="none" src="/api/calls/${k.id}/record"></audio>` : ""}
       ${aiChip(k)}
@@ -710,7 +710,7 @@ async function renderCommsSettings(box, users) {
       <div class="row"><div class="field"><label>Номер кабинета</label><input data-k="sipuni_user" value="${esc(v.sipuni_user)}" placeholder="«Кабинет №…» слева вверху в Sipuni"></div>
         <div class="field"><label>Ключ интеграции</label><input data-k="sipuni_secret" value="${esc(v.sipuni_secret)}"></div></div>
       <div class="field"><label>Адрес для событий (вставить в Sipuni)</label><div class="copy"><input readonly value="${esc(d.hooks.sipuni)}"><button class="btn sm" data-copy="${esc(d.hooks.sipuni)}">Копировать</button></div></div>
-      <div class="small muted">Последнее событие: ${inf.sipuni_last ? dtShort(inf.sipuni_last) : "ещё не было"}. Внутренние номера сотрудников указываются ниже, в списке сотрудников</div>
+      <div class="small muted">Последнее событие: ${inf.sipuni_last ? dtShort(inf.sipuni_last) : "ещё не было"}. Внутренние номера участников команды указываются ниже, в списке участников команды</div>
     </div>
 
     <div class="int"><div class="int-head"><b>Telegram</b>${ok(st.telegram)}${inf.tg_business_enabled ? `<span class="pill green">бизнес-аккаунт</span>` : ""}</div>
@@ -901,7 +901,7 @@ async function renderCallStats(body) {
 
     <section class="panel" style="margin-top:14px">
       <h3>Операторы</h3>
-      ${d.unassigned ? `<div class="small muted" style="margin-bottom:8px">Часть номеров без имени: впишите внутренние номера сотрудникам в Настройках → Сотрудники</div>` : ""}
+      ${d.unassigned ? `<div class="small muted" style="margin-bottom:8px">Часть номеров без имени: впишите внутренние номера участникам команды в Настройках → Команда</div>` : ""}
       ${d.operators.length ? `<div class="table-wrap"><table class="optable">
         <thead><tr><th>Оператор</th><th>Исходящие</th><th>Дозвон</th><th>Принял входящих</th><th>Средний разговор</th><th>Поговорил с лидами</th><th>Записались на пробное</th><th>Купили</th></tr></thead>
         <tbody>${d.operators.map((o) => `<tr>
@@ -1097,7 +1097,7 @@ function administratorGreeting(user=S.user) {
 
 function insertAdministratorGreeting(input,user=S.user) {
   const text=administratorGreeting(user);
-  if(!text){toast('Укажите имя сотрудника в настройках аккаунта');return;}
+  if(!text){toast('Укажите имя участника команды в настройках аккаунта');return;}
   const draft=input.value;
   if(draft!==text&&!draft.startsWith(text+'\n'))input.value=text+(draft?'\n\n'+draft:'');
   input.focus();input.setSelectionRange(input.value.length,input.value.length);

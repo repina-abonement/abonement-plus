@@ -338,7 +338,7 @@ def fake_calls(con, user: dict, seed: int | None = None) -> dict:
     op = con.execute("""SELECT id, name, sip_number FROM users WHERE role='operator' AND active=1
                         ORDER BY (sip_number!='') DESC, (login='olga') DESC, id LIMIT 1""").fetchone()
     if not op:
-        raise ValueError("Нет оператора, заведите сотрудника с ролью «оператор»")
+        raise ValueError("Нет оператора, заведите участника команды с ролью «оператор»")
     sip = op["sip_number"] or "201"
     if not op["sip_number"]:
         con.execute("UPDATE users SET sip_number=? WHERE id=?", (sip, op["id"]))

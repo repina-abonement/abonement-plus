@@ -128,7 +128,7 @@ def login(con, h, user, body, q):
             try:
                 from . import ownerbot
                 ownerbot.alert(con, f"⚠️ 5 неверных паролей подряд для логина «{name}». Вход по нему закрыт на {LOGIN_LOCK_MIN} минут. "
-                                    "Если это не сотрудник ошибся, смените ему пароль")
+                                    "Если это не участник команды ошибся, смените ему пароль")
             except Exception:  # noqa: BLE001
                 pass
         raise ApiError("Неверный логин или пароль", 401)
@@ -227,7 +227,7 @@ def set_post(con, uid: int, post: str | None, promoter=None):
         con.execute("UPDATE users SET is_promoter=? WHERE id=?", (1 if promoter else 0, uid))
 
 
-# ---------------- фото и анкета сотрудника ----------------
+# ---------------- фото и анкета участника команды ----------------
 
 @route("GET", "/api/team", role="team")
 def team_view(con, h, user, body, q):
@@ -298,7 +298,7 @@ def users_patch(con, h, user, body, q, uid):
     if "login" in body:
         target = con.execute("SELECT login FROM users WHERE id=?", (int(uid),)).fetchone()
         if not target:
-            raise ApiError("Сотрудник не найден", 404)
+            raise ApiError("Участник команды не найден", 404)
         login_ = str(body["login"] or "").strip().lower()
         if not re.fullmatch(r"[a-z0-9._-]{1,80}", login_):
             raise ApiError("Логин: от 1 до 80 символов, латинские буквы, цифры, точка, дефис или подчёркивание")
@@ -327,7 +327,7 @@ def users_patch(con, h, user, body, q, uid):
         if len(body["password"]) < 8:
             raise ApiError("Пароль от 8 символов")
         con.execute("UPDATE users SET pw_hash=? WHERE id=?", (db.hash_password(body["password"]), int(uid)))
-        if not body.get("keep_sessions"):  # «Скопировать вход»: сотрудника не выкидываем, код быстрого входа оставляем
+        if not body.get("keep_sessions"):  # «Скопировать вход»: участника команды не выкидываем, код быстрого входа оставляем
             con.execute("DELETE FROM sessions WHERE user_id=? AND ?!=?", (int(uid), int(uid), user["id"]))
             from . import pin
             pin.remove_all(con, int(uid))
@@ -413,7 +413,7 @@ def paylinks_cancel(con, h, user, body, q, lid):
 
 @route("GET", "/api/export/all", role="export")
 def export_all(con, h, user, body, q):
-    """Вся база понятными таблицами Excel: дети и родители, абонементы, оплаты, посещения, группы, сотрудники."""
+    """Вся база понятными таблицами Excel: дети и родители, абонементы, оплаты, посещения, группы, участники команды."""
     from . import fullexport
     data, name = fullexport.build(con, "contacts" if q.get("part") == "contacts" else "all")
     sv.audit(con, user, "export.all", name)
@@ -494,7 +494,7 @@ def users_create(con, h, user, body, q):
     name = " ".join(str(body.get("name") or "").split())[:80]
     login_ = str(body.get("login") or "").strip()
     if not name and not login_:
-        raise ApiError("Укажите имя сотрудника")
+        raise ApiError("Укажите имя участника команды")
     name = name or login_
     if not login_:
         base = schedule._login(name)[:60] or "user"
@@ -1038,10 +1038,10 @@ def board_sales(con, h, user, body, q):
 
 @route("GET", "/api/tasks", role="operator")
 def tasks_list(con, h, user, body, q):
-    if q.get("as_user") and user["role"] == "admin":  # «Смотреть как»: стол глазами сотрудника
+    if q.get("as_user") and user["role"] == "admin":  # «Смотреть как»: стол глазами участника команды
         u = con.execute("SELECT id, name, role FROM users WHERE id=?", (int(q["as_user"]),)).fetchone()
         if not u:
-            raise ApiError("Сотрудник не найден", 404)
+            raise ApiError("Участник команды не найден", 404)
         return tasks.my_tasks(con, dict(u) | {"role": "operator"}, "mine")
     return tasks.my_tasks(con, user, q.get("scope", "mine"))
 
@@ -1563,14 +1563,14 @@ def checkin_reviewer(con, user):
 def checkins_day(con, h, user, body, q):
     from datetime import date as _d
     if not checkin_reviewer(con, user):
-        raise ApiError("Приходы тренеров проверяет назначенный сотрудник", 403)
+        raise ApiError("Приходы тренеров проверяет назначенный участник команды", 403)
     return staff.day_report(con, _d.fromisoformat(q["date"]) if q.get("date") else None)
 
 
 @route("POST", "/api/checkins/{cid}/review", role="operator")
 def checkin_review(con, h, user, body, q, cid):
     if not checkin_reviewer(con, user):
-        raise ApiError("Приходы тренеров проверяет назначенный сотрудник", 403)
+        raise ApiError("Приходы тренеров проверяет назначенный участник команды", 403)
     stx(staff.review, con, int(cid), body.get("action") or "", user, body.get("note") or "")
     return {"ok": True}
 
@@ -1878,12 +1878,6 @@ def staff_expenses_reimburse(con,h,user,body,q,eid):
 def staff_expenses_received(con,h,user,body,q,rid):
     from . import staffexpenses
     return sxp(staffexpenses.receipt_money,con,user,int(rid),body)
-
-
-@route("POST", "/api/staff-expenses/{eid}/receipts", role="staffexpenses")
-def staff_expenses_upload(con,h,user,body,q,eid):
-    from . import staffexpenses
-    return sxp(staffexpenses.add_receipt,con,user,int(eid),body)
 
 
 @route("GET", "/api/staff-expense-receipts/{rid}", role="staffexpenses")
@@ -2662,7 +2656,7 @@ def my_pay(con, h, user, body, q):
     if q.get("user_id") and perms.can(user, "pay", "full"):
         r = con.execute("SELECT id, name, role, is_senior, is_offline_admin, is_promoter FROM users WHERE id=?", (int(q["user_id"]),)).fetchone()
         if not r:
-            raise ApiError("Сотрудник не найден", 404)
+            raise ApiError("Участник команды не найден", 404)
         who = dict(r)
     return mypay.view(con, who, q.get("month")) | {"name": who.get("name", "")}
 
@@ -3734,7 +3728,7 @@ def _startup():
         tasks.seed_demo(con)
     n = perms.archive_test_staff(con)
     if n:
-        print(f"Тестовые сотрудники отправлены в архив: {n}", flush=True)
+        print(f"Тестовые участники команды отправлены в архив: {n}", flush=True)
     con.commit()
     con.close()
     ai.start_worker(db.connect)

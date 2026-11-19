@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS calls (
     direction TEXT NOT NULL DEFAULT 'in',  -- in | out
     phone TEXT NOT NULL DEFAULT '',
     phone_norm TEXT NOT NULL DEFAULT '',
-    operator TEXT NOT NULL DEFAULT '',     -- внутренний номер сотрудника
+    operator TEXT NOT NULL DEFAULT '',     -- внутренний номер участника команды
     family_id INTEGER REFERENCES families(id) ON DELETE SET NULL,
     status TEXT NOT NULL DEFAULT 'ringing',-- ringing | talking | answered | missed | busy | failed
     started_at TEXT NOT NULL,
@@ -185,7 +185,7 @@ def put(con, key: str, value: str):
 
 
 def status(con) -> dict:
-    """Что подключено — без секретов. Видят все сотрудники."""
+    """Что подключено — без секретов. Видят все участники команды."""
     return {
         "sipuni": bool(get(con, "sipuni_user") and get(con, "sipuni_secret")),
         "telegram": bool(get(con, "tg_token")) and get(con, "tg_ok") == "1",
@@ -552,7 +552,7 @@ def tg_hook(con, upd: dict, headers) -> None:
         return
     chat = m.get("chat") or {}
     if chat.get("type") in ("group", "supergroup"):
-        # рабочие чаты сотрудников: команда в чате подключает его к уведомлениям CRM
+        # рабочие чаты участников команды: команда в чате подключает его к уведомлениям CRM
         cmd = (m.get("text") or "").split("@")[0].strip().lower()
         names = {"/crm_coaches": ("tg_chat_coaches", "ТРЕНЕРЫ"), "/crm_care": ("tg_chat_care", "Служба заботы"),
                  "/crm_money": ("tg_chat_money", "ДЕНЬГИ")}
@@ -1315,7 +1315,7 @@ def sipuni_call(con, phone: str, sip_number: str) -> dict:
     if not (user and secret):
         raise CommsError("Sipuni не подключён")
     if not sip_number:
-        raise CommsError("Не указан ваш внутренний номер Sipuni. Его задаёт администратор в Настройках → Сотрудники")
+        raise CommsError("Не указан ваш внутренний номер Sipuni. Его задаёт администратор в Настройках → Команда")
     p = normalize_phone(phone)
     if len(p) < 11:
         raise CommsError("Неверный номер телефона")
@@ -1346,7 +1346,7 @@ def sipuni_hook(con, p: dict) -> None:
     dst = str(p.get("short_dst_num") or p.get("dst_num") or "").strip()
     st, dt = str(p.get("src_type") or ""), str(p.get("dst_type") or "")
     if st == "2" and dt == "2":
-        return  # звонок между сотрудниками
+        return  # звонок между участниками команды
     outgoing = st == "2"
     client = dst if outgoing else src
     operator = src if outgoing else (dst if dt == "2" else "")

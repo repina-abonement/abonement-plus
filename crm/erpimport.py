@@ -754,7 +754,7 @@ def _track(con, batch: int, tbl: str, rid: int):
 
 def wipe_clients(con) -> int:
     """Удаляет всех клиентов, которые были в CRM до переноса (по правилу Юлии до переноса там только выдуманные).
-    Сотрудники, группы, настройки и переписки остаются (переписки просто отвязываются от семей)."""
+    Команда, группы, настройки и переписки остаются (переписки просто отвязываются от семей)."""
     ids = [r[0] for r in con.execute("SELECT id FROM students")]
     tables = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")]
     for t in tables:

@@ -7,7 +7,7 @@ from . import offlineplanner
 
 
 class ExpenseError(ValueError):pass
-FUNDING={'personal':'Личные деньги','cash':'Касса','advance':'Выданы Юлией заранее','company_card':'Корпоративная карта'}
+FUNDING={'personal':'Личные деньги','cash':'Конверт','advance':'Выданы Юлией заранее','company_card':'Корпоративная карта'}
 
 
 def init(con):
@@ -83,9 +83,9 @@ def fields(con,data):
     title=str(data.get('title') or '').strip();note=str(data.get('note') or '').strip()
     if not title or len(title)>300 or len(note)>2000:raise ExpenseError('Проверьте описание расхода')
     try:payer=int(data.get('paid_by_id') or 0)
-    except (TypeError,ValueError):raise ExpenseError('Выберите сотрудника, который оплатил покупку')
+    except (TypeError,ValueError):raise ExpenseError('Выберите участника команды, который оплатил покупку')
     person=con.execute('SELECT * FROM users WHERE id=? AND active=1',(payer,)).fetchone()
-    if not person or not allowed(con,dict(person)):raise ExpenseError('Выберите сотрудника общего журнала, который оплатил покупку')
+    if not person or not allowed(con,dict(person)):raise ExpenseError('Выберите участника команды общего журнала, который оплатил покупку')
     branch=data.get('branch_id') or None
     if branch and not con.execute('SELECT 1 FROM branches WHERE id=?',(branch,)).fetchone():raise ExpenseError('Филиал не найден')
     source=data.get('funding')
@@ -153,7 +153,7 @@ def reimburse(con,user,eid,data):
         if old['expense_id']!=eid or old['amount']!=amount or old['transferred_at']!=day or old['method']!=method:raise ExpenseError('Эта отметка уже сохранена с другими данными')
         return {'id':old['id']}
     total=con.execute('SELECT coalesce(sum(amount),0) FROM staff_reimbursements WHERE expense_id=? AND voided=0',(eid,)).fetchone()[0]
-    if amount>row['amount']-total:raise ExpenseError('Сумма больше остатка к возмещению')
+    if amount!=row['amount']-total:raise ExpenseError('Отметьте получение всей оставшейся суммы')
     rid=con.execute('INSERT INTO staff_reimbursements(expense_id,amount,transferred_at,method,note,recorded_by,recorded_at,request_id) VALUES(?,?,?,?,?,?,?,?)',(eid,amount,day,method,str(data.get('note') or '')[:1000],user['id'],stamp(),request)).lastrowid
     history(con,eid,user,'money_transferred',{'id':rid,'amount':amount,'method':method,'date':day});return {'id':rid}
 
@@ -161,7 +161,7 @@ def reimburse(con,user,eid,data):
 def mark_received(con,user,eid,data):
     require(con,user);row=get_row(con,eid)
     if row['cancelled'] or row['funding']!='personal' or row['paid_by_id']!=user['id']:
-        raise ExpenseError('Возмещение отмечает сотрудник, оплативший покупку личными деньгами')
+        raise ExpenseError('Возмещение отмечает участник команды, оплативший покупку личными деньгами')
     request=str(data.get('request_id') or '')
     if not re.fullmatch(r'[A-Za-z0-9_-]{8,100}',request):raise ExpenseError('Обновите страницу и попробуйте ещё раз')
     request='received:'+request
@@ -173,10 +173,10 @@ def mark_received(con,user,eid,data):
     left=row['amount']-sent
     if left<=0:return {'id':None,'already_reimbursed':True}
     amount=minor(data['amount']) if data.get('amount') is not None else left
-    if amount>left:raise ExpenseError('Сумма больше остатка к возмещению')
+    if amount!=left:raise ExpenseError('Частичное возмещение больше не используется. Отметьте всю оставшуюся сумму')
     now=stamp()
     rid=con.execute("""INSERT INTO staff_reimbursements(expense_id,amount,transferred_at,method,note,recorded_by,recorded_at,received_at,received_by,request_id)
-        VALUES(?,?,?,'not_specified','Получение отмечено сотрудником',?,?,?,?,?)""",(eid,amount,now[:10],user['id'],now,now,user['id'],request)).lastrowid
+        VALUES(?,?,?,'not_specified','Получение отмечено участником команды',?,?,?,?,?)""",(eid,amount,now[:10],user['id'],now,now,user['id'],request)).lastrowid
     history(con,eid,user,'reimbursement_received',{'id':rid,'amount':amount,'source':'employee_confirmation'})
     return {'id':rid}
 
@@ -193,7 +193,7 @@ def receipt_money(con,user,rid,data):
         con.execute('UPDATE staff_reimbursements SET voided=1 WHERE id=?',(rid,));history(con,row['id'],user,'transfer_voided',{'id':rid})
     else:
         if data.get('received') is not True:raise ExpenseError('Подтвердите фактическое получение денег')
-        if user['id']!=row['paid_by_id'] or transfer['voided']:raise ExpenseError('Получение подтверждает сотрудник, оплативший покупку')
+        if user['id']!=row['paid_by_id'] or transfer['voided']:raise ExpenseError('Получение подтверждает участник команды, оплативший покупку')
         if not transfer['received_at']:
             con.execute('UPDATE staff_reimbursements SET received_at=?,received_by=? WHERE id=?',(stamp(),user['id'],rid));history(con,row['id'],user,'money_received',{'id':rid,'amount':transfer['amount']})
     return {'id':rid}

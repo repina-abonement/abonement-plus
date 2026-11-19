@@ -1,6 +1,6 @@
-"""Задачи сотрудников и автосообщения родителям вокруг пробного занятия.
+"""Задачи участников команды и автосообщения родителям вокруг пробного занятия.
 
-Задачи по пробным создаются сами (по дате пробного) и закрываются, когда сотрудник нажал «Готово»
+Задачи по пробным создаются сами (по дате пробного) и закрываются, когда участник команды нажал «Готово»
 или клиент ушёл дальше по воронке. Ответственный за каждый вид задач задаётся в Настройках.
 Те же виды задач используются при переносе из ERP (см. ERP_STATUSES).
 """
@@ -25,7 +25,7 @@ KINDS = {
     "request_data": ("Запросить данные", "📋"),
     "manual": ("Задача", "✅"),
     "plan": ("Задача", "📌"),
-    "bday": ("День рождения сотрудника", "🎂"),
+    "bday": ("День рождения участника команды", "🎂"),
 }
 from .lifecycle import KINDS as _LIFE_KINDS  # noqa: E402
 KINDS.update(_LIFE_KINDS)
@@ -654,7 +654,7 @@ def my_tasks(con, user: dict, scope: str = "mine") -> dict:
 
 def edit(con, tid: int, data: dict, user: dict) -> dict:
     """Правка открытой задачи из карточки или раздела «Задачи»: что сделать, срок, заметка, исполнитель.
-    Передать можно любому действующему сотруднику (в т.ч. тренеру); править могут админы и операторы (проверка в маршруте)."""
+    Передать можно любому действующему участнику команды (в т.ч. тренеру); править могут админы и операторы (проверка в маршруте)."""
     t = con.execute("SELECT * FROM tasks WHERE id=? AND status='open'", (tid,)).fetchone()
     if not t:
         raise comms.CommsError("Задача не найдена или уже закрыта")
@@ -664,7 +664,7 @@ def edit(con, tid: int, data: dict, user: dict) -> dict:
         if not planner.can_change_plan(con, user, t["assignee_id"]):
             raise comms.CommsError("Нет доступа к задаче")
         if data.get("assignee_id") and not planner.can_change_plan(con, user, int(data["assignee_id"])):
-            raise comms.CommsError("Нет доступа к планеру сотрудника")
+            raise comms.CommsError("Нет доступа к планеру участника команды")
     sets, args, notes = [], [], []
     if client and t["assignee_id"] is not None:
         sets.append("assignee_id=NULL")
@@ -672,7 +672,7 @@ def edit(con, tid: int, data: dict, user: dict) -> dict:
         uid = int(data.get("assignee_id") or 0)
         u = con.execute("SELECT id, name FROM users WHERE id=? AND active=1", (uid,)).fetchone()
         if not u:
-            raise comms.CommsError("Выберите сотрудника из списка")
+            raise comms.CommsError("Выберите участника команды из списка")
         if uid != t["assignee_id"]:
             sets.append("assignee_id=?"); args.append(uid)
             notes.append(f"Задача «{t['title']}» передана: {u['name']}")
@@ -711,7 +711,7 @@ def edit(con, tid: int, data: dict, user: dict) -> dict:
     return _task_out(con, con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone())
 
 
-MANUAL_KINDS = ("manual", "plan")  # поставил сотрудник (карточка клиента или «Планер»); остальные CRM ставит сама по цепочке событий
+MANUAL_KINDS = ("manual", "plan")  # поставил участник команды (карточка клиента или «Планер»); остальные CRM ставит сама по цепочке событий
 
 
 def manual_board(con, user: dict, scope: str = "mine") -> dict:

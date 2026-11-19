@@ -361,7 +361,7 @@ function wireCoachAnswers(page) {
   }));
 }
 
-/* «✉️ Взял из конверта»: любой сотрудник, CRM пишет в чат «ДЕНЬГИ» и уменьшает остаток (Юлия, 01.11) */
+/* «✉️ Взял из конверта»: любой участник команды, CRM пишет в чат «ДЕНЬГИ» и уменьшает остаток (Юлия, 01.11) */
 function envelopeButton() {
   return `<button class="btn env-take-btn" data-env-take>✉️ Взял из конверта</button>`;
 }

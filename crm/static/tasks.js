@@ -1,5 +1,5 @@
 "use strict";
-/* Абонемент Плюс — задачи сотрудников, автосообщения, стол тренера. */
+/* Абонемент Плюс — задачи участников команды, автосообщения, стол тренера. */
 
 S.tasks = { scope: "mine" };
 const AUTO_LABEL = { day_before: "за день", "2h_before": "за 2 часа", after: "после пробного" };
@@ -26,7 +26,7 @@ function taskRow(t, options = {}) {
     <div class="now-act">
       ${s.phone ? `<button class="btn sm" data-dial="${esc(s.phone)}">📞</button>` : ""}
       ${t.kind === "rebook" ? `<button class="btn sm primary" data-rebook="${t.id}">Итог звонка</button>` : S.user.role === "coach" && !options.directComplete ? "" : `<button class="btn sm" data-done>Выполнено</button>`}
-      ${!t.client_task && ["admin", "operator"].includes(S.user.role) ? `<button class="btn sm" data-tpass title="Передать другому сотруднику">Передать</button>` : ""}
+      ${!t.client_task && ["admin", "operator"].includes(S.user.role) ? `<button class="btn sm" data-tpass title="Передать другому участнику команды">Передать</button>` : ""}
       ${t.kind === "plan" && S.user.role !== "coach" && (S.tasks.canManage || t.created_by_id === S.user.id) ? `<button class="btn sm" data-tcancel="${t.id}" title="Убрать задачу">✕</button>` : ""}
     </div>
   </div>`;
@@ -42,7 +42,7 @@ async function tasksSection() {
     <div class="now-head"><h3>${as ? `Задачи: ${esc(as.name)}` : S.tasks.scope === "all" ? "Задачи команды" : "Мои задачи"}: ${total ? `на сегодня ${total}` : "на сегодня всё сделано 🎉"}</h3>
       <span class="small muted">Выполнено сегодня: ${d.done_today}</span>
       ${!as ? `<button class="btn sm primary" data-tadd style="margin-left:auto">+ Задача</button>` : ""}
-      ${d.can_manage && !as ? `<div class="seg"><button data-scope="mine" class="${S.tasks.scope === "mine" ? "active" : ""}">Мои</button><button data-scope="all" class="${S.tasks.scope === "all" ? "active" : ""}">Все сотрудники</button></div>` : ""}
+      ${d.can_manage && !as ? `<div class="seg"><button data-scope="mine" class="${S.tasks.scope === "mine" ? "active" : ""}">Мои</button><button data-scope="all" class="${S.tasks.scope === "all" ? "active" : ""}">Вся команда</button></div>` : ""}
     </div>
     ${d.team.length && S.tasks.scope === "all" ? `<div class="chips" style="margin-bottom:10px">${d.team.map((u) => `<span class="pill ${u.overdue ? "red" : u.open ? "yellow" : "green"}">${esc(u.name)}: ${u.open} на сегодня${u.overdue ? `, просрочено ${u.overdue}` : ""}</span>`).join("")}</div>` : ""}
     <div data-taddbox></div>
@@ -82,7 +82,7 @@ function wireTasks(root) {
   });
 }
 
-const kindPill = (t) => t.manual ? `<span class="pill kp-man" title="Поставил сотрудник">ручная</span>` : `<span class="pill kp-auto" title="CRM поставила сама по цепочке событий">авто</span>`;
+const kindPill = (t) => t.manual ? `<span class="pill kp-man" title="Поставил участник команды">ручная</span>` : `<span class="pill kp-auto" title="CRM поставила сама по цепочке событий">авто</span>`;
 
 /* Воронка «Ручные задачи»: задача появляется в свой день. Просрочено / Сегодня. Выполненная сразу пропадает */
 S.manual = { scope: "mine" };
@@ -98,9 +98,9 @@ async function renderManualBoard(page) {
     ${col !== "done" ? `<div class="mt-act"><button class="btn sm" data-mtdone="${t.id}">Выполнено</button></div>` : ""}
   </article>`;
   page.innerHTML = `<div class="page-head"><h2 class="grow">Ручные задачи</h2>
-      ${d.can_manage ? `<div class="seg"><button data-ms="mine" class="${d.scope === "mine" ? "active" : ""}">Мои</button><button data-ms="all" class="${d.scope === "all" ? "active" : ""}">Все сотрудники</button></div>` : ""}
+      ${d.can_manage ? `<div class="seg"><button data-ms="mine" class="${d.scope === "mine" ? "active" : ""}">Мои</button><button data-ms="all" class="${d.scope === "all" ? "active" : ""}">Вся команда</button></div>` : ""}
       <button class="btn primary" id="mt-add">+ Задача</button></div>
-    <div class="small muted" style="margin:-6px 0 12px">Задачи, которые поставили сотрудники. Каждая появляется здесь в свой день${d.later ? `. Запланировано на следующие дни: ${d.later} (видно в «Планере»)` : ""}. Нажмите на задачу, чтобы изменить или передать</div>
+    <div class="small muted" style="margin:-6px 0 12px">Задачи, которые поставили участники команды. Каждая появляется здесь в свой день${d.later ? `. Запланировано на следующие дни: ${d.later} (видно в «Планере»)` : ""}. Нажмите на задачу, чтобы изменить или передать</div>
     <div id="mt-addbox"></div>
     <div class="board">${d.columns.map((c) => `<section class="col"><div class="col-head"><span>${c.title}</span><span class="cnt">${c.cards.length}</span></div>
       <div class="cards">${c.cards.map((t) => card(t, c.key)).join("") || `<div class="small muted" style="padding:8px">${c.key === "today" ? "На сегодня ручных задач нет" : c.key === "overdue" ? "Просроченных нет 👍" : "Пока пусто"}</div>`}</div></section>`).join("")}</div>`;
@@ -117,7 +117,7 @@ async function renderManualBoard(page) {
   }));
 }
 
-/* Правка задачи: что сделать, срок, исполнитель, заметка. Передать можно любому сотруднику, включая тренера */
+/* Правка задачи: что сделать, срок, исполнитель, заметка. Передать можно любому участнику команды, включая тренера */
 const TASK_ROLE = { admin: "руководитель", operator: "администратор", coach: "тренер" };
 function openTaskEdit(t, onDone, focus) {
   if (!t) return;
@@ -130,7 +130,7 @@ function openTaskEdit(t, onDone, focus) {
     <div class="field"><label>Что сделать</label><input name="title" value="${esc(t.title)}" required maxlength="200"></div>
     <div class="row"><div class="field"><label>Срок</label><input name="due_at" type="${client?'date':'datetime-local'}" value="${esc((t.due_at || "").slice(0, client?10:16))}" required></div>
       ${!client?`<div class="field"><label>Исполнитель</label><select name="assignee_id">${staff.map((u) => `<option value="${u.id}" ${u.id === t.assignee_id ? "selected" : ""}>${esc(u.name)} (${TASK_ROLE[u.role] || u.role})</option>`).join("")}
-        ${t.assignee_id && !staff.some((u) => u.id === t.assignee_id) ? `<option value="" selected disabled>${esc(t.assignee || "Сотрудник в архиве")}: выберите нового</option>` : ""}</select></div>`:""}</div>
+        ${t.assignee_id && !staff.some((u) => u.id === t.assignee_id) ? `<option value="" selected disabled>${esc(t.assignee || "Участник команды в архиве")}: выберите нового</option>` : ""}</select></div>`:""}</div>
     ${client?`<label class="check task-priority-control"><input type="checkbox" name="priority" ${t.priority?"checked":""}> 🔥 Приоритет — первой в колонке на этот день</label><p class="small muted">Общая задача для всех администраторов.</p>`:""}
     <div class="field"><label>Заметка</label><textarea name="note" rows="2" maxlength="1000" placeholder="Подробности задачи">${esc(t.note || "")}</textarea></div>
     <div class="need-err small"></div>
@@ -328,11 +328,11 @@ async function renderTaskSettings(box, users) {
     <h3>Скрипты: сообщения родителям и автосообщения</h3>
     <div class="alert ${d.auto_live ? "" : "red"}" style="margin-bottom:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
       <div class="grow"><b>${d.auto_live ? "✅ Автосообщения клиентам включены" : "⛔ Автосообщения клиентам выключены"}</b>
-        <div class="small">${d.auto_live ? "CRM сама пишет родителям: после записи на пробное, напоминания, после пробного, автоцепочки, автоответ бота" : "Клиентам автоматически ничего не уходит: ни напоминания, ни сообщения после записи, ни автоцепочки, ни автоответ бота. Сотрудники пишут сами"}</div></div>
+        <div class="small">${d.auto_live ? "CRM сама пишет родителям: после записи на пробное, напоминания, после пробного, автоцепочки, автоответ бота" : "Клиентам автоматически ничего не уходит: ни напоминания, ни сообщения после записи, ни автоцепочки, ни автоответ бота. Команда пишут сами"}</div></div>
       <button class="btn sm ${d.auto_live ? "" : "primary"}" id="auto-live">${d.auto_live ? "Выключить" : "Запустить"}</button></div>
     <div class="field"><label>Кто отвечает за задачи по пробным</label>
       <select data-t="task_owner_trials">${staff.map((u) => `<option value="${u.id}" ${String(u.id) === v.task_owner_trials ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select></div>
-    <div class="small muted" style="margin:-4px 0 12px">На этого сотрудника встают все задачи по пробным, и при переносе из ERP задачи со статусами: ${d.erp_statuses.map((x) => `«${esc(x)}»`).join(", ")}</div>
+    <div class="small muted" style="margin:-4px 0 12px">На этого участника команды встают все задачи по пробным, и при переносе из ERP задачи со статусами: ${d.erp_statuses.map((x) => `«${esc(x)}»`).join(", ")}</div>
     <div class="bk-places">
       <div class="bk-head"><b>💬 Чат с администратором</b>
         <div class="small muted">В любом тексте ниже напишите {admin}: CRM подставит ссылку под мессенджер родителя (в MAX ссылку MAX, в остальных Telegram)</div></div>

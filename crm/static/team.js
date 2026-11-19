@@ -72,7 +72,7 @@ async function renderTeam(page) {
       </div></section>` : ""}`;
   page.querySelectorAll("[data-prof]").forEach((el) => (el.onclick = () => openStaffProfile(+el.dataset.prof)));
   if ($("#tm-edit")) $("#tm-edit").onclick = () => editTeam(t);
-  if (!admin) {  // сотрудник: «Моя зарплата» сверху, над оргструктурой
+  if (!admin) {  // участник команды: «Моя зарплата» сверху, над оргструктурой
     page.querySelector(".page-head").insertAdjacentHTML("afterend", `<section class="tm-sec" id="my-pay"><div class="muted small">Считаю зарплату…</div></section>`);
     renderMyPay($("#my-pay")).catch((e) => { $("#my-pay").remove(); });
   }
@@ -113,7 +113,7 @@ async function renderMyPay(box, mode) {
 
 function editTeam(t) {
   openDrawer(`<h2>Команда: изменить</h2>
-    <div class="small muted" style="margin-bottom:12px">Отдел человека зависит от его должности. Должность меняется в Настройках → Сотрудники</div>
+    <div class="small muted" style="margin-bottom:12px">Отдел человека зависит от его должности. Должность меняется в Настройках → Команда</div>
     <div class="section"><h3>Зоны ответственности</h3><div class="small muted" style="margin-bottom:8px">Каждый пункт с новой строки</div>
       ${t.zones.map((z, i) => `<div class="field"><label>${esc(z.title)}</label><textarea rows="5" data-zone="${i}">${esc(z.items.join("\n"))}</textarea></div>`).join("")}</div>
     <div class="section"><h3>Оплата</h3><div class="small muted" style="margin-bottom:8px">Проценты тренеров меняются в Настройках, здесь - администраторы и промоутеры</div>

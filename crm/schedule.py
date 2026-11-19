@@ -1,6 +1,6 @@
 """Филиалы, группы, смены админов, расписание на день и неделю, выгрузка списка группы, архив.
 
-Ничего не удаляется: филиалы, группы, ученики и сотрудники уходят в архив и возвращаются оттуда.
+Ничего не удаляется: филиалы, группы, ученики и участники команды уходят в архив и возвращаются оттуда.
 """
 from __future__ import annotations
 
@@ -206,7 +206,7 @@ def structure(con) -> dict:
 def save_shift(con, data: dict, shid: int | None = None) -> int:
     uid, bid = int(data.get("user_id") or 0), int(data.get("branch_id") or 0)
     if not con.execute("SELECT 1 FROM users WHERE id=? AND active=1 AND role IN ('admin','operator','coach')", (uid,)).fetchone():
-        raise SchedError("Выберите сотрудника")
+        raise SchedError("Выберите участника команды")
     if not con.execute("SELECT 1 FROM branches WHERE id=?", (bid,)).fetchone():
         raise SchedError("Выберите филиал")
     vals = (uid, bid, _days(data.get("weekdays")), _time(data.get("time_from")), _time(data.get("time_to")))
@@ -510,7 +510,7 @@ def coach_may(con, coach_id: int, gid: int) -> bool:
 def save_absence(con, data: dict, user: dict) -> int:
     uid = int(data.get("user_id") or 0)
     if not con.execute("SELECT 1 FROM users WHERE id=? AND active=1", (uid,)).fetchone():
-        raise SchedError("Выберите сотрудника")
+        raise SchedError("Выберите участника команды")
     try:
         d1, d2 = date.fromisoformat(data.get("date_from") or ""), date.fromisoformat(data.get("date_to") or "")
     except ValueError:

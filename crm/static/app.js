@@ -280,7 +280,7 @@ async function renderLogin(force = false) {
   <div class="login-wrap"><div class="login">
     <div class="login-mark" aria-hidden="true">⚽</div>
     <h1>Абонемент <span>Плюс</span></h1>
-    <div class="login-sub">Вход для сотрудников школы</div>
+    <div class="login-sub">Вход для участников команды школы</div>
     <form id="login-form">
       <div class="field"><label>Логин</label><input name="login" autocomplete="username" required></div>
       <div class="field"><label>Пароль</label><div class="pw-wrap"><input name="password" type="password" autocomplete="current-password" required>
@@ -341,7 +341,7 @@ const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", c
 function isCoachShort() { return "Результаты"; }
 const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></span>` : "";
 
-/* Боковое меню: главное сверху, остальное по папкам. Открыта папка с текущим разделом и те, что сотрудник раскрыл сам */
+/* Боковое меню: главное сверху, остальное по папкам. Открыта папка с текущим разделом и те, что участник команды раскрыл сам */
 const NAV_TOP = ["today", "sales", "inbox", "planner"];
 const NAV_FOLDERS = [["Клиенты", ["search", "members", "nodeadline"]], ["Занятия", ["journal", "schedule", "coaches"]],
   ["Деньги", ["payments", "fiscal", "merch", "spend", "staffexpenses", "dashboard"]], ["Школа", ["team", "posts", "docs", "settings"]]];
@@ -985,7 +985,7 @@ async function renderErp(box) {
     <div class="erp-step"><b>2. Группы</b><div id="erp-groups" class="small muted">${d.uploads.length ? "Загружаю…" : "Появятся после загрузки файлов"}</div></div>
     <div class="erp-step"><b>3. Пробный прогон</b><div class="small muted">Ничего не записывает: показывает, что будет перенесено, и все нестыковки</div>
       <button class="btn" id="erp-plan" style="margin-top:8px" ${d.uploads.length ? "" : "disabled"}>Проверить</button><div id="erp-plan-out"></div></div>
-    <div class="erp-step"><b>4. Перенос</b><div class="small muted">Перед переносом CRM сделает резервную копию и удалит всех выдуманных клиентов. Сотрудники, группы, настройки и переписки останутся. Перенос можно отменить целиком</div>
+    <div class="erp-step"><b>4. Перенос</b><div class="small muted">Перед переносом CRM сделает резервную копию и удалит всех выдуманных клиентов. Команда, группы, настройки и переписки останутся. Перенос можно отменить целиком</div>
       <label class="check" style="margin-top:8px"><input type="checkbox" id="erp-rkn"> Изменения в Роскомнадзор поданы, политика обработки данных опубликована</label>
       <button class="btn primary" id="erp-run" style="margin-top:8px" disabled>Перенести</button></div>`}`;
   erpPeopleSetup(box, d);
@@ -1115,7 +1115,7 @@ async function renderChainsSettings(box) {
   };
 }
 
-/* Мои списки: сохранённые фильтры «Учеников», у каждого сотрудника свои */
+/* Мои списки: сохранённые фильтры «Учеников», у каждого участника команды свои */
 async function membersViews(page, f, rerender) {
   const box = $("#m-views"); if (!box) return;
   const items = (await api("GET", "/api/views?section=members").catch(() => ({ items: [] }))).items;
@@ -1205,7 +1205,7 @@ const ago = (iso) => {
   return m < 1 ? "только что" : m < 60 ? `${m} мин назад` : m < 1440 ? `${Math.floor(m / 60)} ч назад` : dtShort(iso);
 };
 
-/* «Смотреть как»: админ выбирает сотрудника и видит рабочий стол его глазами */
+/* «Смотреть как»: админ выбирает участника команды и видит рабочий стол его глазами */
 S.viewAs = (() => { try { return JSON.parse(localStorage.getItem("crm.viewAs") || "null"); } catch (_) { return null; } })();
 async function viewAsBar() {
   if (S.user.role !== "admin") return "";
@@ -1754,7 +1754,7 @@ function clientSubscriptionsHtml(d) {
     return `<li class="subscription-card compact-subscription ${cancelled?'is-cancelled':''}">
       <div class="subscription-overview"><div class="subscription-identity"><h4>${x.kind==='single'?`Разовое занятие${x.single_date?' · '+dShort(x.single_date):''}`:monthLabel(x.month)}</h4><div class="subscription-group">${esc(clientGroupLabel(x))}</div><div class="small muted subscription-meta">${esc(tariffs[x.tariff]||'Абонемент')} · ${x.lessons} ${plural(x.lessons,'занятие','занятия','занятий')}${x.valid_from||x.valid_until?` · ${x.valid_from?'с '+dShort(x.valid_from):''}${x.valid_until?' по '+dShort(x.valid_until):''}`:''}</div><span class="pill ${!left&&!cancelled?'green':cancelled?'':'yellow'}">${status}</span></div>
       <div class="finance-numbers subscription-money"><div><small>Стоимость</small><b>${rub(x.price)}</b></div><div><small>Оплачено</small><b>${rub(paid)}</b></div><div><small>${cancelled?'Статус':'Остаток'}</small><b class="${left&&!cancelled?'finance-due':''}">${cancelled?'Отменён':rub(left)}</b></div></div></div>
-      <div class="subscription-card-footer"><details class="finance-detail"><summary>Подробнее</summary><div class="small muted">Оформил(а): ${esc(x.issued_by_name||'Сотрудник не указан')}</div>${subscriptionPaymentDetailsHtml(x,d)}${x.credit_lessons?`<div>Перерасчёт пропусков: ${x.credit_lessons}</div>`:''}${x.late_fee?`<div>Надбавка: ${rub(x.late_fee)}</div>`:''}${x.discount_amount?`<div>Скидка: ${esc(x.discount_name||'Название не указано')} · ${rub(x.discount_amount)}</div>`:''}${x.calculation_reason?`<div>Причина: ${esc(x.calculation_reason)}</div>`:x.corrected&&!x.historical_sale?'<div>Сумма скорректирована · причина в ранней записи не указана</div>':''}${x.excluded_dates&&x.excluded_dates!=='[]'?`<div>Исключены: ${JSON.parse(x.excluded_dates).map(day=>esc(dShort(day))+': '+esc((JSON.parse(x.exclusion_reasons||'{}'))[day]||'Причина не указана')).join('<br>')}</div>`:''}${x.composition_corrected&&x.lesson_schedule?`<div class="small muted">${JSON.parse(x.lesson_schedule).map(c=>`${esc(c.group)}: ${c.dates.length} занятий · ${rub(c.amount??c.dates.length*c.rate)}${c.erp_subscription_id?' · ERP №'+esc(c.erp_subscription_id):''}`).join('<br>')}</div>`:''}</details>
+      <div class="subscription-card-footer"><details class="finance-detail"><summary>Подробнее</summary><div class="small muted">Оформил(а): ${esc(x.issued_by_name||'Автор не указан')}</div>${subscriptionPaymentDetailsHtml(x,d)}${x.credit_lessons?`<div>Перерасчёт пропусков: ${x.credit_lessons}</div>`:''}${x.late_fee?`<div>Надбавка: ${rub(x.late_fee)}</div>`:''}${x.discount_amount?`<div>Скидка: ${esc(x.discount_name||'Название не указано')} · ${rub(x.discount_amount)}</div>`:''}${x.calculation_reason?`<div>Причина: ${esc(x.calculation_reason)}</div>`:x.corrected&&!x.historical_sale?'<div>Сумма скорректирована · причина в ранней записи не указана</div>':''}${x.excluded_dates&&x.excluded_dates!=='[]'?`<div>Исключены: ${JSON.parse(x.excluded_dates).map(day=>esc(dShort(day))+': '+esc((JSON.parse(x.exclusion_reasons||'{}'))[day]||'Причина не указана')).join('<br>')}</div>`:''}${x.composition_corrected&&x.lesson_schedule?`<div class="small muted">${JSON.parse(x.lesson_schedule).map(c=>`${esc(c.group)}: ${c.dates.length} занятий · ${rub(c.amount??c.dates.length*c.rate)}${c.erp_subscription_id?' · ERP №'+esc(c.erp_subscription_id):''}`).join('<br>')}</div>`:''}</details>
       ${actions?`<details class="subscription-actions"><summary class="btn sm" aria-label="Действия с абонементом" title="Действия с абонементом">⋯</summary><div>${actions}</div></details>`:''}</div>
       ${!cancelled&&can('members','full')?`<div data-sub-cancel-box="${x.id}"></div>`:''}
       ${S.user.role==='admin'&&x.program_id?`<div data-composition-box="${x.id}"></div>`:''}
@@ -2559,7 +2559,7 @@ async function renderSearch(page) {
 
 /* ---------- настройки ---------- */
 const SET_TABS = [
-  ["users", "👥", "Сотрудники", "Должности, телефоны, пароли"], ["prices", "💰", "Цены и правила", "Прайс, скидки, сборная ПРО, дни без занятий"],
+  ["users", "👥", "Команда", "Должности, телефоны, пароли"], ["prices", "💰", "Цены и правила", "Прайс, скидки, сборная ПРО, дни без занятий"],
   ["structure", "🏟", "Филиалы, группы и смены", "Расписание и лимиты"], ["resp", "🎯", "Ответственные по филиалам", "Кому задачи по пробным"],
   ["comms", "💬", "Связь с клиентами", "Telegram, MAX, WhatsApp, Sipuni, заявки"], ["trials", "📝", "Скрипты", "Сообщения родителям и автосообщения"],
   ["tips", "💡", "Подсказки по этапам", "Что сказать на каждом этапе воронки"], ["chains", "🔁", "Автоцепочки сообщений", "Серии сообщений родителям"],
@@ -2603,7 +2603,7 @@ async function renderSettings(page) {
       <button class="btn sm" id="tour-again">🎓 Пройти обучение ещё раз</button></div>
     ${S.user.role === "admin" ? `<div class="section" data-tab="profile" id="owner-tg"><h3>🔴 Красное в Telegram</h3><div class="small muted">…</div></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" data-tab="profile"><h3>Праздничное оформление</h3>
-      <label class="check"><input type="checkbox" id="festive-on" ${S.meta.festive !== false ? "checked" : ""}> 🎉 Украшать CRM к праздникам по календарю (у всех сотрудников)</label>
+      <label class="check"><input type="checkbox" id="festive-on" ${S.meta.festive !== false ? "checked" : ""}> 🎉 Украшать CRM к праздникам по календарю (у всех участников команды)</label>
       <div class="small muted" style="margin-top:4px">Хэллоуин, Новый год, 23 февраля, 8 марта, 1 июня, 1 сентября</div></div>` : ""}
     ${admin ? `
     <form class="section" id="set" data-tab="prices">
@@ -2627,10 +2627,10 @@ async function renderSettings(page) {
     ${isOwner() ? `<div class="section" id="diag-box" data-tab="diag"></div>` : ""}
     <div class="section" id="resp-settings" data-tab="resp"></div>
     <div class="section" data-tab="users">
-      <h3>Сотрудники</h3>
+      <h3>Команда</h3>
       <div class="list" style="box-shadow:none;margin-bottom:10px">${users.map((u) => `<div class="list-row staff-row"><div class="grow"><span class="who" data-prof="${u.id}">${avatar(u.id, u.name, 34)}<span>${esc(u.name)} <button type="button" class="linkish small muted" data-ulogin="${u.id}" data-login="${esc(u.login)}" data-name="${esc(u.name)}" title="Изменить логин">${esc(u.login)} ✎</button></span></span></div>
-        <input data-uph="${u.id}" value="${esc(u.phone || "")}" placeholder="телефон" title="Телефон сотрудника" inputmode="tel" style="flex:0 0 130px;padding:5px 8px">
-        <input data-tgu="${u.id}" value="${esc(u.tg_username ? "@" + u.tg_username : "")}" placeholder="@telegram" title="Ник в Telegram: CRM отметит сотрудника в рабочих чатах" style="flex:0 0 120px;padding:5px 8px">
+        <input data-uph="${u.id}" value="${esc(u.phone || "")}" placeholder="телефон" title="Телефон участника команды" inputmode="tel" style="flex:0 0 130px;padding:5px 8px">
+        <input data-tgu="${u.id}" value="${esc(u.tg_username ? "@" + u.tg_username : "")}" placeholder="@telegram" title="Ник в Telegram: CRM отметит участника команды в рабочих чатах" style="flex:0 0 120px;padding:5px 8px">
         ${u.role === "coach" ? "" : `<input data-sip="${u.id}" value="${esc(u.sip_number || "")}" placeholder="вн. номер" title="Внутренний номер Sipuni: на него придёт звонок из карточки" inputmode="numeric" style="flex:0 0 96px;padding:5px 8px">`}
         <select data-upost="${u.id}" title="Должность: от неё зависят разделы и права" style="flex:0 0 auto;width:auto;padding:5px 8px" ${u.id === S.user.id ? "disabled" : ""}>${POSTS.map(([k, t]) => `<option value="${k}" ${postOf(u) === k ? "selected" : ""}>${t}</option>`).join("")}</select>
         <label class="check small" title="Промоутер: права промоутера добавляются к должности" style="flex:0 0 auto"><input type="checkbox" data-uprom="${u.id}" ${u.is_promoter ? "checked" : ""}> промоутер</label>
@@ -2640,9 +2640,9 @@ async function renderSettings(page) {
       <form id="nu">
         <div class="row"><div class="field"><label>Имя и фамилия</label><input name="name" autocomplete="off" required></div><div class="field"><label>Телефон</label><input name="phone" type="tel" placeholder="Необязательно"></div></div>
         <div class="field"><label>Должность</label><select name="post">${POSTS.map(([k, t]) => `<option value="${k}" ${k === "operator" ? "selected" : ""}>${t}</option>`).join("")}</select></div>
-        <p class="small muted">Логин и случайный пароль CRM создаст сама и покажет после добавления сотрудника.</p>
+        <p class="small muted">Логин и случайный пароль CRM создаст сама и покажет после добавления участника команды.</p>
         <label class="check small" style="margin-bottom:8px"><input type="checkbox" name="is_promoter" value="1"> Ещё и промоутер</label>
-        <button class="btn sm">Добавить сотрудника</button>
+        <button class="btn sm">Добавить участника команды</button>
       </form>
       <details style="margin-top:12px"><summary class="linkish small">Завести команду списком (пароли создаст CRM)</summary>
         <div class="small muted" style="margin:6px 0">По строке на человека: Имя Фамилия; должность; телефон. Должность: администратор, старший администратор, тренер, промоутер, юрист или руководитель. Если человек уже есть, ему просто выдастся новый пароль</div>
@@ -2663,7 +2663,7 @@ async function renderSettings(page) {
       <div class="row" style="align-items:center;flex-wrap:wrap"><input type="number" id="fake-n" value="150" min="1" max="500" style="flex:0 0 100px">
         <button class="btn sm primary" id="fake-add" style="flex:0">Добавить</button><button class="btn sm" id="fake-real" style="flex:0">Школа с историей за 1,5 года</button><button class="btn sm" id="fake-calls" style="flex:0">+ Звонки с разборами</button><button class="btn sm danger" id="fake-del" style="flex:0">Удалить всех выдуманных</button></div></div>` : ""}
     ${admin && S.meta.demo ? `<div class="section" data-tab="test"><h3>Тестовые данные</h3>
-      <div class="small muted" style="margin-bottom:8px">Сейчас включён тестовый режим. Кнопка сотрёт всех клиентов и создаст выдуманных заново. Сотрудники и настройки сохранятся.</div>
+      <div class="small muted" style="margin-bottom:8px">Сейчас включён тестовый режим. Кнопка сотрёт всех клиентов и создаст выдуманных заново. Команда и настройки сохранятся.</div>
       <button class="btn sm danger" id="demo-reset">Пересоздать тестовые данные</button></div>` : ""}
     <form class="section" id="pw" data-tab="profile">
       <h3>Мой пароль</h3>
@@ -2687,7 +2687,7 @@ async function renderSettings(page) {
       const r = await api("POST", "/api/users", Object.fromEntries(new FormData(e.target)));
       await render();
       const text = `${r.name}\nВход в CRM: ${location.origin}\nЛогин: ${r.login}\nПароль: ${r.password}`;
-      openDrawer(`<h2>Сотрудник добавлен</h2><p>${esc(r.name)}</p><dl class="kv"><dt>Логин</dt><dd><b>${esc(r.login)}</b></dd><dt>Пароль</dt><dd><code>${esc(r.password)}</code></dd></dl><p class="small muted">Скопируйте данные для входа перед закрытием этой карточки. Пароль показывается только сейчас.</p><button type="button" class="btn primary" id="new-staff-copy">Скопировать данные для входа</button>`);
+      openDrawer(`<h2>Участник команды добавлен</h2><p>${esc(r.name)}</p><dl class="kv"><dt>Логин</dt><dd><b>${esc(r.login)}</b></dd><dt>Пароль</dt><dd><code>${esc(r.password)}</code></dd></dl><p class="small muted">Скопируйте данные для входа перед закрытием этой карточки. Пароль показывается только сейчас.</p><button type="button" class="btn primary" id="new-staff-copy">Скопировать данные для входа</button>`);
       $("#new-staff-copy").onclick = async () => {
         try { await navigator.clipboard.writeText(text); toast("Данные для входа скопированы"); }
         catch (_) { prompt("Скопируйте данные для входа", text); }
@@ -2738,7 +2738,7 @@ async function renderSettings(page) {
   if ($("#structure-settings")) renderStructure($("#structure-settings"), users).catch(fail);
   if ($("#archive-settings")) renderArchive($("#archive-settings")).catch(fail);
   page.querySelectorAll("[data-upw]").forEach((b) => (b.onclick = async () => {
-    const pw = prompt("Новый пароль для сотрудника (от 8 символов). Передайте его лично");
+    const pw = prompt("Новый пароль для участника команды (от 8 символов). Передайте его лично");
     if (!pw) return;
     try { await api("PATCH", `/api/users/${b.dataset.upw}`, { password: pw }); toast("Пароль задан"); } catch (e) { fail(e); }
   }));
@@ -2756,15 +2756,15 @@ async function renderSettings(page) {
       <textarea readonly rows="5" style="width:100%" onclick="this.select()">${esc(text)}</textarea>`);
   }));
   page.querySelectorAll("[data-uarch]").forEach((b) => (b.onclick = async () => {
-    if (!confirm("Перенести сотрудника в архив? Он больше не сможет войти, вернуть можно в Архиве")) return;
-    try { await api("PATCH", `/api/users/${b.dataset.uarch}`, { active: false }); toast("Сотрудник в архиве"); render(); } catch (e) { fail(e); }
+    if (!confirm("Перенести участника команды в архив? Он больше не сможет войти, вернуть можно в Архиве")) return;
+    try { await api("PATCH", `/api/users/${b.dataset.uarch}`, { active: false }); toast("Участник команды в архиве"); render(); } catch (e) { fail(e); }
   }));
   if ($("#bulk-go")) $("#bulk-go").onclick = async () => {
     try {
       const r = await api("POST", "/api/users/bulk", { text: $("#bulk-users").value });
       const txt = r.users.map((u) => `${u.name}\nЛогин: ${u.login}\nПароль: ${u.password}`).join("\n\n");
-      $("#bulk-res").innerHTML = `<div class="alert" style="margin-top:8px">Пароли показываются только сейчас. Скопируйте и раздайте сотрудникам лично</div>
-        <table class="tbl"><thead><tr><th>Сотрудник</th><th>Логин</th><th>Пароль</th><th></th></tr></thead><tbody>${r.users.map((u) => `<tr><td>${esc(u.name)}</td><td><b>${esc(u.login)}</b></td><td><code>${esc(u.password)}</code></td><td class="small muted">${esc(u.status)}</td></tr>`).join("")}</tbody></table>
+      $("#bulk-res").innerHTML = `<div class="alert" style="margin-top:8px">Пароли показываются только сейчас. Скопируйте и раздайте участникам команды лично</div>
+        <table class="tbl"><thead><tr><th>Участник команды</th><th>Логин</th><th>Пароль</th><th></th></tr></thead><tbody>${r.users.map((u) => `<tr><td>${esc(u.name)}</td><td><b>${esc(u.login)}</b></td><td><code>${esc(u.password)}</code></td><td class="small muted">${esc(u.status)}</td></tr>`).join("")}</tbody></table>
         <button class="btn sm" id="bulk-copy" style="margin-top:6px">Копировать всё</button>`;
       $("#bulk-copy").onclick = () => { navigator.clipboard.writeText(txt).then(() => toast("Скопировано")); };
     } catch (e) { fail(e); }
@@ -2787,7 +2787,7 @@ async function renderSettings(page) {
   });
   page.querySelectorAll("[data-upost]").forEach((sel) => (sel.onchange = async () => {
     const t = POSTS.find(([k]) => k === sel.value)[1];
-    if (!confirm(`Сделать должность «${t}»? Разделы и права поменяются сразу, сотруднику нужно будет войти заново`)) { render(); return; }
+    if (!confirm(`Сделать должность «${t}»? Разделы и права поменяются сразу, участнику команды нужно будет войти заново`)) { render(); return; }
     try { await api("PATCH", `/api/users/${sel.dataset.upost}`, { post: sel.value }); toast("Должность изменена"); } catch (err) { fail(err); render(); }
   }));
   page.querySelectorAll("[data-ujour]").forEach((c) => (c.onchange = async () => {
@@ -2862,7 +2862,7 @@ async function renderPriceList(box) {
   };
 }
 
-/* должности для Настроек → Сотрудники (perms.py) */
+/* должности для Настроек → Команда (perms.py) */
 const POSTS = [["owner", "Руководитель"], ["senior", "Старший администратор"], ["operator", "Администратор"], ["offline_admin", "Офлайн-администратор"], ["coach", "Тренер"], ["lawyer", "Юрист"], ["trainee", "Стажёр (только Планер)"]];
 const postOf = (u) => u.role === "admin" ? "owner" : u.role === "operator" ? (u.is_offline_admin ? "offline_admin" : u.is_senior ? "senior" : "operator") : u.role;
 
@@ -2949,9 +2949,9 @@ document.addEventListener("copy", (e) => {
   toast("Копировать данные из CRM может только руководитель", true);
 });
 
-/* Документы: юридические документы, оферты, подписи сотрудников (руководитель и юрист) */
+/* Документы: юридические документы, оферты, подписи участников команды (руководитель и юрист) */
 async function renderDocs(page) {
-  const tabs = [...(can("docs", "full") ? [["legal", "Юридические документы"], ["offers", "Оферты"]] : []), ...(can("staffdocs", "view") ? [["staff", "Документы сотрудников"]] : [])];
+  const tabs = [...(can("docs", "full") ? [["legal", "Юридические документы"], ["offers", "Оферты"]] : []), ...(can("staffdocs", "view") ? [["staff", "Документы команды"]] : [])];
   if (!tabs.some(([k]) => k === S.docTab)) S.docTab = tabs[0] && tabs[0][0];
   page.innerHTML = `<div class="page-head"><h2 class="grow">Документы</h2></div><div style="max-width:880px">
     ${tabs.length > 1 ? `<div class="seg" style="margin-bottom:14px">${tabs.map(([k, t]) => `<button data-dtab="${k}" class="${S.docTab === k ? "active" : ""}">${t}</button>`).join("")}</div>` : ""}
@@ -3001,7 +3001,7 @@ function openTransfer(eid, box, d, groups, reload, initialDate) {
   sel.onchange = calc; dt.onchange = calc; if(box.querySelector("[data-trtar]"))box.querySelector("[data-trtar]").onchange=calc;
 }
 
-/* Первый вход сотрудника: принять документы (NDA, правила работы с данными, согласие, журнал, ПЭП) */
+/* Первый вход участника команды: принять документы (NDA, правила работы с данными, согласие, журнал, ПЭП) */
 async function renderStaffDocs(page) {
   const d = await api("GET", "/api/staff-docs");
   const need = d.docs.filter((x) => !x.accepted_at);
@@ -3026,11 +3026,11 @@ async function renderStaffDocs(page) {
 
 async function renderStaffDocsAdmin(box) {
   const d = await api("GET", "/api/staff-docs/overview");
-  box.innerHTML = `<h3>Документы сотрудников</h3><div class="small muted">NDA, правила работы с данными, согласие, журнал действий, электронная подпись. Каждый подписывает при первом входе</div>
+  box.innerHTML = `<h3>Документы команды</h3><div class="small muted">NDA, правила работы с данными, согласие, журнал действий, электронная подпись. Каждый подписывает при первом входе</div>
     ${d.items.map((u) => `<div class="list-row"><div class="grow">${esc(u.name)}</div>
       ${u.pending ? `<span class="pill red">не подписал${u.last ? " новую редакцию" : ""}</span>` : `<span class="pill green">подписал ${dtWhen(u.last)}</span>`}
       ${u.tour ? `<span class="pill green" title="Обучение в CRM">обучение ${dtWhen(u.tour)}</span>` : `<span class="pill">обучение не пройдено</span>`}
-      ${u.last ? `<button class="btn sm" data-sdlog="${u.id}">Лист подписания</button>` : ""}</div>`).join("") || `<div class="small muted">Сотрудников пока нет</div>`}`;
+      ${u.last ? `<button class="btn sm" data-sdlog="${u.id}">Лист подписания</button>` : ""}</div>`).join("") || `<div class="small muted">Участников команды пока нет</div>`}`;
   box.querySelectorAll("[data-sdlog]").forEach((b) => (b.onclick = async () => {
     const l = await api("GET", `/api/staff-docs/log/${b.dataset.sdlog}`);
     openDrawer(`<h2>Лист подписания</h2><div class="muted">${esc(l.name)}</div>
@@ -3044,7 +3044,7 @@ async function renderStaffDocsAdmin(box) {
 /* Настройки → «🩺 Проверка соединений» (только владелец): кто и как подключался к CRM, по журналу сервера */
 async function renderDiag(box, ip = "") {
   box.innerHTML = `<h3>🩺 Проверка соединений</h3>
-    <div class="small muted">Попросите сотрудника открыть ab-plus.ru и прислать скриншот с сайта 2ip.ru (там его IP-адрес). Впишите IP сюда и нажмите «Показать». Видно, дошёл ли он до сервера и на каком шаге оборвалось</div>
+    <div class="small muted">Попросите участника команды открыть ab-plus.ru и прислать скриншот с сайта 2ip.ru (там его IP-адрес). Впишите IP сюда и нажмите «Показать». Видно, дошёл ли он до сервера и на каком шаге оборвалось</div>
     <div class="row" style="gap:8px;margin-top:8px"><input id="dg-ip" placeholder="IP-адрес, например 95.24.1.2" value="${esc(ip)}">
       <button class="btn primary" id="dg-go" style="flex:0 0 auto">Показать</button><button class="btn" id="dg-all" style="flex:0 0 auto">Все за последнее время</button></div>
     <div id="dg-out" class="small muted" style="margin-top:10px">Загружаю…</div>`;
@@ -3088,7 +3088,7 @@ async function renderBackup(box) {
     ${can("export") ? `<div class="field" style="margin-top:14px"><label>Копия, которую можно прочитать</label>
       <div class="row" style="gap:8px;flex-wrap:wrap"><a class="btn sm" style="flex:0 0 auto" href="/api/export/all?t=${Date.now()}">📥 Вся база в Excel</a>
         <a class="btn sm" style="flex:0 0 auto" href="/api/export/all?part=contacts&t=${Date.now()}">📞 Только контакты</a></div>
-      <div class="small muted" style="margin-top:6px"><b>Вся база:</b> дети и родители с телефонами, абонементы, оплаты, посещения, группы, сотрудники.<br>
+      <div class="small muted" style="margin-top:6px"><b>Вся база:</b> дети и родители с телефонами, абонементы, оплаты, посещения, группы, участники команды.<br>
         <b>Только контакты:</b> один лист для обзвона: ребёнок, родитель, телефон, группа, ученик или лид, пометка «не звонить». Без оплат.<br>
         Храните файлы в надёжном месте: в них персональные данные клиентов</div></div>` : ""}`;
   $("#bk-copy").onclick = () => navigator.clipboard.writeText(d.key).then(() => toast("Пароль скопирован"));

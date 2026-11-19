@@ -426,7 +426,7 @@ async function renderArchive(box) {
     <div class="small muted" style="margin-top:6px">Ученики и лиды из архива: раздел «Ученики» → кнопка «Архив»</div>
     ${block("Группы", d.groups, (x) => `${esc(x.name)} <span class="muted">${esc(x.branch)}</span>`, "group")}
     ${block("Филиалы", d.branches, (x) => esc(x.name), "branch")}
-    ${block("Сотрудники", d.users, (x) => `${esc(x.name)} <span class="muted">${esc(x.login)}</span>`, "user")}`;
+    ${block("Команда", d.users, (x) => `${esc(x.name)} <span class="muted">${esc(x.login)}</span>`, "user")}`;
   box.querySelectorAll("[data-restore]").forEach((b) => (b.onclick = async () => {
     const [k, id] = b.dataset.restore.split(":");
     const call = { student: ["POST", `/api/students/${id}/archive`, { archived: false }], group: ["POST", `/api/groups/${id}/archive`, { active: true }],

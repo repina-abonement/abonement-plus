@@ -1,4 +1,4 @@
-"""Фото и анкета сотрудника: аватарка в CRM, карточка тренера (образование, стаж, достижения, слова о школе).
+"""Фото и анкета участника команды: аватарка в CRM, карточка тренера (образование, стаж, достижения, слова о школе).
 
 Фото хранится файлом рядом с базой (data/photos/<id>.jpg), в базе — только отметка, что фото есть, и время,
 чтобы браузер обновлял картинку после замены. Загрузить можно файлом из CRM или по ссылке с сайта Футболики.
@@ -103,7 +103,7 @@ def get_bio(con, uid: int) -> dict:
 def profile(con, uid: int) -> dict:
     r = con.execute("SELECT id, name, role, phone, tg_username, photo_at FROM users WHERE id=?", (uid,)).fetchone()
     if not r:
-        raise ApiError("Сотрудник не найден", 404)
+        raise ApiError("Участник команды не найден", 404)
     groups = [dict(g) for g in con.execute(
         """SELECT g.id, g.name, b.name AS branch, CASE WHEN g.coach_id=? THEN 'главный' ELSE 'помощник' END AS role
            FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.active=1 AND (g.coach_id=? OR g.assistant_id=?)
