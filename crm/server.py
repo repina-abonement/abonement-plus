@@ -1195,25 +1195,25 @@ def move(con, h, user, body, q, sid):
     return {"ok": True} | (r or {})
 
 
-@route("GET", "/api/students/recent", role="operator")
+@route("GET", "/api/students/recent", role="operator|search:view")
 def recent_students(con, h, user, body, q):
     from . import recents
     return recents.listing(con, user["id"])
 
 
-@route("DELETE", "/api/students/recent", role="operator")
+@route("DELETE", "/api/students/recent", role="operator|search:view")
 def recent_students_clear(con, h, user, body, q):
     from . import recents
     recents.clear(con, user["id"])
     return {"ok": True}
 
 
-@route("GET", "/api/students", role="operator")
+@route("GET", "/api/students", role="operator|search:view")
 def students(con, h, user, body, q):
     return sv.search_students(con, q.get("q", ""), q.get("archived") == "1")
 
 
-@route("GET", "/api/people", role="operator")
+@route("GET", "/api/people", role="operator|search:view")
 def people_list(con, h, user, body, q):
     """«Клиенты и лиды»: лиды без единой покупки, клиенты с фильтром по статусам карточки и ERP."""
     from . import people
@@ -1235,7 +1235,7 @@ def student_create(con, h, user, body, q):
     return {"id": sid}
 
 
-@route("GET", "/api/students/{sid}", role="operator")
+@route("GET", "/api/students/{sid}", role="operator|search:view")
 def student_get(con, h, user, body, q, sid):
     from . import recents
     recents.remember(con, user["id"], int(sid))

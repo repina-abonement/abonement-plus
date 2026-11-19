@@ -72,7 +72,7 @@ def level(user: dict, section: str) -> int:
         if user.get("coach_nebo_only") and section not in ("today", "journal"):
             return 0
     if "offline" in roles_of(user):
-        return LEVEL["full"] if section == "inbox" else LEVEL["own"] if section == "planner" else 0
+        return LEVEL["full"] if section == "inbox" else LEVEL["view"] if section == "search" else LEVEL["own"] if section == "planner" else 0
     rules = SECTIONS.get(section, {})
     return max((LEVEL[rules[r]] for r in roles_of(user) if r in rules), default=0)
 
