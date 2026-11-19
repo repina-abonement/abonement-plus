@@ -77,7 +77,7 @@ def can_manage(con, user: dict) -> bool:
     """Ставить задачи другим и видеть всю команду: руководитель и старший администратор."""
     if user["role"] == "trainee":
         return False
-    return user["role"] == "admin" or bool(user.get("is_senior")) or user["id"] == controller(con)
+    return user["role"] == "admin" or bool(user.get("is_senior")) or user["id"] == controller(con) or offlineplanner.can_assign(con,user)
 
 
 def can_view_plan(con, user: dict, uid: int) -> bool:
@@ -86,6 +86,7 @@ def can_view_plan(con, user: dict, uid: int) -> bool:
         return uid == user["id"]
     if uid == user["id"] or user["role"] == "admin":
         return True
+    if offlineplanner.can_assign(con,user) and con.execute("SELECT 1 FROM users WHERE id=? AND active=1 AND role='operator'",(uid,)).fetchone():return True
     return bool(user.get("is_senior") and con.execute(
         "SELECT 1 FROM users WHERE id=? AND role!='admin'", (uid,)).fetchone())
 

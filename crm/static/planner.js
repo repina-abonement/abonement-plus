@@ -13,10 +13,13 @@ async function openTaskForm(box, done, preset = {}) {
   let p;
   try { p = await api("GET", "/api/planner"); } catch (e) { return fail(e); }
   const staff = p.staff;
-  box.innerHTML = `<div class="sub-form task-form">
+  const targetId=+(preset.assignee_id||p.my_board_id||S.user.id),target=staff.find(x=>+x.id===targetId),lockedTarget=!!preset.assignee_id;
+  if(lockedTarget&&!target){box.innerHTML='<p class="need-err">Эта доска недоступна для назначения. Обновите страницу и выберите планер заново</p>';return}
+
+  box.innerHTML = `<div class="sub-form task-form">${lockedTarget?`<div class="planner-form-target"><b>Новая задача</b><div>Кому: ${esc(target.name)}</div><input type="hidden" data-ta value="${targetId}"></div>`:''}
     <div class="field"><label>Что сделать</label><input data-tt placeholder="Например: переписать оферту" value="${esc(preset.title || "")}"></div>
     <div class="row" style="flex-wrap:wrap;align-items:flex-end">
-      ${p.can_manage ? `<div class="field"><label>Кому</label><select data-ta>${staff.map((u) => `<option value="${u.id}" ${u.id === (preset.assignee_id || S.user.id) ? "selected" : ""}>${esc(u.name)}${u.id === S.user.id ? " (себе)" : ""}</option>`).join("")}</select></div>` : ""}
+      ${p.can_manage && !lockedTarget ? `<div class="field"><label>Кому</label><select data-ta>${staff.map((u) => `<option value="${u.id}" ${+u.id === targetId ? "selected" : ""}>${esc(u.name)}${u.id === S.user.id ? " (себе)" : ""}</option>`).join("")}</select></div>` : ""}
       <div class="field" style="flex:0 0 150px"><label>Когда</label><input type="date" data-td value="${preset.date || S.meta.today}"></div>
       <div class="field" style="flex:0 0 110px"><label>Время</label><input type="time" data-ttm></div>
       <div class="field" style="flex:0 0 170px"><label>Повтор</label><select data-tr><option value="">Не повторять</option>
@@ -38,6 +41,7 @@ async function openTaskForm(box, done, preset = {}) {
   const syncShift=()=>{const target=box.querySelector('[data-ta]')?.value||preset.assignee_id||p.my_board_id||S.user.id;const field=box.querySelector('[data-shift-field]');field.hidden=+target!==+p.shift_board_id;if(field.hidden)box.querySelector('[data-task-shift]').value='common'};
   const assignee=box.querySelector('[data-ta]');if(assignee)assignee.onchange=syncShift;syncShift();
   box.querySelector("[data-tt]").focus();
+  box.scrollIntoView({block:"nearest",behavior:"smooth"});
   box.querySelector("[data-tsave]").onclick = async () => {
     const a = box.querySelector("[data-ta]");
     const data = { title: box.querySelector("[data-tt]").value, date: box.querySelector("[data-td]").value, time: box.querySelector("[data-ttm]").value,
@@ -102,7 +106,7 @@ async function renderPlanner(page) {
     <div class="seg" style="margin-bottom:14px;flex-wrap:wrap">${tabs.map(([k, t]) => `<button data-pt="${k}" class="${C.tab === k ? "active" : ""}">${t}</button>`).join("")}</div>
     <div class="tasks-box">${body}</div>`;
   page.querySelectorAll("[data-pt]").forEach((b) => (b.onclick = () => { step(() => { C.tab = b.dataset.pt; }); }));
-  $("#pl-add").onclick = () => openTaskForm($("#pl-form"), render, C.tab === "week" && C.user ? { assignee_id: C.user } : {});
+  $("#pl-add").onclick = () => openTaskForm($("#pl-form"), render, C.tab === "week" && C.user ? { assignee_id: C.user,date:C.layout==='day'?C.start:S.meta.today } : {});
   if (C.tab === "week") await renderWeek($("#pl-week"));
   wireTasks(page);
   page.querySelectorAll("[data-plan-detail]").forEach(el => {
@@ -216,8 +220,10 @@ async function renderWeek(box) {
   }));
   // быстрое добавление в колонку дня
   box.querySelectorAll("[data-pq]").forEach((button) => (button.onclick = () => {
-    const form = $("#pl-form");
-    form.innerHTML = "";
+    document.querySelectorAll('.planner-day-form').forEach(el=>el.remove());
+    const globalForm=$('#pl-form');if(globalForm)globalForm.innerHTML='';
+    const form=document.createElement('div');form.className='planner-day-form';
+    button.after(form);
     openTaskForm(form, () => {
       if (C.status === "done") C.status = "all";
       reload();
