@@ -156,3 +156,90 @@ class PayoutMatching(unittest.TestCase):
         self.assertTrue(payoutcheck.same_name(['Иванов П.'],'Петр Иванов'))
         self.assertTrue(payoutcheck.same_name(['Петр Иванов'],'Иванов П.С.'))
         self.assertFalse(payoutcheck.same_name(['Иванов А.'],'Петр Иванов'))
+
+    def seed_reference(self,item,reference):
+        pid=self.con.execute('SELECT payment_id FROM pay_links WHERE pk_payment_id=?',(item['id'],)).fetchone()[0]
+        provider={'available':True,'id':item['id'],'status':'stuck','pay_amount':str(item['amount_minor']/100),'refund_amount':'0.00','unique_id':reference}
+        payload={'provider_payment_id':item['id'],'bank_payment':provider,'provider_payment':provider,'status':'unknown','label':'Чек не подтверждён','checked_at':'2026-11-19T13:00:00'}
+        self.con.execute('INSERT OR REPLACE INTO fiscal_payment_checks VALUES(?,?,?,?)',(pid,'2026-11-19T13:00:00','unknown',json.dumps(payload)))
+        return pid
+
+    def test_11534_bank_sender_qr_id_confirms_bank_and_leaves_ofd_unavailable(self):
+        reference='AD2010208UGANCGD8TRACRVL5JPQOK71'
+        item=self.member('11534','Клиент',1350,rail='sbp',system='94')
+        self.snapshot([item]);pid=self.seed_reference(item,reference)
+        purpose='Зачисление по QR коду ID '+reference+' от 18.11.2026. НДС не предусмотрен.'
+        credit=self.credit(1350,'ООО «Банк Точка»',purpose,'cbs-tb;2672919318;1',day='2026-11-19')
+        self.con.execute('INSERT INTO ofd_payment_checks VALUES(?,?,?,?)',(pid,'11534','2026-11-19T13:00:00',json.dumps({'status':'unavailable','http_status':403,'provider_message':'Kkt is not paid'})))
+        before=self.con.execute('SELECT count(*) FROM payments').fetchone()[0]
+        result=self.run_bank([credit]);self.assertEqual(result['confirmed'],1)
+        bank=self.states()[0]
+        self.assertEqual(bank['status'],'confirmed')
+        self.assertEqual(bank['evidence']['matched_reference']['provider_field'],'bank_payment.unique_id')
+        self.assertEqual(bank['evidence']['matched_reference']['value'],reference)
+        self.assertEqual(bank['evidence']['bank_operation_id'],'cbs-tb;2672919318;1')
+        self.assertEqual(bank['match_diagnostics']['reference_candidates'],1)
+        payment=self.con.execute('SELECT * FROM payments WHERE id=?',(pid,)).fetchone()
+        control=paymentcontrol.state(self.con,payment)
+        self.assertEqual(control['source']['status'],'confirmed');self.assertEqual(control['bank']['status'],'confirmed')
+        self.assertEqual(control['ofd']['status'],'unavailable');self.assertEqual(control['status'],'attention')
+        self.assertEqual(self.con.execute('SELECT count(*) FROM payments').fetchone()[0],before)
+
+    def test_qr_reference_never_matches_prefix_suffix_case_or_wrong_amount(self):
+        reference='AD2010208UGANCGD8TRACRVL5JPQOK71'
+        item=self.member(amount=1350,rail='sbp');self.snapshot([item]);self.seed_reference(item,reference)
+        for altered in (reference+'X','X'+reference,reference.lower(),reference[:-1]+'2'):
+            with self.subTest(reference=altered):
+                self.run_bank([self.credit(1350,'Петр Иванов','QR код ID '+altered,day='2026-11-18')])
+                self.assertEqual(self.states()[0]['status'],'unverified')
+        self.run_bank([self.credit(1349,'ООО Банк Точка','QR код ID '+reference)])
+        self.assertEqual(self.states()[0]['status'],'unverified')
+
+    def test_two_matching_qr_credits_and_reused_reference_stay_unverified(self):
+        item=self.member(amount=1350,rail='sbp');self.snapshot([item]);self.seed_reference(item,'synthetic-QR-ID')
+        credit=self.credit(1350,'Банк','QR код ID synthetic-QR-ID',day='2026-11-18')
+        self.run_bank([credit,credit|{'transactionId':'second-credit'}])
+        self.assertEqual(self.states()[0]['status'],'unverified')
+        self.assertEqual(self.states()[0]['match_diagnostics']['reference_candidates'],2)
+        self.assertEqual(self.con.execute('SELECT count(*) FROM bank_credit_allocations').fetchone()[0],0)
+
+    def test_exact_qr_reference_has_priority_over_another_customers_name_match(self):
+        exact=self.member('exact','Иванов Петр',1350,rail='sbp')
+        weaker=self.member('name-only','Иванов Петр',1350,rail='sbp')
+        self.snapshot([exact,weaker]);self.seed_reference(exact,'synthetic-QR-ID')
+        self.run_bank([self.credit(1350,'Иванов Петр','QR код ID synthetic-QR-ID',day='2026-11-18')])
+        self.assertEqual([s['status'] for s in self.states()],['confirmed','unverified'])
+
+    def test_structured_sbp_reference_and_unknown_customer_gateway_id(self):
+        item=self.member('typed',amount=1350,rail='sbp')
+        item['references']={'unique_id':'structured-payment-ref'};self.snapshot([item])
+        credit=self.credit(1350,'Банк','Зачисление СБП',day='2026-11-18')|{'paymentId':'structured-payment-ref'}
+        self.run_bank([credit]);self.assertEqual(self.states()[0]['status'],'confirmed')
+        self.assertEqual(self.states()[0]['evidence']['matched_reference']['bank_field'],'paymentId')
+
+    def test_daily_error_reports_safe_http_reason_and_preserves_roster(self):
+        from datetime import timedelta
+        self.snapshot([self.member()])
+        for offset in range(7):
+            day=(self.current.date()-timedelta(days=offset)).isoformat()
+            if day!='2026-11-18':self.snapshot([],day=day,stamp=self.current.isoformat())
+        fiscal.comms.put(self.con,'fx_pk_password','PRIVATE-PASSWORD')
+        self.mock.stop()  # Exercise the real read-only transport with a mocked HTTP response.
+        with patch.object(fiscal.comms,'http',return_value=(403,{'msg':'Denied PRIVATE-PASSWORD https://private.example/token test@example.com 79000000001'})):
+            result=payoutcheck.refresh_source(self.con,self.current,limit=1)
+        self.assertEqual(result['days_unavailable'],1)
+        diagnostics=payoutcheck.diagnostics(self.con)
+        day=next(d for d in diagnostics['daily_sources'] if d['day']=='2026-11-18')
+        self.assertEqual(day['http_status'],403);self.assertEqual(day['error_code'],'provider_http_error')
+        self.assertIn('Denied',day['provider_message']);self.assertEqual(day['payments'],1)
+        for secret in ('PRIVATE-PASSWORD','private.example','test@example.com','79000000001'):
+            self.assertNotIn(secret,json.dumps(diagnostics))
+
+    def test_daily_schema_failure_reports_reason_and_cannot_confirm_empty_day(self):
+        with patch.object(fiscal,'pk_call',return_value={'unexpected':'shape'}):
+            result=payoutcheck.refresh_source(self.con,self.current,limit=1)
+        self.assertEqual(result['days_unavailable'],1)
+        day=payoutcheck.diagnostics(self.con)['daily_sources'][0]
+        self.assertEqual(day['status'],'unavailable');self.assertEqual(day['error_code'],'unexpected_response')
+        self.assertIn('response_shape',day)
+        self.assertIsNone(day['payments']);self.assertIsNone(day['cards']);self.assertFalse(day['source_available'])

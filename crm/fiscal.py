@@ -291,12 +291,15 @@ def pk_call(con, path: str, params=None, form=None):
     url = server + path + ("?" + urlencode(params, doseq=True) if params else "")
     code, js = comms.http("POST" if form is not None else "GET", url, form=form,
                           headers={"Authorization": "Basic " + auth}, timeout=30, context=ssl_ctx())
+    error_message=safe_provider_message(con,js)
+    if not error_message and isinstance(js,dict) and isinstance(js.get('msg'),str):
+        error_message=safe_provider_message(con,{'message':js['msg']})
     if code == 401:
-        raise FxError("PayKeeper: неверный логин или пароль")
+        raise FxError("PayKeeper: неверный логин или пароль",http_status=code,provider_message=error_message)
     if code >= 400:
-        raise FxError(f"PayKeeper ответил {code}")
+        raise FxError(f"PayKeeper ответил {code}",http_status=code,provider_message=error_message)
     if isinstance(js, dict) and js.get("result") == "fail":
-        raise FxError(f"PayKeeper: {js.get('msg') or 'ошибка'}")
+        raise FxError("PayKeeper не выполнил запрос",provider_message=safe_provider_message(con,{"message":js.get("msg") or "Ошибка PayKeeper"}))
     return js
 
 

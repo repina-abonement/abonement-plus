@@ -69,7 +69,7 @@ def state(con,payment_id):
         proof=result.get('settlement_proof',{})
         if not current or len(ids)!=1 or proof.get('payment_gross_minor')!=fiscal.kop(current['amount']):
             return {'status':'unverified','label':'Связь оплаты изменилась, нужна повторная проверка','checked_at':row['checked_at']}
-        return {'status':'confirmed','label':'Зачисление подтверждено выпиской','checked_at':row['checked_at'],'note':result['note'],'evidence':result.get('settlement_proof',{})}
+        return {'status':'confirmed','label':'Зачисление подтверждено выпиской','checked_at':row['checked_at'],'note':result['note'],'evidence':result.get('settlement_proof',{}),'match_diagnostics':result.get('match_diagnostics',{})}
     note=result.get('note') or 'Зачисление на расчётный счёт пока не подтверждено'
     if result.get('registry_status')=='permission_denied':
         note='Предыдущая проверка реестра была недоступна. Новый маршрут использует список PayKeeper и банковскую выписку'
@@ -78,4 +78,4 @@ def state(con,payment_id):
     elif result.get('statement_status')=='read' and result.get('note') in (None,'Фактическая проводка по расчётному счёту ещё не подтверждена'):
         note='Выписка прочитана. Подтверждённая связь с зачислением пока не найдена'
     return {'status':'unverified','label':'Зачисление на расчётный счёт не подтверждено',
-            'checked_at':row['checked_at'],'note':note}
+            'checked_at':row['checked_at'],'note':note,'match_diagnostics':result.get('match_diagnostics',{})}

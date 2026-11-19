@@ -13,6 +13,12 @@ from . import fiscal,paykeepercheck
 
 
 def init(con):
+    con.execute('CREATE TABLE IF NOT EXISTS payment_matching_versions(name TEXT PRIMARY KEY,version TEXT NOT NULL)')
+    version=con.execute("SELECT version FROM payment_matching_versions WHERE name='sbp'").fetchone()
+    if not version or version['version']!='qr-reference-v1':
+        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='payment_control_jobs'").fetchone():
+            con.execute("UPDATE payment_control_jobs SET next_at=NULL WHERE source IN ('paykeeper','tochka') AND lease_owner IS NULL")
+        con.execute("INSERT OR REPLACE INTO payment_matching_versions VALUES('sbp','qr-reference-v1')")
     con.execute('''CREATE TABLE IF NOT EXISTS pk_daily_evidence(
         day TEXT PRIMARY KEY,checked_at TEXT NOT NULL,status TEXT NOT NULL,digest TEXT NOT NULL,result TEXT NOT NULL)''')
     con.execute('''CREATE TABLE IF NOT EXISTS pk_system_evidence(
@@ -65,6 +71,27 @@ def metadata(con):
     return result
 
 
+class DailyEvidenceError(ValueError):
+    def __init__(self,code,note,shape=None):
+        super().__init__(code)
+        self.code,self.note,self.shape=code,note,shape
+
+
+def source_error(con,error,stage):
+    detail={'error_stage':stage,'error_type':type(error).__name__}
+    if isinstance(error,DailyEvidenceError):
+        detail.update(error_code=error.code,note=error.note)
+        if error.shape is not None:detail['response_shape']=error.shape
+    elif isinstance(error,fiscal.FxError):
+        detail.update(error_code='provider_http_error' if error.http_status else 'provider_error',
+            http_status=error.http_status,note='PayKeeper не вернул полный дневной список оплат')
+        message=fiscal.safe_provider_message(con,{'message':error.provider_message})
+        if message:detail['provider_message']=message
+    else:
+        detail.update(error_code='source_request_or_validation_failed',note='Не удалось получить или проверить полный дневной список PayKeeper')
+    return detail
+
+
 def fetch_day(con,day):
     """Complete bounded pagination; an error or repeated ID never becomes an empty day."""
     rows=[];seen=set()
@@ -72,14 +99,17 @@ def fetch_day(con,day):
         page=fiscal.pk_call(con,'/info/payments/bydate/',{'start':day,'end':day,'from':offset,'limit':100,
             'status[]':list(paykeepercheck.RECEIVED_STATUSES)+['refunded','partially_refunded','refunding'],
             'payment_system_id[]':list(range(201))})
-        if not isinstance(page,list) or len(page)>100:raise ValueError('Unknown provider page')
+        if not isinstance(page,list) or len(page)>100:raise DailyEvidenceError('unexpected_response','Неизвестный формат дневного списка PayKeeper',fiscal.shape(page))
         for item in page:
-            if not isinstance(item,dict) or not item.get('id') or str(item['id']) in seen:raise ValueError('Ambiguous provider IDs')
-            if day_of(item.get('obtain_datetime'))!=day:raise ValueError('Provider day mismatch')
-            minor(item.get('pay_amount'));minor(item.get('refund_amount'))
+            if not isinstance(item,dict) or not item.get('id') or str(item['id']) in seen:raise DailyEvidenceError('duplicate_or_missing_id','PayKeeper вернул повторяющийся или пустой ID оплаты')
+            try:actual_day=day_of(item.get('obtain_datetime'))
+            except (ValueError,TypeError):raise DailyEvidenceError('invalid_payment_date','PayKeeper не вернул проверяемую дату получения оплаты')
+            if actual_day!=day:raise DailyEvidenceError('payment_day_mismatch','Дата получения оплаты в ответе PayKeeper не совпадает с запрошенным днём')
+            try:minor(item.get('pay_amount'));minor(item.get('refund_amount'))
+            except (ValueError,TypeError,ArithmeticError):raise DailyEvidenceError('invalid_payment_amount','PayKeeper не вернул проверяемую сумму оплаты или возврата')
             seen.add(str(item['id']));rows.append(item)
         if len(page)<100:return rows
-    raise ValueError('Provider coverage truncated')
+    raise DailyEvidenceError('pagination_limit','Дневной список PayKeeper превышает безопасный предел загрузки')
 
 
 def refresh_source(con,current,limit=2):
@@ -91,10 +121,12 @@ def refresh_source(con,current,limit=2):
             candidate=date.fromisoformat(row['day'])
             if today-timedelta(days=31)<=candidate<=today:days.add(candidate)
         except ValueError:pass
-    previous={r['day']:r['checked_at'] for r in con.execute('SELECT day,checked_at FROM pk_daily_evidence')}
+    prior={r['day']:r for r in con.execute('SELECT * FROM pk_daily_evidence')}
+    previous={day:r['checked_at'] for day,r in prior.items()}
+    unexplained={day for day,r in prior.items() if r['status']=='unavailable' and not json.loads(r['result']).get('error_code')}
     cutoff=(current-timedelta(minutes=10)).isoformat(timespec='seconds')
-    due=[d.isoformat() for d in days if previous.get(d.isoformat(),'')<=cutoff]
-    due.sort(key=lambda d:(d in previous,previous.get(d,''),0 if d==(today-timedelta(days=1)).isoformat() else 1,-date.fromisoformat(d).toordinal()))
+    due=[d.isoformat() for d in days if previous.get(d.isoformat(),'')<=cutoff or d.isoformat() in unexplained]
+    due.sort(key=lambda d:(d not in unexplained,d in previous,previous.get(d,''),0 if d==(today-timedelta(days=1)).isoformat() else 1,-date.fromisoformat(d).toordinal()))
     meta=metadata(con);attempted_systems=set();out={'days_checked':0,'days_unavailable':0}
     for day in due[:limit]:
         try:
@@ -116,13 +148,14 @@ def refresh_source(con,current,limit=2):
                 items.append({'id':str(item['id']),'orderid':str(item.get('orderid') or ''),'client_name':str(item.get('clientid') or '')[:200],
                     'amount_minor':minor(item['pay_amount']),'refund_minor':minor(item['refund_amount']),
                     'status':str(item.get('status') or ''),'paid_at':str(item['obtain_datetime']),
-                    'system_id':str(item.get('payment_system_id') or ''),'rail':rail(info),'acquirer':acquirer(info)})
+                    'system_id':str(item.get('payment_system_id') or ''),'rail':rail(info),'acquirer':acquirer(info),
+                    'references':{key:str(item[key]) for key in ('unique_id','sbp_trxId','sbp_operationId') if item.get(key)}})
             digest=hashlib.sha256(json.dumps(sorted(items,key=lambda i:i['id']),ensure_ascii=False,sort_keys=True).encode()).hexdigest()
             status='complete';result={'items':items,'coverage_complete':True,'verified_at':current.isoformat(timespec='seconds'),'source_available':True}
-        except Exception:
+        except Exception as error:
             old=con.execute('SELECT digest,result FROM pk_daily_evidence WHERE day=?',(day,)).fetchone()
             digest=old['digest'] if old else '';status='unavailable';result=json.loads(old['result']) if old else {}
-            result.update(note='Не удалось получить полный список оплат PayKeeper за день',source_available=False);out['days_unavailable']+=1
+            result.update(source_error(con,error,'daily_payments'));result['source_available']=False;out['days_unavailable']+=1
         con.execute('''INSERT INTO pk_daily_evidence VALUES(?,?,?,?,?) ON CONFLICT(day) DO UPDATE SET
             checked_at=excluded.checked_at,status=excluded.status,digest=excluded.digest,result=excluded.result''',
             (day,current.isoformat(timespec='seconds'),status,digest,json.dumps(result,ensure_ascii=False)))
@@ -137,6 +170,34 @@ def linked(con,item):
     if len(rows)!=1 or rows[0]['orderid']!=item['orderid'] or fiscal.kop(rows[0]['amount'])!=item['amount_minor']:return None
     row=dict(rows[0]);row['names']=[item['client_name']]+[p['name'] for p in con.execute('SELECT name FROM parents WHERE family_id=?',(row['family_id'],))]
     return row
+
+
+def payment_references(con,item):
+    references={key:str(value) for key,value in item.get('references',{}).items() if value and re.fullmatch(r'[A-Za-z0-9_-]{6,128}',str(value))}
+    if not item.get('link'):return references
+    row=con.execute('SELECT result FROM fiscal_payment_checks WHERE payment_id=?',(item['link']['id'],)).fetchone()
+    cached=json.loads(row['result']) if row else {}
+    provider=cached.get('bank_payment',{})
+    if cached.get('provider_payment_id')!=item['id'] or str(provider.get('id'))!=item['id'] or not provider.get('available'):return references
+    try:
+        if minor(provider.get('pay_amount'))!=item['amount_minor']:return references
+    except (ValueError,TypeError,ArithmeticError):return references
+    if provider.get('unique_id'):references['bank_payment.unique_id']=str(provider['unique_id'])
+    references.update({key:str(value) for key,value in cached.get('sbp_identifiers',{}).items() if value})
+    return {key:value for key,value in references.items() if re.fullmatch(r'[A-Za-z0-9_-]{6,128}',value)}
+
+
+def bank_qr_ids(transaction):
+    return set(re.findall(r'\bQR\s*(?:коду|кода|кодом|код)?\s*(?:ID|№)\s*[:=]?\s*([A-Za-z0-9_-]{6,128})(?![A-Za-z0-9_-])',str(transaction.get('description') or ''),re.I))
+
+
+def reference_match(references,transaction):
+    qr_ids=bank_qr_ids(transaction)
+    for source,value in references.items():
+        if value in qr_ids:return {'provider_field':source,'bank_field':'description.qr_id','value':value}
+        for field in ('paymentId','endToEndId','instructionId','transactionId'):
+            if str(transaction.get(field) or '')==value:return {'provider_field':source,'bank_field':field,'value':value}
+    return None
 
 
 def bank_key(transaction):
@@ -242,9 +303,12 @@ def run_bank(con,current,limit=3):
             'amount_minor':minor(transaction['Amount']['amount']),'payer_name':str((transaction.get('DebtorParty') or {}).get('name') or '')[:200],
             'description':description[:700]})
     con.execute('INSERT OR REPLACE INTO bank_statement_observations VALUES(1,?,?)',(stamp,json.dumps({'from':start.isoformat(),'to':current.date().isoformat(),'credit_count':sum(booked(t) for t in transactions),'examples':examples[:50]},ensure_ascii=False)))
-    credits_by_value={}
+    credits_by_value={};credits_by_amount={}
     for transaction in transactions:
-        if booked(transaction):credits_by_value.setdefault((str(transaction.get('documentProcessDate') or ''),minor(transaction['Amount']['amount'])),[]).append(transaction)
+        if booked(transaction):
+            value=minor(transaction['Amount']['amount'])
+            credits_by_value.setdefault((str(transaction.get('documentProcessDate') or ''),value),[]).append(transaction)
+            credits_by_amount.setdefault(value,[]).append(transaction)
     claims={r['bank_key']:r['target'] for r in con.execute('SELECT * FROM bank_credit_allocations')}
     proposals={};out={'checked':0,'confirmed':0,'batches_checked':len(batches),'unavailable':0}
     for batch in batches:
@@ -260,23 +324,47 @@ def run_bank(con,current,limit=3):
         if item['rail']!='sbp':continue
         item['bank_status']='unverified';item['bank_note']='Поимённое поступление СБП пока не сопоставлено'
         if item['refund_minor'] or item['status'] not in paykeepercheck.RECEIVED_STATUSES:continue
+        references=payment_references(con,item)
+        by_reference=[(transaction,match) for transaction in credits_by_amount.get(item['amount_minor'],[]) if (match:=reference_match(references,transaction))]
+        diagnostics={'reference_fields':sorted(references),'reference_candidates':len(by_reference),'name_candidates':0,'qr_conflicts':0}
+        item['match_diagnostics']=diagnostics
+        if by_reference:
+            item['match_method']='paykeeper_bank_reference'
+            if len(by_reference)==1:
+                transaction,match=by_reference[0]
+                item['matched_reference']=match
+                proposals.setdefault(bank_key(transaction),[]).append(('sbp',item,transaction))
+            else:item['bank_note']='Несколько проводок с одним QR/банковским ID — нужна проверка'
+            continue
         candidates=[]
         for transaction in credits_by_value.get((item['day'],item['amount_minor']),[]):
+            if bank_qr_ids(transaction):
+                diagnostics['qr_conflicts']+=1
+                continue
             names=item['link']['names'] if item['link'] else [item['client_name']]
             if not (same_name(names,(transaction.get('DebtorParty') or {}).get('name')) or same_name(names,transaction.get('description'))):continue
             candidates.append(transaction)
-        # Include other gateway payments to detect equal family payments without CRM links.
+        diagnostics['name_candidates']=len(candidates)
+        item['match_method']='payer_amount_day_unique'
         if len(candidates)==1:
             transaction=candidates[0];proposals.setdefault(bank_key(transaction),[]).append(('sbp',item,transaction))
         elif candidates:item['bank_note']='Несколько одинаковых поступлений по плательщику и сумме — нужна проверка'
+        elif diagnostics['qr_conflicts']:item['bank_note']='В выписке есть QR ID, но он не совпал с проверенными идентификаторами PayKeeper'
     for key,options in proposals.items():
-        if len(options)!=1:continue
+        strongest=max(3 if kind=='sbp' and target.get('matched_reference') else 2 if kind=='batch' else 1 for kind,target,_ in options)
+        options=[option for option in options if (3 if option[0]=='sbp' and option[1].get('matched_reference') else 2 if option[0]=='batch' else 1)==strongest]
+        if len(options)!=1:
+            for kind,target,_ in options:
+                if kind=='sbp':target['bank_note']='Одна проводка соответствует нескольким оплатам — нужна проверка'
+            continue
         kind,target,evidence=options[0];target_id=target['id'] if kind=='batch' else 'pk-sbp:'+target['id']
-        if claims.get(key,target_id)!=target_id:continue
+        if claims.get(key,target_id)!=target_id:
+            if kind=='sbp':target['bank_note']='Проводка уже связана с другой оплатой или выплатой'
+            continue
         con.execute('INSERT OR IGNORE INTO bank_credit_allocations VALUES(?,?,?)',(key,target_id,stamp))
         if con.execute('SELECT target FROM bank_credit_allocations WHERE bank_key=?',(key,)).fetchone()['target']!=target_id:continue
         if kind=='batch':target.update(status='confirmed',note='Общая выплата за день сопоставлена с составом оплат PayKeeper',bank=evidence)
-        else:target.update(bank_status='confirmed',bank_note='СБП сопоставлено по плательщику, сумме и дню',bank=evidence)
+        else:target.update(bank_status='confirmed',bank_note='СБП сопоставлено по QR/банковскому ID PayKeeper и сумме' if target.get('matched_reference') else 'СБП сопоставлено по плательщику, сумме и дню',bank=evidence)
     for batch in batches:
         con.execute('''INSERT INTO bank_payout_batches VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET
             checked_at=excluded.checked_at,result=excluded.result''',(batch['id'],batch['day'],stamp,json.dumps(batch,ensure_ascii=False)))
@@ -287,7 +375,9 @@ def run_bank(con,current,limit=3):
         if item['rail']=='sbp':
             result.update(status=item.get('bank_status','unverified'),note=item.get('bank_note','Нужна проверка корректировки СБП'))
             bank=item.get('bank',{});operation=str(bank.get('transactionId') or '')
-            result['settlement_proof']={'method':'payer_amount_day_unique','bank_operation_id':operation,'payment_gross_minor':item['amount_minor']}
+            result['settlement_proof']={'method':item.get('match_method','payer_amount_day_unique'),'bank_operation_id':operation,'payment_gross_minor':item['amount_minor'],
+                'matched_reference':item.get('matched_reference'),'booked_at':bank.get('documentProcessDate')}
+            result['match_diagnostics']=item.get('match_diagnostics',{})
         elif item['rail']=='card':
             batch=next(b for b in batches if b['day']==item['day'] and b['group']==(item['acquirer'] or ('system-'+item['system_id'])))
             result.update(status=batch['status'] if batch['status']=='confirmed' else 'unverified',note=batch['note'],batch_id=batch['id'])
@@ -319,9 +409,13 @@ def diagnostics(con):
     for row in con.execute('SELECT * FROM pk_daily_evidence ORDER BY day DESC LIMIT 32'):
         data=json.loads(row['result']);items=data.get('items',[])
         days.append({'day':row['day'],'checked_at':row['checked_at'],'status':row['status'],
-            'payments':len(items),'cards':sum(i['rail']=='card' for i in items),'sbp':sum(i['rail']=='sbp' for i in items),
-            'unknown_systems':sorted({i['system_id'] for i in items if i['rail']=='unknown'})})
+            'source_available':data.get('source_available',row['status']=='complete'),'last_successful_at':data.get('verified_at'),
+            'payments':len(items) if data.get('coverage_complete') else None,
+            'cards':sum(i['rail']=='card' for i in items) if data.get('coverage_complete') else None,
+            'sbp':sum(i['rail']=='sbp' for i in items) if data.get('coverage_complete') else None,
+            'unknown_systems':sorted({i['system_id'] for i in items if i['rail']=='unknown'}),
+            **{key:data[key] for key in ('note','error_code','error_stage','error_type','http_status','provider_message','response_shape') if key in data}})
     observation=con.execute('SELECT * FROM bank_statement_observations WHERE id=1').fetchone()
-    return {'strategy':'paykeeper_daily_batches_and_named_sbp','acquiring_permission_required':False,
+    return {'strategy':'paykeeper_daily_batches_and_named_sbp','acquiring_permission_required':False,'matching_version':2,'sbp_reference_matching':True,
         'daily_sources':days,'statement':({'checked_at':observation['checked_at'],**json.loads(observation['result'])} if observation else None),
         'card_batches':view(con,(datetime.now(ZoneInfo('Europe/Moscow')).date()-timedelta(days=31)).isoformat(),datetime.now(ZoneInfo('Europe/Moscow')).date().isoformat())[:10]}
