@@ -19,7 +19,6 @@ import subprocess
 import tempfile
 import threading
 
-from . import fiscal
 
 REDIRECT_URI = 'https://ab-plus.ru/api/sber/oauth/callback'
 MAX_CERTIFICATE_BYTES = 2 * 1024 * 1024
@@ -275,11 +274,18 @@ def tls_context(con):
             raise SettingsError('Загрузите сертификат Сбера в подключении CRM')
         try:
             os.chmod(path, 0o600)
-            base = fiscal.ssl_ctx()
-            roots = ''.join(ssl.DER_cert_to_PEM_cert(cert) for cert in base.get_ca_certs(binary_form=True))
-            context = ssl.create_default_context(cadata=roots)
-            context.load_verify_locations(cafile=str(Path(__file__).parent / 'certs' / 'sber_chain.pem'))
-            # Do not mutate fiscal's shared context or send this client identity to another bank.
+            # Keep the system CA file and lazy CA directory intact. Preparing
+            # this context must not download a CA or depend on another bank's
+            # cached SSLContext. Explicit public bundles supply the official
+            # Russian server roots/intermediates and Sber's own API CA chain.
+            context = ssl.create_default_context()
+            certificates = Path(__file__).parent / 'certs'
+            context.load_verify_locations(cafile=str(certificates / 'russian_trust.pem'))
+            context.load_verify_locations(cafile=str(certificates / 'sber_chain.pem'))
+            # An intermediate alone is never the trust anchor: require its path
+            # to a full trusted root. Server identity/expiry checks remain on.
+            context.verify_flags &= ~getattr(ssl, 'VERIFY_X509_PARTIAL_CHAIN', 0)
+            # No shared context is modified and client identity stays bank-local.
             context.verify_mode = ssl.CERT_REQUIRED
             context.check_hostname = True
             context.minimum_version = ssl.TLSVersion.TLSv1_2

@@ -2,6 +2,8 @@
 import base64
 from concurrent.futures import ThreadPoolExecutor
 import json
+import hashlib
+import re
 import os
 from pathlib import Path
 import sqlite3
@@ -12,7 +14,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from crm import sbercredentials as credentials
+from crm import sbercredentials as credentials, fiscal
 
 
 class SberCredentials(unittest.TestCase):
@@ -103,7 +105,7 @@ class SberCredentials(unittest.TestCase):
     def test_tls_context_checks_server_hostname_and_is_not_shared_context(self):
         self.save()
         shared = ssl.create_default_context()
-        with patch.object(credentials.fiscal,'ssl_ctx',return_value=shared):
+        with patch.object(fiscal,'ssl_ctx',side_effect=AssertionError('No network/bootstrap from another bank')), patch('urllib.request.urlopen',side_effect=AssertionError('No network during TLS preparation')):
             context = credentials.tls_context(self.con)
         self.assertIsNot(context,shared)
         self.assertEqual(context.verify_mode,ssl.CERT_REQUIRED)
@@ -111,6 +113,12 @@ class SberCredentials(unittest.TestCase):
         self.assertGreaterEqual(context.minimum_version,ssl.TLSVersion.TLSv1_2)
         self.assertEqual(shared.cert_store_stats()['x509'],ssl.create_default_context().cert_store_stats()['x509'])
         self.assertGreater(context.cert_store_stats()['x509'],shared.cert_store_stats()['x509'])
+        self.assertFalse(context.verify_flags & getattr(ssl,'VERIFY_X509_PARTIAL_CHAIN',0))
+        fingerprints={hashlib.sha256(c).hexdigest() for c in context.get_ca_certs(binary_form=True)}
+        self.assertTrue({'d26d2d0231b7c39f92cc738512ba54103519e4405d68b5bd703e9788ca8ecf31',
+            'bbbde2103e790b999ec62bd03cf625a5a2e7c316e10afe6a490eedead8b3fd9b',
+            '2155785036c900dbb5f1bb2a1569c80c55595bd6bf94867a29bbddbc7d88a3f2'}.issubset(fingerprints))
+        self.assertTrue({hashlib.sha256(c).hexdigest() for c in shared.get_ca_certs(binary_form=True)}.issubset(fingerprints))
 
     def test_invalid_settings_are_rejected_without_changing_store(self):
         self.save()
@@ -162,3 +170,20 @@ class SberCredentials(unittest.TestCase):
                 view,client=pool.submit(snapshot).result(timeout=1)
                 self.assertTrue(view['configured']);self.assertEqual(client,'synthetic-client')
             finally:release.set();held.result(timeout=2)
+
+    def test_bundled_nca_intermediates_chain_to_the_pinned_root(self):
+        bundle=Path(credentials.__file__).parent/'certs'/'russian_trust.pem'
+        certificates=re.findall(r'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----',bundle.read_text(),re.S)
+        self.assertEqual(len(certificates),3)
+        hashes=[hashlib.sha256(ssl.PEM_cert_to_DER_cert(cert)).hexdigest() for cert in certificates]
+        self.assertEqual(hashes,[
+            'd26d2d0231b7c39f92cc738512ba54103519e4405d68b5bd703e9788ca8ecf31',
+            'bbbde2103e790b999ec62bd03cf625a5a2e7c316e10afe6a490eedead8b3fd9b',
+            '2155785036c900dbb5f1bb2a1569c80c55595bd6bf94867a29bbddbc7d88a3f2'])
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)/'root.pem';root.write_text(certificates[0])
+            for cert in certificates[1:]:
+                intermediate=Path(folder)/'intermediate.pem';intermediate.write_text(cert)
+                result=subprocess.run(['openssl','verify','-x509_strict','-CAfile',str(root),str(intermediate)],
+                    stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=False)
+                self.assertEqual(result.returncode,0)

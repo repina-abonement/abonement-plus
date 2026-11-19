@@ -1,4 +1,5 @@
 "use strict";
+/* Sber trust bundle: offline root and issuing CA, revision 2. */
 /* Абонемент Плюс — Чеки 54-ФЗ: каждое поступление на счёт должно иметь чек. */
 
 S.fx = { tab: typeof location !== "undefined" && new URLSearchParams(location.search).get("sber") === "connected" ? "setup" : "list", filter: "problems" };

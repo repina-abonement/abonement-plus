@@ -4,6 +4,10 @@ import io
 from datetime import datetime
 from pathlib import Path
 import socket
+import subprocess
+import shutil
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import sqlite3
 import ssl
 import tempfile
@@ -123,6 +127,28 @@ class SberTransportDiagnostics(unittest.TestCase):
         error.verify_message = self.secret_marker
         return URLError(error)
 
+    def test_numeric_verify_code_survives_recording_without_verification_message(self):
+        error = self.connection_error(self.strict_verification_error(20))
+        self.assertEqual(error.verify_code, 20)
+        sberbank.record_failure(self.con, 'token_exchange', error)
+        last = sberbank.settings(self.con)['last_error']
+        self.assertEqual(last['details'], {'verify_code': 20})
+        self.assertEqual(set(last), {'stage', 'code', 'note', 'checked_at', 'details'})
+        serialized = json.dumps(last, ensure_ascii=False)
+        self.assertNotIn('verify_message', serialized)
+        self.assertNotIn(self.secret_marker, serialized)
+
+    def test_non_numeric_or_unbounded_verify_diagnostics_are_not_saved(self):
+        for code in ('20', True, -1, 999999999, self.secret_marker):
+            with self.subTest(code=code):
+                error = fiscal.FxError('Сервер CRM не смог проверить сертификат сервера Сбера')
+                error.transport_code = 'tls_certificate_verify'
+                error.verify_code = code
+                sberbank.record_failure(self.con, 'token_exchange', error)
+                last = sberbank.settings(self.con)['last_error']
+                self.assertNotIn('details', last)
+                self.assertNotIn(self.secret_marker, json.dumps(last, ensure_ascii=False))
+
     def test_invalid_policy89_may_retry_once_with_trust_and_hostname_checks_retained(self):
         context = ssl.create_default_context()
         context.verify_flags |= ssl.VERIFY_X509_STRICT
@@ -168,6 +194,117 @@ class SberTransportDiagnostics(unittest.TestCase):
         opener.return_value.open.assert_called_once()
         self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
         self.assertTrue(context.check_hostname)
+
+
+
+@unittest.skipUnless(shutil.which('openssl'), 'Local TLS fixture needs openssl')
+class SberRealTLS(unittest.TestCase):
+    """Real loopback TLS: trust and hostname verification stay enabled."""
+    @classmethod
+    def setUpClass(cls):
+        temporary = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(temporary.cleanup)
+        cls.root = Path(temporary.name)
+        def openssl(*args):
+            subprocess.run(['openssl', *map(str, args)], cwd=cls.root, check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        openssl('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', 'root.key', '-out', 'root.pem',
+                '-days', '2', '-subj', '/CN=Synthetic Root CA',
+                '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign')
+        openssl('req', '-newkey', 'rsa:2048', '-nodes', '-keyout', 'intermediate.key', '-out', 'intermediate.csr',
+                '-subj', '/CN=Synthetic Intermediate CA')
+        (cls.root/'intermediate.ext').write_text('basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n')
+        openssl('x509', '-req', '-in', 'intermediate.csr', '-CA', 'root.pem', '-CAkey', 'root.key', '-CAcreateserial',
+                '-out', 'intermediate.pem', '-days', '2', '-extfile', 'intermediate.ext')
+        openssl('req', '-newkey', 'rsa:2048', '-nodes', '-keyout', 'server.key', '-out', 'server.csr',
+                '-subj', '/CN=localhost')
+        (cls.root/'server.ext').write_text('basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:localhost\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n')
+        openssl('x509', '-req', '-in', 'server.csr', '-CA', 'intermediate.pem', '-CAkey', 'intermediate.key', '-CAcreateserial',
+                '-out', 'server.pem', '-days', '2', '-extfile', 'server.ext')
+        (cls.root/'chain.pem').write_text((cls.root/'server.pem').read_text()+(cls.root/'intermediate.pem').read_text())
+        cls.received = 0
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                cls.received += 1
+                payload=b'{"ok": true}'
+                self.send_response(200)
+                self.send_header('Content-Type','application/json')
+                self.send_header('Content-Length',str(len(payload)))
+                self.end_headers();self.wfile.write(payload)
+            def log_message(self,*args):pass
+        cls.srv = ThreadingHTTPServer(('127.0.0.1',0),Handler)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(str(cls.root/'chain.pem'),str(cls.root/'server.key'))
+        cls.srv.socket=context.wrap_socket(cls.srv.socket,server_side=True)
+        cls.thread=threading.Thread(target=cls.srv.serve_forever,daemon=True);cls.thread.start()
+        cls.addClassCleanup(cls.stop_server)
+
+    @classmethod
+    def stop_server(cls):
+        cls.srv.shutdown();cls.srv.server_close();cls.thread.join(timeout=5)
+
+    def test_trusted_chain_succeeds_with_strict_verification(self):
+        context=ssl.create_default_context(cafile=str(self.root/'root.pem'))
+        context.verify_flags |= ssl.VERIFY_X509_STRICT
+        with patch.object(sberbank,'API',f'https://localhost:{self.srv.server_port}'),patch.object(sbercredentials,'tls_context',return_value=context):
+            result=sberbank.request(None,sberbank.TOKEN)
+        self.assertEqual(result,{'ok':True})
+        self.assertEqual(context.verify_mode,ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+        self.assertTrue(context.verify_flags & ssl.VERIFY_X509_STRICT)
+
+    def test_untrusted_chain_is_rejected_before_any_http_body(self):
+        context=ssl.create_default_context()
+        context.verify_flags |= ssl.VERIFY_X509_STRICT
+        before=self.received
+        with patch.object(sberbank,'API',f'https://localhost:{self.srv.server_port}'),patch.object(sbercredentials,'tls_context',return_value=context):
+            with self.assertRaises(fiscal.FxError) as caught:sberbank.request(None,sberbank.TOKEN)
+        self.assertEqual(caught.exception.transport_code,'tls_certificate_verify')
+        self.assertEqual(self.received,before)
+        self.assertEqual(context.verify_mode,ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+        self.assertTrue(context.verify_flags & ssl.VERIFY_X509_STRICT)
+
+    def test_valid_issuer_does_not_override_hostname_mismatch(self):
+        context=ssl.create_default_context(cafile=str(self.root/'root.pem'))
+        before=self.received
+        with patch.object(sberbank,'API',f'https://127.0.0.1:{self.srv.server_port}'),patch.object(sbercredentials,'tls_context',return_value=context):
+            with self.assertRaises(fiscal.FxError) as caught:sberbank.request(None,sberbank.TOKEN)
+        self.assertEqual(caught.exception.transport_code,'tls_certificate_verify')
+        self.assertEqual(self.received,before)
+        self.assertEqual(context.verify_mode,ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+
+
+    def test_missing_intermediate_is_fixed_by_adding_issuer_without_weakening_verification(self):
+        # A real server deliberately sends the leaf only, reproducing an
+        # incomplete chain while the root itself is already trusted.
+        local = ThreadingHTTPServer(('127.0.0.1', 0), self.srv.RequestHandlerClass)
+        server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        server_context.load_cert_chain(str(self.root/'server.pem'), str(self.root/'server.key'))
+        local.socket = server_context.wrap_socket(local.socket, server_side=True)
+        thread = threading.Thread(target=local.serve_forever, daemon=True); thread.start()
+        context = ssl.create_default_context(cafile=str(self.root/'root.pem'))
+        context.verify_flags |= ssl.VERIFY_X509_STRICT
+        initial_flags = context.verify_flags
+        before = self.received
+        try:
+            with patch.object(sberbank, 'API', f'https://localhost:{local.server_port}'), patch.object(sbercredentials, 'tls_context', return_value=context):
+                with self.assertRaises(fiscal.FxError) as caught:
+                    sberbank.request(None, sberbank.TOKEN)
+                self.assertEqual(caught.exception.transport_code, 'tls_certificate_verify')
+                self.assertEqual(self.received, before)
+                self.assertEqual(context.verify_flags, initial_flags)
+                # Add precisely the missing public issuing CA, retaining the
+                # same context, hostname checks, root and strict verification.
+                context.load_verify_locations(cafile=str(self.root/'intermediate.pem'))
+                self.assertEqual(sberbank.request(None, sberbank.TOKEN), {'ok': True})
+            self.assertEqual(self.received, before + 1)
+            self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+            self.assertTrue(context.check_hostname)
+            self.assertEqual(context.verify_flags, initial_flags)
+        finally:
+            local.shutdown(); local.server_close(); thread.join(timeout=5)
 
 
 

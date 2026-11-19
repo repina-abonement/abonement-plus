@@ -22,8 +22,8 @@ def init(con):
     con.execute('''CREATE TABLE IF NOT EXISTS ofd_payment_checks (
         payment_id INTEGER PRIMARY KEY,provider_payment_id TEXT NOT NULL,
         checked_at TEXT NOT NULL,result TEXT NOT NULL)''')
-    # Saved certificate can now be probed before OAuth; retry promptly after upgrade.
-    con.execute("UPDATE payment_control_jobs SET next_at=NULL WHERE source='incoming_sber' AND status='not_configured' AND lease_owner IS NULL")
+    # Recheck Sber immediately after service restart / trust bundle upgrades.
+    con.execute("UPDATE payment_control_jobs SET next_at=NULL WHERE source='incoming_sber' AND lease_owner IS NULL")
     # Bootstrap the new daily gateway feed once, without waiting for an old scheduler slot.
     if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pk_daily_evidence'").fetchone() and not con.execute('SELECT 1 FROM pk_daily_evidence LIMIT 1').fetchone():
         con.execute("UPDATE payment_control_jobs SET next_at=NULL WHERE source IN ('paykeeper','tochka') AND lease_owner IS NULL")

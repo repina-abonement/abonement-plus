@@ -53,6 +53,17 @@ TRANSPORT_NOTES={
 }
 
 
+CERTIFICATE_NOTES={
+    9:'Срок сертификата в цепочке Сбера ещё не наступил. Требуется проверить время сервера CRM',
+    10:'В цепочке Сбера обнаружен сертификат с истёкшим сроком действия',
+    18:'Сервер CRM не доверяет сертификату, представленному при соединении со Сбером',
+    19:'Сервер CRM не смог построить доверенную цепочку сертификатов Сбера',
+    20:'Сервер CRM не нашёл издателя сертификата Сбера в доверенной цепочке',
+    21:'Сервер CRM получил неполную цепочку сертификатов Сбера',
+    62:'Имя в сертификате не совпало с адресом сервера Сбера. Соединение остановлено',
+}
+
+
 def transport_failure(error):
     reason=error.reason if isinstance(error,URLError) else error
     if isinstance(reason,ssl.SSLCertVerificationError):code='tls_certificate_verify'
@@ -64,7 +75,9 @@ def transport_failure(error):
     elif isinstance(reason,(ConnectionResetError,ConnectionAbortedError,EOFError)):code='connection_reset'
     elif isinstance(reason,OSError) and str(reason).startswith('Tunnel connection failed:'):code='proxy_tunnel'
     else:code='connection_error'
-    failure=fiscal.FxError(TRANSPORT_NOTES[code]);failure.transport_code=code
+    verify_code=getattr(reason,'verify_code',None)
+    note=CERTIFICATE_NOTES.get(verify_code,TRANSPORT_NOTES[code]) if code=='tls_certificate_verify' and type(verify_code) is int else TRANSPORT_NOTES[code]
+    failure=fiscal.FxError(note);failure.transport_code=code
     # Only numeric enum diagnostics, never the original exception, host URL or key.
     if isinstance(getattr(reason,'verify_code',None),int):failure.verify_code=reason.verify_code
     return failure
@@ -77,8 +90,12 @@ def record_failure(con,stage,error,current=None):
     elif isinstance(error,fiscal.FxError):
         code=getattr(error,'transport_code',None) or ('http_'+str(error.http_status) if error.http_status else 'bank_response')
         note=TRANSPORT_NOTES.get(code,str(error))
+        verify_code=getattr(error,'verify_code',None)
+        if code=='tls_certificate_verify' and type(verify_code) is int:note=CERTIFICATE_NOTES.get(verify_code,note)
     else:code='connection_error';note=TRANSPORT_NOTES[code]
     value={'stage':stage,'code':code,'note':note[:500],'checked_at':current.isoformat(timespec='seconds')}
+    verify_code=getattr(error,'verify_code',None)
+    if type(verify_code) is int and 0<=verify_code<=99999:value['details']={'verify_code':verify_code}
     credentials.update_private(con,{'last_error':value})
     return value
 
