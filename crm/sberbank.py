@@ -123,7 +123,7 @@ def request(con,path,*,method='GET',params=None,form=None,token=None,bearer=Fals
         except Exception:error_code=''
         error.close()
         note='Сбер: требуется обновить разрешение доступа' if status==401 else 'Сбер: нет разрешения читать выбранный счёт или выписку' if status==403 else 'Сбер временно не вернул данные; проверка повторится автоматически'
-        if path==TOKEN and error_code=='invalid_client':note='Сбер: обновите client_secret в подключении CRM из карточки сервиса Сбера'
+        if path==TOKEN and error_code=='invalid_client':note='Сбер не принял client_id или client_secret. Сверьте оба значения с параметрами промышленного сервиса и сохраните в подключении CRM'
         elif path==TOKEN and error_code=='invalid_grant':note='Сбер: требуется заново разрешить чтение выписки в подключении CRM'
         raise fiscal.FxError(note,http_status=status) from None
     except (fiscal.FxError,credentials.SettingsError):raise
