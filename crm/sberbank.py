@@ -134,9 +134,11 @@ def complete_authorization(con,actor_id,query,current=None):
     current=current or now();state=str(query.get('state') or '')
     if not re.fullmatch('[a-f0-9]{64}',state):raise fiscal.FxError('Ссылка подключения Сбера недействительна. Начните подключение заново')
     digest=hashlib.sha256(state.encode()).hexdigest()
+    if con.in_transaction:raise fiscal.FxError('Подключение Сбера требует отдельного запроса без транзакции базы')
+    # Consume state before taking the private-file lock: never invert SQL/file lock order.
+    record=con.execute('DELETE FROM sber_oauth_states WHERE state_hash=? AND actor_id=? AND expires_at>? RETURNING *',
+        (digest,actor_id,current.isoformat(timespec='seconds'))).fetchone()
     with credentials.lock(con):
-        record=con.execute('DELETE FROM sber_oauth_states WHERE state_hash=? AND actor_id=? AND expires_at>? RETURNING *',
-            (digest,actor_id,current.isoformat(timespec='seconds'))).fetchone()
         if not record or record['client_id']!=credentials.get(con,'client_id'):
             raise fiscal.FxError('Ссылка подключения Сбера истекла или уже использована. Начните подключение заново')
         if query.get('error') or not query.get('code'):raise fiscal.FxError('Сбер не разрешил подключение. Повторите вход и разрешите чтение выписки')

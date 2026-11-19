@@ -126,8 +126,9 @@ def _write(con, data):
 
 
 def get(con, key, default=''):
-    with lock(con):
-        return _read(con).get(key, default)
+    # Atomic replace makes a snapshot read safe without waiting for bank HTTP.
+    # Multi-field token refresh still holds lock() around the whole operation.
+    return _read(con).get(key, default)
 
 
 def update_private(con, values):
@@ -243,27 +244,25 @@ def save(con, body):
 
 
 def view(con):
-    with lock(con):
-        data = _read(con)
-        explicit_accounts = data.get('accounts') or []
-        accounts = explicit_accounts or data.get('discovered_accounts') or []
-        name = data.get('certificate_file', '')
-        cert_present = bool(re.fullmatch(r'client-[a-f0-9]{64}\.pem', name) and (_directory(con)/name).is_file())
-        cert = cert_present and bool(data.get('client_id')) and data.get('certificate_client_id') == data.get('client_id')
-        secret = bool(data.get('client_secret'))
-        masked = ['•••• ' + str(a)[-4:] for a in accounts]
-        return {'client_id': data.get('client_id', ''), 'redirect_uri': REDIRECT_URI,
-            'client_secret_configured': secret, 'client_secret_set': secret,
-            'certificate_configured': cert, 'certificate_set': cert,
-            'certificate_expires_at': data.get('certificate_expires_at'),
-            'certificate_requires_replacement': cert_present and not cert,
-            'client_secret_updated_at': data.get('client_secret_updated_at'),
-            'accounts': masked, 'accounts_masked': masked,
-            'accounts_configured': bool(accounts), 'accounts_set': bool(explicit_accounts),
-            'configured': bool(data.get('client_id') and secret and cert),
-            'connected': bool(data.get('refresh_token')),
-            'token_expires_at': data.get('token_expires_at') or data.get('expires_at')}
-
+    data = _read(con)
+    explicit_accounts = data.get('accounts') or []
+    accounts = explicit_accounts or data.get('discovered_accounts') or []
+    name = data.get('certificate_file', '')
+    cert_present = bool(re.fullmatch(r'client-[a-f0-9]{64}\.pem', name) and (_directory(con)/name).is_file())
+    cert = cert_present and bool(data.get('client_id')) and data.get('certificate_client_id') == data.get('client_id')
+    secret = bool(data.get('client_secret'))
+    masked = ['•••• ' + str(a)[-4:] for a in accounts]
+    return {'client_id': data.get('client_id', ''), 'redirect_uri': REDIRECT_URI,
+        'client_secret_configured': secret, 'client_secret_set': secret,
+        'certificate_configured': cert, 'certificate_set': cert,
+        'certificate_expires_at': data.get('certificate_expires_at'),
+        'certificate_requires_replacement': cert_present and not cert,
+        'client_secret_updated_at': data.get('client_secret_updated_at'),
+        'accounts': masked, 'accounts_masked': masked,
+        'accounts_configured': bool(accounts), 'accounts_set': bool(explicit_accounts),
+        'configured': bool(data.get('client_id') and secret and cert),
+        'connected': bool(data.get('refresh_token')),
+        'token_expires_at': data.get('token_expires_at') or data.get('expires_at')}
 
 def tls_context(con):
     with lock(con):

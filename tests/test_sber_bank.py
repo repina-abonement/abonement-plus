@@ -221,3 +221,12 @@ class SberBank(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+    def test_callback_never_exchanges_code_inside_sql_transaction(self):
+        query=self.authorization();request={key:values[0] for key,values in query.items()};request['code']='synthetic-code'
+        self.con.execute('BEGIN')
+        try:
+            with patch.object(sberbank,'request') as bank:
+                with self.assertRaises(fiscal.FxError):sberbank.complete_authorization(self.con,7,request,self.current)
+            bank.assert_not_called()
+        finally:self.con.execute('ROLLBACK')

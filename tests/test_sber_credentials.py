@@ -8,6 +8,7 @@ import sqlite3
 import ssl
 import subprocess
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -142,3 +143,22 @@ class SberCredentials(unittest.TestCase):
         self.assertEqual(result['accounts_masked'],['•••• 9876'])
         self.assertFalse(result['accounts_set'])
         self.assertTrue(result['client_secret_updated_at'])
+
+    def test_status_reads_do_not_wait_for_bank_refresh_lock(self):
+        self.save();entered=threading.Event();release=threading.Event()
+        def refresh():
+            con=sqlite3.connect(self.database)
+            try:
+                with credentials.lock(con):entered.set();release.wait(5)
+            finally:con.close()
+        def snapshot():
+            con=sqlite3.connect(self.database)
+            try:return credentials.view(con),credentials.get(con,'client_id')
+            finally:con.close()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            held=pool.submit(refresh)
+            self.assertTrue(entered.wait(2))
+            try:
+                view,client=pool.submit(snapshot).result(timeout=1)
+                self.assertTrue(view['configured']);self.assertEqual(client,'synthetic-client')
+            finally:release.set();held.result(timeout=2)
