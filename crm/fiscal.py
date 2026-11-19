@@ -379,8 +379,12 @@ def pk_reprint(con, failed: dict, attempt: int) -> str:
 def ofd_get(con, path: str, params=None):
     url = OFD_API + path + ("?" + urlencode(params) if params else "")
     code, js = comms.http("GET", url, headers={"Token": cfg(con, "fx_ofd_token"), "Accept": "application/json"}, timeout=30, context=ssl_ctx())
-    if code in (401, 403):
-        raise FxError("Платформа ОФД: токен не подошёл",http_status=code,provider_message=safe_provider_message(con,js))
+    if code == 401:
+        raise FxError("Платформа ОФД: требуется обновить доступ",http_status=code,provider_message=safe_provider_message(con,js))
+    if code == 403:
+        detail=safe_provider_message(con,js)
+        note="Платформа ОФД: доступ к данным кассы не оплачен или не активирован" if "kkt is not paid" in detail.lower() else "Платформа ОФД: доступ к данным запрещён"
+        raise FxError(note,http_status=code,provider_message=detail)
     if code >= 400:
         raise FxError(f"Платформа ОФД ответила {code}",http_status=code,provider_message=safe_provider_message(con,js))
     return js or {}
