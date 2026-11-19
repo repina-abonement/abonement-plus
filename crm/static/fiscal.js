@@ -1,5 +1,5 @@
 "use strict";
-/* Sber trust bundle: offline root and issuing CA, revision 2. */
+/* Sber trust bundle: offline root and issuing CA, revision 3; observed-root verification. */
 /* Абонемент Плюс — Чеки 54-ФЗ: каждое поступление на счёт должно иметь чек. */
 
 S.fx = { tab: typeof location !== "undefined" && new URLSearchParams(location.search).get("sber") === "connected" ? "setup" : "list", filter: "problems" };
@@ -104,6 +104,7 @@ async function fxSberSetup(box) {
     ${d.connected ? '<p class="small">Разрешение получено. Фактическое чтение выписки проверяется отдельно.</p>' : ''}
     ${(d.maintenance||[]).map(note=>`<p class="small" role="status">${esc(note)}</p>`).join('')}
     ${d.last_error?`<p class="small" role="alert">Последняя попытка: ${esc(d.last_error.note)}</p>`:''}
+    ${!d.connected&&!d.last_error&&d.last_connection_check?.ok?'<p class="small" role="status">Связь с сервером Сбера установлена. Нажмите «Разрешить чтение в Сбере».</p>':''}
     <ol class="small"><li>В карточке активированного сервиса Sber API откройте параметры подключения и перенесите client_id и client_secret в поля ниже.</li>
       <li>В разделе Сбера «Сертификаты шифрования» создайте сертификат, задайте пароль и скачайте файл .p12. Выберите его ниже.</li>
       <li>CRM читает все счета, доступные вашему разрешению. При желании укажите ожидаемые номера — CRM проверит, что они доступны. Сохраните настройки и нажмите «Разрешить чтение в Сбере».</li></ol>

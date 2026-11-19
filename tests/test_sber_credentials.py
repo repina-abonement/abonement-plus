@@ -187,3 +187,77 @@ class SberCredentials(unittest.TestCase):
                 result=subprocess.run(['openssl','verify','-x509_strict','-CAfile',str(root),str(intermediate)],
                     stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=False)
                 self.assertEqual(result.returncode,0)
+
+    def test_ext_candidate_is_not_loaded_by_default_and_unknown_root_is_ignored(self):
+        self.save()
+        context=credentials.tls_context(self.con)
+        before={hashlib.sha256(c).hexdigest() for c in context.get_ca_certs(binary_form=True)}
+        system={hashlib.sha256(c).hexdigest() for c in ssl.create_default_context().get_ca_certs(binary_form=True)}
+        if credentials.OFFICIAL_EXT_ROOT_SHA256 not in system:
+            self.assertNotIn(credentials.OFFICIAL_EXT_ROOT_SHA256,before)
+        with patch.object(credentials,'OFFICIAL_EXT_CHAIN',Path('/not/read/for/unknown/peer.pem')):
+            for unknown in (None,'',{},'e77059','0'*64,credentials.OFFICIAL_EXT_INTERMEDIATE_SHA256):
+                self.assertFalse(credentials.load_official_ext(context,unknown))
+        self.assertEqual(before,{hashlib.sha256(c).hexdigest() for c in context.get_ca_certs(binary_form=True)})
+
+    def test_ext_candidate_requires_observed_pinned_root_and_preserves_tls_checks(self):
+        self.save()
+        context=credentials.tls_context(self.con)
+        flags=context.verify_flags
+        self.assertTrue(credentials.load_official_ext(context,credentials.OFFICIAL_EXT_ROOT_SHA256))
+        fingerprints={hashlib.sha256(c).hexdigest() for c in context.get_ca_certs(binary_form=True)}
+        self.assertTrue({credentials.OFFICIAL_EXT_ROOT_SHA256,credentials.OFFICIAL_EXT_INTERMEDIATE_SHA256}.issubset(fingerprints))
+        self.assertEqual(context.verify_mode,ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+        self.assertEqual(context.verify_flags,flags & ~getattr(ssl,'VERIFY_X509_PARTIAL_CHAIN',0))
+        self.assertGreaterEqual(context.minimum_version,ssl.TLSVersion.TLSv1_2)
+
+    def test_ext_candidate_tampered_bundle_and_insecure_context_fail_closed(self):
+        context=ssl.create_default_context()
+        before={hashlib.sha256(c).hexdigest() for c in context.get_ca_certs(binary_form=True)}
+        tampered=Path(self.temp.name)/'tampered.pem'
+        tampered.write_text((Path(credentials.__file__).parent/'certs'/'sber_chain.pem').read_text())
+        with patch.object(credentials,'OFFICIAL_EXT_CHAIN',tampered):
+            with self.assertRaises(credentials.SettingsError):credentials.load_official_ext(context,credentials.OFFICIAL_EXT_ROOT_SHA256)
+        self.assertEqual(before,{hashlib.sha256(c).hexdigest() for c in context.get_ca_certs(binary_form=True)})
+        insecure=ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        insecure.check_hostname=False
+        with self.assertRaises(credentials.SettingsError):credentials.load_official_ext(insecure,credentials.OFFICIAL_EXT_ROOT_SHA256)
+
+    def test_ext_candidate_intermediate_validates_against_its_full_pinned_root(self):
+        certificates=re.findall(r'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----',credentials.OFFICIAL_EXT_CHAIN.read_text(),re.S)
+        self.assertEqual(len(certificates),2)
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)/'root.pem';root.write_text(certificates[0])
+            intermediate=Path(folder)/'intermediate.pem';intermediate.write_text(certificates[1])
+            result=subprocess.run(['openssl','verify','-x509_strict','-CAfile',str(root),str(intermediate)],
+                stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=False)
+            self.assertEqual(result.returncode,0)
+
+    def test_ext_proof_cannot_be_set_through_settings_request_body(self):
+        self.save()
+        credentials.save(self.con,{'official_ext_trust_confirmed':True})
+        self.assertIsNone(credentials.get(self.con,'official_ext_trust_confirmed',None))
+        with patch.object(credentials,'load_official_ext',wraps=credentials.load_official_ext) as candidate:
+            credentials.tls_context(self.con)
+        candidate.assert_not_called()
+
+    def test_internal_verified_ext_proof_reuses_only_the_pinned_official_bundle(self):
+        self.save()
+        credentials.update_private(self.con,{'official_ext_trust_confirmed':True})
+        with patch.object(credentials,'load_official_ext',wraps=credentials.load_official_ext) as candidate:
+            context=credentials.tls_context(self.con)
+        candidate.assert_called_once_with(context,credentials.OFFICIAL_EXT_ROOT_SHA256)
+        fingerprints={hashlib.sha256(c).hexdigest() for c in context.get_ca_certs(binary_form=True)}
+        self.assertTrue({credentials.OFFICIAL_EXT_ROOT_SHA256,credentials.OFFICIAL_EXT_INTERMEDIATE_SHA256}.issubset(fingerprints))
+        self.assertEqual(context.verify_mode,ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+        self.assertFalse(context.verify_flags & getattr(ssl,'VERIFY_X509_PARTIAL_CHAIN',0))
+
+    def test_non_boolean_ext_proof_does_not_expand_trust(self):
+        self.save()
+        for invalid in ('true',1,[],{}):
+            credentials.update_private(self.con,{'official_ext_trust_confirmed':invalid})
+            with patch.object(credentials,'load_official_ext',wraps=credentials.load_official_ext) as candidate:
+                credentials.tls_context(self.con)
+            candidate.assert_not_called()

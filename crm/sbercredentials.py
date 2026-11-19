@@ -22,6 +22,12 @@ import threading
 
 REDIRECT_URI = 'https://ab-plus.ru/api/sber/oauth/callback'
 MAX_CERTIFICATE_BYTES = 2 * 1024 * 1024
+# This separately published CA is a candidate only. Never import a root or a
+# certificate supplied by the peer. The request layer may call load_official_ext
+# after observing precisely this root on the fixed bank route.
+OFFICIAL_EXT_ROOT_SHA256 = 'e77059cd24606a8a24043100ec7e23db917bfc85054ee08b79ca71b43b8f4690'
+OFFICIAL_EXT_INTERMEDIATE_SHA256 = 'b9b14bf1cbc063d106d095eac17f1bc93720031ac2894bac557b9bf91e2c1ae8'
+OFFICIAL_EXT_CHAIN = Path(__file__).parent / 'certs' / 'sber_ext_chain.pem'
 _LOCKS = {}
 _LOCKS_GUARD = threading.Lock()
 _LOCAL = threading.local()
@@ -290,6 +296,37 @@ def tls_context(con):
             context.check_hostname = True
             context.minimum_version = ssl.TLSVersion.TLSv1_2
             context.load_cert_chain(str(path))
+            # Set only by the request layer after observing the pinned bank
+            # root and then completing an ordinary verified TLS/HTTP exchange.
+            # save() never accepts this internal proof from a browser body.
+            if data.get('official_ext_trust_confirmed') is True:
+                load_official_ext(context, OFFICIAL_EXT_ROOT_SHA256)
             return context
         except (OSError, ssl.SSLError):
             raise SettingsError('Не удалось подготовить защищённое соединение со Сбером') from None
+
+
+def load_official_ext(context, peer_root_sha):
+    """Load the fixed official candidate only after exact observed-root matching.
+
+    False means no eligible root was observed. A matching root with an invalid
+    bundled file or an insecure context fails closed; peer PEM is never accepted.
+    The following bank request still has to verify its entire chain and hostname.
+    """
+    if not isinstance(peer_root_sha, str) or peer_root_sha != OFFICIAL_EXT_ROOT_SHA256:
+        return False
+    if not isinstance(context, ssl.SSLContext) or context.verify_mode != ssl.CERT_REQUIRED or not context.check_hostname:
+        raise SettingsError('Проверка сертификата и имени сервера Сбера должна быть включена')
+    try:
+        if OFFICIAL_EXT_CHAIN.stat().st_size > 64 * 1024:
+            raise ValueError()
+        pem = OFFICIAL_EXT_CHAIN.read_text(encoding='ascii')
+        certificates = re.findall(r'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----', pem, re.S)
+        fingerprints = tuple(hashlib.sha256(ssl.PEM_cert_to_DER_cert(cert)).hexdigest() for cert in certificates)
+        if fingerprints != (OFFICIAL_EXT_ROOT_SHA256, OFFICIAL_EXT_INTERMEDIATE_SHA256):
+            raise ValueError()
+        context.load_verify_locations(cadata='\n'.join(certificates))
+        context.verify_flags &= ~getattr(ssl, 'VERIFY_X509_PARTIAL_CHAIN', 0)
+        return True
+    except (OSError, ValueError, UnicodeError):
+        raise SettingsError('Не удалось проверить официальную цепочку сертификатов Сбера') from None

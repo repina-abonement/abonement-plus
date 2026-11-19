@@ -15,7 +15,7 @@ from urllib.parse import urlencode,urlparse,parse_qs,urljoin
 from urllib.request import Request,build_opener,HTTPSHandler,HTTPRedirectHandler
 from urllib.error import HTTPError,URLError
 from zoneinfo import ZoneInfo
-from . import fiscal,sbercredentials as credentials
+from . import fiscal,sbercredentials as credentials,sberpeer
 
 API='https://fintech.sberbank.ru:9443'
 AUTHORIZE='https://sbi.sberbank.ru:9443/ic/sso/api/v2/oauth/authorize'
@@ -109,9 +109,15 @@ def request(con,path,*,method='GET',params=None,form=None,token=None,bearer=Fals
     if form is not None:
         data=urlencode(form).encode();headers['Content-Type']='application/x-www-form-urlencoded'
     url=API+path+('?' + urlencode(params) if params else '')
+    peer_report=None;ext_loaded=False;strict_retried=False
+    def remember_verified(status):
+        if ext_loaded and type(status) is int and 100<=status<=599:
+            evidence=dict(peer_report or {})
+            evidence.update(official_ext_root_verified=credentials.OFFICIAL_EXT_ROOT_SHA256,verified_http_status=status)
+            credentials.update_private(con,{'official_ext_trust_confirmed':True,'tls_diagnostics':evidence})
     try:
         context=credentials.tls_context(con)
-        for attempt in range(2):
+        for attempt in range(3):
             opener=build_opener(HTTPSHandler(context=context),NoRedirect())
             if path==STATEMENT:
                 global _LAST_STATEMENT_REQUEST
@@ -123,19 +129,33 @@ def request(con,path,*,method='GET',params=None,form=None,token=None,bearer=Fals
                 with opener.open(Request(url,data=data,headers=headers,method=method),timeout=30) as response:
                     raw=response.read(8_000_001)
                     if len(raw)>8_000_000:raise fiscal.FxError('Сбер вернул слишком большой ответ')
+                    remember_verified(getattr(response,'status',None))
                 break
             except (URLError,ssl.SSLError) as error:
                 reason=error.reason if isinstance(error,URLError) else error
                 strict=getattr(ssl,'VERIFY_X509_STRICT',0)
-                if attempt==0 and isinstance(reason,ssl.SSLCertVerificationError) and getattr(reason,'verify_code',None)==89 and strict and context.verify_flags & strict:
+                if attempt<2 and not ext_loaded and isinstance(reason,ssl.SSLCertVerificationError) and getattr(reason,'verify_code',None)==19:
+                    try:
+                        peer_report=sberpeer.inspect(context)
+                        credentials.update_private(con,{'tls_diagnostics':peer_report})
+                        matched=peer_report.get('status')=='captured' and peer_report.get('probe_route') in ('direct','http_proxy') and any(
+                            c.get('sha256')==credentials.OFFICIAL_EXT_ROOT_SHA256 for c in peer_report.get('chain',[]) if isinstance(c,dict))
+                    except Exception:
+                        matched=False  # Inspection failure must preserve the original certificate failure.
+                    if matched and credentials.load_official_ext(context,credentials.OFFICIAL_EXT_ROOT_SHA256):
+                        ext_loaded=True
+                        continue
+                if attempt<2 and not strict_retried and isinstance(reason,ssl.SSLCertVerificationError) and getattr(reason,'verify_code',None)==89 and strict and context.verify_flags & strict:
                     # Published Sber intermediate (2018) has non-critical BasicConstraints.
                     # Python 3.13 enables strict by default. Use standard CA verification
                     # only for this bank context; keep signature, trust, expiry and hostname.
                     context.verify_flags &= ~strict
+                    strict_retried=True
                     continue
                 raise
     except HTTPError as error:
         status=error.code
+        remember_verified(status)
         try:error_code=json.loads(error.read(4096)).get('error','')
         except Exception:error_code=''
         error.close()
@@ -203,6 +223,7 @@ def settings(con):
     result['token_expires_at']=credentials.get(con,'token_expires_at') or None
     result['last_error']=credentials.get(con,'last_error',None)
     result['last_connection_check']=credentials.get(con,'last_connection_check',None)
+    result['tls_diagnostics']=credentials.get(con,'tls_diagnostics',None)
     return result
 
 

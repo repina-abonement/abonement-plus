@@ -196,6 +196,123 @@ class SberTransportDiagnostics(unittest.TestCase):
         self.assertTrue(context.check_hostname)
 
 
+    def root_probe_context(self):
+        context = ssl.create_default_context()
+        context.verify_flags |= ssl.VERIFY_X509_STRICT
+        return context
+
+    def test_verify19_matching_official_root_retries_normal_verification_once(self):
+        for route in ('direct', 'http_proxy'):
+            with self.subTest(route=route):
+                context = self.root_probe_context()
+                expected = sbercredentials.OFFICIAL_EXT_ROOT_SHA256
+                report = {'status': 'captured', 'probe_route': route, 'api_proxy_configured': route == 'http_proxy', 'proxy_bypassed': False, 'chain': [{'sha256': expected}]}
+                response = MagicMock(); response.__enter__.return_value.read.return_value = b'{"ok": true}'
+                response.__enter__.return_value.status = 200
+                snapshots = []
+                def open_request(*args, **kwargs):
+                    snapshots.append((context.verify_mode, context.check_hostname, context.verify_flags))
+                    if len(snapshots) == 1: raise self.strict_verification_error(19)
+                    return response
+                with patch.object(sbercredentials, 'tls_context', return_value=context), patch('crm.sberpeer.inspect', return_value=report) as inspect_peer, patch.object(sbercredentials, 'load_official_ext', return_value=True) as load, patch.object(sberbank, 'build_opener') as opener:
+                    opener.return_value.open.side_effect = open_request
+                    result = sberbank.request(self.con, sberbank.TOKEN)
+                self.assertEqual(result, {'ok': True})
+                self.assertEqual(len(snapshots), 2)
+                load.assert_called_once_with(context, expected)
+                inspect_peer.assert_called_once_with(context)
+                self.assertTrue(all(mode == ssl.CERT_REQUIRED and hostname for mode, hostname, flags in snapshots))
+                self.assertEqual(snapshots[0][2], snapshots[1][2])
+                self.assertTrue(sbercredentials.get(self.con, 'official_ext_trust_confirmed'))
+                self.assertEqual(sbercredentials.get(self.con, 'tls_diagnostics')['verified_http_status'], 200)
+
+    def test_verify19_then_policy89_uses_two_independent_bounded_fixes(self):
+        context = self.root_probe_context()
+        report = {'status': 'captured', 'probe_route': 'direct', 'chain': [{'sha256': sbercredentials.OFFICIAL_EXT_ROOT_SHA256}]}
+        response = MagicMock(); response.__enter__.return_value.read.return_value = b'{"ok": true}'
+        snapshots = []
+        def open_request(*args, **kwargs):
+            snapshots.append((context.verify_mode, context.check_hostname, context.verify_flags))
+            if len(snapshots) == 1: raise self.strict_verification_error(19)
+            if len(snapshots) == 2: raise self.strict_verification_error(89)
+            return response
+        with patch.object(sbercredentials, 'tls_context', return_value=context), patch('crm.sberpeer.inspect', return_value=report) as inspect_peer, patch.object(sbercredentials, 'load_official_ext', return_value=True) as load, patch.object(sberbank, 'build_opener') as opener:
+            opener.return_value.open.side_effect = open_request
+            self.assertEqual(sberbank.request(self.con, sberbank.TOKEN), {'ok': True})
+        self.assertEqual(len(snapshots), 3)
+        inspect_peer.assert_called_once_with(context); load.assert_called_once()
+        self.assertTrue(all(mode == ssl.CERT_REQUIRED and hostname for mode, hostname, flags in snapshots))
+        self.assertTrue(snapshots[0][2] & ssl.VERIFY_X509_STRICT)
+        self.assertTrue(snapshots[1][2] & ssl.VERIFY_X509_STRICT)
+        self.assertFalse(snapshots[2][2] & ssl.VERIFY_X509_STRICT)
+
+    def test_verify19_unknown_root_or_missing_chain_cannot_add_trust_or_retry_http(self):
+        reports = [
+            {'status': 'captured', 'probe_route': 'direct', 'chain': [{'sha256': 'a' * 64}]},
+            {'status': 'captured', 'probe_route': 'direct', 'chain': []},
+            {'status': 'captured', 'probe_route': 'direct'},
+            {'status': 'unavailable', 'probe_route': 'direct', 'chain': []},
+            {'status': 'unavailable', 'probe_route': 'direct', 'chain': [{'sha256': sbercredentials.OFFICIAL_EXT_ROOT_SHA256}]},
+            {'status': 'captured', 'probe_route': 'unsupported_proxy', 'chain': [{'sha256': sbercredentials.OFFICIAL_EXT_ROOT_SHA256}]},
+            {'status': 'route_unsupported', 'probe_route': 'http_proxy', 'chain': [{'sha256': sbercredentials.OFFICIAL_EXT_ROOT_SHA256}]},
+        ]
+        for report in reports:
+            with self.subTest(report=report):
+                context = self.root_probe_context()
+                with patch.object(sbercredentials, 'tls_context', return_value=context), patch('crm.sberpeer.inspect', return_value=report), patch.object(sbercredentials, 'load_official_ext', return_value=True) as load, patch.object(sberbank, 'build_opener') as opener:
+                    opener.return_value.open.side_effect = self.strict_verification_error(19)
+                    with self.assertRaises(fiscal.FxError) as caught:
+                        sberbank.request(self.con, sberbank.TOKEN)
+                opener.return_value.open.assert_called_once()
+                load.assert_not_called()
+                self.assertEqual(caught.exception.transport_code, 'tls_certificate_verify')
+                self.assertEqual(caught.exception.verify_code, 19)
+                self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+                self.assertTrue(context.check_hostname)
+
+    def test_verify19_probe_failure_retains_original_safe_certificate_diagnostic(self):
+        context = self.root_probe_context()
+        with patch.object(sbercredentials, 'tls_context', return_value=context), patch('crm.sberpeer.inspect', side_effect=RuntimeError('https://bank.invalid/?client_secret=' + self.secret_marker)), patch.object(sbercredentials, 'load_official_ext', return_value=True) as load, patch.object(sberbank, 'build_opener') as opener:
+            opener.return_value.open.side_effect = self.strict_verification_error(19)
+            with self.assertRaises(fiscal.FxError) as caught:
+                sberbank.request(self.con, sberbank.TOKEN)
+        opener.return_value.open.assert_called_once(); load.assert_not_called()
+        self.assertEqual(caught.exception.transport_code, 'tls_certificate_verify')
+        self.assertEqual(caught.exception.verify_code, 19)
+        self.assertNotIn(self.secret_marker, str(caught.exception))
+        self.assertNotIn('bank.invalid', str(caught.exception))
+
+    def test_verify20_never_probes_or_adds_a_root(self):
+        context = self.root_probe_context()
+        with patch.object(sbercredentials, 'tls_context', return_value=context), patch('crm.sberpeer.inspect') as inspect_peer, patch.object(sbercredentials, 'load_official_ext', return_value=True) as load, patch.object(sberbank, 'build_opener') as opener:
+            opener.return_value.open.side_effect = self.strict_verification_error(20)
+            with self.assertRaises(fiscal.FxError):sberbank.request(self.con, sberbank.TOKEN)
+        inspect_peer.assert_not_called(); load.assert_not_called()
+        opener.return_value.open.assert_called_once()
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+
+    def test_verify19_with_failed_pinned_bundle_load_does_not_retry_http(self):
+        context = self.root_probe_context()
+        report = {'status': 'captured', 'probe_route': 'direct', 'chain': [{'sha256': sbercredentials.OFFICIAL_EXT_ROOT_SHA256}]}
+        with patch.object(sbercredentials, 'tls_context', return_value=context), patch('crm.sberpeer.inspect', return_value=report), patch.object(sbercredentials, 'load_official_ext', return_value=False), patch.object(sberbank, 'build_opener') as opener:
+            opener.return_value.open.side_effect = self.strict_verification_error(19)
+            with self.assertRaises(fiscal.FxError):sberbank.request(self.con, sberbank.TOKEN)
+        opener.return_value.open.assert_called_once()
+
+    def test_verify19_official_root_retry_is_bounded_when_chain_still_invalid(self):
+        context = self.root_probe_context()
+        report = {'status': 'captured', 'probe_route': 'direct', 'chain': [{'sha256': sbercredentials.OFFICIAL_EXT_ROOT_SHA256}]}
+        with patch.object(sbercredentials, 'tls_context', return_value=context), patch('crm.sberpeer.inspect', return_value=report) as inspect_peer, patch.object(sbercredentials, 'load_official_ext', return_value=True) as load, patch.object(sberbank, 'build_opener') as opener:
+            opener.return_value.open.side_effect = self.strict_verification_error(19)
+            with self.assertRaises(fiscal.FxError):sberbank.request(self.con, sberbank.TOKEN)
+        self.assertEqual(opener.return_value.open.call_count, 2)
+        self.assertFalse(sbercredentials.get(self.con, 'official_ext_trust_confirmed'))
+        inspect_peer.assert_called_once_with(context); load.assert_called_once()
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+
+
 
 @unittest.skipUnless(shutil.which('openssl'), 'Local TLS fixture needs openssl')
 class SberRealTLS(unittest.TestCase):
