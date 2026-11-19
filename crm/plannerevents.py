@@ -38,7 +38,7 @@ def save(con,user,data,event_id=None):
         if bool(start)!=bool(end) or (start and start>=end):raise PlanError('Укажите начало и окончание мероприятия в пределах одного дня')
         branch=data.get('branch_id') or None
         if branch and not con.execute('SELECT 1 FROM branches WHERE id=?',(branch,)).fetchone():raise PlanError('Филиал не найден')
-        fields=dict(title=title,day=day,start_time=start,end_time=end,branch_id=branch,participants=str(data.get('participants') or '').strip(),note=str(data.get('note') or '').strip())
+        fields=dict(title=title,day=day,start_time=start,end_time=end,branch_id=branch,participants=str(data.get('participants',old['participants'] if old else '') or '').strip(),note=str(data.get('note') or '').strip())
         if len(fields['participants'])>1000 or len(fields['note'])>2000:raise PlanError('Слишком длинное описание')
     stamp=datetime.now(ZoneInfo('Europe/Moscow')).isoformat(timespec='seconds')
     if old:
