@@ -69,8 +69,8 @@ def inspect(con,provider_id,include_bank=True,include_ofd=True):
     if include_ofd:
         result['ofd']=primary_ofd(con,result['primary_receipt'])
     if include_bank:
-        from . import tochkacheck
-        result['bank_settlement']=tochkacheck.inspect(con,result['payment'],result.get('sbp_identifiers',{}))
+        from . import bankcheck
+        result['bank_settlement']=bankcheck.state(con,link['payment_id']) or {'status':'unverified','note':'Ожидается серверная сверка PayKeeper с банковской выпиской'}
     return result
 
 
@@ -86,9 +86,10 @@ def source_status(con):
             'note':'Доступ к источнику не подтверждает зачисление платежа или наличие конкретного чека'}
     checks=con.execute('SELECT count(*) AS total,max(checked_at) AS last_checked_at FROM bank_payment_checks').fetchone()
     result['automatic_bank_checks']={'enabled':bool(fiscal.cfg(con,'fx_tochka_token')),
-        'interval_minutes':10,'batch_limit':3,'payments_checked':checks['total'],
+        'interval_minutes':10,'batch_limit':None,'daily_provider_snapshots_per_run':2,'payments_checked':checks['total'],
         'last_checked_at':checks['last_checked_at'],'settlement_confirmation_implemented':True,
-        'coverage_note':'Подтверждение только при точных структурированных идентификаторах и полном реестре; возвраты неизвестного формата блокируют результат'}
+        'coverage_note':'Поимённые оплаты PayKeeper сопоставляются с выпиской: СБП отдельно, карты общими выплатами за день. Недоступное право эквайринга не требуется'
+        ,'strategy':'paykeeper_daily_batches_and_named_sbp'}
     from . import paymentworker
     result['control_jobs']=paymentworker.states(con)
     if result['tochka']['configured']:

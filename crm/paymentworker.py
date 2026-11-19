@@ -22,6 +22,9 @@ def init(con):
     con.execute('''CREATE TABLE IF NOT EXISTS ofd_payment_checks (
         payment_id INTEGER PRIMARY KEY,provider_payment_id TEXT NOT NULL,
         checked_at TEXT NOT NULL,result TEXT NOT NULL)''')
+    # Bootstrap the new daily gateway feed once, without waiting for an old scheduler slot.
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pk_daily_evidence'").fetchone() and not con.execute('SELECT 1 FROM pk_daily_evidence LIMIT 1').fetchone():
+        con.execute("UPDATE payment_control_jobs SET next_at=NULL WHERE source IN ('paykeeper','tochka') AND lease_owner IS NULL")
 
 def configured(con, source):
     from . import fiscal
@@ -56,7 +59,13 @@ def cycle(con,source,current=None):
         if not configured(con,source):
             result={'configured':False,'checked':0};status='not_configured'
         else:
-            if source=='paykeeper':result=fiscalcheck.run_automatic(con,current,limit=3,include_ofd=False)
+            if source=='paykeeper':
+                from . import payoutcheck
+                result=fiscalcheck.run_automatic(con,current,limit=3,include_ofd=False)
+                daily=payoutcheck.refresh_source(con,current)
+                result.update(daily)
+                result['unavailable']=result.get('unavailable',0)+daily.get('days_unavailable',0)
+                if not result['checked'] and daily.get('days_checked'):result['checked']=daily['days_checked']
             elif source=='tochka':result=bankcheck.run_automatic(con,current,limit=3,cached_only=True)
             else:result=run_ofd(con,current,limit=3)
             status='attention' if result.get('unavailable') or result.get('blocked') else 'waiting_data' if result.get('waiting') else 'ok' if result.get('checked') else 'idle'

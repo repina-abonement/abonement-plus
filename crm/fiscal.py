@@ -174,6 +174,8 @@ def init(con):
     fiscalcheck.init(con)
     from . import bankcheck
     bankcheck.init(con)
+    from . import payoutcheck
+    payoutcheck.init(con)
     from . import paymentworker
     paymentworker.init(con)
     con.execute('CREATE TABLE IF NOT EXISTS fiscal_ofd_days(day TEXT PRIMARY KEY,checked_at TEXT NOT NULL,ok INTEGER NOT NULL)')
@@ -225,7 +227,7 @@ def tochka_get(con, path: str, method: str = "GET", data=None):
     return js
 
 
-def fetch_tochka(con, d_from: date, d_to: date) -> list[dict]:
+def fetch_tochka(con, d_from: date, d_to: date, include_debits=False) -> list[dict]:
     """Входящие операции по всем рублёвым счетам Точки за период."""
     accs = (tochka_get(con, "/open-banking/v1.0/accounts").get("Data") or {}).get("Account") or []
     out = []
@@ -247,10 +249,12 @@ def fetch_tochka(con, d_from: date, d_to: date) -> list[dict]:
             time.sleep(2)
         else:
             raise FxError("Точка долго формирует выписку, попробуем в следующий раз")
+        if (js.get("Meta") or {}).get("totalPages",1)>1 or (js.get("Links") or {}).get("next"):
+            raise FxError("Выписка вернулась не полностью. Необходима обработка всех страниц")
         for t in st.get("Transaction") or []:
-            if t.get("creditDebitIndicator") != "Credit" or t.get("status") != "Booked":
+            if t.get("status") != "Booked" or (not include_debits and t.get("creditDebitIndicator") != "Credit"):
                 continue
-            out.append(t)
+            out.append(dict(t,_account_id=acc) if include_debits else t)
     return out
 
 

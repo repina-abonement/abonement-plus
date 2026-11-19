@@ -53,11 +53,11 @@ def summarize(rows):
 
 def inspect_existing(con,provider_id):
     """Inspect persisted evidence only, without provider requests or data mutations."""
-    from . import services,paymentworker
+    from . import services,paymentworker,payoutcheck
     rows=con.execute("""SELECT DISTINCT p.* FROM payments p JOIN pay_links l ON l.payment_id=p.id
         WHERE l.pk_payment_id=? AND p.cancelled=0""",(str(provider_id or ''),)).fetchall()
     if len(rows)!=1:raise services.ApiError('Нужен один однозначно связанный существующий платёж',409 if rows else 404)
     payment=rows[0]
     return {'control_version':2,'provider_payment_id':str(provider_id),'crm_payment_id':payment['id'],
             'amount_minor':fiscal.kop(payment['amount']),'control':state(con,payment),'control_jobs':paymentworker.states(con),
-            'read_only':True,'live_provider_requests':False}
+            'payout_control':payoutcheck.diagnostics(con),'read_only':True,'live_provider_requests':False}

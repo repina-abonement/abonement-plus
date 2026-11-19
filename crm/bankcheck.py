@@ -14,6 +14,11 @@ def init(con):
 def run_automatic(con, now=None, limit=3, cached_only=False):
     if not fiscal.cfg(con,'fx_tochka_token'):
         return {'checked':0,'configured':False}
+    if cached_only:
+        from . import payoutcheck
+        current=now or datetime.now(ZoneInfo('Europe/Moscow'))
+        if current.tzinfo is not None:current=current.astimezone(ZoneInfo('Europe/Moscow')).replace(tzinfo=None)
+        return payoutcheck.run_bank(con,current,limit=limit)
     current=now or datetime.now(ZoneInfo('Europe/Moscow'))
     if current.tzinfo is not None:
         current=current.astimezone(ZoneInfo('Europe/Moscow')).replace(tzinfo=None)
@@ -31,18 +36,8 @@ def run_automatic(con, now=None, limit=3, cached_only=False):
     denied=unavailable=checked=waiting=0
     for row in rows:
         try:
-            if cached_only:
-                from . import tochkacheck
-                cache=con.execute('SELECT result FROM fiscal_payment_checks WHERE payment_id=?',(row['id'],)).fetchone()
-                evidence=json.loads(cache['result']) if cache else {}
-                if evidence.get('provider_payment_id')!=row['pk_payment_id']:evidence={}
-                if not evidence.get('bank_payment',{}).get('available') or not evidence.get('sbp_identifiers'):
-                    waiting+=1
-                    continue
-                result=tochkacheck.inspect(con,evidence.get('bank_payment',{}),evidence.get('sbp_identifiers',{}))
-            else:
-                inspection=paykeepercheck.inspect(con,row['pk_payment_id'],include_bank=True,include_ofd=False)
-                result=inspection['bank_settlement']
+            inspection=paykeepercheck.inspect(con,row['pk_payment_id'],include_bank=True,include_ofd=False)
+            result=inspection['bank_settlement']
         except Exception:
             result={'status':'unavailable','note':'Не удалось проверить зачисление. Деньги не отмечены как зачисленные'}
         checked+=1
@@ -63,6 +58,11 @@ def state(con,payment_id):
     if not con.execute('SELECT 1 FROM pay_links WHERE payment_id=? AND pk_payment_id=?',
                        (payment_id,row['provider_payment_id'])).fetchone():return None
     result=json.loads(row['result'])
+    if result.get('source_day'):
+        snapshot=con.execute('SELECT status,digest FROM pk_daily_evidence WHERE day=?',(result['source_day'],)).fetchone()
+        if not snapshot or not snapshot['digest'] or snapshot['digest']!=result.get('source_digest'):
+            return {'status':'unverified','label':'Нужна повторная сверка состава оплат','checked_at':row['checked_at'],
+                'note':'PayKeeper обновил состав оплат или полный список недоступен. Ожидается повторная сверка с выпиской'}
     if result.get('status')=='confirmed':
         current=con.execute('SELECT amount FROM payments WHERE id=? AND cancelled=0',(payment_id,)).fetchone()
         ids=con.execute("SELECT DISTINCT pk_payment_id FROM pay_links WHERE payment_id=? AND pk_payment_id!=''",(payment_id,)).fetchall()
@@ -72,7 +72,7 @@ def state(con,payment_id):
         return {'status':'confirmed','label':'Зачисление подтверждено выпиской','checked_at':row['checked_at'],'note':result['note'],'evidence':result.get('settlement_proof',{})}
     note=result.get('note') or 'Зачисление на расчётный счёт пока не подтверждено'
     if result.get('registry_status')=='permission_denied':
-        note='Точка: ключу CRM не хватает права чтения эквайринга ReadAcquiringData'
+        note='Предыдущая проверка реестра была недоступна. Новый маршрут использует список PayKeeper и банковскую выписку'
     elif (result.get('registry_matches') or result.get('statement_candidates')) and result.get('note') in (None,'Фактическая проводка по расчётному счёту ещё не подтверждена'):
         note='Найдены связанные операции. Сумма выплаты, комиссия и зачисление ещё требуют подтверждения'
     elif result.get('statement_status')=='read' and result.get('note') in (None,'Фактическая проводка по расчётному счёту ещё не подтверждена'):

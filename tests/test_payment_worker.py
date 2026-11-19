@@ -47,7 +47,10 @@ class SettlementProof(unittest.TestCase):
 
 
 class PaymentWorker(unittest.TestCase):
-    setUp=FiscalPaymentCheck.setUp
+    def setUp(self):
+        FiscalPaymentCheck.setUp(self)
+        source=patch('crm.payoutcheck.refresh_source',return_value={'days_checked':0,'days_unavailable':0})
+        source.start();self.addCleanup(source.stop)
     new=FiscalPaymentCheck.new
     payment=FiscalPaymentCheck.payment
     current=datetime(2026,11,19,14)
@@ -63,16 +66,16 @@ class PaymentWorker(unittest.TestCase):
     def test_access_errors_and_restoration_retry_without_pk_call(self):
         pid=self.payment();self.configure();self.cache(pid)
         denied={'status':'unverified','registry_status':'permission_denied','http_status':403}
-        with patch('crm.tochkacheck.inspect',return_value=denied),patch.object(paykeepercheck,'inspect',side_effect=AssertionError('Bank must not read PK')):
+        with patch('crm.payoutcheck.run_bank',side_effect=lambda con,*a,**kw: (con.execute('INSERT OR REPLACE INTO bank_payment_checks VALUES(?,?,?,?)',(pid,'synthetic-11534','2026-11-19T14:00:00',json.dumps(denied))) and {'checked':1})),patch.object(paykeepercheck,'inspect',side_effect=AssertionError('Bank must not read PK')):
             paymentworker.cycle(self.con,'tochka',self.current)
-        self.assertIn('ReadAcquiringData',bankcheck.state(self.con,pid)['note'])
+        self.assertIn('банковскую выписку',bankcheck.state(self.con,pid)['note'])
         with patch.object(paykeepercheck,'primary_ofd',return_value={'status':'unavailable','http_status':403,'provider_message':'Kkt is not paid'}):
             paymentworker.cycle(self.con,'ofd',self.current)
         p=self.con.execute('SELECT * FROM payments WHERE id=?',(pid,)).fetchone()
         self.assertIn('ОФД: Kkt is not paid',paymentcontrol.state(self.con,p)['issues'])
         later=self.current+timedelta(minutes=11)
         # No manual retry or settings edit is required once provider access is restored.
-        with patch('crm.tochkacheck.inspect',return_value={'status':'unverified','statement_status':'read'}) as bank:
+        with patch('crm.payoutcheck.run_bank',return_value={'checked':1}) as bank:
             paymentworker.cycle(self.con,'tochka',later);bank.assert_called_once()
         good={'status':'confirmed','note':'Exact receipt','fn':'synthetic-fn','fd':'3483','fp':'synthetic-fp','total_minor':135000,'issued_at':'2026-11-18T12:10:00'}
         with patch.object(paykeepercheck,'primary_ofd',return_value=good):paymentworker.cycle(self.con,'ofd',later)
@@ -124,9 +127,9 @@ class PaymentWorker(unittest.TestCase):
             paymentworker.cycle(self.con,'paykeeper',self.current)
         cache=json.loads(self.con.execute('SELECT result FROM fiscal_payment_checks WHERE payment_id=?',(pid,)).fetchone()[0])
         self.assertEqual(cache['primary_receipt']['fd'],'3483')
-        with patch('crm.tochkacheck.inspect',return_value={'status':'unverified'}) as bank,patch.object(paykeepercheck,'primary_ofd',return_value={'status':'unavailable'}) as ofd:
+        with patch('crm.payoutcheck.run_bank',return_value={'checked':1}) as bank,patch.object(paykeepercheck,'primary_ofd',return_value={'status':'unavailable'}) as ofd:
             paymentworker.cycle(self.con,'tochka',self.current);paymentworker.cycle(self.con,'ofd',self.current)
-            self.assertEqual(bank.call_args.args[1]['id'],'synthetic-11534');self.assertEqual(ofd.call_args.args[1]['fd'],'3483')
+            bank.assert_called_once();self.assertEqual(ofd.call_args.args[1]['fd'],'3483')
 
     def test_end_to_end_three_independent_cycles_only_read_existing_payment(self):
         from tests.test_primary_receipt_options import PrimaryOptions
@@ -146,6 +149,10 @@ class PaymentWorker(unittest.TestCase):
         receipt={'fiscalDriveNumber':'1234567890123456','fiscalDocumentNumber':'123','fiscalSign':'1234567890','totalSum':135000,'operationType':1}
         before=self.con.execute('SELECT count(*) FROM payments').fetchone()[0]
         with patch.object(fiscal,'pk_call',side_effect=pk),patch.object(fiscal,'tochka_get',side_effect=bank),patch.object(fiscal,'fetch_tochka',return_value=[data.transaction]),patch.object(fiscal,'fetch_ofd_kkts',return_value=['synthetic-kkt']),patch.object(fiscal,'ofd_get',return_value={'receipts':[receipt]}),patch.object(fiscal,'run',side_effect=AssertionError('No legacy printing')):
+            from tests.test_payout_matching import PayoutMatching
+            item={'id':'synthetic-11534','client_name':'Parent','amount_minor':135000,'refund_minor':0,'orderid':order,'status':'obtained','paid_at':'2026-11-18 12:05:19','system_id':'94','rail':'sbp','acquirer':'tochka'}
+            PayoutMatching.snapshot(self,[item])
+            data.transaction.update(Amount={'amount':'1350','currency':'RUB'},DebtorParty={'name':'Parent'},documentProcessDate='2026-11-18')
             for source in ('paykeeper','tochka','ofd'):paymentworker.cycle(self.con,source,self.current)
         payment=self.con.execute('SELECT * FROM payments WHERE id=?',(pid,)).fetchone()
         control=paymentcontrol.state(self.con,payment)
@@ -186,7 +193,7 @@ with patch.object(fiscalcheck,'run_automatic',side_effect=slow):paymentworker.cy
 from unittest.mock import patch
 from crm import db,fiscalcheck,paymentworker
 con=db.connect(sys.argv[1])
-with patch.object(fiscalcheck,'run_automatic',return_value={'checked':1}):
+with patch.object(fiscalcheck,'run_automatic',return_value={'checked':1}),patch('crm.payoutcheck.refresh_source',return_value={'days_checked':0}):
  result=paymentworker.cycle(con,'paykeeper')
  assert result.get('checked')==1,result
 assert con.execute("SELECT status FROM payment_control_jobs WHERE source='paykeeper'").fetchone()[0]=='ok'
@@ -230,15 +237,8 @@ assert con.execute("SELECT status FROM payment_control_jobs WHERE source='paykee
         self.con.execute('UPDATE fiscal_payment_checks SET result=? WHERE payment_id=?',(json.dumps(cached),pid))
         self.assertEqual(paymentcontrol.state(self.con,payment)['source']['status'],'unverified')
 
-    def test_bank_waits_for_pk_identity_without_erasing_last_error(self):
-        pid=self.payment();self.configure()
-        denied={'status':'unverified','registry_status':'permission_denied','http_status':403}
-        self.con.execute('INSERT INTO bank_payment_checks VALUES(?,?,?,?)',(pid,'synthetic-11534','2026-11-18T14:00:00',json.dumps(denied)))
-        with patch('crm.tochkacheck.inspect',side_effect=AssertionError('No bank probe without verified IDs')):
+    def test_bank_waits_for_daily_snapshot_without_acquiring_calls(self):
+        self.payment();self.configure()
+        with patch.object(fiscal,'tochka_get',side_effect=AssertionError('No acquiring endpoint')):
             result=paymentworker.cycle(self.con,'tochka',self.current)
         self.assertEqual(result['checked'],0);self.assertEqual(result['waiting'],1)
-        self.assertIn('ReadAcquiringData',bankcheck.state(self.con,pid)['note'])
-        self.cache(pid)
-        with patch('crm.tochkacheck.inspect',return_value=denied) as bank:
-            result=paymentworker.cycle(self.con,'tochka',self.current+timedelta(seconds=30))
-            bank.assert_called_once();self.assertEqual(result['checked'],1)

@@ -24,7 +24,7 @@ class AutomaticBankChecks(unittest.TestCase):
         self.assertEqual(api.call_args.kwargs,{'include_bank':True,'include_ofd':False})
         payment=self.con.execute('SELECT * FROM payments WHERE id=?',(pid,)).fetchone()
         state=reconciliation.payment_state(self.con,payment)
-        self.assertIn('ReadAcquiringData',state['bank']['note'])
+        self.assertIn('банковскую выписку',state['bank']['note'])
         self.assertEqual(state['bank']['checked_at'],'2026-11-18T14:11:00')
         self.assertFalse(state['complete'])
         self.assertEqual(payment['amount'],1350)

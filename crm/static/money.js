@@ -33,6 +33,12 @@ function paymentJobsView(jobs){
   return jobs?.length?`<details class="payment-control-jobs"><summary>Автоматические проверки на сервере · каждые 10 минут</summary>${jobs.map(j=>`<div class="small"><b>${names[j.source]||esc(j.source)}</b>: ${esc(labels[j.status]||j.status)}${j.last_finished_at?' · '+esc(j.last_finished_at.replace('T',' '))+' МСК':''}${j.next_at?' · следующая: '+esc(j.next_at.replace('T',' '))+' МСК':''}</div>`).join('')}<p class="small muted">Работают при закрытом браузере. Статус запуска не подтверждает конкретное зачисление или чек — результат указан у платежа</p></details>`:'';
 }
 
+function payoutBatchesHtml(batches){
+  if(!batches?.length)return '';
+  const banks={vtb:'ВТБ',sber:'Сбер',alfa:'Альфа-Банк',tochka:'Точка',gpb:'Газпромбанк'};
+  return `<details class="payment-payout-batches"><summary>Карточные выплаты по дням · ${batches.length}</summary>${batches.map(b=>`<details class="panel"><summary>${esc(b.day.split('-').reverse().join('.'))} · ${esc(banks[b.acquirer]||'Банк')} · ${b.members.length} оплат · ${rub(b.gross_minor/100)} <span class="pill ${b.status==='confirmed'?'green':'yellow'}">${b.status==='confirmed'?'Зачисление сопоставлено':'Ожидает сверки'}</span></summary><p class="small">${esc(b.note)}</p>${!b.bank&&b.candidates?.length?`<div class="small muted">${b.candidates.slice(0,3).map(c=>`В выписке: ${rub(c.received_minor/100)} · Комиссия: ${c.fee_minor===null?'не указана':rub(c.fee_minor/100)}${c.fee_minor===null?'':` · Расхождение: ${rub((b.gross_minor-c.received_minor-c.fee_minor)/100)}`}`).join('<br>')}</div>`:''}<div class="small">Получено от клиентов: <b>${rub(b.gross_minor/100)}</b>${b.bank?` · На счёт: <b>${rub(b.bank.received_minor/100)}</b> · Комиссия: ${b.bank.fee_minor===null?'отдельно не подтверждена':rub(b.bank.fee_minor/100)}`:''}</div><ul>${b.members.map(m=>`<li class="small">${m.student_id?`<button class="link" data-open="${m.student_id}">${esc(m.client_name)}</button>`:esc(m.client_name||'Без связи с карточкой')} · ${rub(m.amount_minor/100)} · PayKeeper №${esc(m.id)}</li>`).join('')}</ul>${b.bank?`<div class="small muted">Проводка: ${esc(b.bank.bank_operation_id)}</div>`:''}</details>`).join('')}</details>`;
+}
+
 async function renderPayments(page) {
   const P = S.pay;
   const today = S.meta.today;
@@ -61,7 +67,7 @@ async function renderPayments(page) {
         <button class="chip ${P.unconfirmed ? "on warn" : d.unconfirmed.count ? "warn" : ""}" id="p-unc">Ждут подтверждения${d.unconfirmed.count ? ` · ${d.unconfirmed.count} · ${rub(d.unconfirmed.sum)}` : ""}</button>
       </div>
     </div>
-    ${d.control_summary?`<section class="panel payment-control-summary"><b>Контроль оплат и чеков</b>${paymentJobsView(d.control_jobs)}<div class="chips"><span>Подтверждено: ${d.control_summary.complete} из ${d.control_summary.total}</span><button type="button" class="chip ${P.controlOnly?'on':''}" id="p-control-attention">Требует проверки: ${d.control_summary.attention}</button>${P.controlOnly?'<button type="button" class="chip" id="p-control-all">Показать все</button>':''}</div></section>`:''}
+    ${d.control_summary?`<section class="panel payment-control-summary"><b>Контроль оплат и чеков</b>${paymentJobsView(d.control_jobs)}${payoutBatchesHtml(d.payout_batches)}<div class="chips"><span>Подтверждено: ${d.control_summary.complete} из ${d.control_summary.total}</span><button type="button" class="chip ${P.controlOnly?'on':''}" id="p-control-attention">Требует проверки: ${d.control_summary.attention}</button>${P.controlOnly?'<button type="button" class="chip" id="p-control-all">Показать все</button>':''}</div></section>`:''}
     ${d.debtors.length ? `<details class="panel fold" style="margin-top:12px"><summary><h3>Должники · ${d.debtors.length}</h3><span class="muted small">${rub(d.debtors.reduce((a, x) => a + x.debt, 0))}</span></summary>
       <div class="chips" style="margin-top:8px">${d.debtors.slice(0, 60).map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)} · ${rub(x.debt)}</button>`).join("")}</div></details>` : ""}
     ${d.corrections.length ? `<details class="panel fold" style="margin-top:12px"><summary><h3>Корректировки цен · ${d.corrections.length}</h3><span class="muted small">исключения из правил: кто, на сколько и почему</span></summary>
