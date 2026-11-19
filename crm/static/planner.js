@@ -196,9 +196,9 @@ async function renderWeek(box) {
       <div class="col-body ov-body">${overdue.map(pcard).join("")}</div></section>` : ""}
     <div class="board week-board ${dayView?'planner-single-day':''}">${days.map((d) => `<section class="col ${d.date === today ? "is-today" : ""} ${d.date < today ? "past" : ""}" data-day="${d.date}">
       <div class="col-head"><h3>${PL_DAY.format(new Date(d.date + "T00:00"))}</h3><span class="count">${d.tasks.length+(d.events||[]).length}</span></div>
-      ${w.can_manage_events||(d.events||[]).length?`<section class="planner-events-section" aria-label="Мероприятия"><div class="planner-section-heading"><b>Мероприятия</b><span>${(d.events||[]).length}</span></div>${w.can_manage_events?`<button type="button" class="btn sm planner-event-add" data-event-add="${d.date}">+ Мероприятие</button>`:''}
+      ${(d.events||[]).length?`<section class="planner-events-section" aria-label="Мероприятия"><div class="planner-section-heading"><b>Мероприятия</b><span>${(d.events||[]).length}</span></div>
       <div class="planner-events">${(d.events||[]).map(event=>`<button type="button" class="planner-event" data-event-edit="${event.id}"><b>🎉 ${esc(event.title)}</b><span>${event.start_time?esc(event.start_time+'–'+event.end_time):'Время не указано'}${event.branch_name?' · '+esc(event.branch_name):''}</span>${event.participants?`<span>${esc(event.participants)}</span>`:''}</button>`).join('')}</div>
-      ${(d.events||[]).length?'':'<div class="small muted planner-no-events">Мероприятий нет</div>'}</section>`:''}
+      </section>`:''}
       <section class="planner-tasks-section" aria-label="Задачи"><div class="planner-section-heading"><b>Задачи</b><span>${d.tasks.length}</span></div><button type="button" class="btn sm pquick" data-pq="${d.date}" ${(w.can_add===undefined?C.readOnly:!w.can_add)?'disabled':''}>+ Добавить задачу</button><div class="col-body">${groups(d.tasks,d.date)}</div></section>
     </section>`).join("")}</div>
     <input type="date" id="pmove-date" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px">`;
@@ -245,11 +245,10 @@ async function renderWeek(box) {
     }, { date: button.dataset.pq, assignee_id: w.user_id,shift:button.dataset.pqshift||'common' });
   }));
   const eventForm=(button,day,event)=>{box.querySelectorAll('.planner-event-host').forEach(el=>el.remove());const host=document.createElement('div');host.className='planner-event-host';button.after(host);openPlannerEventForm(host,day,reload,event)};
-  box.querySelectorAll('[data-event-add]').forEach(button=>button.onclick=()=>eventForm(button,button.dataset.eventAdd,{}));
   box.querySelectorAll('[data-event-edit]').forEach(button=>button.onclick=()=>{const event=w.days.flatMap(day=>day.events||[]).find(e=>e.id===+button.dataset.eventEdit);if(event)eventForm(button,event.day,event)});
   if(w.can_manage_events&&S.pendingPlannerEvent){
-    const draft=S.pendingPlannerEvent,button=[...box.querySelectorAll('[data-event-add]')].find(b=>b.dataset.eventAdd===draft.day);
-    if(button){delete S.pendingPlannerEvent;const branches=(S.meta.branches||[]).filter(b=>String(b.name).toLocaleLowerCase().includes(draft.branch_name.toLocaleLowerCase()));if(draft.branch_name&&branches.length===1)draft.branch_id=branches[0].id;eventForm(button,draft.day,draft)}
+    const draft=S.pendingPlannerEvent;
+    if(w.days.some(day=>day.date===draft.day)){delete S.pendingPlannerEvent;const branches=(S.meta.branches||[]).filter(b=>String(b.name).toLocaleLowerCase().includes(draft.branch_name.toLocaleLowerCase()));if(draft.branch_name&&branches.length===1)draft.branch_id=branches[0].id;const host=document.createElement('div');host.className='planner-event-host';const target=$('#pl-form');if(target)target.before(host);else box.prepend(host);openPlannerEventForm(host,draft.day,day=>{if(day)C.start=day;reload()},draft)}
   }
   // перенос: перетаскиванием (компьютер) или кнопкой 📅 (телефон)
   let dragId = null;
