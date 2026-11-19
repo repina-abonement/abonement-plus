@@ -92,13 +92,27 @@ def source_error(con,error,stage):
     return detail
 
 
+def confirm_empty_page(con,params,received_count):
+    """Some servers encode no rows as null; require the documented total counter."""
+    raw=fiscal.pk_call(con,'/info/payments/bydatecount/',{key:value for key,value in params.items() if key not in ('from','limit')})
+    groups=raw if isinstance(raw,list) else [raw] if isinstance(raw,dict) else []
+    totals=[group['fullcount'] for group in groups if isinstance(group,dict) and 'fullcount' in group]
+    if len(totals)==1 and isinstance(totals[0],list) and len(totals[0])==1 and isinstance(totals[0][0],dict):
+        count=totals[0][0].get('count')
+        if not isinstance(count,bool) and re.fullmatch(r'\d+',str(count)) and int(count)==received_count:return True
+    return False
+
+
 def fetch_day(con,day):
     """Complete bounded pagination; an error or repeated ID never becomes an empty day."""
     rows=[];seen=set()
     for offset in range(0,10000,100):
-        page=fiscal.pk_call(con,'/info/payments/bydate/',{'start':day,'end':day,'from':offset,'limit':100,
+        params={'start':day,'end':day,'from':offset,'limit':100,
             'status[]':list(paykeepercheck.RECEIVED_STATUSES)+['refunded','partially_refunded','refunding'],
-            'payment_system_id[]':list(range(201))})
+            'payment_system_id[]':list(range(201))}
+        page=fiscal.pk_call(con,'/info/payments/bydate/',params)
+        if page is None or page=={}:
+            if confirm_empty_page(con,params,len(rows)):return rows
         if not isinstance(page,list) or len(page)>100:raise DailyEvidenceError('unexpected_response','Неизвестный формат дневного списка PayKeeper',fiscal.shape(page))
         for item in page:
             if not isinstance(item,dict) or not item.get('id') or str(item['id']) in seen:raise DailyEvidenceError('duplicate_or_missing_id','PayKeeper вернул повторяющийся или пустой ID оплаты')

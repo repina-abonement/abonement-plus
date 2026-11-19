@@ -707,6 +707,7 @@ async function renderDashboard(page) {
   const segColors = { new: "#8cc9a4", regular: "#1f7a4d", returned: "#d9a441" };
   const seg = d.segments[S.dashSeg];
   page.innerHTML = `
+    ${d.incoming_control?`<a class="panel" href="#payments">Поступления и чеки: требуют внимания ${d.incoming_control.attention}. Не проведено в CRM: ${d.incoming_control.unrecorded}. ${d.incoming_control.complete?"":"Охват всех счетов пока не подтверждён"}</a>`:""}
     <div class="dash-filters">
       <select id="dash-month">${months.map((x) => `<option value="${x}" ${x === S.dashMonth ? "selected" : ""}>${monthLabel(x)}</option>`).join("")}</select>
       <select id="dash-branch"><option value="">Все филиалы</option>${S.meta.branches.map((b) => `<option value="${b.id}" ${String(b.id) === String(S.dashBranch) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>

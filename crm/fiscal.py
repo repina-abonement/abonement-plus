@@ -176,6 +176,8 @@ def init(con):
     bankcheck.init(con)
     from . import payoutcheck
     payoutcheck.init(con)
+    from . import incomingcontrol
+    incomingcontrol.init(con)
     from . import paymentworker
     paymentworker.init(con)
     con.execute('CREATE TABLE IF NOT EXISTS fiscal_ofd_days(day TEXT PRIMARY KEY,checked_at TEXT NOT NULL,ok INTEGER NOT NULL)')
@@ -227,13 +229,14 @@ def tochka_get(con, path: str, method: str = "GET", data=None):
     return js
 
 
-def fetch_tochka(con, d_from: date, d_to: date, include_debits=False) -> list[dict]:
+def fetch_tochka(con, d_from: date, d_to: date, include_debits=False, all_currencies=False) -> list[dict]:
     """Входящие операции по всем рублёвым счетам Точки за период."""
     accs = (tochka_get(con, "/open-banking/v1.0/accounts").get("Data") or {}).get("Account") or []
+    if all_currencies and not accs:raise FxError("Точка не вернула доступные счета")
     out = []
     for a in accs:
         acc = a.get("accountId")
-        if not acc or (a.get("currency") not in (None, "RUB", "643")):
+        if not acc or (not all_currencies and a.get("currency") not in (None, "RUB", "643")):
             continue
         init_js = tochka_get(con, "/open-banking/v1.0/statements", "POST", {"Data": {"Statement": {
             "accountId": acc, "startDateTime": d_from.isoformat(), "endDateTime": d_to.isoformat()}}})

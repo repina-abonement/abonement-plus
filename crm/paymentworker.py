@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-SOURCES=('paykeeper','tochka','ofd')
+SOURCES=('paykeeper','tochka','ofd','incoming_paykeeper','incoming_tochka','incoming_receipts')
 INTERVAL=600
 LEASE=3600
 
@@ -29,7 +29,10 @@ def init(con):
 def configured(con, source):
     from . import fiscal
     keys={'paykeeper':('fx_pk_server','fx_pk_user','fx_pk_password'),
-          'tochka':('fx_tochka_token',),'ofd':('fx_ofd_token',)}
+          'tochka':('fx_tochka_token',),'ofd':('fx_ofd_token',),
+          'incoming_paykeeper':('fx_pk_server','fx_pk_user','fx_pk_password'),
+          'incoming_tochka':('fx_tochka_token',),
+          'incoming_receipts':('fx_pk_server','fx_pk_user','fx_pk_password','fx_ofd_token')}
     return all(fiscal.cfg(con,k) for k in keys[source])
 
 def cycle(con,source,current=None):
@@ -67,8 +70,12 @@ def cycle(con,source,current=None):
                 result['unavailable']=result.get('unavailable',0)+daily.get('days_unavailable',0)
                 if not result['checked'] and daily.get('days_checked'):result['checked']=daily['days_checked']
             elif source=='tochka':result=bankcheck.run_automatic(con,current,limit=3,cached_only=True)
-            else:result=run_ofd(con,current,limit=3)
-            status='no_payments' if result.get('no_crm_payments') and not result.get('checked') else 'attention' if result.get('unavailable') or result.get('blocked') else 'waiting_data' if result.get('waiting') else 'ok' if result.get('checked') else 'idle'
+            elif source=='ofd':result=run_ofd(con,current,limit=3)
+            else:
+                from . import incomingcontrol
+                run={'incoming_paykeeper':incomingcontrol.discover_paykeeper,'incoming_tochka':incomingcontrol.discover_tochka,'incoming_receipts':incomingcontrol.check_receipts}[source]
+                result=run(con,current)
+            status='no_payments' if result.get('no_crm_payments') and not result.get('checked') else 'attention' if result.get('unavailable') or result.get('blocked') else 'waiting_data' if result.get('waiting') else 'ok' if result.get('checked') or result.get('completed') else 'idle'
     except Exception:
         # Provider exception text can contain credentials or client data.
         result={'error':'Не удалось завершить проверку. Повтор произойдёт автоматически'};status='error'
@@ -133,7 +140,7 @@ def states(con):
             'result':json.loads(r.get('result','{}'))})
     return out
 
-def start_worker(connect,stop=None):
+def start_worker(connect,stop=None,sources=None):
     stop=stop or threading.Event()
     def loop(source):
         con=None
@@ -146,7 +153,7 @@ def start_worker(connect,stop=None):
             stop.wait(5)
         if con is not None:con.close()
     threads=[]
-    for source in SOURCES:
+    for source in (SOURCES if sources is None else sources):
         thread=threading.Thread(target=loop,args=(source,),name='payment-control-'+source,daemon=True)
         thread.start();threads.append(thread)
     return threads

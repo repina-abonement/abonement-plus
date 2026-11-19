@@ -1786,6 +1786,12 @@ def fiscal_source_status(con,h,user,body,q):
     return paykeepercheck.source_status(con)
 
 
+@route("GET", "/api/incoming-control", role="admin")
+def incoming_control_view(con,h,user,body,q):
+    from . import incomingcontrol
+    return incomingcontrol.view(con,summary_only=q.get('summary')=='1')
+
+
 @route("GET", "/api/fiscal/control-payment", role="admin")
 def fiscal_control_payment(con,h,user,body,q):
     from . import paymentcontrol
@@ -2682,7 +2688,10 @@ def my_pay_set(con, h, user, body, q):
 
 @route("GET", "/api/dashboard", role="admin")
 def dashboard(con, h, user, body, q):
-    return sv.dashboard(con, q.get("month"), int(q["branch_id"]) if q.get("branch_id") else None, int(q["group_id"]) if q.get("group_id") else None)
+    result=sv.dashboard(con, q.get("month"), int(q["branch_id"]) if q.get("branch_id") else None, int(q["group_id"]) if q.get("group_id") else None)
+    from . import incomingcontrol
+    result["incoming_control"]=incomingcontrol.view(con,summary_only=True)
+    return result
 
 
 @route("POST", "/api/students/{sid}/trial")

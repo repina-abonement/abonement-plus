@@ -28,7 +28,7 @@ function paymentControlHtml(control){
 }
 
 function paymentJobsView(jobs){
-  const names={paykeeper:'PayKeeper',tochka:'Точка',ofd:'ОФД'};
+  const names={paykeeper:'PayKeeper',tochka:'Точка',ofd:'ОФД',incoming_paykeeper:'Поиск новых оплат PayKeeper',incoming_tochka:'Поиск всех поступлений Точки',incoming_receipts:'Чеки новых поступлений'};
   const labels={no_payments:'В CRM нет оплат для сверки',waiting_data:'Ожидает проверенных данных PayKeeper',idle:'Ожидает срока проверки оплат',stale:'Давно не завершалась, проверьте службу CRM',waiting:'Ожидает запуска',running:'Проверка идёт',ok:'Проверка завершена',attention:'Есть ограничения доступа или ошибки',error:'Не удалось проверить, повтор автоматически',not_configured:'Доступ не настроен',interrupted:'Проверка прервана, будет повторена'};
   return jobs?.length?`<details class="payment-control-jobs"><summary>Автоматические проверки на сервере · каждые 10 минут</summary>${jobs.map(j=>`<div class="small"><b>${names[j.source]||esc(j.source)}</b>: ${esc(labels[j.status]||j.status)}${j.last_finished_at?' · '+esc(j.last_finished_at.replace('T',' '))+' МСК':''}${j.next_at?' · следующая: '+esc(j.next_at.replace('T',' '))+' МСК':''}</div>`).join('')}<p class="small muted">Работают при закрытом браузере. Статус запуска не подтверждает конкретное зачисление или чек — результат указан у платежа</p></details>`:'';
 }
@@ -39,6 +39,13 @@ function payoutBatchesHtml(batches){
   return `<details class="payment-payout-batches"><summary>Карточные выплаты по дням · ${batches.length}</summary>${batches.map(b=>`<details class="panel"><summary>${esc(b.day.split('-').reverse().join('.'))} · ${esc(banks[b.acquirer]||'Банк')} · ${b.members.length} оплат · ${rub(b.gross_minor/100)} <span class="pill ${b.status==='confirmed'?'green':'yellow'}">${b.status==='confirmed'?'Зачисление сопоставлено':'Ожидает сверки'}</span></summary><p class="small">${esc(b.note)}</p>${!b.bank&&b.candidates?.length?`<div class="small muted">${b.candidates.slice(0,3).map(c=>`В выписке: ${rub(c.received_minor/100)} · Комиссия: ${c.fee_minor===null?'не указана':rub(c.fee_minor/100)}${c.fee_minor===null?'':` · Расхождение: ${rub((b.gross_minor-c.received_minor-c.fee_minor)/100)}`}`).join('<br>')}</div>`:''}<div class="small">Получено от клиентов: <b>${rub(b.gross_minor/100)}</b>${b.bank?` · На счёт: <b>${rub(b.bank.received_minor/100)}</b> · Комиссия: ${b.bank.fee_minor===null?'отдельно не подтверждена':rub(b.bank.fee_minor/100)}`:''}</div><ul>${b.members.map(m=>`<li class="small">${m.student_id?`<button class="link" data-open="${m.student_id}">${esc(m.client_name)}</button>`:esc(m.client_name||'Без связи с карточкой')} · ${rub(m.amount_minor/100)} · PayKeeper №${esc(m.id)}</li>`).join('')}</ul>${b.bank?`<div class="small muted">Проводка: ${esc(b.bank.bank_operation_id)}</div>`:''}</details>`).join('')}</details>`;
 }
 
+function incomingControlHtml(d){
+  if(!d)return '';
+  const names={paykeeper:'PayKeeper',tochka:'Точка',sber:'Сбер Бизнес'};
+  const statuses={ok:'прочитано',not_connected:'не подключён',waiting:'ожидает проверки',unavailable:'источник недоступен',stale:'данные устарели'};
+  return `<section class="panel incoming-control"><h3>Поступления и чеки</h3><p><b>Не проведено в CRM: ${d.unrecorded}</b> · Без подтверждения ОФД: ${d.receipt_unconfirmed}</p><div class="small">${Object.entries(d.coverage).map(([k,v])=>`${names[k]}: ${esc(statuses[v.status]||v.status)}${v.checked_at?' · '+esc(v.checked_at.replace('T',' '))+' МСК':''}`).join('<br>')}</div><p class="small muted">${esc(d.scope_note)} Полный охват всех поступлений пока не подтверждён.</p>${d.rows?.length?`<details><summary>Требуют внимания · ${d.attention}</summary>${d.rows.map(r=>`<div class="panel"><b>${esc(r.payer||'Плательщик не определён')} · ${rub(r.amount_minor/100)} ${r.currency==='RUB'?'':esc(r.currency)}</b><div class="small">${esc(r.day)} · ${r.sources.map(k=>names[k]||esc(k)).join(', ')}</div>${r.unrecorded?'<span class="pill yellow">Не проведено в CRM</span>':''}<div class="small">${esc(r.receipt.label)}</div>${r.purpose?`<div class="small muted">${esc(r.purpose)}</div>`:''}</div>`).join('')}</details>`:''}</section>`;
+}
+
 async function renderPayments(page) {
   const P = S.pay;
   const today = S.meta.today;
@@ -46,6 +53,7 @@ async function renderPayments(page) {
   P.openDays = P.openDays || {}; P.allDays = P.allDays || {};
   const qs = `from=${P.from}&to=${P.to}&method=${P.method}${P.unconfirmed ? "&unconfirmed=1" : ""}`;
   const d = await api("GET", "/api/payments?" + qs);
+  const incoming = S.user?.role==='admin' ? await api("GET", "/api/incoming-control") : null;
   const days = {};
   const shownRows=P.controlOnly?d.rows.filter(r=>r.control?.status==='attention'):d.rows;
   shownRows.forEach((r) => { const k = (r.paid_at || "").slice(0, 10); (days[k] = days[k] || []).push(r); });
@@ -67,6 +75,7 @@ async function renderPayments(page) {
         <button class="chip ${P.unconfirmed ? "on warn" : d.unconfirmed.count ? "warn" : ""}" id="p-unc">Ждут подтверждения${d.unconfirmed.count ? ` · ${d.unconfirmed.count} · ${rub(d.unconfirmed.sum)}` : ""}</button>
       </div>
     </div>
+    ${incomingControlHtml(incoming)}
     ${d.control_summary?`<section class="panel payment-control-summary"><b>Контроль оплат и чеков</b>${paymentJobsView(d.control_jobs)}${payoutBatchesHtml(d.payout_batches)}<div class="chips"><span>Подтверждено: ${d.control_summary.complete} из ${d.control_summary.total}</span><button type="button" class="chip ${P.controlOnly?'on':''}" id="p-control-attention">Требует проверки: ${d.control_summary.attention}</button>${P.controlOnly?'<button type="button" class="chip" id="p-control-all">Показать все</button>':''}</div></section>`:''}
     ${d.debtors.length ? `<details class="panel fold" style="margin-top:12px"><summary><h3>Должники · ${d.debtors.length}</h3><span class="muted small">${rub(d.debtors.reduce((a, x) => a + x.debt, 0))}</span></summary>
       <div class="chips" style="margin-top:8px">${d.debtors.slice(0, 60).map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)} · ${rub(x.debt)}</button>`).join("")}</div></details>` : ""}

@@ -113,7 +113,7 @@ class PaymentWorker(unittest.TestCase):
         def bank(*a,**kw):bank_done.set();return {'checked':1}
         def ofd(*a,**kw):ofd_done.set();return {'checked':1}
         with patch.object(fiscalcheck,'run_automatic',side_effect=slow),patch.object(bankcheck,'run_automatic',side_effect=bank),patch.object(paymentworker,'run_ofd',side_effect=ofd),patch.object(fiscal,'run',side_effect=AssertionError('Legacy fiscal calls forbidden')):
-            threads=paymentworker.start_worker(lambda:db.connect(path),stop)
+            threads=paymentworker.start_worker(lambda:db.connect(path),stop,sources=('paykeeper','tochka','ofd'))
             try:
                 self.assertTrue(entered.wait(2));self.assertTrue(bank_done.wait(2));self.assertTrue(ofd_done.wait(2))
                 self.con.execute("INSERT INTO hook_log(ts,source,payload) VALUES('2026-11-19','wazzup','{}')")
