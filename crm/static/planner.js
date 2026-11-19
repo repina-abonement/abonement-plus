@@ -191,10 +191,10 @@ async function renderWeek(box) {
       <div class="col-body ov-body">${overdue.map(pcard).join("")}</div></section>` : ""}
     <div class="board week-board ${dayView?'planner-single-day':''}">${days.map((d) => `<section class="col ${d.date === today ? "is-today" : ""} ${d.date < today ? "past" : ""}" data-day="${d.date}">
       <div class="col-head"><h3>${PL_DAY.format(new Date(d.date + "T00:00"))}</h3><span class="count">${d.tasks.length+(d.events||[]).length}</span></div>
-      <button type="button" class="btn sm pquick" data-pq="${d.date}" ${(w.can_add===undefined?C.readOnly:!w.can_add)?'disabled':''}>+ Добавить задачу</button>
-      ${w.can_manage_events?`<button type="button" class="btn sm pquick" data-event-add="${d.date}">+ Мероприятие</button>`:''}
+      ${w.can_manage_events||(d.events||[]).length?`<section class="planner-events-section" aria-label="Мероприятия"><div class="planner-section-heading"><b>Мероприятия</b><span>${(d.events||[]).length}</span></div>${w.can_manage_events?`<button type="button" class="btn sm planner-event-add" data-event-add="${d.date}">+ Мероприятие</button>`:''}
       <div class="planner-events">${(d.events||[]).map(event=>`<button type="button" class="planner-event" data-event-edit="${event.id}"><b>🎉 ${esc(event.title)}</b><span>${event.start_time?esc(event.start_time+'–'+event.end_time):'Время не указано'}${event.branch_name?' · '+esc(event.branch_name):''}</span>${event.participants?`<span>${esc(event.participants)}</span>`:''}</button>`).join('')}</div>
-      <div class="col-body">${groups(d.tasks,d.date)}</div>
+      ${(d.events||[]).length?'':'<div class="small muted planner-no-events">Мероприятий нет</div>'}</section>`:''}
+      <section class="planner-tasks-section" aria-label="Задачи"><div class="planner-section-heading"><b>Задачи</b><span>${d.tasks.length}</span></div><button type="button" class="btn sm pquick" data-pq="${d.date}" ${(w.can_add===undefined?C.readOnly:!w.can_add)?'disabled':''}>+ Добавить задачу</button><div class="col-body">${groups(d.tasks,d.date)}</div></section>
     </section>`).join("")}</div>
     <input type="date" id="pmove-date" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px">`;
   box.querySelectorAll('[data-period]').forEach(button=>button.onclick=()=>{C.layout=button.dataset.period;C.start=S.meta.today;renderWeek(box)});
