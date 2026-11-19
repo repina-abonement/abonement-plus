@@ -49,6 +49,9 @@ def init(con):
                 "recur_id INTEGER", "returned_note TEXT NOT NULL DEFAULT ''"):
         if col.split()[0] not in tcols:
             con.execute(f"ALTER TABLE tasks ADD COLUMN {col}")
+    for table,column in (('tasks','shift'),('recurring','shift_mode')):
+        if column not in {r[1] for r in con.execute(f'PRAGMA table_info({table})')}:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT 'common'")
     ucols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
     if "birth" not in ucols:
         con.execute("ALTER TABLE users ADD COLUMN birth TEXT NOT NULL DEFAULT ''")
@@ -107,6 +110,31 @@ def _due(d: str, t: str) -> str:
     return f"{d}T{t or '23:59'}"
 
 
+SHIFT_LABELS = {'common':'Общие задачи дня','morning':'☀️ Утренняя смена','evening':'🌙 Вечерняя смена','both':'Обе смены'}
+
+
+def shift_mode(con,who,value):
+    mode=str(value or 'common')
+    if mode not in SHIFT_LABELS:raise PlanError('Выберите смену')
+    if mode!='common' and who!=offlineplanner.pool_id(con):raise PlanError('Смены доступны в общем планере офлайн-администраторов')
+    return mode
+
+
+def shifts_for(mode,day):
+    if day.weekday() not in (0,2):return ['common']
+    return ['morning','evening'] if mode=='both' else [mode]
+
+
+def _emit(con,r,d,now):
+    made=0
+    for shift in shifts_for(dict(r).get('shift_mode','common'),d):
+        key=f"recur:{r['id']}:{d}"+((':'+shift) if dict(r).get('shift_mode','common')!='common' else '')
+        made+=con.execute("""INSERT OR IGNORE INTO tasks(kind,title,assignee_id,due_at,source,auto_key,note,created_at,
+            created_by_id,created_by,priority,recur_id,shift) VALUES('plan',?,?,?,'recurring',?,?,?,?,?,?,?,?)""",
+            (r['title'],r['assignee_id'],f"{d}T{r['time'] or '23:59'}",key,r['note'],now,r['created_by_id'],r['created_by'],r['priority'],r['id'],shift)).rowcount
+    return made
+
+
 def add(con, user: dict, data: dict) -> int:
     title = (data.get("title") or "").strip()
     if not title:
@@ -123,6 +151,7 @@ def add(con, user: dict, data: dict) -> int:
     note = (data.get("note") or "").strip()[:1000]
     rep = data.get("repeat") or {}
     rule = rep.get("rule") or ""
+    mode=shift_mode(con,who,data.get('shift_mode'))
     rid = None
     if rule:
         if rule not in RULES:
@@ -136,12 +165,16 @@ def add(con, user: dict, data: dict) -> int:
                              start_date, created_by_id, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                           (title, note, who, rule, wds, mday, yday, (data.get("time") or "").strip(), prio, d,
                            user["id"], user.get("name", ""), _now().isoformat(timespec="minutes"))).lastrowid
+        con.execute("UPDATE recurring SET shift_mode=? WHERE id=?",(mode,rid))
         generate(con, date.today())
         return rid
-    return con.execute("""INSERT INTO tasks(kind, title, assignee_id, due_at, source, note, created_at, created_by_id,
-                          created_by, priority) VALUES ('plan',?,?,?,'manual',?,?,?,?,?)""",
-                       (title, who, due, note, _now().isoformat(timespec="minutes"), user["id"], user.get("name", ""),
-                        prio)).lastrowid
+    first=None
+    for shift in shifts_for(mode,date.fromisoformat(d)):
+        tid=con.execute("""INSERT INTO tasks(kind,title,assignee_id,due_at,source,note,created_at,created_by_id,created_by,priority,shift)
+            VALUES('plan',?,?,?,'manual',?,?,?,?,?,?)""",(title,who,due,note,_now().isoformat(timespec='minutes'),user['id'],user.get('name',''),prio,shift)).lastrowid
+        first=first or tid
+    return first
+
 
 
 def _occurs(r, d: date) -> bool:
@@ -183,11 +216,7 @@ def generate(con, today: date | None = None) -> int:
         for d in (today, today + timedelta(days=1)):
             if not _occurs(r, d):
                 continue
-            cur = con.execute("""INSERT OR IGNORE INTO tasks(kind, title, assignee_id, due_at, source, auto_key, note, created_at,
-                                 created_by_id, created_by, priority, recur_id) VALUES ('plan',?,?,?,'recurring',?,?,?,?,?,?,?)""",
-                              (r["title"], r["assignee_id"], f"{d.isoformat()}T{r['time'] or '23:59'}", f"recur:{r['id']}:{d}",
-                               r["note"], now, r["created_by_id"], r["created_by"], r["priority"], r["id"]))
-            made += cur.rowcount
+            made += _emit(con,r,d,now)
     boss = controller(con) or (con.execute("SELECT id FROM users WHERE role='admin' AND active=1 ORDER BY id").fetchone() or [None])[0]
     if boss:
         lead = int(comms.get(con, BDAY_LEAD_KEY) or 7)
@@ -241,18 +270,15 @@ def week(con, user: dict, start: str, who: int | None = None, *, rolling: bool =
         (uid, min(today.isoformat(), d0.isoformat())))]
     name = (con.execute("SELECT name FROM users WHERE id=?", (uid,)).fetchone() or [""])[0]
     return {"start": d0.isoformat(), "days": days, "overdue": overdue, "user_id": uid, "user_name": name,"can_edit":can_change_plan(con,user,uid),"can_add":can_add_plan(con,user,uid),
-            "can_manage": len(visible_staff(con,user))>1,
-            "staff": visible_staff(con, user), "people":visible_staff(con,user,people=True)}
+            "can_manage": len(visible_staff(con,user))>1,"shifts_enabled":uid==offlineplanner.pool_id(con),
+            "staff": visible_staff(con, user), "people":visible_staff(con,user,people=True),"shift_board_id":offlineplanner.pool_id(con)}
 
 
 def _materialize(con, d: date):
     now = _now().isoformat(timespec="minutes")
     for r in con.execute("SELECT * FROM recurring WHERE active=1").fetchall():
         if _occurs(r, d):
-            con.execute("""INSERT OR IGNORE INTO tasks(kind, title, assignee_id, due_at, source, auto_key, note, created_at,
-                           created_by_id, created_by, priority, recur_id) VALUES ('plan',?,?,?,'recurring',?,?,?,?,?,?,?)""",
-                        (r["title"], r["assignee_id"], f"{d.isoformat()}T{r['time'] or '23:59'}", f"recur:{r['id']}:{d}",
-                         r["note"], now, r["created_by_id"], r["created_by"], r["priority"], r["id"]))
+            _emit(con,r,d,now)
 
 
 def move(con, tid: int, user: dict, new_date: str):
@@ -335,7 +361,7 @@ def view(con, user: dict) -> dict:
     out = {"mine": mine, "given": given, "recurring": recurring, "today": today,
            "can_manage": user["role"] != "trainee" and (can_manage(con,user) or offlineplanner.can_assign(con,user)),
            "controller": controller(con), "rules": RULES,"offline_viewer":comms.get(con,offlineplanner.VIEWER_KEY) if user['role']=='admin' else None,
-           "staff": visible_staff(con, user), "people":visible_staff(con,user,people=True)}
+           "staff": visible_staff(con, user), "people":visible_staff(con,user,people=True),"shift_board_id":offlineplanner.pool_id(con),"my_board_id":mine_id}
     if out["can_manage"]:
         out["team"] = team(con, user)
     return out
@@ -413,6 +439,7 @@ def edit_task(con, tid: int, user: dict, data: dict) -> dict:
         raise PlanError("Проверьте дату, время и исполнителя")
     if not can_change_plan(con, user, who) or (who!=offlineplanner.pool_id(con) and not con.execute("SELECT 1 FROM users WHERE id=? AND active=1", (who,)).fetchone()):
         raise PlanError("Нельзя назначить задачу этому сотруднику")
+    mode=shift_mode(con,who,data.get("shift_mode",t.get("shift","common")))
     scope = data.get("scope") or "one"
     if scope not in ("one", "future"):
         raise PlanError("Выберите одну задачу или будущие повторы")
@@ -435,6 +462,7 @@ def edit_task(con, tid: int, user: dict, data: dict) -> dict:
         original = detail["repeat"]
         if rule != original.get("rule", "") or (rule == "weekly" and weekdays != original.get("weekdays", [])):
             raise PlanError("Чтобы изменить повтор, выберите «Эта и будущие задачи»")
+    if rid and scope=="one" and mode=="both":raise PlanError("Для обеих смен выберите эту и будущие задачи")
     prio = 1 if data.get("priority") else 0
     due = _due(day, tm)
     if not rid or scope == "future":
@@ -450,7 +478,15 @@ def edit_task(con, tid: int, user: dict, data: dict) -> dict:
                                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                                   (title,note,who,rule,",".join(map(str,weekdays)),date.fromisoformat(day).day if rule == "monthly" else 0,
                                    day[5:] if rule == "yearly" else "",tm,prio,day,user["id"],user.get("name", ""),_now().isoformat(timespec="minutes"))).lastrowid
-        con.execute("UPDATE tasks SET recur_id=?,auto_key=?,source=? WHERE id=?", (new_rid, f"recur:{new_rid}:{day}" if new_rid else None, "recurring" if new_rid else "manual",tid))
-    con.execute("UPDATE tasks SET title=?,note=?,assignee_id=?,due_at=?,priority=? WHERE id=?", (title,note,who,due,prio,tid))
+        if new_rid:con.execute('UPDATE recurring SET shift_mode=? WHERE id=?',(mode,new_rid))
+        current_shift=shifts_for(mode,date.fromisoformat(day))[0]
+        key=(f"recur:{new_rid}:{day}"+((':'+current_shift) if mode!='common' else '')) if new_rid else None
+        con.execute("UPDATE tasks SET recur_id=?,auto_key=?,source=? WHERE id=?", (new_rid,key,"recurring" if new_rid else "manual",tid))
+        if new_rid:_materialize(con,date.fromisoformat(day))
+    current_shift=shifts_for(mode,date.fromisoformat(day))[0]
+    con.execute("UPDATE tasks SET title=?,note=?,assignee_id=?,due_at=?,priority=?,shift=? WHERE id=?", (title,note,who,due,prio,current_shift,tid))
+    if not rid and not rule and mode=='both' and current_shift=='morning':
+        con.execute("""INSERT INTO tasks(kind,title,assignee_id,due_at,source,note,created_at,created_by_id,created_by,priority,shift)
+            VALUES('plan',?,?,?,'manual',?,?,?,?,?,'evening')""",(title,who,due,note,_now().isoformat(timespec='minutes'),user['id'],user.get('name',''),prio))
     generate(con)
     return {"ok": True, "id": tid}

@@ -19,7 +19,7 @@ class VaryaAssignment(unittest.TestCase):
             existing=planner.add(con,admin,{'title':'Synthetic existing task'})
             week=planner.week(con,varya,'2026-11-19',pool,rolling=True)
             self.assertTrue(week['can_add'])
-            self.assertFalse(week['can_edit'])
+            self.assertTrue(week['can_edit'])
             self.assertFalse(planner.week(con,observer,'2026-11-19',pool,rolling=True)['can_add'])
             task=planner.add(con,varya,{'title':'Synthetic assignment','assignee_id':pool,'date':'2026-11-19'})
             row=con.execute('SELECT * FROM tasks WHERE id=?',(task,)).fetchone()
@@ -29,6 +29,6 @@ class VaryaAssignment(unittest.TestCase):
             self.assertIn(pool,[r['id'] for r in planner.view(con,varya)['staff']])
             for actor in (other,observer):
                 with self.assertRaises(planner.PlanError):planner.add(con,actor,{'title':'Denied','assignee_id':pool})
-            with self.assertRaises(planner.PlanError):planner.cancel(con,existing,varya)
+            self.assertTrue(planner.task_detail(con,existing,varya)['can_edit'])
             user('duplicate','Варвара Батарева')
             self.assertFalse(offlineplanner.can_assign(con,varya))

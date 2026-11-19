@@ -35,7 +35,7 @@ def can_view(con,user):
 
 
 def can_edit(con,user):
-    return user['role']=='admin' or member(con,user)
+    return user['role']=='admin' or member(con,user) or can_assign(con,user)
 
 
 def validate_viewer(con,value):

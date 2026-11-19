@@ -2007,3 +2007,5 @@ html.theme-soft #comms-box .family-chat-feed{background:#182624}html.theme-soft 
 .chat-client-list .btn{text-align:left;white-space:normal}
 @media(max-width:700px){.chat-header{flex-wrap:wrap}.chat-header>.grow{min-width:0}.chat-header>.chat-client-link,.chat-header>.chat-client-picker{font-size:12px}.chat-header .chat-client-link{padding:7px 9px}}
 @media(max-width:700px){#inbox-chat-pane .composer #chat-send{font-size:0;padding:0}}
+
+.planner-shift{padding:9px;border-radius:12px;margin:8px 0;border:1px solid #dce5df}.planner-shift-morning{background:#fff5d7;border-color:#ebdba3}.planner-shift-evening{background:#e8f0ff;border-color:#c6d6f3}.planner-shift-common{background:#f7f8f7}.planner-shift-heading{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:7px;font-size:13px}.planner-shift-heading .btn{padding:3px 8px;min-height:30px}.planner-shift .empty{font-size:12px;padding:7px}.planner-shift-filter{display:flex;align-items:center;gap:8px;margin:8px 0 12px}.planner-shift-filter select{width:auto;max-width:100%}.planner-shift .pcard{margin-bottom:6px}
