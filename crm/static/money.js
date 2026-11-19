@@ -21,6 +21,12 @@ function dayTitle(iso, today) {
   return `${pre}${dt.getDate()} ${MON_RU[dt.getMonth()]}, ${DAY_RU[dt.getDay()]}`;
 }
 
+function paymentControlHtml(control){
+  if(!control)return '';
+  const tone=control.status==='complete'?'green':control.status==='excluded'?'':'yellow';
+  return `<details class="payment-control-details"><summary><span class="pill ${tone}">${esc(control.label)}</span></summary>${[control.source,control.bank,control.ofd].filter(Boolean).map(item=>`<div class="small">${esc(item.label)}</div>`).join('')}${control.checked_at?`<div class="small muted">Проверено: ${esc(control.checked_at.replace('T',' '))} МСК</div>`:''}${control.issues?.length?`<ul class="small muted">${control.issues.map(issue=>`<li>${esc(issue)}</li>`).join('')}</ul>`:''}</details>`;
+}
+
 async function renderPayments(page) {
   const P = S.pay;
   const today = S.meta.today;
@@ -29,7 +35,8 @@ async function renderPayments(page) {
   const qs = `from=${P.from}&to=${P.to}&method=${P.method}${P.unconfirmed ? "&unconfirmed=1" : ""}`;
   const d = await api("GET", "/api/payments?" + qs);
   const days = {};
-  d.rows.forEach((r) => { const k = (r.paid_at || "").slice(0, 10); (days[k] = days[k] || []).push(r); });
+  const shownRows=P.controlOnly?d.rows.filter(r=>r.control?.status==='attention'):d.rows;
+  shownRows.forEach((r) => { const k = (r.paid_at || "").slice(0, 10); (days[k] = days[k] || []).push(r); });
   const dayKeys = Object.keys(days).sort().reverse();
   const isOpen = (k, i) => P.openDays[k] ?? i === 0;
   const per = payPeriods(today);
@@ -48,6 +55,7 @@ async function renderPayments(page) {
         <button class="chip ${P.unconfirmed ? "on warn" : d.unconfirmed.count ? "warn" : ""}" id="p-unc">Ждут подтверждения${d.unconfirmed.count ? ` · ${d.unconfirmed.count} · ${rub(d.unconfirmed.sum)}` : ""}</button>
       </div>
     </div>
+    ${d.control_summary?`<section class="panel payment-control-summary"><b>Контроль оплат и чеков</b><div class="chips"><span>Подтверждено: ${d.control_summary.complete} из ${d.control_summary.total}</span><button type="button" class="chip ${P.controlOnly?'on':''}" id="p-control-attention">Требует проверки: ${d.control_summary.attention}</button>${P.controlOnly?'<button type="button" class="chip" id="p-control-all">Показать все</button>':''}</div></section>`:''}
     ${d.debtors.length ? `<details class="panel fold" style="margin-top:12px"><summary><h3>Должники · ${d.debtors.length}</h3><span class="muted small">${rub(d.debtors.reduce((a, x) => a + x.debt, 0))}</span></summary>
       <div class="chips" style="margin-top:8px">${d.debtors.slice(0, 60).map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)} · ${rub(x.debt)}</button>`).join("")}</div></details>` : ""}
     ${d.corrections.length ? `<details class="panel fold" style="margin-top:12px"><summary><h3>Корректировки цен · ${d.corrections.length}</h3><span class="muted small">исключения из правил: кто, на сколько и почему</span></summary>
@@ -62,6 +70,7 @@ async function renderPayments(page) {
           <td class="muted small" style="width:48px">${esc((r.paid_at || "").slice(11, 16))}</td>
           <td><b class="pay-name">${esc(r.student)}</b><div class="small muted">${esc(r.group_name || "")}</div></td>
           <td style="white-space:nowrap"><b>${rub(r.amount)}</b></td><td class="small">${esc(r.method_label)}</td>
+          <td>${paymentControlHtml(r.control)}</td>
           <td class="small muted">${esc(r.comment)}${r.user_name ? `<div>${esc(r.user_name)}</div>` : ""}</td>
           <td style="text-align:right">${r.cancelled ? `<span class="pill">отменён</span>` : r.confirmed ? "" : `<button class="btn sm" data-pconf="${r.id}">Подтвердить</button>`}</td></tr>`).join("")}</tbody></table></div>
         ${rows.length > 15 && !P.allDays[k] ? `<button class="btn sm" data-pmore="${k}" style="margin-top:8px">Показать ещё ${rows.length - 15}</button>` : ""}</details>`; }).join("")
@@ -72,10 +81,11 @@ async function renderPayments(page) {
   ["#p-from", "#p-to"].forEach((x) => ($(x).onchange = upd));
   page.querySelectorAll("[data-pmore]").forEach((b) => (b.onclick = () => { P.allDays[b.dataset.pmore] = true; render(); }));
   page.querySelectorAll("[data-m]").forEach((b) => (b.onclick = () => { P.method = b.dataset.m; render(); }));
+  const attention=$("#p-control-attention");if(attention)attention.onclick=()=>{P.controlOnly=!P.controlOnly;render()};const showAll=$("#p-control-all");if(showAll)showAll.onclick=()=>{P.controlOnly=false;render()};
   $("#p-unc").onclick = () => { P.unconfirmed = !P.unconfirmed; render(); };
   page.querySelectorAll(".pay-day").forEach((x) => x.addEventListener("toggle", () => { P.openDays[x.dataset.day] = x.open; }));
   page.querySelectorAll("[data-open]").forEach((b) => (b.onclick = (e) => { e.preventDefault(); openStudent(+b.dataset.open); }));
-  page.querySelectorAll("[data-prow]").forEach((tr) => (tr.onclick = (e) => { if (!e.target.closest("button")) openStudent(+tr.dataset.prow); }));
+  page.querySelectorAll("[data-prow]").forEach((tr) => (tr.onclick = (e) => { if (!e.target.closest("button,.payment-control-details")) openStudent(+tr.dataset.prow); }));
   page.querySelectorAll("[data-pconf]").forEach((b) => (b.onclick = async () => { await api("POST", `/api/payments/${b.dataset.pconf}/confirm`, {}).catch(fail); render(); }));
 }
 

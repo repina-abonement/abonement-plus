@@ -27,6 +27,9 @@ def check(con,pid,user):
             # payment options first; this is read-only and does not claim OFD success.
             from . import paykeepercheck
             inspection=paykeepercheck.inspect(con,link['pk_payment_id'],include_bank=False)
+            provider=inspection.get('payment',{})
+            result['provider_payment']={k:provider[k] for k in ('available','id','status','pay_amount','refund_amount','site_description','system_description') if k in provider}
+            result['ofd_check']={k:inspection.get('ofd',{})[k] for k in ('status','note','http_status','provider_message') if k in inspection.get('ofd',{})}
             primary=inspection.get('primary_receipt',{})
             if primary.get('status')=='fiscal_details':
                 fiscal.store_pk(con,[],[{'id':'primary:'+link['pk_payment_id'],
@@ -74,7 +77,7 @@ def run_automatic(con,now=None,limit=30):
     rows=con.execute('''SELECT DISTINCT p.id FROM payments p JOIN pay_links l ON l.payment_id=p.id
         LEFT JOIN fiscal_payment_checks c ON c.payment_id=p.id
         WHERE p.cancelled=0 AND p.amount>0 AND l.pk_payment_id!=''
-          AND (c.payment_id IS NULL OR (c.checked_at<=? AND (c.status!='confirmed' OR NOT EXISTS (SELECT 1 FROM fx_receipts r WHERE r.source='paykeeper' AND r.pk_payment=l.pk_payment_id AND r.fiscal_fn!='' AND r.fiscal_fd!='' AND r.fiscal_fp!=''))))
+          AND (c.payment_id IS NULL OR c.checked_at<=?)
         ORDER BY c.checked_at IS NOT NULL,c.checked_at,p.id LIMIT ?''',(cutoff,max(0,min(int(limit),100)))).fetchall()
     result={'checked':0,'confirmed':0,'unavailable':0}
     for row in rows:

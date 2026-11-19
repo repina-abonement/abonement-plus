@@ -11,7 +11,7 @@ def _minor(value):
     return int(n)
 
 
-def inspect(con,payment,identifiers):
+def inspect(con,payment,identifiers,as_of=None):
     result={'status':'unverified','note':'Фактическая проводка по расчётному счёту ещё не подтверждена',
             'registry_matches':[],'required_permission':'ReadAcquiringData'}
     if not fiscal.cfg(con,'fx_tochka_token') or not payment.get('available') or payment.get('system_description')!='SBP-TOCHKA':return result
@@ -71,7 +71,14 @@ def inspect(con,payment,identifiers):
         try:
             from datetime import date
             day=date.fromisoformat(str(payment.get('obtain_datetime') or '')[:10])
-            transactions=fiscal.fetch_tochka(con,day,day)
+            from datetime import datetime,timedelta
+            from zoneinfo import ZoneInfo
+            today=as_of or datetime.now(ZoneInfo('Europe/Moscow')).date()
+            end=min(today,day+timedelta(days=31))
+            if end<day:raise ValueError('Future payment timestamp')
+            result['statement_period']={'from':day.isoformat(),'to':end.isoformat()}
+            result['coverage_limited']=result.get('coverage_limited',False) or end<today
+            transactions=fiscal.fetch_tochka(con,day,end)
             result['statement_status']='read'
             for item in transactions:
                 basis=[]

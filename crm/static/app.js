@@ -2888,6 +2888,7 @@ async function boot() {
   }
   setInterval(() => { if ($("#drawer").hidden && ["members", "skips"].includes(S.view)) render(); }, 60000);
   setInterval(() => { if ($("#drawer").hidden && S.view === "sales" && !document.hidden && !document.querySelector(".task-done:not([hidden])")) render(); }, 20000);
+  setInterval(() => { if ($("#drawer").hidden && S.view === "payments" && !document.hidden && !document.querySelector(".payment-control-details[open]")) render(); }, 60000);
   if (can("inbox")) { pollCounts(); setInterval(pollCounts, 10000); }
   if (!S.meta.tour_pending && !restoreCard) offerAlerts();
   setTimeout(() => { if (typeof memoSync === "function") memoSync(); }, 4000);  // памятки для родителей: перерисовать, если поменялись цены

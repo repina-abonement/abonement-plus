@@ -340,14 +340,16 @@ def registry(con, start: str, end: str, method: str = "", only_unconfirmed: bool
         f"""SELECT p.*, s.name AS student, f.name AS family, g.name AS group_name
             FROM payments p JOIN students s ON s.id=p.student_id JOIN families f ON f.id=s.family_id
             LEFT JOIN groups g ON g.id=s.group_id WHERE {' AND '.join(where)} ORDER BY p.paid_at DESC, p.id DESC""", args)]
+    from . import paymentcontrol
     totals = {}
     for r in rows:
         r["display_method"] = payment_method(con,r)
         r["method_label"] = METHODS.get(r["display_method"], r["method"])
+        r["control"]=paymentcontrol.state(con,r)
         if not r["cancelled"]:
             totals[r["method_label"]] = totals.get(r["method_label"], 0) + r["amount"]
     unconfirmed = con.execute("SELECT COUNT(*), COALESCE(SUM(amount),0) FROM payments WHERE confirmed=0 AND cancelled=0").fetchone()
-    return {"rows": rows, "totals": totals, "total": sum(totals.values()),
+    return {"rows": rows, "totals": totals, "total": sum(totals.values()),"control_summary":paymentcontrol.summarize(rows),
             "unconfirmed": {"count": unconfirmed[0], "sum": unconfirmed[1]}, "methods": METHODS}
 
 
