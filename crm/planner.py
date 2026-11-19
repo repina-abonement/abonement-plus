@@ -332,7 +332,7 @@ def _materialize(con, d: date):
             _emit(con,r,d,now)
 
 
-def move(con, tid: int, user: dict, new_date: str):
+def move(con, tid: int, user: dict, new_date: str, shift=None):
     """Перетащили задачу на другой день: время остаётся прежним."""
     t = con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
     if not t:
@@ -345,7 +345,15 @@ def move(con, tid: int, user: dict, new_date: str):
         raise PlanError("Неверная дата")
     if t["kind"] == "rebook" and new_date > (date.today() + timedelta(days=14)).isoformat():
         raise PlanError("Задачу «Перезаписать на ПУ» нельзя отодвинуть больше чем на 14 дней")
-    con.execute("UPDATE tasks SET due_at=? WHERE id=?", (f"{new_date}T{t['due_at'][11:16]}", tid))
+    selected=t['shift']
+    if shift is not None:
+        if t['kind']!='plan' or t['status']!='open':raise PlanError('Смену можно менять у открытой задачи планера')
+        selected=shift_mode(con,t['assignee_id'],shift)
+        if selected=='both':raise PlanError('Перетащите задачу в одну смену')
+        if selected!='common' and date.fromisoformat(new_date).weekday() not in (0,2):
+            raise PlanError('Две смены доступны по понедельникам и средам')
+    if t['assignee_id']==offlineplanner.pool_id(con) and date.fromisoformat(new_date).weekday() not in (0,2):selected='common'
+    con.execute("UPDATE tasks SET due_at=?,shift=? WHERE id=?", (f"{new_date}T{t['due_at'][11:16]}",selected,tid))
 
 
 def reopen(con, tid: int, user: dict):

@@ -1716,7 +1716,7 @@ def planner_task_edit(con, h, user, body, q, tid):
 
 @route("POST", "/api/planner/tasks/{tid}/move", role="planner")
 def planner_move(con, h, user, body, q, tid):
-    px(planner.move, con, int(tid), user, body.get("date") or "")
+    px(planner.move, con, int(tid), user, body.get("date") or "",body.get("shift"))
     return {"ok": True}
 
 

@@ -163,7 +163,7 @@ async function renderWeek(box) {
   };
   const groups=(items,day)=>{
     if(!w.shifts_enabled || ![1,3].includes(new Date(day+'T12:00:00').getDay()))return plainGroups(items);
-    return ['morning','evening','common'].filter(shift=>!C.shift||C.shift==='all'||shift==='common'||shift===C.shift).map(shift=>`<section class="planner-shift planner-shift-${shift}"><div class="planner-shift-heading"><b>${PLAN_SHIFTS[shift]}</b>${w.can_add?`<button type="button" class="btn sm" data-pq="${day}" data-pqshift="${shift}" aria-label="Добавить: ${PLAN_SHIFTS[shift]}">＋</button>`:''}</div>${plainGroups(items.filter(t=>(t.shift||'common')===shift))}</section>`).join('');
+    return ['morning','evening','common'].filter(shift=>!C.shift||C.shift==='all'||shift==='common'||shift===C.shift).map(shift=>`<section class="planner-shift planner-shift-${shift}" data-drop-shift="${shift}"><div class="planner-shift-heading"><b>${PLAN_SHIFTS[shift]}</b>${w.can_add?`<button type="button" class="btn sm" data-pq="${day}" data-pqshift="${shift}" aria-label="Добавить: ${PLAN_SHIFTS[shift]}">＋</button>`:''}</div>${plainGroups(items.filter(t=>(t.shift||'common')===shift))}</section>`).join('');
   };
   box.innerHTML = `<div class="planner-period-switch"><button type="button" class="btn sm ${dayView?'primary':''}" data-period="day">День</button><button type="button" class="btn sm ${dayView?'':'primary'}" data-period="week">Неделя</button></div><div class="week-nav">
       <button class="btn sm" data-wk="${dayView?-1:-7}">‹</button>
@@ -226,16 +226,18 @@ async function renderWeek(box) {
   // перенос: перетаскиванием (компьютер) или кнопкой 📅 (телефон)
   let dragId = null;
   box.querySelectorAll(".pcard[draggable=true]").forEach((el) => {
-    el.addEventListener("dragstart", (e) => { dragId = el.dataset.pc; el.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; });
-    el.addEventListener("dragend", () => el.classList.remove("dragging"));
+    el.addEventListener("dragstart", (e) => { dragId = el.dataset.pc; el.classList.add("dragging"); e.dataTransfer.effectAllowed = "move";e.dataTransfer.setData("text/plain",dragId); });
+    el.addEventListener("dragend", () => {dragId=null;el.classList.remove("dragging");box.querySelectorAll(".drop").forEach(x=>x.classList.remove("drop"))});
   });
   box.querySelectorAll(".week-board .col").forEach((col) => {
-    col.addEventListener("dragover", (e) => { e.preventDefault(); col.classList.add("drop"); });
+    col.addEventListener("dragover", (e) => { if(!dragId||C.readOnly)return;e.preventDefault();box.querySelectorAll(".drop").forEach(x=>x.classList.remove("drop"));(e.target.closest("[data-drop-shift]")||col).classList.add("drop"); });
     col.addEventListener("dragleave", () => col.classList.remove("drop"));
     col.addEventListener("drop", async (e) => {
-      e.preventDefault(); col.classList.remove("drop");
-      if (!dragId) return;
-      try { await api("POST", `/api/planner/tasks/${dragId}/move`, { date: col.dataset.day }); dragId = null; reload(); } catch (err) { fail(err); }
+      e.preventDefault();box.querySelectorAll(".drop").forEach(x=>x.classList.remove("drop"));
+      if (!dragId||C.readOnly) return;
+      const target=e.target.closest('[data-drop-shift]'),data={date:col.dataset.day};if(target)data.shift=target.dataset.dropShift;
+      const moved=dragId;dragId=null;
+      try { await api("POST", `/api/planner/tasks/${moved}/move`, data); reload(); } catch (err) { fail(err); }
     });
   });
   const picker = $("#pmove-date");
