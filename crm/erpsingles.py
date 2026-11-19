@@ -26,6 +26,15 @@ CREATE TABLE IF NOT EXISTS erp_single_payments (
  operation_id TEXT PRIMARY KEY,
  payment_id INTEGER NOT NULL UNIQUE REFERENCES payments(id) ON DELETE CASCADE,
  source_sale_id TEXT NOT NULL DEFAULT '', signature TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS erp_single_reschedules (
+ id INTEGER PRIMARY KEY,
+ source_id TEXT NOT NULL REFERENCES erp_single_sales(source_id) ON DELETE CASCADE,
+ visit_id INTEGER NOT NULL REFERENCES single_visits(id) ON DELETE CASCADE,
+ student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+ group_id INTEGER NOT NULL REFERENCES groups(id),
+ from_date TEXT NOT NULL, to_date TEXT NOT NULL,
+ changed_at TEXT NOT NULL, user_name TEXT NOT NULL, reason TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS erp_single_reschedules_source ON erp_single_reschedules(source_id,id);
 """
 
 
@@ -89,6 +98,69 @@ def _native_signature(row):
 
 def _payment_signature(row):
     return _json([row[key] for key in ('student_id', 'amount', 'method', 'paid_at', 'cancelled')])
+
+
+def reschedule_sale(con, source_id, expected_date, new_date, user, reason):
+    """Record a reviewed move of an existing imported visit, without a new sale.
+
+    Original ERP date and accounting month remain source evidence. A separate
+    audit authorizes the effective booking date during later source replays.
+    This reconciliation helper never creates payments, bookings or reminders.
+    """
+    from datetime import date
+    from . import erpimport as ei
+    source_id, reason = str(source_id or '').strip(), str(reason or '').strip()
+    try:
+        if any(date.fromisoformat(value).isoformat() != value for value in (expected_date, new_date)):
+            raise ValueError()
+    except (TypeError, ValueError):
+        raise ei.ImportError_('Для переноса нужны точные прежняя и новая даты занятия')
+    if not reason or not (user or {}).get('name'):
+        raise ei.ImportError_('Укажите основание переноса и кто его подтвердил')
+    con.execute('SAVEPOINT erp_single_reschedule')
+    try:
+        sale = con.execute('''SELECT l.*,s.kind,s.status AS sale_status FROM erp_single_sales l
+            JOIN subscriptions s ON s.id=l.subscription_id WHERE l.source_id=?''', (source_id,)).fetchone()
+        if not sale or sale['kind'] != 'single' or sale['sale_status'] == 'cancelled':
+            raise ei.ImportError_('Для переноса нужна существующая действующая разовая продажа ERP')
+        visits = con.execute('SELECT * FROM single_visits WHERE subscription_id=?', (sale['subscription_id'],)).fetchall()
+        if (len(visits) != 1 or visits[0]['status'] != 'booked' or
+                (visits[0]['student_id'], visits[0]['group_id']) != (sale['student_id'], sale['group_id'])):
+            raise ei.ImportError_('Запись на разовое неоднозначна, отменена или удалена; нужна сверка')
+        visit = visits[0]
+        if visit['date'] != expected_date:
+            raise ei.ImportError_('Дата занятия уже изменилась; обновите сведения перед переносом')
+        if new_date == expected_date:
+            con.execute('RELEASE erp_single_reschedule')
+            return {'id': visit['id'], 'date': new_date, 'changed': False}
+        if con.execute("SELECT 1 FROM single_visits WHERE student_id=? AND date=? AND status='booked' AND id!=?",
+                       (sale['student_id'], new_date, visit['id'])).fetchone():
+            raise ei.ImportError_('На новую дату уже есть разовое занятие; нужна сверка без объединения записей')
+        if con.execute('''SELECT 1 FROM attendance WHERE student_id=? AND group_id=? AND date IN (?,?)''',
+                       (sale['student_id'], sale['group_id'], expected_date, new_date)).fetchone():
+            raise ei.ImportError_('На прежнюю или новую дату есть отметка посещения; сначала сверьте её')
+        if con.execute("SELECT 1 FROM tasks WHERE auto_key LIKE ? AND status='open'",
+                       (f"single:{visit['id']}:%",)).fetchone():
+            raise ei.ImportError_('У записи есть напоминание; сначала сверьте его срок')
+        changed = con.execute("UPDATE single_visits SET date=? WHERE id=? AND date=? AND status='booked'",
+                              (new_date, visit['id'], expected_date)).rowcount
+        if changed != 1:
+            raise ei.ImportError_('Запись изменилась во время переноса; повторите сверку')
+        at = datetime.now().isoformat(timespec='seconds')
+        audit_id = con.execute('''INSERT INTO erp_single_reschedules
+            (source_id,visit_id,student_id,group_id,from_date,to_date,changed_at,user_name,reason)
+            VALUES (?,?,?,?,?,?,?,?,?)''',
+            (source_id, visit['id'], sale['student_id'], sale['group_id'], expected_date, new_date,
+             at, user['name'], reason)).lastrowid
+        con.execute('''INSERT INTO history(student_id,ts,user_name,kind,text) VALUES (?,?,?,'system',?)''',
+                    (sale['student_id'], at, user['name'],
+                     f'Разовое ERP №{source_id} перенесено с {expected_date} на {new_date}. Основание: {reason}'))
+        con.execute('RELEASE erp_single_reschedule')
+        return {'id': visit['id'], 'date': new_date, 'changed': True, 'reschedule_id': audit_id}
+    except BaseException:
+        con.execute('ROLLBACK TO erp_single_reschedule')
+        con.execute('RELEASE erp_single_reschedule')
+        raise
 
 
 def import_sale(con, record, sid, gid, now):
@@ -166,7 +238,11 @@ def import_sale(con, record, sid, gid, now):
     if day and status != 'cancelled':
         visits = con.execute('SELECT * FROM single_visits WHERE subscription_id=?', (sub_id,)).fetchall()
         if visits:
-            if len(visits) != 1 or (visits[0]['student_id'], visits[0]['group_id'], visits[0]['date'], visits[0]['status']) != (sid, gid, day, 'booked'):
+            move = con.execute('SELECT * FROM erp_single_reschedules WHERE source_id=? ORDER BY id DESC LIMIT 1', (source_id,)).fetchone()
+            effective_day = move['to_date'] if move else day
+            if (len(visits) != 1 or
+                    (visits[0]['student_id'], visits[0]['group_id'], visits[0]['date'], visits[0]['status']) != (sid, gid, effective_day, 'booked') or
+                    move and (move['visit_id'], move['student_id'], move['group_id']) != (visits[0]['id'], sid, gid)):
                 reason = 'Разовое: запись на занятие изменена в CRM; изменения сохранены'
         elif linked and linked['lesson_date']:
             reason = 'Разовое: сохранённая запись на занятие удалена; автоматически не восстановлена'

@@ -109,7 +109,10 @@ def calendar_entitlements(con, sid, ym):
     single_ids={r['id'] for r in rows if r['id'] in history_single_ids}
     monthly_history=[r for r in history if r['kind']=='month' and r['id'] not in history_single_ids]
     monthly=[r for r in monthly_history if r['month']==ym]
-    all_visits=[dict(r) for r in con.execute('SELECT * FROM single_visits WHERE student_id=? AND substr(date,1,7)<=?',(sid,ym))]
+    recorded_visits=[dict(r) for r in con.execute('SELECT * FROM single_visits WHERE student_id=?',(sid,))]
+    # The recurring-mode history is bounded by the displayed month. A sale's
+    # exact linked booking, however, can legitimately move into another month.
+    all_visits=[v for v in recorded_visits if v['date'][:7]<=ym]
     visits=[v for v in all_visits if v['date'][:7]==ym]
 
     def monthly_groups(subs):
@@ -174,7 +177,7 @@ def calendar_entitlements(con, sid, ym):
         else:continue
         # Only a booking explicitly linked to this sale establishes its date.
         # An attendance mark or payment timestamp cannot establish that link.
-        known={v['date'] for v in visits if v['subscription_id']==r['id']}
+        known={v['date'] for v in recorded_visits if v['subscription_id']==r['id']}
         missing=max(0,count-len(known))
         if missing:unknown+=missing;unknown_ids.append(r['id'])
     warnings=[]

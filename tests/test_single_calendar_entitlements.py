@@ -215,5 +215,40 @@ class SingleCalendarEntitlements(unittest.TestCase):
         self.assertTrue(all(event['kind']=='subscription' for event in result['events']))
 
 
+    def test_cross_month_reschedule_preserves_sale_month_without_unknown_date_warning(self):
+        originals=['2026-11-04','2026-11-11','2026-11-18','2026-11-25']
+        sales=[]
+        for day in originals:
+            sub=self.sale();sales.append(sub);self.booking(sub,day)
+        self.con.execute("UPDATE single_visits SET date='2026-12-02' WHERE subscription_id=?",(sales[0],))
+        before=[tuple(row) for row in self.con.execute('SELECT id,month,lessons,price FROM subscriptions ORDER BY id')]
+        november=self.calendar()
+        self.assertEqual([(event['date'],event['kind']) for event in november['events']],
+                         [(day,'single') for day in originals[1:]])
+        self.assertFalse(november['date_warnings'])
+        december=clientattendance.calendar(self.con,self.sid,'2026-12')
+        self.assertEqual([(event['date'],event['kind']) for event in december['events']],[('2026-12-02','single')])
+        self.assertFalse(december['date_warnings'])
+        self.assertEqual([tuple(row) for row in self.con.execute('SELECT id,month,lessons,price FROM subscriptions ORDER BY id')],before)
+        self.assertEqual(sum(row[3] for row in before),10000)
+        self.assertEqual(self.con.execute('SELECT count(*) FROM single_visits').fetchone()[0],4)
+
+    def test_other_sales_future_booking_cannot_fill_an_undated_sale(self):
+        unknown=self.sale()
+        moved=self.sale();self.booking(moved,'2026-12-02')
+        warnings=self.calendar()['date_warnings']
+        self.assertEqual(len(warnings),1)
+        self.assertEqual(warnings[0]['lessons'],1)
+        self.assertEqual(warnings[0]['subscription_ids'],[unknown])
+
+    def test_future_booking_does_not_reclassify_earlier_unrelated_month_plan(self):
+        self.con.execute("INSERT INTO subscriptions(student_id,month,tariff,kind,lessons,per_lesson,price,status,created_at) VALUES (?,'2026-12','single','single',1,2500,2500,'paid','2026-12-01')",(self.sid,))
+        sub=self.con.execute('SELECT id FROM subscriptions').fetchone()[0]
+        self.booking(sub,'2026-12-02')
+        context=subscriptiondates.calendar_entitlements(self.con,self.sid,'2026-11')
+        self.assertFalse(context['single_only'])
+        self.assertFalse(context['single_groups'])
+
+
 
 if __name__=='__main__':unittest.main()

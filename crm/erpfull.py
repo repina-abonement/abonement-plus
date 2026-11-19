@@ -729,7 +729,7 @@ def plan(con, ids):
     # even if the aggregate row counts would happen to stay the same.
     state = hashlib.sha256()
     for table in ('subscriptions', 'payments', 'single_visits', 'erp_full_operations',
-                  'erp_single_sales', 'erp_single_payments', 'erp_single_reviews'):
+                  'erp_single_sales', 'erp_single_payments', 'erp_single_reviews', 'erp_single_reschedules'):
         state.update(table.encode())
         for row in con.execute('SELECT * FROM '+table+' ORDER BY 1'):
             state.update(_json(list(row)).encode())
