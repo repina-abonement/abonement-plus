@@ -121,7 +121,7 @@ class PayoutMatching(unittest.TestCase):
                 return [item|{'system_description':'SBP-TOCHKA' if item['payment_system_id']=='94' else 'VTB','site_description':'СБП Точка-Банк' if item['payment_system_id']=='94' else 'Банковская карта ВТБ'}]
             raise AssertionError('Read endpoints only')
         with patch.object(fiscal,'pk_call',side_effect=provider):result=payoutcheck.refresh_source(self.con,self.current,limit=2)
-        self.assertEqual(result['days_checked'],2);self.assertEqual(result['days_unavailable'],0)
+        self.assertEqual(result['days_checked'],1);self.assertEqual(result['days_unavailable'],0)
         self.assertTrue(all(path.startswith('/info/') for path in calls))
         result=self.run_bank([self.credit(),self.credit(1350,'Иванов Петр','СБП',ident='bank-sbp',day='2026-11-18')])
         self.assertEqual(result['confirmed'],4)
@@ -236,6 +236,7 @@ class PayoutMatching(unittest.TestCase):
             self.assertNotIn(secret,json.dumps(diagnostics))
 
     def test_daily_schema_failure_reports_reason_and_cannot_confirm_empty_day(self):
+        self.member()
         with patch.object(fiscal,'pk_call',return_value={'unexpected':'shape'}):
             result=payoutcheck.refresh_source(self.con,self.current,limit=1)
         self.assertEqual(result['days_unavailable'],1)
@@ -243,3 +244,58 @@ class PayoutMatching(unittest.TestCase):
         self.assertEqual(day['status'],'unavailable');self.assertEqual(day['error_code'],'unexpected_response')
         self.assertIn('response_shape',day)
         self.assertIsNone(day['payments']);self.assertIsNone(day['cards']);self.assertFalse(day['source_available'])
+
+    def test_no_crm_payments_means_no_provider_or_bank_requests(self):
+        with patch.object(fiscal,'pk_call',side_effect=AssertionError('No gateway query without CRM payments')) as provider,patch.object(fiscal,'fetch_tochka',side_effect=AssertionError('No bank query without CRM payments')) as bank:
+            source=payoutcheck.refresh_source(self.con,self.current)
+            result=payoutcheck.run_bank(self.con,self.current)
+        self.assertTrue(source['no_crm_payments']);self.assertEqual(source['days_checked'],0)
+        self.assertTrue(result['no_crm_payments']);provider.assert_not_called();bank.assert_not_called()
+        self.assertEqual(self.con.execute('SELECT count(*) FROM pk_daily_evidence').fetchone()[0],0)
+
+    def test_old_calendar_failure_is_not_an_active_error_without_crm_payment(self):
+        self.con.execute('INSERT INTO pk_daily_evidence VALUES(?,?,?,?,?)',('2026-11-19','2026-11-19T13:00:00','unavailable','',json.dumps({'note':'Old calendar query failed','error_code':'unexpected_response'})))
+        with patch.object(fiscal,'pk_call',side_effect=AssertionError('No calendar probing')) as provider:
+            payoutcheck.refresh_source(self.con,self.current)
+        day=payoutcheck.diagnostics(self.con)['daily_sources'][0]
+        self.assertEqual(day['status'],'not_required');self.assertFalse(day['check_required'])
+        self.assertEqual(day['crm_payments'],0);self.assertNotIn('error_code',day)
+        provider.assert_not_called()
+        self.assertEqual(self.con.execute('SELECT status FROM pk_daily_evidence').fetchone()[0],'unavailable')  # history preserved
+
+    def test_only_actual_crm_day_is_requested_not_today_or_previous_seven_days(self):
+        self.member(day='2026-11-18')
+        with patch.object(fiscal,'pk_call',return_value=[]) as provider:
+            payoutcheck.refresh_source(self.con,self.current,limit=10)
+        self.assertEqual(provider.call_count,1)
+        self.assertEqual(provider.call_args.args[2]['start'],'2026-11-18')
+        self.assertEqual(provider.call_args.args[2]['end'],'2026-11-18')
+        self.assertEqual(self.con.execute('SELECT count(*) FROM pk_daily_evidence').fetchone()[0],1)
+
+    def test_cash_only_or_cancelled_payments_do_not_trigger_paykeeper(self):
+        cash=money.add_payment(self.con,self.sid,500,'cash',self.user,paid_at='2026-11-19')
+        with patch.object(fiscal,'pk_call',side_effect=AssertionError('Cash is not PayKeeper')):
+            self.assertTrue(payoutcheck.refresh_source(self.con,self.current)['no_crm_payments'])
+        self.member(day='2026-11-18')
+        self.con.execute("UPDATE payments SET cancelled=1 WHERE id!=?",(cash,))
+        with patch.object(fiscal,'pk_call',side_effect=AssertionError('Cancelled payment excluded')):
+            self.assertTrue(payoutcheck.refresh_source(self.con,self.current)['no_crm_payments'])
+
+    def test_manual_paykeeper_payment_requires_check_even_without_provider_link(self):
+        money.add_payment(self.con,self.sid,1000,'paykeeper_manual',self.user,paid_at='2026-11-19')
+        with patch.object(fiscal,'pk_call',return_value=[]) as provider:
+            payoutcheck.refresh_source(self.con,self.current)
+        self.assertEqual(provider.call_count,1);self.assertEqual(provider.call_args.args[2]['start'],'2026-11-19')
+        day=payoutcheck.diagnostics(self.con)['daily_sources'][0]
+        self.assertTrue(day['check_required']);self.assertEqual(day['crm_payments'],1);self.assertEqual(day['payments'],0)
+
+    def test_server_cycles_without_crm_payments_are_normal_not_errors(self):
+        from crm import paymentworker
+        fiscal.comms.put(self.con,'fx_tochka_token','synthetic')
+        with patch.object(fiscal,'pk_call',side_effect=AssertionError('No empty-day gateway requests')) as provider,patch.object(fiscal,'fetch_tochka',side_effect=AssertionError('No empty-day bank requests')) as bank:
+            paymentworker.cycle(self.con,'paykeeper',self.current)
+            paymentworker.cycle(self.con,'tochka',self.current)
+        rows=list(self.con.execute('SELECT status,result FROM payment_control_jobs'))
+        self.assertEqual(len(rows),2);self.assertTrue(all(r['status']=='no_payments' for r in rows))
+        self.assertTrue(all(json.loads(r['result'])['checked']==0 for r in rows))
+        provider.assert_not_called();bank.assert_not_called()

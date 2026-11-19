@@ -68,7 +68,7 @@ def cycle(con,source,current=None):
                 if not result['checked'] and daily.get('days_checked'):result['checked']=daily['days_checked']
             elif source=='tochka':result=bankcheck.run_automatic(con,current,limit=3,cached_only=True)
             else:result=run_ofd(con,current,limit=3)
-            status='attention' if result.get('unavailable') or result.get('blocked') else 'waiting_data' if result.get('waiting') else 'ok' if result.get('checked') else 'idle'
+            status='no_payments' if result.get('no_crm_payments') and not result.get('checked') else 'attention' if result.get('unavailable') or result.get('blocked') else 'waiting_data' if result.get('waiting') else 'ok' if result.get('checked') else 'idle'
     except Exception:
         # Provider exception text can contain credentials or client data.
         result={'error':'Не удалось завершить проверку. Повтор произойдёт автоматически'};status='error'

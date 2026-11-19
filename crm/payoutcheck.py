@@ -15,10 +15,10 @@ from . import fiscal,paykeepercheck
 def init(con):
     con.execute('CREATE TABLE IF NOT EXISTS payment_matching_versions(name TEXT PRIMARY KEY,version TEXT NOT NULL)')
     version=con.execute("SELECT version FROM payment_matching_versions WHERE name='sbp'").fetchone()
-    if not version or version['version']!='qr-reference-v1':
+    if not version or version['version']!='crm-first-qr-v2':
         if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='payment_control_jobs'").fetchone():
             con.execute("UPDATE payment_control_jobs SET next_at=NULL WHERE source IN ('paykeeper','tochka') AND lease_owner IS NULL")
-        con.execute("INSERT OR REPLACE INTO payment_matching_versions VALUES('sbp','qr-reference-v1')")
+        con.execute("INSERT OR REPLACE INTO payment_matching_versions VALUES('sbp','crm-first-qr-v2')")
     con.execute('''CREATE TABLE IF NOT EXISTS pk_daily_evidence(
         day TEXT PRIMARY KEY,checked_at TEXT NOT NULL,status TEXT NOT NULL,digest TEXT NOT NULL,result TEXT NOT NULL)''')
     con.execute('''CREATE TABLE IF NOT EXISTS pk_system_evidence(
@@ -112,15 +112,25 @@ def fetch_day(con,day):
     raise DailyEvidenceError('pagination_limit','Дневной список PayKeeper превышает безопасный предел загрузки')
 
 
+def crm_payment_days(con,current=None):
+    """CRM payment facts define the work queue; calendar days never create work."""
+    days={}
+    for row in con.execute("""SELECT p.id,p.paid_at FROM payments p
+        WHERE p.cancelled=0 AND p.amount>0 AND (p.method IN ('paykeeper','paykeeper_manual','online')
+        OR EXISTS(SELECT 1 FROM pay_links l WHERE l.payment_id=p.id AND l.pk_payment_id!=''))"""):
+        try:day=date.fromisoformat(day_of(row['paid_at']))
+        except (ValueError,TypeError):continue
+        if current is not None and not current.date()-timedelta(days=31)<=day<=current.date():continue
+        days[day.isoformat()]=days.get(day.isoformat(),0)+1
+    return days
+
+
 def refresh_source(con,current,limit=2):
+    relevant=crm_payment_days(con,current)
+    if not relevant:return {'days_checked':0,'days_unavailable':0,'no_crm_payments':True}
     if not fiscal.configured(con)['paykeeper']:return {'days_checked':0}
     today=current.date()
-    days={today-timedelta(days=i) for i in range(7)}
-    for row in con.execute("SELECT DISTINCT substr(p.paid_at,1,10) AS day FROM payments p JOIN pay_links l ON l.payment_id=p.id WHERE p.cancelled=0 AND p.amount>0 AND l.pk_payment_id!=''"):
-        try:
-            candidate=date.fromisoformat(row['day'])
-            if today-timedelta(days=31)<=candidate<=today:days.add(candidate)
-        except ValueError:pass
+    days={date.fromisoformat(day) for day in relevant}
     prior={r['day']:r for r in con.execute('SELECT * FROM pk_daily_evidence')}
     previous={day:r['checked_at'] for day,r in prior.items()}
     unexplained={day for day,r in prior.items() if r['status']=='unavailable' and not json.loads(r['result']).get('error_code')}
@@ -266,7 +276,9 @@ def _save_payment(con,pid,provider,stamp,result):
 
 def run_bank(con,current,limit=3):
     """Match one shared statement window, never request the acquiring API."""
-    snapshots=list(con.execute("SELECT * FROM pk_daily_evidence WHERE day>=? ORDER BY day DESC",((current.date()-timedelta(days=31)).isoformat(),)))
+    relevant=crm_payment_days(con,current)
+    if not relevant:return {'checked':0,'no_crm_payments':True}
+    snapshots=[r for r in con.execute("SELECT * FROM pk_daily_evidence WHERE day>=? ORDER BY day DESC",((current.date()-timedelta(days=31)).isoformat(),)) if r['day'] in relevant]
     if not snapshots:return {'checked':0,'waiting':1}
     complete=[s for s in snapshots if s['digest'] and json.loads(s['result']).get('coverage_complete')]
     if not complete:return {'checked':0,'unavailable':1}
@@ -389,8 +401,9 @@ def run_bank(con,current,limit=3):
 
 
 def view(con,start,end):
-    rows=[]
+    rows=[];relevant=crm_payment_days(con)
     for row in con.execute('SELECT * FROM bank_payout_batches WHERE day>=? AND day<=? ORDER BY day DESC,id',(start,end)):
+        if row['day'] not in relevant:continue
         batch=json.loads(row['result'])
         snapshot=con.execute('SELECT status,digest FROM pk_daily_evidence WHERE day=?',(batch['day'],)).fetchone()
         if not snapshot or not snapshot['digest'] or snapshot['digest']!=batch['digest']:
@@ -405,10 +418,21 @@ def view(con,start,end):
 
 
 def diagnostics(con):
-    days=[]
-    for row in con.execute('SELECT * FROM pk_daily_evidence ORDER BY day DESC LIMIT 32'):
+    days=[];relevant=crm_payment_days(con)
+    snapshots={r['day']:r for r in con.execute('SELECT * FROM pk_daily_evidence')}
+    for day in sorted(set(snapshots)|set(relevant),reverse=True)[:32]:
+        row=snapshots.get(day)
+        if day not in relevant:
+            days.append({'day':day,'status':'not_required','check_required':False,'crm_payments':0,
+                'note':'В CRM нет оплат PayKeeper за этот день; сверка не нужна',
+                'source_available':None,'payments':None,'cards':None,'sbp':None})
+            continue
+        if row is None:
+            days.append({'day':day,'status':'waiting','check_required':True,'crm_payments':relevant[day],
+                'note':'Оплаты CRM ожидают автоматической сверки','source_available':None,'payments':None,'cards':None,'sbp':None})
+            continue
         data=json.loads(row['result']);items=data.get('items',[])
-        days.append({'day':row['day'],'checked_at':row['checked_at'],'status':row['status'],
+        days.append({'day':day,'checked_at':row['checked_at'],'status':row['status'],'check_required':True,'crm_payments':relevant[day],
             'source_available':data.get('source_available',row['status']=='complete'),'last_successful_at':data.get('verified_at'),
             'payments':len(items) if data.get('coverage_complete') else None,
             'cards':sum(i['rail']=='card' for i in items) if data.get('coverage_complete') else None,
@@ -416,6 +440,6 @@ def diagnostics(con):
             'unknown_systems':sorted({i['system_id'] for i in items if i['rail']=='unknown'}),
             **{key:data[key] for key in ('note','error_code','error_stage','error_type','http_status','provider_message','response_shape') if key in data}})
     observation=con.execute('SELECT * FROM bank_statement_observations WHERE id=1').fetchone()
-    return {'strategy':'paykeeper_daily_batches_and_named_sbp','acquiring_permission_required':False,'matching_version':2,'sbp_reference_matching':True,
+    return {'strategy':'paykeeper_daily_batches_and_named_sbp','crm_first':True,'acquiring_permission_required':False,'matching_version':3,'sbp_reference_matching':True,
         'daily_sources':days,'statement':({'checked_at':observation['checked_at'],**json.loads(observation['result'])} if observation else None),
         'card_batches':view(con,(datetime.now(ZoneInfo('Europe/Moscow')).date()-timedelta(days=31)).isoformat(),datetime.now(ZoneInfo('Europe/Moscow')).date().isoformat())[:10]}
