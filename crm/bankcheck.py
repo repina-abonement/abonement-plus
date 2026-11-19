@@ -28,7 +28,7 @@ def run_automatic(con, now=None, limit=3, cached_only=False):
         ORDER BY c.checked_at IS NOT NULL,c.checked_at,p.id LIMIT ?''',
         (cutoff,max(0,min(int(limit),10)))).fetchall()
     from . import paykeepercheck
-    denied=unavailable=0
+    denied=unavailable=checked=waiting=0
     for row in rows:
         try:
             if cached_only:
@@ -36,12 +36,16 @@ def run_automatic(con, now=None, limit=3, cached_only=False):
                 cache=con.execute('SELECT result FROM fiscal_payment_checks WHERE payment_id=?',(row['id'],)).fetchone()
                 evidence=json.loads(cache['result']) if cache else {}
                 if evidence.get('provider_payment_id')!=row['pk_payment_id']:evidence={}
+                if not evidence.get('bank_payment',{}).get('available') or not evidence.get('sbp_identifiers'):
+                    waiting+=1
+                    continue
                 result=tochkacheck.inspect(con,evidence.get('bank_payment',{}),evidence.get('sbp_identifiers',{}))
             else:
                 inspection=paykeepercheck.inspect(con,row['pk_payment_id'],include_bank=True,include_ofd=False)
                 result=inspection['bank_settlement']
         except Exception:
             result={'status':'unavailable','note':'Не удалось проверить зачисление. Деньги не отмечены как зачисленные'}
+        checked+=1
         denied+=result.get('registry_status')=='permission_denied'
         unavailable+=result.get('registry_status')=='unavailable' or result.get('statement_status')=='unavailable' or result.get('status')=='unavailable'
         if result.get('status')!='confirmed':result=dict(result,status='unverified')
@@ -49,7 +53,7 @@ def run_automatic(con, now=None, limit=3, cached_only=False):
             ON CONFLICT(payment_id) DO UPDATE SET provider_payment_id=excluded.provider_payment_id,
             checked_at=excluded.checked_at,result=excluded.result''',
             (row['id'],row['pk_payment_id'],stamp,json.dumps(result,ensure_ascii=False)))
-    return {'checked':len(rows),'configured':True,'blocked':denied,'registry_denied':denied,'unavailable':unavailable}
+    return {'checked':checked,'waiting':waiting,'configured':True,'blocked':denied,'registry_denied':denied,'unavailable':unavailable}
 
 
 def state(con,payment_id):

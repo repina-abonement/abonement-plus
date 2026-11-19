@@ -202,3 +202,43 @@ assert con.execute("SELECT status FROM payment_control_jobs WHERE source='paykee
         self.assertTrue(result['read_only']);self.assertFalse(result['live_provider_requests'])
         self.assertEqual(result['amount_minor'],135000)
         self.assertEqual(self.con.total_changes,before)
+
+    def test_restart_before_due_does_not_add_ten_minutes(self):
+        pid=self.payment();self.configure()
+        cached=self.cache(pid)
+        self.con.execute('UPDATE fiscal_payment_checks SET checked_at=? WHERE payment_id=?',('2026-11-19T13:54:00',pid))
+        with patch.object(fiscal,'pk_call',return_value=[]) as calls:
+            result=paymentworker.cycle(self.con,'paykeeper',self.current)
+            self.assertEqual(result['checked'],0);calls.assert_not_called()
+            self.assertEqual(self.con.execute("SELECT status FROM payment_control_jobs WHERE source='paykeeper'").fetchone()[0],'idle')
+            result=paymentworker.cycle(self.con,'paykeeper',self.current+timedelta(minutes=4))
+            self.assertEqual(result['checked'],1);self.assertEqual(calls.call_count,3)
+
+    def test_stuck_means_provider_received_but_not_bank_or_ofd_confirmed(self):
+        pid=self.payment();cached=self.cache(pid)
+        cached['provider_payment']=cached['bank_payment']|{'status':'stuck'}
+        self.con.execute('UPDATE fiscal_payment_checks SET result=? WHERE payment_id=?',(json.dumps(cached),pid))
+        payment=self.con.execute('SELECT * FROM payments WHERE id=?',(pid,)).fetchone()
+        result=paymentcontrol.state(self.con,payment)
+        self.assertEqual(result['source']['status'],'confirmed')
+        self.assertEqual(result['status'],'attention')
+        self.assertEqual(result['bank']['status'],'unverified')
+        self.assertNotEqual(result['ofd']['status'],'confirmed')
+        proof=SettlementProof();proof.setUp();proof.payment['status']='stuck'
+        self.assertEqual(proof.prove()['status'],'confirmed')
+        cached['provider_payment']['refund_amount']='100'
+        self.con.execute('UPDATE fiscal_payment_checks SET result=? WHERE payment_id=?',(json.dumps(cached),pid))
+        self.assertEqual(paymentcontrol.state(self.con,payment)['source']['status'],'unverified')
+
+    def test_bank_waits_for_pk_identity_without_erasing_last_error(self):
+        pid=self.payment();self.configure()
+        denied={'status':'unverified','registry_status':'permission_denied','http_status':403}
+        self.con.execute('INSERT INTO bank_payment_checks VALUES(?,?,?,?)',(pid,'synthetic-11534','2026-11-18T14:00:00',json.dumps(denied)))
+        with patch('crm.tochkacheck.inspect',side_effect=AssertionError('No bank probe without verified IDs')):
+            result=paymentworker.cycle(self.con,'tochka',self.current)
+        self.assertEqual(result['checked'],0);self.assertEqual(result['waiting'],1)
+        self.assertIn('ReadAcquiringData',bankcheck.state(self.con,pid)['note'])
+        self.cache(pid)
+        with patch('crm.tochkacheck.inspect',return_value=denied) as bank:
+            result=paymentworker.cycle(self.con,'tochka',self.current+timedelta(seconds=30))
+            bank.assert_called_once();self.assertEqual(result['checked'],1)

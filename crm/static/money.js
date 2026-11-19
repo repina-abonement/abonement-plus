@@ -29,7 +29,7 @@ function paymentControlHtml(control){
 
 function paymentJobsView(jobs){
   const names={paykeeper:'PayKeeper',tochka:'Точка',ofd:'ОФД'};
-  const labels={stale:'Давно не завершалась, проверьте службу CRM',waiting:'Ожидает запуска',running:'Проверка идёт',ok:'Проверка завершена',attention:'Есть ограничения доступа или ошибки',error:'Не удалось проверить, повтор автоматически',not_configured:'Доступ не настроен',interrupted:'Проверка прервана, будет повторена'};
+  const labels={waiting_data:'Ожидает проверенных данных PayKeeper',idle:'Ожидает срока проверки оплат',stale:'Давно не завершалась, проверьте службу CRM',waiting:'Ожидает запуска',running:'Проверка идёт',ok:'Проверка завершена',attention:'Есть ограничения доступа или ошибки',error:'Не удалось проверить, повтор автоматически',not_configured:'Доступ не настроен',interrupted:'Проверка прервана, будет повторена'};
   return jobs?.length?`<details class="payment-control-jobs"><summary>Автоматические проверки на сервере · каждые 10 минут</summary>${jobs.map(j=>`<div class="small"><b>${names[j.source]||esc(j.source)}</b>: ${esc(labels[j.status]||j.status)}${j.last_finished_at?' · '+esc(j.last_finished_at.replace('T',' '))+' МСК':''}${j.next_at?' · следующая: '+esc(j.next_at.replace('T',' '))+' МСК':''}</div>`).join('')}<p class="small muted">Работают при закрытом браузере. Статус запуска не подтверждает конкретное зачисление или чек — результат указан у платежа</p></details>`:'';
 }
 

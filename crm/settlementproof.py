@@ -6,6 +6,7 @@ confirmation rather than silently treating refunds as zero.
 """
 from decimal import Decimal
 from datetime import date
+from .paykeepercheck import RECEIVED_STATUSES
 
 
 def minor(value):
@@ -17,7 +18,7 @@ def minor(value):
 def prove(blocks,transactions,operation_ids,payment):
     result={'status':'unverified','note':'Нужна точная связь полного реестра с проводкой по идентификаторам'}
     try:
-        if not payment.get('available') or payment.get('status') not in ('obtained','success'):
+        if not payment.get('available') or payment.get('status') not in RECEIVED_STATUSES:
             return result
         if minor(payment.get('refund_amount'))!=0:
             return result|{'note':'Есть возврат PayKeeper. Нужен отдельный реестр возвратов и его связь с выплатой'}

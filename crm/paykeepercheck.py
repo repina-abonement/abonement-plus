@@ -4,6 +4,10 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from . import fiscal,services as sv
 
+# https://docs.paykeeper.ru/dokumentatsiya-json-api/platezhi/
+# These mean customer funds were debited, not that a bank statement was reconciled.
+RECEIVED_STATUSES=('obtained','success','stuck')
+
 PAYMENT_FIELDS=('id','status','pay_amount','refund_amount','payment_system_id','unique_id',
                 'RRN','site_description','system_description','obtain_datetime','success_datetime')
 RECEIPT_FIELDS=('id','payment_id','type','is_post_sale','status','sum_cashless','sum_cash',

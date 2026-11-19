@@ -1,6 +1,6 @@
 """Read-only control projection covering every registry row, without false settlement proof."""
 import json
-from . import reconciliation,money,fiscal
+from . import reconciliation,money,fiscal,paykeepercheck
 
 
 def state(con,payment):
@@ -17,7 +17,7 @@ def state(con,payment):
     links=con.execute("SELECT DISTINCT pk_payment_id FROM pay_links WHERE payment_id=? AND pk_payment_id!=''",(payment['id'],)).fetchall()
     provider_ok=False
     if links:
-        provider_ok=len(links)==1 and provider.get('available') is True and str(provider.get('id'))==links[0]['pk_payment_id'] and provider.get('status') in ('obtained','success')
+        provider_ok=len(links)==1 and provider.get('available') is True and str(provider.get('id'))==links[0]['pk_payment_id'] and provider.get('status') in paykeepercheck.RECEIVED_STATUSES
         try:provider_ok=provider_ok and fiscal.kop(provider.get('pay_amount'))==fiscal.kop(payment['amount']) and provider.get('refund_amount') is not None and fiscal.kop(provider['refund_amount'])==0
         except Exception:provider_ok=False
         source={'status':'confirmed' if provider_ok else 'unverified','label':'PayKeeper: оплата подтверждена' if provider_ok else 'PayKeeper: оплата требует проверки',

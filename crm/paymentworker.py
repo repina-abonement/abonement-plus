@@ -59,14 +59,16 @@ def cycle(con,source,current=None):
             if source=='paykeeper':result=fiscalcheck.run_automatic(con,current,limit=3,include_ofd=False)
             elif source=='tochka':result=bankcheck.run_automatic(con,current,limit=3,cached_only=True)
             else:result=run_ofd(con,current,limit=3)
-            status='attention' if result.get('unavailable') or result.get('blocked') else 'ok'
+            status='attention' if result.get('unavailable') or result.get('blocked') else 'waiting_data' if result.get('waiting') else 'ok' if result.get('checked') else 'idle'
     except Exception:
         # Provider exception text can contain credentials or client data.
         result={'error':'Не удалось завершить проверку. Повтор произойдёт автоматически'};status='error'
     finished=current if supplied else now()
+    # A restart between per-payment due times must not add another full interval.
+    delay=30 if status in ('idle','waiting_data') else INTERVAL
     con.execute('''UPDATE payment_control_jobs SET finished_at=?,next_at=?,lease_until=NULL,
         lease_owner=NULL,status=?,result=? WHERE source=? AND lease_owner=?''',
-        (finished.isoformat(timespec='seconds'),(finished+timedelta(seconds=INTERVAL)).isoformat(timespec='seconds'),
+        (finished.isoformat(timespec='seconds'),(finished+timedelta(seconds=delay)).isoformat(timespec='seconds'),
          status,json.dumps(result,ensure_ascii=False),source,owner))
     return result
 
