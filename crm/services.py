@@ -1157,13 +1157,34 @@ def paid_for_month(con, sid: int, ym: str) -> bool:
                             (sid, ym, ym, ym)).fetchone())
 
 
-def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpaid_marks: bool = True) -> dict:
+def _journal_single_paid(con, sid, group_id, day, entitlements):
+    """Payment of a single visit grants its booked date, not a whole month."""
+    visits=con.execute("""SELECT v.subscription_id,x.id,x.kind,x.status FROM single_visits v
+        LEFT JOIN subscriptions x ON x.id=v.subscription_id
+        WHERE v.student_id=? AND v.group_id=? AND v.date=? AND v.status='booked'""",(sid,group_id,day)).fetchall()
+    for visit in visits:
+        if visit['subscription_id'] is not None:
+            if visit['status']=='paid' and (visit['kind']=='single' or visit['id'] in entitlements['single_ids']):return True
+        elif con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND kind='single' AND status='paid'
+            AND (month=? OR substr(created_at,1,7)=?)""",(sid,day[:7],day[:7])).fetchone():
+            # Old manual bookings may predate explicit subscription_id links.
+            # The retained fallback still requires this precise booked date.
+            return True
+    return False
+
+
+def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpaid_marks: bool = True, *, _entitlement_cache=None) -> dict:
     g = con.execute("SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.id=?",
                     (group_id,)).fetchone()
     if not g:
         raise ApiError("Группа не найдена", 404)
     d = date.fromisoformat(day)
-    from . import closures, schedule
+    from . import closures, schedule, subscriptiondates
+    entitlement_cache={} if _entitlement_cache is None else _entitlement_cache
+    def entitlements_for(sid):
+        if sid not in entitlement_cache:
+            entitlement_cache[sid]=subscriptiondates.calendar_entitlements(con,sid,day[:7])
+        return entitlement_cache[sid]
     closed = closures.is_closed(con, group_id, d)
     has_lesson = d.weekday() in logic.parse_weekdays(schedule.on(con, g, d)["weekdays"]) and not closed  # с учётом версий расписания
     from . import subcomposition
@@ -1195,18 +1216,21 @@ def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpai
                 continue
             a = con.execute("SELECT status, resolved, warned, note FROM attendance WHERE student_id=? AND date=? AND group_id=?",
                             (s["id"], day, group_id)).fetchone()
-            from . import subscriptiondates
+            entitlement=entitlements_for(s["id"])
+            if not a and not subscriptiondates.recurring_calendar_allowed(group_id,entitlement):
+                # An imported active enrollment is not proof of a month plan.
+                # Exact single bookings are appended below; marks remain factual.
+                continue
             if not a and (subscriptiondates.excluded(con, s["id"], group_id, day)
                           or subscriptiondates.outside_period(con, s["id"], group_id, day)):
                 continue
             vac = logic.in_vacation(d, vacations_of(con, s["id"]))
             # в журнале только те, у кого оплачено фактически: абонемент на месяц или разовое (Юлия, 04.11).
             # Уже отмеченных не прячем, чтобы не потерять отметку
-            paid_month = con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND month=? AND status='paid'
-                                        AND COALESCE(kind,'month')='month'""", (s["id"], day[:7])).fetchone()
-            paid_single = not paid_month and con.execute(
-                """SELECT 1 FROM subscriptions WHERE student_id=? AND kind='single' AND status='paid'
-                   AND (month=? OR substr(created_at,1,7)=?)""", (s["id"], day[:7], day[:7])).fetchone()
+            paid_month = any(r['id'] not in entitlement['single_ids'] for r in con.execute(
+                """SELECT id FROM subscriptions WHERE student_id=? AND month=? AND status='paid'
+                   AND COALESCE(kind,'month')='month'""",(s["id"],day[:7])))
+            paid_single = not paid_month and _journal_single_paid(con,s["id"],group_id,day,entitlement)
             if paid_only and not paid_month and not paid_single and not a:
                 hidden.append({"id": s["id"], "name": s["name"]})
                 continue
@@ -1233,8 +1257,7 @@ def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpai
                 continue
             a = con.execute("SELECT status, resolved, warned, note FROM attendance WHERE student_id=? AND date=? AND group_id=?",
                             (v["id"], day, group_id)).fetchone()
-            paid1 = con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND kind='single' AND status='paid'
-                                   AND (month=? OR substr(created_at,1,7)=?)""", (v["id"], day[:7], day[:7])).fetchone()
+            paid1 = _journal_single_paid(con,v["id"],group_id,day,entitlements_for(v["id"]))
             rows.append({"id": v["id"], "name": v["name"], "birth": v["birth"] or "", "tag": "single", "single_id": v["single_id"],
                          "unpaid": not paid1, "status": a["status"] if a else None, "resolved": a["resolved"] if a else None,
                          "warned": bool(a and a["warned"]), "note": a["note"] if a else ""})
@@ -1306,8 +1329,9 @@ def journal_month(con, group_id: int, ym: str) -> dict:
         "SELECT substr(visit_at,1,10) FROM erp_trial_visits WHERE group_id=? AND visit_at>=? AND visit_at<?",
         (group_id, start.isoformat(), (end+timedelta(days=1)).isoformat())))
     days, attendance, d = [], [], start
+    entitlement_cache={}
     while d <= end:
-        j = journal(con, group_id, d.isoformat(), paid_only=True)
+        j = journal(con, group_id, d.isoformat(), paid_only=True, _entitlement_cache=entitlement_cache)
         if j["has_lesson"] or j["closed"] or d.isoformat() in marked_dates:
             rows = j["rows"]
             attendance.extend({"attendance_id":r["attendance_id"],"student_id":r["id"],"name":r["name"],

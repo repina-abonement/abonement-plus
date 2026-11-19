@@ -123,6 +123,8 @@ def _record(f, row):
         'date': ['дата оплаты'] if f['kind'] == 'payments' else ['дата занятия'],
         'date_alt': ['дата продажи'], 'amount': ['сумма'], 'method': ['вид оплаты'],
         'operation_id': ['id операции'], 'task_id': ['id задачи'], 'due': ['дедлайн'],
+        'sale_id': ['id продажи', 'id покупки'],
+        'lesson_date': ['дата занятия'],
         'payment_type': ['тип платежа'],
         'event_at': ['дата события'], 'event': ['событие'], 'task_end': ['задача (end)'],
         'task_new': ['задача (new)'], 'assignee': ['исполнитель'], 'author': ['автор'],
@@ -310,6 +312,19 @@ def _process(con, files, now):
     counts = Counter()
     subs = defaultdict(list)
     used_legacy = set(r[0] for r in con.execute('SELECT payment_id FROM erp_full_operations'))
+    # A payment file may precede its sales file. Determine explicit single-sale
+    # operation IDs up front, rather than guessing a legacy payment first.
+    single_operations = set()
+    single_sale_ids = set(r[0] for r in con.execute('SELECT source_id FROM erp_single_sales'))
+    for source in files:
+        if source['kind'] == 'subs':
+            for source_row in source['rows']:
+                sale = _record(source, source_row)
+                if ei.sub_kind(sale.get('tariff', '')) == 'single':
+                    if sale.get('operation_id'):
+                        single_operations.add(str(sale['operation_id']).strip())
+                    if sale.get('sale_id'):
+                        single_sale_ids.add(str(sale['sale_id']).strip())
     # Resolve the client files first, regardless of upload order.
     for f in sorted(files, key=lambda x: (x['kind'] != 'clients', x['id'])):
         old = con.execute('SELECT id FROM erp_full_files WHERE digest=?', (f['digest'],)).fetchone()
@@ -319,6 +334,9 @@ def _process(con, files, now):
         for index, row in enumerate(f['rows'], 2):
             report['source_rows'] += 1
             r = _record(f, row)
+            r['_source_key'] = f['digest']+':'+str(index)
+            r['_source_row'] = {'headers': f['headers'], 'values': row}
+            r['_record_kind'] = f['kind']
             sid, reason = matcher.find(r, f['kind'])
             state, tbl, target = 'unmatched', '', None
             if f['kind'] in ('payments','subs') and not any(str(v).strip() for v in row[:17]):
@@ -447,9 +465,12 @@ def _process(con, files, now):
                         else:
                             candidates = [p for p in con.execute('SELECT * FROM payments WHERE student_id=? AND amount=? AND substr(paid_at,1,10)=? AND cancelled=0 AND user_name=? ORDER BY id',
                                 (sid, amount, d[:10], 'ERP')) if p['id'] not in used_legacy and p['method'] in accepted_methods and (len(d) == 10 or p['paid_at'][:len(d)] == d)]
+                            single_payment = str(r.get('sale_id') or '').strip() in single_sale_ids or op in single_operations or ei.sub_kind(r.get('comment', '')) == 'single' or con.execute('SELECT 1 FROM erp_single_sales WHERE payment_operation_id=?', (op,)).fetchone()
                             synthetic = con.execute("SELECT 1 FROM payments WHERE student_id=? AND cancelled=0 AND comment='Оплата до реестра платежей'", (sid,)).fetchone()
                             other = con.execute('SELECT 1 FROM payments WHERE student_id=? AND amount=? AND substr(paid_at,1,10)=? AND cancelled=0 AND user_name!=?', (sid, amount, d[:10], 'ERP')).fetchone()
-                            if candidates:
+                            if candidates and single_payment:
+                                reason = 'Разовое: есть оплата CRM без связи с ID операции ERP; сумма и дата не доказывают соответствие'
+                            elif candidates:
                                 target = candidates[0]['id']
                                 used_legacy.add(target)
                                 counts['matched_payments'] += 1
@@ -463,6 +484,12 @@ def _process(con, files, now):
                             if target:
                                 con.execute('INSERT INTO erp_full_operations(operation_id,payment_id,signature) VALUES (?,?,?)', (op, target, signature))
                                 state, tbl = 'native', 'payments'
+                        if state == 'native':
+                            from . import erpsingles
+                            link = erpsingles.register_payment(con, target, op, r.get('sale_id', ''), now)
+                            if link['reason']:
+                                reason = link['reason']
+                                state = 'unmatched'
                 elif f['kind'] == 'tasks':
                     if r.get('event'):
                         # Event log is history, not a new open task for every event.
@@ -523,8 +550,16 @@ def _process(con, files, now):
                     exact_id = r.get('reviewed_sub_id', '')
                     if not gid and ym == '2026-10' and ei._norm(r.get('reviewed_lessons','')) == 'да' and exact_id.isdigit() and int(exact_id) > 0:
                         gid = -int(exact_id)
-                    if kind in ('trial', 'makeup'):
+                    if kind != 'single' and str(r.get('sale_id') or '').strip() in single_sale_ids:
+                        reason = 'Тип продажи ERP изменён: этот ID относится к разовому занятию; покупка CRM сохранена, нужен разбор исходных строк'
+                    elif kind in ('trial', 'makeup'):
                         reason = 'Вводное занятие или отработка сохранены как исходная продажа ERP'
+                    elif kind == 'single':
+                        from . import erpsingles
+                        single = erpsingles.import_sale(con, r, sid, gid, now)
+                        state, reason = single['state'], single['reason']
+                        tbl, target = single['target_table'], single['target_id']
+                        counts.update(single['counts'])
                     elif not ym or not gid or price is None:
                         reason = 'Не определены месяц, группа или точная стоимость абонемента'
                     else:
@@ -536,6 +571,20 @@ def _process(con, files, now):
             con.execute('INSERT INTO erp_full_rows(file_id,row_num,student_id,state,reason,target_table,target_id) VALUES (?,?,?,?,?,?,?) ON CONFLICT(file_id,row_num) DO UPDATE SET student_id=excluded.student_id,state=excluded.state,reason=excluded.reason,target_table=excluded.target_table,target_id=excluded.target_id',
                         (fid, index, sid, state, reason, tbl, target))
     for (sid, gid, ym), rows in subs.items():
+        # Validate again at the deferred write boundary: a later source row
+        # may have established a single-sale identity after a month row was
+        # queued. That identity must never create a second monthly charge.
+        valid_rows = []
+        for fid, index, record, price in rows:
+            source_id = str(record.get('sale_id') or '').strip()
+            if source_id and con.execute('SELECT 1 FROM erp_single_sales WHERE source_id=?', (source_id,)).fetchone():
+                con.execute("UPDATE erp_full_rows SET state='unmatched',reason=?,target_table='',target_id=NULL WHERE file_id=? AND row_num=?",
+                            ('Тип продажи ERP изменён: этот ID уже связан с разовым занятием; новый абонемент не создан', fid, index))
+            else:
+                valid_rows.append((fid, index, record, price))
+        rows = valid_rows
+        if not rows:
+            continue
         # No sale ID exists in this ERP report. Identical rows from overlapping
         # files cannot safely be added twice or silently collapsed.
         fingerprints = [_hash(r) for _, _, r, _ in rows]
@@ -658,6 +707,16 @@ def _process(con, files, now):
             identity = {k: rec.get(k, '') for k in ('child_name','erp_id','id_namespace','phone','group','event_at','date','month','amount','price','task_id')}
             report['issues'].append({'file': f['filename'], 'kind': f['kind'], **dict(row), 'source_identity': identity})
     report['counts'] = dict(counts)
+    from . import erpsingles
+    links = erpsingles.reconcile_links(con)
+    counts.update(links['counts'])
+    report['counts'] = dict(counts)
+    for issue in links['issues']:
+        sale = con.execute('SELECT student_id,subscription_id FROM erp_single_sales WHERE source_id=?',
+                           (issue['sale_id'],)).fetchone()
+        report['issues'].append({'file': 'Связь разовой оплаты ERP', 'row_num': issue['sale_id'],
+            'student_id': sale['student_id'] if sale else None, 'target_table': 'subscriptions',
+            'target_id': sale['subscription_id'] if sale else None, **issue})
     report['issue_count'] = len(report['issues'])
     report['complete'] = not report['issues']
     return report
@@ -665,6 +724,15 @@ def _process(con, files, now):
 
 def plan(con, ids):
     files = _files(con, ids)
+    # The approval token covers existing native and identity/link rows as well
+    # as the dry-run result. An edit between plan/apply must require a new plan,
+    # even if the aggregate row counts would happen to stay the same.
+    state = hashlib.sha256()
+    for table in ('subscriptions', 'payments', 'single_visits', 'erp_full_operations',
+                  'erp_single_sales', 'erp_single_payments', 'erp_single_reviews'):
+        state.update(table.encode())
+        for row in con.execute('SELECT * FROM '+table+' ORDER BY 1'):
+            state.update(_json(list(row)).encode())
     # Serialize the current snapshot into a separate in-memory database. Dry run
     # cannot accidentally commit CRM changes, migrations or outbound messages.
     clone = sqlite3.connect(':memory:', isolation_level=None)
@@ -681,6 +749,7 @@ def plan(con, ids):
         report = _process(clone, files, '2000-01-01T00:00')
     finally:
         clone.close()
+    report['state_token'] = state.hexdigest()
     report['token'] = _hash(report)
     return report
 

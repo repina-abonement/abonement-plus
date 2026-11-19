@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import re
@@ -57,6 +58,8 @@ def init(con):
     con.executescript(SCHEMA)
     from . import erpfull
     erpfull.init(con)
+    from . import erpsingles
+    erpsingles.init(con)
     cols = [c[1] for c in con.execute("PRAGMA table_info(students)")]
     if "erp_id" not in cols:
         con.execute("ALTER TABLE students ADD COLUMN erp_id TEXT NOT NULL DEFAULT ''")
@@ -162,6 +165,10 @@ FIELDS = {
         ("comment", "Комментарий", ["комментарий", "примечание", "заметка"]),
     ],
     "subs": [
+        ("sale_id", "ID продажи в ERP", ["id продажи", "id покупки"]),
+        ("lesson_date", "Дата разового занятия (из ERP)", ["дата занятия", "дата разового занятия"]),
+        ("operation_id", "ID операции оплаты в ERP", ["id операции", "id оплаты"]),
+        ("sale_at", "Дата продажи", ["дата продажи"]),
         ("erp_id", "Номер клиента в ERP", ["id клиента", "код клиента", "номер клиента", "id"]),
         ("child_name", "Ребёнок", ["фио ребенка", "ребенок", "ученик", "клиент", "фио"]),
         ("phone", "Телефон", ["телефон"]),
@@ -173,6 +180,8 @@ FIELDS = {
         ("tariff", "Тариф", ["тариф", "тип"]),
     ],
     "payments": [
+        ("operation_id", "ID операции в ERP", ["id операции", "id оплаты"]),
+        ("sale_id", "ID продажи в ERP", ["id продажи", "id покупки"]),
         ("erp_id", "Номер клиента в ERP", ["id клиента", "код клиента", "номер клиента", "id"]),
         ("child_name", "Ребёнок", ["фио ребенка", "ребенок", "ученик", "клиент", "фио", "плательщик"]),
         ("phone", "Телефон", ["телефон"]),
@@ -235,6 +244,8 @@ def guess_mapping(kind: str, headers: list[str]) -> dict:
 def guess_kind(headers: list[str]) -> str:
     names = {_norm(h) for h in headers}
     # Concrete ERP layouts before loose words such as visits in a client list.
+    if names & {'id продажи', 'id покупки'} and names & {'тип', 'тариф'}:
+        return 'subs'
     if 'id операции' in names:
         return 'payments'
     if 'задача (end)' in names or 'задача (new)' in names:
@@ -527,6 +538,21 @@ def _records(con, kind: str) -> list[dict]:
     out = []
     for r in con.execute("SELECT * FROM erp_uploads WHERE kind=? ORDER BY id", (kind,)):
         mp = json.loads(r["mapping"])
+        headers, source_rows = json.loads(r["headers"]), json.loads(r["rows"])
+        digest = hashlib.sha256(json.dumps([kind, headers, source_rows], ensure_ascii=False).encode()).hexdigest()
+        # Existing staged files predate these fields. Recover only exact source
+        # headings; a purchase/payment/start date is never a lesson date.
+        exact = {"sale_id": ("id продажи", "id покупки"),
+                 "operation_id": ("id операции", "id оплаты"),
+                 "lesson_date": ("дата занятия", "дата разового занятия"),
+                 "sale_at": ("дата продажи",)}
+        hs = [_norm(h) for h in headers]
+        for key, names in exact.items():
+            if key not in mp and (kind == "subs" or kind == "payments" and key in ("sale_id", "operation_id")):
+                for name in names:
+                    if name in hs:
+                        mp[key] = hs.index(name)
+                        break
         if kind == "payments" and "date_alt" not in mp:
             # файлы, загруженные до появления поля: дату продажи находим по названию колонки сами
             hs = [_norm(h) for h in json.loads(r["headers"])]
@@ -534,9 +560,11 @@ def _records(con, kind: str) -> list[dict]:
                 if name in hs and hs.index(name) not in mp.values():
                     mp["date_alt"] = hs.index(name)
                     break
-        for i, row in enumerate(json.loads(r["rows"])):
+        for i, row in enumerate(source_rows):
             rec = {k: (row[c] if c < len(row) else "") for k, c in mp.items()}
             rec["_where"] = f"{r['filename']}, строка {i + 2}"
+            rec["_source_key"] = f"{kind}:{digest}:{i}"
+            rec["_source_row"] = {"headers": headers, "values": row}
             out.append(rec)
     return out
 
@@ -700,6 +728,12 @@ def plan(con, today: date | None = None) -> dict:
     tasks = _records(con, "tasks")
     cls = _classify(con, children, subs, lambda r: (lambda c: _key(c) if c else None)(find(r)), today)
     kinds = [sub_kind(s.get("tariff", "")) for s in subs]
+    for rec, kind in zip(subs, kinds):
+        if kind == "single":
+            if not str(rec.get("sale_id") or "").strip():
+                problems.append(f"{rec['_where']}: для разового нужен ID продажи ERP; строка останется для ручной сверки")
+            if not parse_date(rec.get("lesson_date", "")):
+                problems.append(f"{rec['_where']}: дата разового занятия неизвестна; расписание группы её не заменяет")
     stats = {"families": len(fams), "children": len(children),
              "members_active": sum(1 for v in cls.values() if v["state"] == "paid_now"),
              "members_unpaid": sum(1 for v in cls.values() if v["state"] == "unpaid_now"),
@@ -750,6 +784,84 @@ def plan(con, today: date | None = None) -> dict:
 
 def _track(con, batch: int, tbl: str, rid: int):
     con.execute("INSERT INTO erp_rows(batch_id, tbl, row_id) VALUES (?,?,?)", (batch, tbl, rid))
+
+
+def _single_result(con, rec, sid, gid, now, track, stats, issues):
+    from . import erpsingles
+    result = erpsingles.import_sale(con, rec, sid, gid, now)
+    for table, rid in result.get("created", []):
+        track(table, rid)
+        if table == "subscriptions":
+            stats["subs"] += 1
+    if result.get("reason"):
+        issues.append(f"{rec.get('_where', 'Разовое ERP')}: {result['reason']}")
+    return result
+
+
+def _single_type_conflict(con, rec, sid, now, track, issues):
+    """An identified single sale cannot be billed again as a monthly row."""
+    from . import erpsingles
+    source_id = str(rec.get("sale_id") or "").strip()
+    if (sub_kind(rec.get("tariff", "")) == "single" or not source_id or
+            not con.execute("SELECT 1 FROM erp_single_sales WHERE source_id=?", (source_id,)).fetchone()):
+        return False
+    reason = "Тип продажи ERP изменился с разового; исходная покупка сохранена, нужен разбор"
+    result = erpsingles.review(con, rec, sid, None, reason, now)
+    for table, rid in result.get("created", []):
+        track(table, rid)
+    issues.append(f"{rec.get('_where', source_id)}: {reason}")
+    return True
+
+
+def _erp_payment(con, rec, sid, now, track, subscription_id=None, updating=False, single_sale_ids=()):
+    """Stable operation IDs survive repeated/reordered files, including equal payments.
+
+    A legacy row without an operation ID cannot prove which single purchase was
+    paid. Such rows require review rather than a guessed payment/sale link.
+    """
+    from . import erpsingles
+    raw_date, _ = pay_date(rec)
+    amount = parse_money(rec.get("amount", ""))
+    if not raw_date or amount is None or amount == 0:
+        return False, "Не определены сумма или дата оплаты"
+    if amount < 0:
+        return False, "Отрицательная операция ERP требует отдельной сверки возврата; платёж не создан"
+    method = pay_method(rec.get("method", ""))
+    op, sale_id = str(rec.get("operation_id") or "").strip(), str(rec.get("sale_id") or "").strip()
+    signature = json.dumps([sid, raw_date, amount, method], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    paid_at = raw_date if len(raw_date) > 10 else raw_date + "T12:00"
+    single_payment = bool(sale_id in single_sale_ids or "разов" in _norm(rec.get("comment", "")) or
+                          sale_id and con.execute("SELECT 1 FROM erp_single_sales WHERE source_id=?", (sale_id,)).fetchone() or
+                          op and con.execute("SELECT 1 FROM erp_single_sales WHERE payment_operation_id=?", (op,)).fetchone())
+    if not op and single_payment:
+        return False, "Для оплаты разового нужен ID операции ERP; сумма и день не определяют покупку"
+    if op:
+        linked = con.execute("SELECT * FROM erp_full_operations WHERE operation_id=?", (op,)).fetchone()
+        if linked:
+            p = con.execute("SELECT * FROM payments WHERE id=?", (linked["payment_id"],)).fetchone()
+            if (not p or p["cancelled"] or linked["signature"] != signature or
+                    (p["student_id"], p["amount"], p["method"], p["paid_at"][:len(raw_date)]) != (sid, amount, method, raw_date)):
+                return False, "Операция ERP уже связана с отличающимся платежом; внесённые данные сохранены"
+            result = erpsingles.register_payment(con, p["id"], op, sale_id)
+            return False, result.get("reason", "")
+        # Unlinked old entries need explicit reconciliation. Amount/date alone
+        # must not adopt an arbitrary payment or create another copy of it.
+        if con.execute("""SELECT 1 FROM payments p WHERE p.student_id=? AND p.amount=?
+            AND substr(p.paid_at,1,10)=? AND p.cancelled=0 AND NOT EXISTS
+            (SELECT 1 FROM erp_full_operations o WHERE o.payment_id=p.id)""", (sid, amount, raw_date[:10])).fetchone():
+            return False, "Есть оплата без ID операции ERP; нужна сверка перед добавлением или привязкой"
+    elif updating and con.execute("SELECT 1 FROM payments WHERE student_id=? AND amount=? AND substr(paid_at,1,10)=?", (sid, amount, raw_date[:10])).fetchone():
+        return False, ""
+    pid = con.execute("""INSERT INTO payments(student_id,amount,method,paid_at,comment,user_name,confirmed,
+        confirmed_by,confirmed_at,subscription_id,created_at) VALUES (?,?,?,?,?,'ERP',1,'Перенос из ERP',?,?,?)""",
+        (sid, amount, method, paid_at, ((rec.get("comment") or "").strip() + " (из ERP)").strip(), now,
+         None if single_payment else subscription_id, now)).lastrowid
+    track("payments", pid)
+    if op:
+        con.execute("INSERT INTO erp_full_operations(operation_id,payment_id,signature) VALUES (?,?,?)", (op, pid, signature))
+        result = erpsingles.register_payment(con, pid, op, sale_id)
+        return True, result.get("reason", "")
+    return True, ""
 
 
 def wipe_clients(con) -> int:
@@ -904,13 +1016,26 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
         _track(con, batch, "enrollments", eid)
         return eid
 
-    sub_index = {}
-    for rec in _records(con, "subs"):
+    sub_index, issues = {}, []
+    single_sale_ids = {str(r.get("sale_id") or "").strip() for r in sub_recs
+                       if sub_kind(r.get("tariff", "")) == "single" and r.get("sale_id")}
+    track = lambda table, rid: _track(con, batch, table, rid)
+    # New monthly rows in this batch must not look like an old collapsed ERP
+    # invoice to the single-sale conflict guard. Existing CRM rows still do.
+    for rec in sorted(_records(con, "subs"), key=lambda r: sub_kind(r.get("tariff", "")) != "single"):
         sid = find_sid(rec)
         ym = parse_month(rec.get("month", ""))
-        if not sid or not ym:
+        if not sid:
             continue
         kind = sub_kind(rec.get("tariff", ""))
+        if _single_type_conflict(con, rec, sid, nowi, track, issues):
+            continue
+        if kind == "single":
+            gid = _group_id(con, "", rec.get("group", "")) if rec.get("group") else None
+            _single_result(con, rec, sid, gid, nowi, track, st, issues)
+            continue
+        if not ym:
+            continue
         if kind in ("trial", "makeup"):  # вводные и отработки - не абонементы: деньги есть в оплатах, посещения в журнале
             st["skipped_trials" if kind == "trial" else "skipped_makeups"] += 1
             continue
@@ -920,7 +1045,7 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
         status = sub_status(rec.get("status", ""), price)
         tariff = "flex" if "гибк" in _norm(rec.get("tariff", "")) else (con.execute("SELECT tariff FROM students WHERE id=?", (sid,)).fetchone()[0])
         old = con.execute("SELECT id, price, lessons, status FROM subscriptions WHERE enrollment_id=? AND month=?", (eid, ym)).fetchone()
-        if old:  # в ERP за месяц в одной группе бывает несколько продаж (абонемент и разовые): в CRM это один абонемент месяца
+        if old:  # Monthly rows only. Single purchases never enter this aggregation.
             p2, l2 = old["price"] + price, old["lessons"] + lessons
             s2 = "paid" if old["status"] == "paid" and status == "paid" else "invoiced"
             con.execute("UPDATE subscriptions SET price=?, lessons=?, per_lesson=?, status=?, paid_at=? WHERE id=?",
@@ -937,18 +1062,20 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
     for rec in _records(con, "payments"):
         sid = find_sid(rec)
         d, from_sale = pay_date(rec)
-        amt = parse_money(rec.get("amount", ""))
-        if not sid or not d or not amt:
-            continue
         st["pay_date_from_sale"] += from_sale
         ym = parse_month(rec.get("month", "")) if rec.get("month") else None
-        pid = con.execute("""INSERT INTO payments(student_id, amount, method, paid_at, comment, user_name, confirmed, confirmed_by,
-                             confirmed_at, subscription_id, created_at) VALUES (?,?,?,?,?,?,1,'Перенос из ERP',?,?,?)""",
-                          (sid, amt, pay_method(rec.get("method", "")), d if len(d) > 10 else d + "T12:00",
-                           ((rec.get("comment") or "").strip() + " (из ERP)").strip(), "ERP", nowi,
-                           sub_index.get((sid, ym)) if ym else None, nowi)).lastrowid
-        _track(con, batch, "payments", pid)
-        st["payments"] += 1
+        added, reason = (_erp_payment(con, rec, sid, nowi, track, sub_index.get((sid, ym)) if ym else None,
+                                      single_sale_ids=single_sale_ids) if sid else
+                         (False, "Не найден ребёнок для оплаты ERP; исходная строка сохранена для сверки"))
+        st["payments"] += int(added)
+        if reason:
+            from . import erpsingles
+            result = erpsingles.review(con, rec, sid, None, reason, nowi)
+            for table, rid in result.get("created", []):
+                track(table, rid)
+            issues.append(f"{rec['_where']}: {reason}")
+    from . import erpsingles
+    issues.extend(item["reason"] for item in erpsingles.reconcile_links(con).get("issues", []))
     for rec in _records(con, "visits"):
         sid = find_sid(rec)
         d = parse_date(rec.get("date", ""))
@@ -980,9 +1107,10 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
             st["tasks"] += 1
     # текущий месяц: у учеников с активной группой без абонемента ничего не придумываем, это покажет сверка
     st["removed_before"] = removed
+    st["single_review"] = len(issues)
     con.execute("UPDATE erp_batches SET stats=? WHERE id=?", (json.dumps(st, ensure_ascii=False), batch))
     con.execute("INSERT INTO audit(ts, user_id, action, detail) VALUES (?,?,?,?)", (nowi, user.get("id"), "erp.import", json.dumps(st)))
-    return {"batch": batch, "stats": st, "month": month_now}
+    return {"batch": batch, "stats": st, "month": month_now, "issues": issues}
 
 
 def update(con, user: dict, now: datetime | None = None) -> dict:
@@ -1092,11 +1220,22 @@ def update(con, user: dict, now: datetime | None = None) -> dict:
     def find_sid(rec):
         c = find_child(rec)
         return sid_by_key.get(_key(c)) if c else None
-    # абонементы: сумма по (ребёнок, группа, месяц), как при переносе, потом сверяем с CRM
-    agg = {}
-    for rec in sub_recs:
+    # Only genuine monthly subscriptions may be grouped by month.
+    agg, issues = {}, []
+    single_sale_ids = {str(r.get("sale_id") or "").strip() for r in sub_recs
+                       if sub_kind(r.get("tariff", "")) == "single" and r.get("sale_id")}
+    for rec in sorted(sub_recs, key=lambda r: sub_kind(r.get("tariff", "")) != "single"):
         sid, ym = find_sid(rec), parse_month(rec.get("month", ""))
-        if not sid or not ym or sub_kind(rec.get("tariff", "")) in ("trial", "makeup"):
+        if not sid:
+            continue
+        kind = sub_kind(rec.get("tariff", ""))
+        if _single_type_conflict(con, rec, sid, nowi, track, issues):
+            continue
+        if kind == "single":
+            gid = _group_id(con, "", rec.get("group", "")) if rec.get("group") else None
+            _single_result(con, rec, sid, gid, nowi, track, st, issues)
+            continue
+        if not ym or kind in ("trial", "makeup"):
             continue
         gid = _group_id(con, "", rec.get("group", "")) or con.execute("SELECT group_id FROM students WHERE id=?", (sid,)).fetchone()[0]
         if not gid:
@@ -1123,17 +1262,18 @@ def update(con, user: dict, now: datetime | None = None) -> dict:
             st["subs"] += 1
     for rec in _records(con, "payments"):
         sid = find_sid(rec)
-        d, _ = pay_date(rec)
-        amt = parse_money(rec.get("amount", ""))
-        if not sid or not d or not amt:
-            continue
-        d = d if len(d) > 10 else d + "T12:00"
-        if con.execute("SELECT 1 FROM payments WHERE student_id=? AND amount=? AND substr(paid_at,1,10)=?", (sid, amt, d[:10])).fetchone():
-            continue
-        track("payments", con.execute("""INSERT INTO payments(student_id, amount, method, paid_at, comment, user_name, confirmed, confirmed_by, confirmed_at, created_at)
-                       VALUES (?,?,?,?,?,'ERP',1,'Обновление из ERP',?,?)""",
-                    (sid, amt, pay_method(rec.get("method", "")), d, ((rec.get("comment") or "").strip() + " (из ERP)").strip(), nowi, nowi)).lastrowid)
-        st["payments"] += 1
+        added, reason = (_erp_payment(con, rec, sid, nowi, track, updating=True, single_sale_ids=single_sale_ids) if sid else
+                         (False, "Не найден ребёнок для оплаты ERP; исходная строка сохранена для сверки"))
+        st["payments"] += int(added)
+        if reason:
+            from . import erpsingles
+            result = erpsingles.review(con, rec, sid, None, reason, nowi)
+            for table, rid in result.get("created", []):
+                track(table, rid)
+            issues.append(f"{rec['_where']}: {reason}")
+    from . import erpsingles
+    issues.extend(item["reason"] for item in erpsingles.reconcile_links(con).get("issues", []))
+    st["single_review"] = len(issues)
     from . import tasks as _tasks
     for rec in _records(con, "tasks"):
         sid = find_sid(rec)
@@ -1143,7 +1283,7 @@ def update(con, user: dict, now: datetime | None = None) -> dict:
     con.execute("DELETE FROM erp_uploads")  # файлы дня использованы: завтра загружаем свежие
     con.execute("INSERT INTO audit(ts, user_id, action, detail) VALUES (?,?,?,?)", (nowi, user.get("id"), "erp.update", json.dumps(st)))
     con.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('erp_last_update', ?)", (json.dumps({"at": nowi, "stats": st}, ensure_ascii=False),))
-    return {"stats": st, "at": nowi}
+    return {"stats": st, "at": nowi, "issues": issues}
 
 
 def day_for_erp(con, d: str) -> dict:
@@ -1192,10 +1332,17 @@ def undo(con, user: dict) -> dict:
     if not b:
         raise ImportError_("Отменять нечего")
     n = 0
-    for tbl in ("tasks", "attendance", "payments", "subscriptions", "history", "enrollments", "students", "parents", "families"):
+    for tbl in ("tasks", "attendance", "single_visits", "erp_single_reviews", "payments", "subscriptions", "history", "enrollments", "students", "parents", "families"):
         ids = [r[0] for r in con.execute("SELECT row_id FROM erp_rows WHERE batch_id=? AND tbl=?", (b[0], tbl))]
         for i in range(0, len(ids), 500):
             part = ids[i:i + 500]
+            if tbl == "payments":
+                con.execute(f'DELETE FROM erp_full_operations WHERE payment_id IN ({",".join("?" * len(part))})', part)
+            if tbl == "subscriptions":
+                # Some exact-ID links attach a pre-existing payment that was
+                # not created by this batch. Preserve it and remove only the
+                # reference to the purchase that undo is about to delete.
+                con.execute(f'UPDATE payments SET subscription_id=NULL WHERE subscription_id IN ({",".join("?" * len(part))})', part)
             if tbl == "students":  # всё, что успели завести по этим детям уже в CRM
                 q = ",".join("?" * len(part))
                 for (t,) in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
@@ -1228,7 +1375,7 @@ def verify(con) -> dict:
     line("Дети и лиды", p["stats"]["children"], cnt("students"))
     line("Занимаются сейчас", p["stats"]["members_active"],
          con.execute("SELECT COUNT(*) FROM students WHERE funnel='members' AND stage='active'").fetchone()[0])
-    line("Абонементы", p["stats"]["subs"], cnt("subscriptions") + st.get("subs_merged", 0))  # продажи одного месяца в одной группе сложены в один
+    line("Абонементы", p["stats"]["subs"], cnt("subscriptions") + st.get("subs_merged", 0))
     line("Оплаты, штук", p["stats"]["payments"], cnt("payments"))
     crm_sum = con.execute("""SELECT COALESCE(SUM(t.amount),0) FROM erp_rows r JOIN payments t ON t.id=r.row_id
                              WHERE r.batch_id=? AND r.tbl='payments'""", (bid,)).fetchone()[0]

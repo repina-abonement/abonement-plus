@@ -1,5 +1,5 @@
 /* Посещения клиента: один календарь и запись на отработку. */
-const ATTENDANCE_KINDS={subscription:['А','Абонемент'],makeup:['О','Отработка'],trial:['П','Пробное'],single:['Р','Разовое']};
+const ATTENDANCE_KINDS={subscription:['А','Абонемент'],makeup:['О','Отработка'],trial:['П','Пробное'],single:['Р','Разовое'],visit:['?','Посещение']};
 const ATTENDANCE_STATUS={present:'Был',absent:'Пропуск',planned:'Запланировано',warned:'Предупредили, что не придёт'};
 function clientAttendanceMarkup(){return `<h3>Посещения и отработки</h3><div id="client-attendance"><div class="small muted">Откройте вкладку, чтобы посмотреть календарь.</div></div>`}
 function wireClientAttendance(body,studentData,onChanged){
@@ -25,7 +25,7 @@ function wireClientAttendance(body,studentData,onChanged){
       }).join('')}</div></div>`);
     }
     const c=data.counters;
-    box.innerHTML=`<div class="attendance-toolbar"><button class="btn sm" data-att-prev aria-label="Предыдущий месяц">←</button><input type="month" id="att-month" value="${month}" aria-label="Месяц посещений"><button class="btn sm" data-att-next aria-label="Следующий месяц">→</button></div>
+    box.innerHTML=`${(data.date_warnings||[]).map(w=>`<p class="panel attendance-date-warning" role="status">${esc(w.message)}</p>`).join('')}<div class="attendance-toolbar"><button class="btn sm" data-att-prev aria-label="Предыдущий месяц">←</button><input type="month" id="att-month" value="${month}" aria-label="Месяц посещений"><button class="btn sm" data-att-next aria-label="Следующий месяц">→</button></div>
       <div class="attendance-stats"><div><b>${data.attended}</b><span>посещено за месяц</span></div><div><b>${data.missed}</b><span>пропусков за месяц</span></div><div class="available"><b>${c.available}</b><span>отмеченных пропусков доступно</span></div><div><b>${c.booked}</b><span>записано на отработку</span></div></div>
       <div class="attendance-legend">${Object.entries(ATTENDANCE_KINDS).map(([k,[short,label]])=>`<span><i class="att-${k}" aria-hidden="true">●</i>${label}</span>`).join('')}<span>✓ был · × пропуск · ○ план</span></div>
       <p class="attendance-calendar-hint small muted">Листайте календарь вбок, чтобы увидеть остальные дни недели.</p><div class="attendance-calendar-scroll" tabindex="0" role="region" aria-label="Календарь посещений"><div class="attendance-calendar">${WD.map(d=>`<b class="attendance-weekday">${d}</b>`).join('')}${cells.join('')}</div></div><div id="attendance-day-detail"></div>

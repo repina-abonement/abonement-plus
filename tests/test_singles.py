@@ -11,6 +11,7 @@ def main():
     con = db.connect(os.path.join(tempfile.mkdtemp(), "s.sqlite3")); db.init_db(con)
     U = {"id": 1, "name": "Оля", "role": "operator"}
     sv.today = lambda: date(2026, 11, 4)
+    singles._now = lambda: datetime(2026, 11, 4, 10, 0)
     b = schedule.save_branch(con, {"name": "ТЦ «Небо»"})
     g = schedule.save_group(con, {"name": "Небо Пн/Чт 17:00", "branch_id": b, "weekdays": [0, 3], "time": "17:00", "age": "4–5"})
     sid = sv.create_student(con, {"name": "Саша Разовый", "parent_name": "Мама", "phone": "+7 900 300-00-01", "funnel": "members",

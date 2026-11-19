@@ -18,10 +18,12 @@ def calendar(con, sid, ym):
     makeups=list(con.execute("SELECT * FROM makeups WHERE student_id=? AND date BETWEEN ? AND ? AND status!='cancelled'",(sid,start.isoformat(),end.isoformat())))
     mk={(r['date'],r['group_id']):r for r in makeups}
     singles={(r['date'],r['group_id']):r for r in con.execute("SELECT * FROM single_visits WHERE student_id=? AND date BETWEEN ? AND ? AND status='booked'",(sid,start.isoformat(),end.isoformat()))}
+    entitlements=subscriptiondates.calendar_entitlements(con,sid,ym)
     billed={r[0] for r in con.execute("SELECT enrollment_id FROM subscriptions WHERE student_id=? AND month=? AND status!='cancelled' AND kind='month'",(sid,ym))}
     for e in con.execute("SELECT * FROM enrollments WHERE student_id=?",(sid,)).fetchall():
         g=groups.get(e['group_id'])
         if not g:continue
+        if not subscriptiondates.recurring_calendar_allowed(g['id'],entitlements):continue
         if not e['active'] and not e['end_date']:continue
         for day in schedule.month_dates(con,g,e['weekdays'],ym):
             iso=day.isoformat()
@@ -38,7 +40,7 @@ def calendar(con, sid, ym):
                 add(day,component['group_id'],'subscription')
     for (day,gid),a in marks.items():
         g=groups.get(gid,{})
-        kind='makeup' if (day,gid) in mk or g.get('is_makeup') else 'single' if (day,gid) in singles else a['erp_visit_kind'] or 'subscription'
+        kind='makeup' if (day,gid) in mk or g.get('is_makeup') else 'single' if (day,gid) in singles else a['erp_visit_kind'] or ('visit' if not subscriptiondates.recurring_calendar_allowed(gid,entitlements) else 'subscription')
         if kind != 'subscription':
             events.pop((day,gid,'subscription'),None)
         add(day,gid,kind,'warned' if a['warned'] and day>sv.today().isoformat() else a['status'],attendance_id=a['id'],warned=bool(a['warned']),note=a['note'] or '',resolved=a['resolved'])
@@ -81,7 +83,7 @@ def calendar(con, sid, ym):
         if event.get('trial_time'):
             event['time'] = event['trial_time']
     result.sort(key=lambda x:(x['date'],x['time'],x['kind']))
-    return {'month':ym,'today':sv.today().isoformat(),'events':result,'counters':sv.absence_counters(con,sid),
+    return {'month':ym,'today':sv.today().isoformat(),'events':result,'date_warnings':entitlements['date_warnings'],'counters':sv.absence_counters(con,sid),
             'attended':sum(x['status']=='present' for x in result),'missed':sum(x['status']=='absent' and x['kind']!='makeup' for x in result)}
 
 

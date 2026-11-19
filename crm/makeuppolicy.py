@@ -5,14 +5,18 @@ from . import services as sv,clientattendance,subscriptiondates,logic
 
 
 def paid(con,sid,month):
+    entitlements=subscriptiondates.calendar_entitlements(con,sid,month)
     return [dict(r) for r in con.execute("""SELECT x.*,e.group_id,g.program_id FROM subscriptions x
         LEFT JOIN enrollments e ON e.id=x.enrollment_id LEFT JOIN groups g ON g.id=e.group_id
-        WHERE x.student_id=? AND x.month=? AND x.status='paid' AND COALESCE(x.kind,'month')='month'""",(sid,month))]
+        WHERE x.student_id=? AND x.month=? AND x.status='paid' AND COALESCE(x.kind,'month')='month'""",(sid,month))
+        if r['id'] not in entitlements['single_ids']]
 
 
 def covered(con,subs,event):
     if not subs:return False
     sid=subs[0]['student_id']
+    entitlements=subscriptiondates.calendar_entitlements(con,sid,event['date'][:7])
+    if not subscriptiondates.recurring_calendar_allowed(event['group_id'],entitlements):return False
     if subscriptiondates.excluded(con,sid,event['group_id'],event['date']) or subscriptiondates.outside_period(con,sid,event['group_id'],event['date']):return False
     for sub in subs:
         if sub['valid_from'] and event['date']<sub['valid_from'] or sub['valid_until'] and event['date']>sub['valid_until']:continue

@@ -221,9 +221,11 @@ def rules():
     check(act == [chob] and two["group_id"] == chob, f"Действующая группа - та, куда продан абонемент на ноябрь ({act})")
     check(g("2")["stage"] == "active" and g("3")["stage"] == "left" and g("4")["stage"] == "active", "Не оплатил ноябрь - занимается, давно ушёл - ушёл, купил на декабрь - занимается")
     two_subs = con.execute("SELECT price, status FROM subscriptions WHERE student_id=?", (g("2")["id"],)).fetchall()
-    check([tuple(x) for x in two_subs] == [(9500, "invoiced")], f"Продажи одного месяца сложены, частично оплаченный - не оплачен ({[tuple(x) for x in two_subs]})")
+    check([tuple(x) for x in two_subs] == [(8000, "invoiced")], f"Разовое без ID продажи не увеличивает месячный абонемент ({[tuple(x) for x in two_subs]})")
+    check(con.execute("SELECT 1 FROM erp_single_reviews WHERE student_id=?", (g("2")["id"],)).fetchone(),
+          "Разовое без ID продажи и даты сохранено для ручной сверки")
     v = {x["label"]: x for x in ei.verify(con)["rows"]}
-    check(v["Абонементы"]["ok"], f"Сверка абонементов учитывает сложенные продажи ({v['Абонементы']})")
+    check(not v["Абонементы"]["ok"], f"Неперенесённые разовые явно оставляют расхождение для сверки ({v['Абонементы']})")
     t1, t2 = g("11")["id"], g("12")["id"]
     vv = {r[0]: r[1] for r in con.execute("SELECT student_id, status FROM attendance WHERE student_id IN (?,?)", (t1, t2))}
     check(vv == {t2: "present", t1: "absent"}, f"Посещения тёзок без номера разведены по группе ({vv})")

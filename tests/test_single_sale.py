@@ -23,7 +23,9 @@ def main():
     assert sub['month']=='2026-12' and sub['kind']=='single' and sub['price']==1800
     assert con.execute('SELECT COUNT(*) FROM single_visits').fetchone()[0]==1
     detail=sv.student_detail(con,sid)
-    assert detail['subscriptions'][0]['single_date']=='2026-12-05' and detail['subscriptions'][0]['group_name']=='Сб'
+    group_name=con.execute('SELECT name FROM groups WHERE id=?',(g,)).fetchone()[0]
+    assert detail['subscriptions'][0]['single_date']=='2026-12-05' and detail['subscriptions'][0]['group_name']==group_name
+    assert detail['subscriptions'][0]['group_id']==g
     money.add_payment(con,sid,1800,'cash',user,subscription_id=r['id'])
     assert singles.sale_quote(con,sid,g,'2026-12','2026-12-05')['total']==0
     for bad in ('2026-12-06','2026-11-01'):
