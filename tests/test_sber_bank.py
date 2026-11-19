@@ -230,3 +230,21 @@ if __name__ == '__main__':
                 with self.assertRaises(fiscal.FxError):sberbank.complete_authorization(self.con,7,request,self.current)
             bank.assert_not_called()
         finally:self.con.execute('ROLLBACK')
+
+    def test_background_checks_transport_before_oauth_and_keeps_existing_events(self):
+        self.private.pop('refresh_token',None)
+        row=sberbank.normalize(self.row(),self.account,self.day)
+        incomingcontrol.ingest_bank(self.con,'sber',[row],self.current)
+        with patch.object(sberbank,'transport_check',return_value={'ok':False,'note':'Сбер не ответил вовремя','code':'timeout'}) as probe:
+            result=sberbank.discover(self.con,self.current)
+        probe.assert_called_once()
+        self.assertTrue(result['authorization_required']);self.assertEqual(result['unavailable'],1)
+        self.assertEqual(self.con.execute('SELECT count(*) FROM incoming_money_events').fetchone()[0],1)
+        self.assertEqual(self.con.execute("SELECT status FROM incoming_source_checks WHERE source='sber'").fetchone()[0],'unavailable')
+
+    def test_bank_reachable_without_oauth_does_not_confirm_any_payment(self):
+        self.private.pop('refresh_token',None)
+        with patch.object(sberbank,'transport_check',return_value={'ok':True,'note':'Сервер доступен','code':'reachable'}):
+            result=sberbank.discover(self.con,self.current)
+        self.assertTrue(result['authorization_required']);self.assertEqual(result['checked'],0)
+        self.assertEqual(self.con.execute("SELECT status FROM incoming_source_checks WHERE source='sber'").fetchone()[0],'authorization_required')

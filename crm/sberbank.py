@@ -6,11 +6,14 @@ import re
 import secrets
 import time
 import threading
+import ssl
+import socket
+import errno
 from datetime import date,datetime,timedelta
 from decimal import Decimal
 from urllib.parse import urlencode,urlparse,parse_qs,urljoin
 from urllib.request import Request,build_opener,HTTPSHandler,HTTPRedirectHandler
-from urllib.error import HTTPError
+from urllib.error import HTTPError,URLError
 from zoneinfo import ZoneInfo
 from . import fiscal,sbercredentials as credentials
 
@@ -37,6 +40,49 @@ class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self,*args,**kwargs):return None
 
 
+TRANSPORT_NOTES={
+    'dns':'Сервер CRM не смог найти адрес Сбера. Проверка повторится автоматически',
+    'timeout':'Сбер не ответил серверу CRM вовремя на порту 9443. Проверка повторится автоматически',
+    'connection_refused':'Соединение сервера CRM со Сбером на порту 9443 отклонено',
+    'network_unreachable':'У сервера CRM нет сетевого маршрута к Сберу на порт 9443',
+    'tls_certificate_verify':'Сервер CRM не смог проверить сертификат сервера Сбера',
+    'tls_alert':'Сбер прервал защищённое соединение. Нужна проверка клиентского сертификата и параметров TLS',
+    'connection_reset':'Соединение сервера CRM со Сбером было прервано до получения ответа',
+    'proxy_tunnel':'Прокси сервера CRM не пропустил соединение со Сбером на порт 9443',
+    'connection_error':'Сбой связи сервера CRM со Сбером. Причина сохранена без секретных данных',
+}
+
+
+def transport_failure(error):
+    reason=error.reason if isinstance(error,URLError) else error
+    if isinstance(reason,ssl.SSLCertVerificationError):code='tls_certificate_verify'
+    elif isinstance(reason,ssl.SSLError):code='tls_alert'
+    elif isinstance(reason,socket.gaierror):code='dns'
+    elif isinstance(reason,(TimeoutError,socket.timeout)):code='timeout'
+    elif isinstance(reason,ConnectionRefusedError) or getattr(reason,'errno',None)==errno.ECONNREFUSED:code='connection_refused'
+    elif getattr(reason,'errno',None) in (errno.ENETUNREACH,errno.EHOSTUNREACH):code='network_unreachable'
+    elif isinstance(reason,(ConnectionResetError,ConnectionAbortedError,EOFError)):code='connection_reset'
+    elif isinstance(reason,OSError) and str(reason).startswith('Tunnel connection failed:'):code='proxy_tunnel'
+    else:code='connection_error'
+    failure=fiscal.FxError(TRANSPORT_NOTES[code]);failure.transport_code=code
+    # Only numeric enum diagnostics, never the original exception, host URL or key.
+    if isinstance(getattr(reason,'verify_code',None),int):failure.verify_code=reason.verify_code
+    return failure
+
+
+def record_failure(con,stage,error,current=None):
+    current=current or now()
+    if stage not in ('token_exchange','connection_check','token_refresh','statement','accounts'):stage='connection_check'
+    if isinstance(error,credentials.SettingsError):code='local_certificate';note=str(error)
+    elif isinstance(error,fiscal.FxError):
+        code=getattr(error,'transport_code',None) or ('http_'+str(error.http_status) if error.http_status else 'bank_response')
+        note=TRANSPORT_NOTES.get(code,str(error))
+    else:code='connection_error';note=TRANSPORT_NOTES[code]
+    value={'stage':stage,'code':code,'note':note[:500],'checked_at':current.isoformat(timespec='seconds')}
+    credentials.update_private(con,{'last_error':value})
+    return value
+
+
 def request(con,path,*,method='GET',params=None,form=None,token=None,bearer=False,text=False):
     # Never take URLs/paths from settings or bank pagination. Client cert cannot leak via redirect.
     if path not in (TOKEN,STATEMENT,USERINFO):raise fiscal.FxError('Недопустимый метод Сбера')
@@ -47,18 +93,31 @@ def request(con,path,*,method='GET',params=None,form=None,token=None,bearer=Fals
         data=urlencode(form).encode();headers['Content-Type']='application/x-www-form-urlencoded'
     url=API+path+('?' + urlencode(params) if params else '')
     try:
-        opener=build_opener(HTTPSHandler(context=credentials.tls_context(con)),NoRedirect())
-        if path==STATEMENT:
-            global _LAST_STATEMENT_REQUEST
-            with _RATE_LOCK:
-                delay=.21-(time.monotonic()-_LAST_STATEMENT_REQUEST)
-                if delay>0:time.sleep(delay)
-                _LAST_STATEMENT_REQUEST=time.monotonic()
-        with opener.open(Request(url,data=data,headers=headers,method=method),timeout=30) as response:
-            raw=response.read(8_000_001)
-            if len(raw)>8_000_000:raise fiscal.FxError('Сбер вернул слишком большой ответ')
+        context=credentials.tls_context(con)
+        for attempt in range(2):
+            opener=build_opener(HTTPSHandler(context=context),NoRedirect())
+            if path==STATEMENT:
+                global _LAST_STATEMENT_REQUEST
+                with _RATE_LOCK:
+                    delay=.21-(time.monotonic()-_LAST_STATEMENT_REQUEST)
+                    if delay>0:time.sleep(delay)
+                    _LAST_STATEMENT_REQUEST=time.monotonic()
+            try:
+                with opener.open(Request(url,data=data,headers=headers,method=method),timeout=30) as response:
+                    raw=response.read(8_000_001)
+                    if len(raw)>8_000_000:raise fiscal.FxError('Сбер вернул слишком большой ответ')
+                break
+            except (URLError,ssl.SSLError) as error:
+                reason=error.reason if isinstance(error,URLError) else error
+                strict=getattr(ssl,'VERIFY_X509_STRICT',0)
+                if attempt==0 and isinstance(reason,ssl.SSLCertVerificationError) and getattr(reason,'verify_code',None)==89 and strict and context.verify_flags & strict:
+                    # Published Sber intermediate (2018) has non-critical BasicConstraints.
+                    # Python 3.13 enables strict by default. Use standard CA verification
+                    # only for this bank context; keep signature, trust, expiry and hostname.
+                    context.verify_flags &= ~strict
+                    continue
+                raise
     except HTTPError as error:
-        # Provider bodies and URLs may contain credentials or account numbers. Do not log either.
         status=error.code
         try:error_code=json.loads(error.read(4096)).get('error','')
         except Exception:error_code=''
@@ -67,10 +126,37 @@ def request(con,path,*,method='GET',params=None,form=None,token=None,bearer=Fals
         if path==TOKEN and error_code=='invalid_client':note='Сбер: обновите client_secret в подключении CRM из карточки сервиса Сбера'
         elif path==TOKEN and error_code=='invalid_grant':note='Сбер: требуется заново разрешить чтение выписки в подключении CRM'
         raise fiscal.FxError(note,http_status=status) from None
-    except fiscal.FxError:raise
-    except Exception:raise fiscal.FxError('Не удалось установить защищённое соединение со Сбером') from None
+    except (fiscal.FxError,credentials.SettingsError):raise
+    except Exception as error:raise transport_failure(error) from None
     try:return raw.decode('utf-8') if text else json.loads(raw.decode('utf-8'),parse_float=Decimal)
     except Exception:raise fiscal.FxError('Сбер вернул неизвестный формат ответа') from None
+
+
+def credentials_ready(con):
+    try:return bool(credentials.view(con).get('configured'))
+    except credentials.SettingsError:return False
+
+
+def transport_check(con,current=None):
+    """GET without OAuth credentials: check server-side mTLS, never create an account/payment."""
+    current=current or now()
+    try:
+        request(con,TOKEN)  # Unsupported GET normally returns 400/401/403/405 after TLS succeeds.
+        result={'ok':True,'code':'reachable','note':'Защищённое соединение со Сбером установлено. Нажмите «Разрешить чтение в Сбере»'}
+    except fiscal.FxError as error:
+        if error.http_status in (400,401,403,404,405):
+            result={'ok':True,'code':'reachable','http_status':error.http_status,'note':'Сервер Сбера доступен. Для чтения выписки нажмите «Разрешить чтение в Сбере»'}
+        else:
+            failure=record_failure(con,'connection_check',error,current)
+            result={'ok':False,**failure}
+    except credentials.SettingsError as error:
+        failure=record_failure(con,'connection_check',error,current);result={'ok':False,**failure}
+    result['checked_at']=current.isoformat(timespec='seconds')
+    updates={'last_connection_check':result}
+    previous=credentials.get(con,'last_error') or {}
+    if result['ok'] and previous.get('code') in set(TRANSPORT_NOTES)|{'local_certificate'}:updates['last_error']=None
+    credentials.update_private(con,updates)
+    return result
 
 
 def configured(con):
@@ -98,6 +184,8 @@ def settings(con):
     result['maintenance']=maintenance(con)
     result['connected']=configured(con)
     result['token_expires_at']=credentials.get(con,'token_expires_at') or None
+    result['last_error']=credentials.get(con,'last_error',None)
+    result['last_connection_check']=credentials.get(con,'last_connection_check',None)
     return result
 
 
@@ -126,7 +214,7 @@ def store_tokens(con,response,current):
         raise fiscal.FxError('Сбер не подтвердил срок доступа')
     credentials.update_private(con,{'access_token':response['access_token'],'refresh_token':response['refresh_token'],
         'token_expires_at':(current+timedelta(seconds=lifetime)).isoformat(timespec='seconds'),
-        'authorized_scope':' '.join(sorted(scopes)),'authorization_checked_at':current.isoformat(timespec='seconds')})
+        'authorized_scope':' '.join(sorted(scopes)),'authorization_checked_at':current.isoformat(timespec='seconds'),'last_error':None})
     return response['access_token']
 
 
@@ -142,9 +230,12 @@ def complete_authorization(con,actor_id,query,current=None):
         if not record or record['client_id']!=credentials.get(con,'client_id'):
             raise fiscal.FxError('Ссылка подключения Сбера истекла или уже использована. Начните подключение заново')
         if query.get('error') or not query.get('code'):raise fiscal.FxError('Сбер не разрешил подключение. Повторите вход и разрешите чтение выписки')
-        response=request(con,TOKEN,method='POST',form={'grant_type':'authorization_code','client_id':record['client_id'],
-            'client_secret':credentials.get(con,'client_secret'),'code':query['code'],'redirect_uri':credentials.get(con,'redirect_uri')})
-        store_tokens(con,response,current)
+        try:
+            response=request(con,TOKEN,method='POST',form={'grant_type':'authorization_code','client_id':record['client_id'],
+                'client_secret':credentials.get(con,'client_secret'),'code':query['code'],'redirect_uri':credentials.get(con,'redirect_uri')})
+            store_tokens(con,response,current)
+        except (fiscal.FxError,credentials.SettingsError) as error:
+            record_failure(con,'token_exchange',error,current);raise
     return {'connected':True}
 
 
@@ -230,6 +321,11 @@ def statement(con,account,day):
 
 def discover(con,current):
     from . import incomingcontrol
+    if not configured(con):
+        probe=transport_check(con,current)
+        result={'checked':0,'completed':True,'blocked':1,'authorization_required':True,'unavailable':0 if probe['ok'] else 1,'note':probe['note'],'transport':probe}
+        incomingcontrol.checked(con,'sber',current,'authorization_required' if probe['ok'] else 'unavailable',result)
+        return result
     previous=con.execute("SELECT result FROM incoming_source_checks WHERE source='sber'").fetchone()
     old=json.loads(previous['result']) if previous else {}
     floor=(current.date()-timedelta(days=31)).isoformat();cursor=old.get('history_cursor') or floor
@@ -260,6 +356,7 @@ def discover(con,current):
 
 
 def test_connection(con):
+    if not configured(con):return transport_check(con)
     visible=accounts(con)
     day=(now().date()-timedelta(days=1)).isoformat()
     count=sum(len(statement(con,account,day)) for account in visible)

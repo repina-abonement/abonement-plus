@@ -1796,6 +1796,7 @@ def sber_save_settings(con,h,user,body,q):
     except sbercredentials.SettingsError as error:raise ApiError(str(error)) from None
     # Audit action only, never credential values or uploaded file.
     sv.audit(con,user,"sber.settings","Реквизиты подключения обновлены")
+    con.execute("UPDATE payment_control_jobs SET next_at=NULL WHERE source='incoming_sber' AND lease_owner IS NULL")
     return sberbank.settings(con)
 
 
