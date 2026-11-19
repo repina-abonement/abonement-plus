@@ -187,13 +187,16 @@ def view(con,summary_only=False,current=None):
         check=con.execute('SELECT * FROM incoming_source_checks WHERE source=?',(source,)).fetchone()
         coverage[source]={'status':check['status'] if check else 'not_connected' if source=='sber' else 'waiting',
             'checked_at':check['checked_at'] if check else None,'detail':json.loads(check['result']) if check else {}}
+    from . import sberbank
+    if not sberbank.configured(con):coverage['sber']['status']='not_connected'
+    elif coverage['sber']['status']=='not_connected':coverage['sber']['status']='waiting'
     for item in coverage.values():
-        if item['checked_at'] and datetime.fromisoformat(item['checked_at'])<current-timedelta(minutes=30):item['status']='stale'
+        if item['status'] not in ('not_connected','unavailable') and item['checked_at'] and datetime.fromisoformat(item['checked_at'])<current-timedelta(minutes=30):item['status']='stale'
     # Rolling discovery is not a claim of complete historical/account coverage.
     complete=False
     result={'complete':complete,'coverage':coverage,'tracked_cases':len(rows),'attention':len(issues),
         'unrecorded':sum(c['unrecorded'] for c in rows),'receipt_unconfirmed':sum(c['receipt']['status']!='confirmed' for c in rows),
-        'scope_note':'Поиск новых поступлений: PayKeeper — сегодня, вчера и поэтапная проверка предыдущих 31 дня; Точка — все доступные ключу счета, первоначально 31 день. Сбер и более ранняя история пока не охвачены полностью.',
+        'scope_note':'Поиск новых поступлений: PayKeeper — сегодня, вчера и поэтапная проверка предыдущих 31 дня; Точка — все доступные ключу счета, первоначально 31 день. Сбер — все счета, доступные разрешению, с поэтапной проверкой 31 дня. Более ранняя история и полнота доступа ко всем счетам пока не подтверждены.',
         'truncated':truncated,'sber_connected':coverage['sber']['status']=='ok'}
     if not summary_only:result['rows']=issues
     return result

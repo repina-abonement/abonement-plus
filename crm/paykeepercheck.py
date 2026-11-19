@@ -76,10 +76,11 @@ def inspect(con,provider_id,include_bank=True,include_ofd=True):
 
 def source_status(con):
     """Probe existing read credentials only; no statements requested, no print/run calls."""
+    from . import sberbank
     result={'checked_at':datetime.now(ZoneInfo('Europe/Moscow')).isoformat(timespec='seconds'),
             'tochka':{'configured':bool(fiscal.cfg(con,'fx_tochka_token')),'available':False},
             'ofd':{'configured':bool(fiscal.cfg(con,'fx_ofd_token')),'available':False},
-            'sber':{'connector_implemented':False},
+            'sber':{'connector_implemented':True,'configured':sberbank.configured(con)},
             'legacy_automation_enabled':fiscal.cfg(con,'fx_enabled')=='1',
             'automatic_reprint_enabled':fiscal.cfg(con,'fx_auto_retry')=='1',
             'legacy_background_started':False,'control_read_only':True,

@@ -178,6 +178,8 @@ def init(con):
     payoutcheck.init(con)
     from . import incomingcontrol
     incomingcontrol.init(con)
+    from . import sberbank
+    sberbank.init(con)
     from . import paymentworker
     paymentworker.init(con)
     con.execute('CREATE TABLE IF NOT EXISTS fiscal_ofd_days(day TEXT PRIMARY KEY,checked_at TEXT NOT NULL,ok INTEGER NOT NULL)')

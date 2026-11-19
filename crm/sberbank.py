@@ -1,0 +1,264 @@
+"""Read-only Sber Business statements. No payment/refund/fiscal write endpoints."""
+import base64
+import hashlib
+import json
+import re
+import secrets
+import time
+import threading
+from datetime import date,datetime,timedelta
+from decimal import Decimal
+from urllib.parse import urlencode,urlparse,parse_qs,urljoin
+from urllib.request import Request,build_opener,HTTPSHandler,HTTPRedirectHandler
+from urllib.error import HTTPError
+from zoneinfo import ZoneInfo
+from . import fiscal,sbercredentials as credentials
+
+API='https://fintech.sberbank.ru:9443'
+AUTHORIZE='https://sbi.sberbank.ru:9443/ic/sso/api/v2/oauth/authorize'
+TOKEN='/ic/sso/api/v2/oauth/token'
+STATEMENT='/fintech/api/v2/statement/transactions'
+USERINFO='/fintech/api/ic/sso/api/v2/oauth/user-info'
+SCOPES=frozenset(('openid','accounts','GET_STATEMENT_ACCOUNT','GET_STATEMENT_TRANSACTION'))
+_RATE_LOCK=threading.Lock()
+_LAST_STATEMENT_REQUEST=0.0
+
+
+def now():return datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None)
+
+
+def init(con):
+    con.execute('''CREATE TABLE IF NOT EXISTS sber_oauth_states(
+        state_hash TEXT PRIMARY KEY,actor_id INTEGER NOT NULL,expires_at TEXT NOT NULL,
+        client_id TEXT NOT NULL,nonce TEXT NOT NULL)''')
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self,*args,**kwargs):return None
+
+
+def request(con,path,*,method='GET',params=None,form=None,token=None,bearer=False,text=False):
+    # Never take URLs/paths from settings or bank pagination. Client cert cannot leak via redirect.
+    if path not in (TOKEN,STATEMENT,USERINFO):raise fiscal.FxError('Недопустимый метод Сбера')
+    headers={'Accept':'application/jwt' if text else 'application/json'}
+    if token:headers['Authorization']=('Bearer ' if bearer else '')+token
+    data=None
+    if form is not None:
+        data=urlencode(form).encode();headers['Content-Type']='application/x-www-form-urlencoded'
+    url=API+path+('?' + urlencode(params) if params else '')
+    try:
+        opener=build_opener(HTTPSHandler(context=credentials.tls_context(con)),NoRedirect())
+        if path==STATEMENT:
+            global _LAST_STATEMENT_REQUEST
+            with _RATE_LOCK:
+                delay=.21-(time.monotonic()-_LAST_STATEMENT_REQUEST)
+                if delay>0:time.sleep(delay)
+                _LAST_STATEMENT_REQUEST=time.monotonic()
+        with opener.open(Request(url,data=data,headers=headers,method=method),timeout=30) as response:
+            raw=response.read(8_000_001)
+            if len(raw)>8_000_000:raise fiscal.FxError('Сбер вернул слишком большой ответ')
+    except HTTPError as error:
+        # Provider bodies and URLs may contain credentials or account numbers. Do not log either.
+        status=error.code
+        try:error_code=json.loads(error.read(4096)).get('error','')
+        except Exception:error_code=''
+        error.close()
+        note='Сбер: требуется обновить разрешение доступа' if status==401 else 'Сбер: нет разрешения читать выбранный счёт или выписку' if status==403 else 'Сбер временно не вернул данные; проверка повторится автоматически'
+        if path==TOKEN and error_code=='invalid_client':note='Сбер: обновите client_secret в подключении CRM из карточки сервиса Сбера'
+        elif path==TOKEN and error_code=='invalid_grant':note='Сбер: требуется заново разрешить чтение выписки в подключении CRM'
+        raise fiscal.FxError(note,http_status=status) from None
+    except fiscal.FxError:raise
+    except Exception:raise fiscal.FxError('Не удалось установить защищённое соединение со Сбером') from None
+    try:return raw.decode('utf-8') if text else json.loads(raw.decode('utf-8'),parse_float=Decimal)
+    except Exception:raise fiscal.FxError('Сбер вернул неизвестный формат ответа') from None
+
+
+def configured(con):
+    try:return bool(credentials.get(con,'client_id') and credentials.get(con,'client_secret') and credentials.view(con).get('certificate_configured') and credentials.get(con,'refresh_token'))
+    except credentials.SettingsError:return False
+
+
+def maintenance(con,current=None):
+    current=current or now();notes=[]
+    stamp=credentials.get(con,'client_secret_updated_at')
+    if stamp:
+        changed=datetime.fromisoformat(stamp).astimezone(ZoneInfo('Europe/Moscow')).replace(tzinfo=None)
+        days=40-(current-changed).days
+        if days<=10:notes.append('Сбер: срок client_secret скоро истечёт или уже истёк. Обновите его в карточке сервиса и сохраните в подключении CRM')
+    certificate=credentials.get(con,'certificate_expires_at')
+    if certificate:
+        expires=datetime.fromisoformat(certificate).astimezone(ZoneInfo('Europe/Moscow')).replace(tzinfo=None)
+        if expires<current+timedelta(days=30):notes.append('Сбер: обновите сертификат в карточке сервиса и загрузите новый файл в подключении CRM')
+    return notes
+
+
+def settings(con):
+    result=credentials.view(con)
+    result['scope']=' '.join(sorted(SCOPES))
+    result['maintenance']=maintenance(con)
+    result['connected']=configured(con)
+    result['token_expires_at']=credentials.get(con,'token_expires_at') or None
+    return result
+
+
+def authorize(con,actor_id,current=None):
+    current=current or now()
+    view=credentials.view(con)
+    if not view.get('client_id') or not view.get('client_secret_configured') or not view.get('certificate_configured'):
+        raise fiscal.FxError('Сначала сохраните реквизиты сервиса Сбера и сертификат')
+    state=secrets.token_hex(32);nonce=secrets.token_hex(24)
+    con.execute('DELETE FROM sber_oauth_states WHERE expires_at<=?',(current.isoformat(timespec='seconds'),))
+    con.execute('INSERT INTO sber_oauth_states VALUES(?,?,?,?,?)',
+        (hashlib.sha256(state.encode()).hexdigest(),actor_id,(current+timedelta(minutes=15)).isoformat(timespec='seconds'),view['client_id'],nonce))
+    return {'url':AUTHORIZE+'?'+urlencode({'response_type':'code','client_id':view['client_id'],
+        'redirect_uri':view['redirect_uri'],'scope':' '.join(sorted(SCOPES)),'state':state,'nonce':nonce})}
+
+
+def store_tokens(con,response,current):
+    if not isinstance(response,dict):raise fiscal.FxError('Сбер не подтвердил доступ')
+    scopes=set(str(response.get('scope') or '').split())
+    if not {'openid','accounts','GET_STATEMENT_ACCOUNT'}.issubset(scopes) or scopes-SCOPES:
+        raise fiscal.FxError('Разрешения Сбера отличаются от доступа только к чтению. Подключите отдельный сервис CRM')
+    if not isinstance(response.get('access_token'),str) or not response['access_token'] or not isinstance(response.get('refresh_token'),str) or not response['refresh_token']:
+        raise fiscal.FxError('Сбер не вернул пару ключей доступа')
+    lifetime=response.get('expires_in')
+    if isinstance(lifetime,bool) or not isinstance(lifetime,int) or not 60<=lifetime<=86400 or str(response.get('token_type','')).lower()!='bearer':
+        raise fiscal.FxError('Сбер не подтвердил срок доступа')
+    credentials.update_private(con,{'access_token':response['access_token'],'refresh_token':response['refresh_token'],
+        'token_expires_at':(current+timedelta(seconds=lifetime)).isoformat(timespec='seconds'),
+        'authorized_scope':' '.join(sorted(scopes)),'authorization_checked_at':current.isoformat(timespec='seconds')})
+    return response['access_token']
+
+
+def complete_authorization(con,actor_id,query,current=None):
+    current=current or now();state=str(query.get('state') or '')
+    if not re.fullmatch('[a-f0-9]{64}',state):raise fiscal.FxError('Ссылка подключения Сбера недействительна. Начните подключение заново')
+    digest=hashlib.sha256(state.encode()).hexdigest()
+    with credentials.lock(con):
+        record=con.execute('DELETE FROM sber_oauth_states WHERE state_hash=? AND actor_id=? AND expires_at>? RETURNING *',
+            (digest,actor_id,current.isoformat(timespec='seconds'))).fetchone()
+        if not record or record['client_id']!=credentials.get(con,'client_id'):
+            raise fiscal.FxError('Ссылка подключения Сбера истекла или уже использована. Начните подключение заново')
+        if query.get('error') or not query.get('code'):raise fiscal.FxError('Сбер не разрешил подключение. Повторите вход и разрешите чтение выписки')
+        response=request(con,TOKEN,method='POST',form={'grant_type':'authorization_code','client_id':record['client_id'],
+            'client_secret':credentials.get(con,'client_secret'),'code':query['code'],'redirect_uri':credentials.get(con,'redirect_uri')})
+        store_tokens(con,response,current)
+    return {'connected':True}
+
+
+def access_token(con,force=False,current=None):
+    current=current or now()
+    with credentials.lock(con):
+        expiry=credentials.get(con,'token_expires_at')
+        if not force and credentials.get(con,'access_token') and expiry and datetime.fromisoformat(expiry)>current+timedelta(seconds=60):
+            return credentials.get(con,'access_token')
+        refresh=credentials.get(con,'refresh_token')
+        if not refresh:raise fiscal.FxError('Сбер: сначала разрешите CRM читать выписку в разделе подключения')
+        response=request(con,TOKEN,method='POST',form={'grant_type':'refresh_token','client_id':credentials.get(con,'client_id'),
+            'client_secret':credentials.get(con,'client_secret'),'refresh_token':refresh})
+        return store_tokens(con,response,current)
+
+
+def read(con,path,params=None,*,text=False):
+    for attempt in range(2):
+        token=access_token(con,force=attempt==1)
+        try:return request(con,path,params=params,token=token,bearer=path==USERINFO,text=text)
+        except fiscal.FxError as error:
+            if error.http_status!=401 or attempt:raise
+
+
+def accounts(con):
+    """Accounts data received directly from bank through verified mTLS, not a browser JWT login."""
+    raw=read(con,USERINFO,text=True)
+    try:
+        # This JWT is used only as the bank's account-data envelope; never as CRM authentication.
+        parts=raw.split('.')
+        if len(parts)!=3:raise ValueError()
+        claims=json.loads(base64.urlsafe_b64decode(parts[1]+'='*(-len(parts[1])%4)))
+        rows=claims['accounts']
+        if not isinstance(rows,list) or not rows:raise ValueError()
+        out=[str(row['accountNumber']) for row in rows]
+        if len(out)!=len(set(out)) or len(out)>30 or any(not re.fullmatch(r'\d{20}',a) for a in out):raise ValueError()
+        return out
+    except Exception:raise fiscal.FxError('Сбер не вернул проверяемый список счетов. Охват счетов пока не подтверждён') from None
+
+
+def normalize(row,account,day):
+    if not isinstance(row,dict):raise fiscal.FxError('Неизвестная операция в выписке Сбера')
+    ident=row.get('uuid');direction=row.get('direction');amount=row.get('amount')
+    if not isinstance(ident,str) or not ident or direction not in ('CREDIT','DEBIT') or not isinstance(amount,dict):
+        raise fiscal.FxError('В операции Сбера отсутствуют ID, сумма или направление')
+    try:
+        value=Decimal(str(amount['amount']));currency=amount['currencyName']
+        if not value.is_finite() or not 0<=value<=Decimal('99999999999999.99') or value*100!=(value*100).to_integral_value() or not re.fullmatch('[A-Z]{3}',currency):raise ValueError()
+        at=datetime.fromisoformat(row['operationDate'].replace('Z','+00:00'))
+        if at.tzinfo:at=at.astimezone(ZoneInfo('Europe/Moscow'))
+        if at.date().isoformat()!=day:raise ValueError()
+    except Exception:raise fiscal.FxError('Не удалось подтвердить сумму, валюту или дату операции Сбера') from None
+    transfer=row.get('rurTransfer') or row.get('curTransfer') or row.get('swiftTransfer') or {}
+    if not isinstance(transfer,dict):raise fiscal.FxError('Неизвестные реквизиты операции Сбера')
+    if direction=='CREDIT' and transfer.get('payeeAccount') and transfer['payeeAccount']!=account:
+        raise fiscal.FxError('Счёт операции Сбера не совпал с запрошенным счётом')
+    return {'_account_id':'sber:'+account,'transactionId':ident,'status':'Booked',
+        'creditDebitIndicator':'Credit' if direction=='CREDIT' else 'Debit','documentProcessDate':day,
+        'Amount':{'amount':str(value),'currency':currency},'description':str(row.get('paymentPurpose') or ''),
+        'DebtorParty':{'name':str(transfer.get('payerName') or transfer.get('orderingCustomerName') or ''),'inn':str(transfer.get('payerInn') or '')}}
+
+
+def statement(con,account,day):
+    rows=[];seen=set()
+    for page in range(1,101):
+        response=read(con,STATEMENT,{'accountNumber':account,'statementDate':day,'page':page})
+        if not isinstance(response,dict) or not isinstance(response.get('transactions'),list) or not isinstance(response.get('_links',[]),list):
+            raise fiscal.FxError('Сбер не вернул полную проверяемую выписку')
+        for row in response['transactions']:
+            normalized=normalize(row,account,day)
+            if normalized['transactionId'] in seen:raise fiscal.FxError('Сбер повторил операцию при чтении страниц выписки')
+            seen.add(normalized['transactionId']);rows.append(normalized)
+        links=response.get('_links',[])
+        if any(not isinstance(link,dict) or not isinstance(link.get('href'),str) or link.get('rel') not in ('next','prev','self','first','last') for link in links):raise fiscal.FxError('Сбер вернул неизвестную структуру страниц')
+        nexts=[link for link in links if link.get('rel')=='next']
+        if not nexts:return rows
+        if len(nexts)!=1:raise fiscal.FxError('Сбер вернул неоднозначную следующую страницу')
+        link=urlparse(urljoin(API+STATEMENT,str(nexts[0].get('href') or '')));params=parse_qs(link.query)
+        if link.scheme!='https' or link.netloc!='fintech.sberbank.ru:9443' or link.path!=STATEMENT or params.get('accountNumber')!=[account] or params.get('statementDate')!=[day] or params.get('page')!=[str(page+1)]:
+            raise fiscal.FxError('Сбер вернул несогласованную следующую страницу выписки')
+    raise fiscal.FxError('Выписка Сбера превышает предел страниц; полнота не подтверждена')
+
+
+def discover(con,current):
+    from . import incomingcontrol
+    previous=con.execute("SELECT result FROM incoming_source_checks WHERE source='sber'").fetchone()
+    old=json.loads(previous['result']) if previous else {}
+    floor=(current.date()-timedelta(days=31)).isoformat();cursor=old.get('history_cursor') or floor
+    if not floor<=cursor<=current.date().isoformat():cursor=floor
+    days=list(dict.fromkeys([current.date().isoformat(),(current.date()-timedelta(days=1)).isoformat(),cursor]))
+    errors=[];successful=[];count=0;account_count=0
+    try:
+        visible=accounts(con);selected=credentials.get(con,'accounts') or visible
+        if set(selected)-set(visible):raise fiscal.FxError('Сбер не разрешил чтение одного из выбранных счетов')
+        credentials.update_private(con,{'discovered_accounts':visible,'accounts_checked_at':current.isoformat(timespec='seconds')})
+        account_count=len(visible)
+        for day in days:
+            try:
+                transactions=[]
+                for account in visible:transactions.extend(statement(con,account,day))
+                count+=incomingcontrol.ingest_bank(con,'sber',transactions,current);successful.append(day)
+            except (fiscal.FxError,credentials.SettingsError) as error:errors.append({'day':day,'note':str(error),'http_status':getattr(error,'http_status',None)})
+            except Exception:errors.append({'day':day,'note':'Сбер: не удалось подтвердить полноту выписки'})
+        if cursor in successful:
+            cursor=(date.fromisoformat(cursor)+timedelta(days=1)).isoformat()
+            if cursor>current.date().isoformat():cursor=floor
+    except (fiscal.FxError,credentials.SettingsError) as error:errors.append({'note':str(error),'http_status':getattr(error,'http_status',None)})
+    except Exception:errors.append({'note':'Сбер: проверка временно недоступна; повтор произойдёт автоматически'})
+    result={'checked':count,'completed':True,'days':days,'successful_days':successful,'history_cursor':cursor,
+        'accounts_count':account_count,'maintenance':maintenance(con,current),'unavailable':len(errors),'errors':errors,'empty':not count and not errors}
+    incomingcontrol.checked(con,'sber',current,'unavailable' if errors else 'ok',result)
+    return result
+
+
+def test_connection(con):
+    visible=accounts(con)
+    day=(now().date()-timedelta(days=1)).isoformat()
+    count=sum(len(statement(con,account,day)) for account in visible)
+    return {'ok':True,'accounts_count':len(visible),'transactions_count':count,'note':'Счета и выписка Сбера читаются. Поступления проверяются в фоне каждые 10 минут'}

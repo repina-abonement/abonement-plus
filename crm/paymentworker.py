@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-SOURCES=('paykeeper','tochka','ofd','incoming_paykeeper','incoming_tochka','incoming_receipts')
+SOURCES=('paykeeper','tochka','ofd','incoming_paykeeper','incoming_tochka','incoming_receipts','incoming_sber')
 INTERVAL=600
 LEASE=3600
 
@@ -28,6 +28,9 @@ def init(con):
 
 def configured(con, source):
     from . import fiscal
+    if source=='incoming_sber':
+        from . import sberbank
+        return sberbank.configured(con)
     keys={'paykeeper':('fx_pk_server','fx_pk_user','fx_pk_password'),
           'tochka':('fx_tochka_token',),'ofd':('fx_ofd_token',),
           'incoming_paykeeper':('fx_pk_server','fx_pk_user','fx_pk_password'),
@@ -71,6 +74,9 @@ def cycle(con,source,current=None):
                 if not result['checked'] and daily.get('days_checked'):result['checked']=daily['days_checked']
             elif source=='tochka':result=bankcheck.run_automatic(con,current,limit=3,cached_only=True)
             elif source=='ofd':result=run_ofd(con,current,limit=3)
+            elif source=='incoming_sber':
+                from . import sberbank
+                result=sberbank.discover(con,current)
             else:
                 from . import incomingcontrol
                 run={'incoming_paykeeper':incomingcontrol.discover_paykeeper,'incoming_tochka':incomingcontrol.discover_tochka,'incoming_receipts':incomingcontrol.check_receipts}[source]

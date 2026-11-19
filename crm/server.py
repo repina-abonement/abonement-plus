@@ -63,12 +63,13 @@ SESSION_DAYS = 14
 ROUTES: list[tuple[str, re.Pattern, callable, str]] = []
 
 
-def route(method: str, pattern: str, role: str = "any"):
+def route(method: str, pattern: str, role: str = "any", *, transactional=True):
     # Existing IDs stay numeric. Attachment IDs/tickets are deliberately opaque.
     parameter_types={'token':r'[A-Za-z0-9_-]{43}'} if pattern.startswith('/api/public/pay-links/') else {'aid':r'[0-9a-f]{32}'} if '/attachments/' in pattern else {'ticket':r'[A-Za-z0-9_-]{43}','filename':r'[^/]+'} if pattern.startswith('/api/chat-files/') else {}
     rx = re.compile("^" + re.sub(r"\{(\w+)\}", lambda m:'(?P<'+m[1]+'>'+parameter_types.get(m[1],r'[0-9]+')+')', pattern) + "$")
 
     def deco(fn):
+        fn.transactional=transactional
         ROUTES.append((method, rx, fn, role))
         return fn
     return deco
@@ -1778,6 +1779,56 @@ def fx(fn, *a, **kw):
         return fn(*a, **kw)
     except fiscal.FxError as e:
         raise ApiError(str(e))
+
+
+@route("GET", "/api/sber/settings", role="admin", transactional=False)
+def sber_settings(con,h,user,body,q):
+    from . import sberbank
+    h.extra_headers.extend([("Cache-Control","no-store"),("Referrer-Policy","no-referrer")])
+    return sberbank.settings(con)
+
+
+@route("PUT", "/api/sber/settings", role="admin", transactional=False)
+def sber_save_settings(con,h,user,body,q):
+    from . import sbercredentials,sberbank
+    h.extra_headers.append(("Cache-Control","no-store"))
+    try:sbercredentials.save(con,body)
+    except sbercredentials.SettingsError as error:raise ApiError(str(error)) from None
+    # Audit action only, never credential values or uploaded file.
+    sv.audit(con,user,"sber.settings","Реквизиты подключения обновлены")
+    return sberbank.settings(con)
+
+
+@route("POST", "/api/sber/authorize", role="admin", transactional=False)
+def sber_authorize(con,h,user,body,q):
+    from . import sberbank
+    h.extra_headers.append(("Cache-Control","no-store"))
+    try:return sberbank.authorize(con,user['id'])
+    except fiscal.FxError as error:raise ApiError(str(error)) from None
+
+
+@route("GET", "/api/sber/oauth/callback", role="admin", transactional=False)
+def sber_oauth_callback(con,h,user,body,q):
+    from . import sberbank,sbercredentials
+    h.extra_headers.extend([("Cache-Control","no-store"),("Referrer-Policy","no-referrer"),
+        ("Content-Security-Policy","default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'")])
+    try:
+        sberbank.complete_authorization(con,user['id'],q)
+        sv.audit(con,user,"sber.authorized","Разрешено чтение выписки")
+        con.execute("UPDATE payment_control_jobs SET next_at=NULL WHERE source='incoming_sber' AND lease_owner IS NULL")
+        note='Сбер разрешил чтение выписки. Автоматическая проверка начнётся на сервере.'
+    except (fiscal.FxError,sbercredentials.SettingsError) as error:note=str(error)
+    return Raw(('<!doctype html><html lang="ru"><meta charset="utf-8"><title>Подключение Сбера</title>'
+        '<body style="font-family:sans-serif;max-width:640px;margin:60px auto;padding:20px"><h2>Сбер Бизнес</h2><p>'+
+        html_escape(note)+'</p><a href="/?sber=connected#fiscal">Вернуться в подключение CRM</a></body></html>').encode(),'text/html; charset=utf-8')
+
+
+@route("POST", "/api/sber/test", role="admin", transactional=False)
+def sber_test_connection(con,h,user,body,q):
+    from . import sberbank,sbercredentials
+    h.extra_headers.append(("Cache-Control","no-store"))
+    try:return sberbank.test_connection(con)
+    except (fiscal.FxError,sbercredentials.SettingsError) as error:return {'ok':False,'note':str(error)}
 
 
 @route("GET", "/api/fiscal/source-status", role="admin")
@@ -3496,6 +3547,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         if os.environ.get("CRM_QUIET") != "1":
+            if self.path.startswith("/api/sber/oauth/callback"):
+                return super().log_message("%s", "Sber OAuth callback [query hidden]")
             super().log_message(fmt, *args)
 
     def _send(self, status: int, payload, ctype="application/json; charset=utf-8"):
@@ -3504,9 +3557,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "same-origin")
+        if not any(k.lower()=="referrer-policy" for k,v in getattr(self,"extra_headers",[])):
+            self.send_header("Referrer-Policy", "same-origin")
         self.send_header("X-Frame-Options", "DENY")
-        if ctype.startswith("application/json"):
+        if ctype.startswith("application/json") and not any(k.lower()=="cache-control" for k,v in getattr(self,"extra_headers",[])):
             self.send_header("Cache-Control", "no-store")
         for k, v in getattr(self, "extra_headers", []):
             self.send_header(k, v)
@@ -3608,7 +3662,7 @@ class Handler(BaseHTTPRequestHandler):
                     if method != "DELETE" and "application/json" not in (self.headers.get("Content-Type") or ""):
                         raise ApiError("Ожидается JSON", 415)
                     n = int(self.headers.get("Content-Length") or 0)
-                    if n > (1_500_000 if url.path == "/api/sticker-packs/upload" else 21_000_000 if url.path.startswith("/api/offers") else 40_000_000 if url.path.startswith("/api/erp") else 80_000_000 if url.path.startswith("/api/import/telegram") else 8_000_000 if re.fullmatch(r'/api/conversations/[0-9]+/attachments',url.path) else 8_000_000 if url.path.startswith("/api/memos") else 14_000_000 if url.path.startswith("/api/posts") else 1_000_000):
+                    if n > (3_000_000 if url.path == "/api/sber/settings" else 1_500_000 if url.path == "/api/sticker-packs/upload" else 21_000_000 if url.path.startswith("/api/offers") else 40_000_000 if url.path.startswith("/api/erp") else 80_000_000 if url.path.startswith("/api/import/telegram") else 8_000_000 if re.fullmatch(r'/api/conversations/[0-9]+/attachments',url.path) else 8_000_000 if url.path.startswith("/api/memos") else 14_000_000 if url.path.startswith("/api/posts") else 1_000_000):
                         raise ApiError("Слишком большой запрос", 413)
                     if n:
                         body = json.loads(self.rfile.read(n) or b"{}")
@@ -3629,16 +3683,17 @@ class Handler(BaseHTTPRequestHandler):
                             raise ApiError("Стажёру доступен только Планер", 403)
                     if not any(perms.allowed(user, x) for x in role.split("|")):
                         raise ApiError("Недостаточно прав", 403)
-                con.execute("BEGIN" if method in ("GET", "HEAD") else "BEGIN IMMEDIATE")
+                transactional=getattr(fn,"transactional",True)
+                if transactional:con.execute("BEGIN" if method in ("GET", "HEAD") else "BEGIN IMMEDIATE")
                 try:
                     if user and user["role"] == "trainee" and (url.path.startswith("/api/planner") or re.fullmatch(r"/api/tasks/[0-9]+/done", url.path)):
                         from . import staffdocs
                         if staffdocs.pending(con, user):
                             raise ApiError("Перед работой в Планере прочитайте и примите документы при входе", 403)
                     result = fn(con, self, user, body, q, **mt.groupdict())
-                    con.execute("COMMIT")
+                    if transactional:con.execute("COMMIT")
                 except BaseException:
-                    con.execute("ROLLBACK")
+                    if transactional and con.in_transaction:con.execute("ROLLBACK")
                     raise
                 if isinstance(result, JsonResponse):
                     return self._send(result.status, result.body)

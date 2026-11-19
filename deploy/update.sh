@@ -21,6 +21,8 @@ fi
 # Свои домены CRM: перечислены в deploy/domains.txt (по одному в строке). Когда домен уже указывает на этот сервер,
 # добавляем его в nginx и получаем сертификат https. Проверка дешёвая, работает при каждом запуске таймера.
 NGX=/etc/nginx/sites-available/abonement-plus
+# OAuth callback contains a one-use bank code; suppress access/error URI logs for this path.
+if [ -f "$NGX" ]; then python3 "$DIR/deploy/protect-sber-callback.py" "$NGX"; fi
 # большие файлы (выгрузки ERP, экспорт Telegram, картинки постов): первоначальная настройка пускала только 2 МБ
 if [ -f "$NGX" ] && grep -q "client_max_body_size 2m;" "$NGX"; then
   sed -i "s/client_max_body_size 2m;/client_max_body_size 100m;/" "$NGX" && nginx -t -q 2>/dev/null && systemctl reload nginx

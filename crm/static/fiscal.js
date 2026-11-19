@@ -1,7 +1,7 @@
 "use strict";
 /* Абонемент Плюс — Чеки 54-ФЗ: каждое поступление на счёт должно иметь чек. */
 
-S.fx = { tab: "list", filter: "problems" };
+S.fx = { tab: typeof location !== "undefined" && new URLSearchParams(location.search).get("sber") === "connected" ? "setup" : "list", filter: "problems" };
 const fxRub = (k) => rub(Math.round(k) / 100);
 const FX_SRC = { tochka: "Точка", paykeeper: "PayKeeper", ofd: "Платформа ОФД" };
 
@@ -59,7 +59,7 @@ async function fxSetup(box, d) {
   try { users = (await api("GET", "/api/users")).filter((u) => u.active && u.role !== "coach"); } catch (e) { /* без списка */ }
   const opt = (sel) => `<option value="">-</option>` + users.map((u) => `<option value="${u.id}" ${String(u.id) === String(sel) ? "selected" : ""}>${esc(u.name)}</option>`).join("");
   const f = (k, label, ph = "", type = "text") => `<div class="field"><label>${label}</label><input data-fx="${k}" type="${type}" value="${esc(v[k] || "")}" placeholder="${esc(ph)}" autocomplete="off"></div>`;
-  box.innerHTML = `<div class="sub-form" style="max-width:640px;padding-bottom:90px">
+  box.innerHTML = `<div id="fx-sber-setup" style="max-width:640px;margin-bottom:18px"></div><div class="sub-form" style="max-width:640px;padding-bottom:90px">
     <label class="fx-check"><input type="checkbox" data-fxc="fx_enabled" ${v.fx_enabled === "1" ? "checked" : ""}><span><b>Сверка включена</b>, проверяет каждые 10 минут</span></label>
     <h3>Точка</h3>${f("fx_tochka_token", "JWT-токен (только чтение счетов и выписок)", "вставьте токен")}
     ${f("fx_inn", "Ваш ИНН (переводы себе не требуют чека)", "12 цифр")}
@@ -87,4 +87,78 @@ async function fxSetup(box, d) {
       $("#fx-test-res").innerHTML = Object.keys(r).length ? Object.entries(r).map(([k, t]) => `${FX_SRC[k]}: ${esc(t)}`).join("<br>") : "Ничего не подключено";
     } catch (e) { fail(e); }
   };
+  await fxSberSetup(box.querySelector("#fx-sber-setup"));
+}
+
+
+async function fxSberSetup(box) {
+  if (!box || S.user.role !== "admin") return;
+  let d;
+  try { d = await api("GET", "/api/sber/settings"); }
+  catch (e) { box.innerHTML = '<p class="small">Сбер Бизнес: не удалось загрузить настройки подключения. Обновите страницу.</p>'; return; }
+  const date = value => { const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? "дата не получена" : esc(parsed.toLocaleString("ru-RU", {timeZone:"Europe/Moscow"})) + " МСК"; };
+  const masked = Array.isArray(d.accounts_masked) ? d.accounts_masked.map(x => esc(x)).join(", ") : "";
+  box.innerHTML = `<details class="panel" id="fx-sber-details"><summary><b>Сбер Бизнес</b> · ${d.connected ? "разрешение на чтение получено" : "подключить выписку"}</summary>
+    <p class="small">CRM будет читать поступления по расписанию при закрытом браузере. При подключении выбирайте только чтение выписки и сведений о счетах.</p>
+    ${d.connected ? '<p class="small">Разрешение получено. Фактическое чтение выписки проверяется отдельно.</p>' : ''}
+    ${(d.maintenance||[]).map(note=>`<p class="small" role="status">${esc(note)}</p>`).join('')}
+    <ol class="small"><li>В карточке активированного сервиса Sber API откройте параметры подключения и перенесите client_id и client_secret в поля ниже.</li>
+      <li>В разделе Сбера «Сертификаты шифрования» создайте сертификат, задайте пароль и скачайте файл .p12. Выберите его ниже.</li>
+      <li>CRM читает все счета, доступные вашему разрешению. При желании укажите ожидаемые номера — CRM проверит, что они доступны. Сохраните настройки и нажмите «Разрешить чтение в Сбере».</li></ol>
+    <div class="field"><label for="sber-client-id">client_id из карточки сервиса</label><input id="sber-client-id" type="text" value="${esc(d.client_id || '')}" autocomplete="off" spellcheck="false"></div>
+    <div class="field"><label for="sber-client-secret">client_secret</label><input id="sber-client-secret" type="password" value="" autocomplete="new-password" placeholder="${d.client_secret_set ? 'Уже сохранён · оставьте пустым, чтобы сохранить' : 'Вставьте из карточки сервиса'}"></div>
+    <div class="field"><label for="sber-accounts">Ожидаемые расчётные счета (необязательно)</label><textarea id="sber-accounts" rows="2" autocomplete="off" placeholder="${d.accounts_set ? 'Оставьте пустым, если список счетов не меняется' : 'Каждый номер счёта с новой строки · пусто = доступные счета'}"></textarea>${masked ? `<span class="small muted">Сохранены счета, заканчивающиеся на: ${masked}</span>` : ''}</div>
+    <div class="field"><label for="sber-certificate">Сертификат .p12</label><input id="sber-certificate" type="file" accept=".p12,.pfx,application/x-pkcs12">${d.certificate_set ? `<span class="small muted">Сертификат сохранён${d.certificate_expires_at ? ' · действует до ' + date(d.certificate_expires_at) : ''}. Новый файл выбирайте только для замены.</span>` : ''}</div>
+    <div class="field"><label for="sber-certificate-password">Пароль сертификата</label><input id="sber-certificate-password" type="password" value="" autocomplete="new-password" placeholder="Пароль, заданный при создании выбранного файла"></div>
+    <details><summary class="small">Адрес возврата для карточки сервиса Сбера</summary><p class="small">Укажите в Сбере этот redirect_uri:</p><input aria-label="Адрес возврата" readonly value="${esc(d.redirect_uri || '')}" style="width:100%"></details>
+    <p class="small muted">Секрет и пароль не показываются после сохранения. Файл и реквизиты передаются на сервер CRM через защищённое соединение.</p>
+    <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:12px"><button type="button" class="btn" id="sber-save">Сохранить</button><button type="button" class="btn primary" id="sber-authorize">Разрешить чтение в Сбере</button><button type="button" class="btn" id="sber-test">Проверить выписку</button></div>
+    <div class="small" role="status" aria-live="polite" id="sber-result" style="margin-top:10px"></div>
+  </details>`;
+  const el = id => box.querySelector("#" + id);
+  const result = el("sber-result");
+  const buttons = () => box.querySelectorAll("button");
+  const collect = async () => {
+    const body = {}, client = el("sber-client-id").value.trim(), secret = el("sber-client-secret").value;
+    if (client) body.client_id = client;
+    if (secret) body.client_secret = secret;
+    const accounts = el("sber-accounts").value.trim();
+    if (accounts) body.accounts = accounts;
+    const file = el("sber-certificate").files[0], password = el("sber-certificate-password").value;
+    if (file) {
+      if (!/\.(p12|pfx)$/i.test(file.name) || file.size > 2 * 1024 * 1024) throw new Error("Выберите сертификат .p12 или .pfx размером до 2 МБ");
+      body.certificate_base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(",")[1]);
+        reader.onerror = () => reject(new Error("Не удалось прочитать сертификат. Выберите файл ещё раз"));
+        reader.readAsDataURL(file);
+      });
+      body.certificate_password = password;
+    } else if (password) throw new Error("Выберите файл сертификата, к которому относится пароль");
+    return body;
+  };
+  const run = async action => {
+    buttons().forEach(b => b.disabled = true); result.textContent = "Проверяем…";
+    try {
+      const body = await collect();
+      if (Object.keys(body).length) await api("PUT", "/api/sber/settings", body);
+      // Secret fields are cleared even when the next step fails; the saved values stay on the server.
+      el("sber-client-secret").value = ""; el("sber-certificate-password").value = ""; el("sber-certificate").value = "";
+      if (action === "authorize") {
+        const r = await api("POST", "/api/sber/authorize", {}), url = new URL(r.url);
+        if (url.origin !== "https://sbi.sberbank.ru:9443" || url.pathname !== "/ic/sso/api/v2/oauth/authorize" || url.username || url.password || url.hash) throw new Error("CRM не получила корректный адрес входа в Сбер");
+        window.location.assign(url.href);
+      } else if (action === "test") {
+        const r = await api("POST", "/api/sber/test", {});
+        result.textContent = r.note || (r.ok ? "Выписка прочитана" : "Выписка пока не получена");
+      } else {
+        await fxSberSetup(box); box.querySelector("details").open = true;
+        box.querySelector("#sber-result").textContent = "Настройки сохранены. Теперь разрешите чтение в Сбере";
+      }
+    } catch (e) { result.textContent = e.message || "Не удалось завершить подключение"; }
+    finally { buttons().forEach(b => b.disabled = false); }
+  };
+  el("sber-save").onclick = () => run("save");
+  el("sber-authorize").onclick = () => run("authorize");
+  el("sber-test").onclick = () => run("test");
 }
