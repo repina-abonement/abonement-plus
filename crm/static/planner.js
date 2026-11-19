@@ -2,7 +2,7 @@
 /* Абонемент Плюс — планер: свои дела, поручения, повторы, дни рождения сотрудников, контроль команды. */
 
 S.planner = { tab: "week", start: null, user: null, status: "all" };
-const PLAN_SHIFTS={common:'Общие задачи дня',morning:'☀️ Утренняя смена',evening:'🌙 Вечерняя смена',both:'Обе смены'};
+const PLAN_SHIFTS={common:'Общие задачи дня',morning:'☀️ Утренняя смена',evening:'🔵 Основная смена',both:'Обе смены'};
 function planShiftOptions(value){return Object.entries(PLAN_SHIFTS).map(([key,label])=>`<option value="${key}" ${key===value?'selected':''}>${label}</option>`).join('')}
 const WD_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
@@ -23,8 +23,9 @@ async function openTaskForm(box, done, preset = {}) {
         ${Object.entries(p.rules).map(([k, t]) => `<option value="${k}">${t[0].toUpperCase() + t.slice(1)}</option>`).join("")}</select></div>
     </div>
     <div data-twd hidden class="chips" style="margin:-2px 0 8px">${WD_SHORT.map((w, i) => `<button type="button" class="chip day" data-twdi="${i}">${w}</button>`).join("")}</div>
-    <div class="field" data-shift-field><label>Смена</label><select data-task-shift>${planShiftOptions(preset.shift||'common')}</select><small class="muted">Утро и вечер отдельно по понедельникам и средам. В другие дни задача выполняется один раз.</small></div>
+    <div class="field" data-shift-field><label>Смена</label><select data-task-shift>${planShiftOptions(preset.shift||'common')}</select><small class="muted">Утренняя и основная смены отдельно по понедельникам и средам. В другие дни задача выполняется один раз.</small></div>
     <div class="field"><label>Подробности</label><textarea data-tn rows="2" placeholder="Необязательно"></textarea></div>
+    <div class="field"><label>Подзадачи (каждая с новой строки)</label><textarea data-new-subtasks rows="3" placeholder="Проверить кассу&#10;Проверить уборку"></textarea><small class="muted">У каждого дня и каждой смены будут свои галочки</small></div>
     <div class="row" style="align-items:center;flex-wrap:wrap"><label class="check grow"><input type="checkbox" data-tp> 🔥 Важно</label>
       <button class="btn" data-tcancel style="flex:0">Отмена</button>
       <button class="btn primary" data-tsave style="flex:0">Поставить задачу</button></div>
@@ -40,7 +41,7 @@ async function openTaskForm(box, done, preset = {}) {
   box.querySelector("[data-tsave]").onclick = async () => {
     const a = box.querySelector("[data-ta]");
     const data = { title: box.querySelector("[data-tt]").value, date: box.querySelector("[data-td]").value, time: box.querySelector("[data-ttm]").value,
-      shift_mode:box.querySelector("[data-task-shift]").value,note: box.querySelector("[data-tn]").value, priority: box.querySelector("[data-tp]").checked, assignee_id: a ? +a.value : S.user.id };
+      subtasks:box.querySelector("[data-new-subtasks]").value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean),shift_mode:box.querySelector("[data-task-shift]").value,note: box.querySelector("[data-tn]").value, priority: box.querySelector("[data-tp]").checked, assignee_id: a ? +a.value : S.user.id };
     if (rule.value) data.repeat = { rule: rule.value, weekdays: [...box.querySelectorAll("[data-twdi].on")].map((x) => +x.dataset.twdi) };
     try { await api("POST", "/api/planner/tasks", data); toast("Задача поставлена"); box.innerHTML = ""; done(); } catch (e) { fail(e); }
   };
@@ -132,6 +133,7 @@ function pcard(t) {
   return `<article class="pcard ${done ? "done" : ""} ${t.priority ? "hot" : ""}" draggable="${done||readOnly ? "false" : "true"}" data-pc="${t.id}" role="button" tabindex="0" aria-label="${esc(t.title)}">
     <label class="pcheck"><input type="checkbox" aria-label="Задача выполнена" data-pdone="${t.id}" ${done ? "checked" : ""} ${readOnly?'disabled':''}></label>
     <div class="grow"><div class="ptitle">${t.priority ? "🔥 " : ""}${esc(t.title)}</div>
+      ${t.subtasks?.length?`<div class="small muted" data-checklist-progress>${t.subtasks.filter(x=>x.done).length}/${t.subtasks.length} подзадач</div>`:''}
       ${done?`<div class="small muted">${esc(t.done_by||'')} · ${esc(dtWhen(t.done_at))}</div>`:''}
     </div>
     ${done||readOnly ? "" : `<button class="pmove" data-pmove="${t.id}" title="Перенести на другой день">📅</button>`}
@@ -141,8 +143,9 @@ function pcard(t) {
 async function renderWeek(box) {
   const C = S.planner;
   if (!C.start) C.start = S.meta.today;
-  const w = await api("GET", `/api/planner/week?rolling=1&start=${C.start}${C.user ? "&user=" + C.user : ""}`);
-  const end = addDays(w.start, 6), today = S.meta.today;
+  const w = await api("GET", `/api/planner/week?rolling=1&days=${C.layout==='day'?1:7}&start=${C.start}${C.user ? "&user=" + C.user : ""}`);
+  const dayView=C.layout==='day';
+  const end = addDays(w.start, dayView?0:6), today = S.meta.today;
   C.readOnly=w.can_edit===false;C.user=w.user_id;
   const addButton=$('#pl-add');if(addButton)addButton.disabled=w.can_add===undefined?C.readOnly:!w.can_add;
   const visible = (t) => (C.status === "all" || t.status === C.status) && (!w.shifts_enabled || !C.shift || C.shift==='all' || !t.shift || t.shift==='common' || t.shift===C.shift);
@@ -162,24 +165,25 @@ async function renderWeek(box) {
     if(!w.shifts_enabled || ![1,3].includes(new Date(day+'T12:00:00').getDay()))return plainGroups(items);
     return ['morning','evening','common'].filter(shift=>!C.shift||C.shift==='all'||shift==='common'||shift===C.shift).map(shift=>`<section class="planner-shift planner-shift-${shift}"><div class="planner-shift-heading"><b>${PLAN_SHIFTS[shift]}</b>${w.can_add?`<button type="button" class="btn sm" data-pq="${day}" data-pqshift="${shift}" aria-label="Добавить: ${PLAN_SHIFTS[shift]}">＋</button>`:''}</div>${plainGroups(items.filter(t=>(t.shift||'common')===shift))}</section>`).join('');
   };
-  box.innerHTML = `<div class="week-nav">
-      <button class="btn sm" data-wk="-7">‹</button>
-      <b>${dShort(w.start)} – ${dShort(end)}</b>
-      <button class="btn sm" data-wk="7">›</button>
-      <button class="btn sm" data-wk="0">Эта неделя</button>
+  box.innerHTML = `<div class="planner-period-switch"><button type="button" class="btn sm ${dayView?'primary':''}" data-period="day">День</button><button type="button" class="btn sm ${dayView?'':'primary'}" data-period="week">Неделя</button></div><div class="week-nav">
+      <button class="btn sm" data-wk="${dayView?-1:-7}">‹</button>
+      <b>${dShort(w.start)}${dayView?'':' – '+dShort(end)}</b>
+      <button class="btn sm" data-wk="${dayView?1:7}">›</button>
+      <button class="btn sm" data-wk="0">${dayView?'Сегодня':'Эта неделя'}</button>
       <label>С даты <input type="date" id="wk-start" value="${w.start}"></label>
       <label>Статус <select id="wk-status"><option value="all">Все задачи</option><option value="open">Открытые</option><option value="done">Выполненные</option></select></label>
       ${w.can_manage ? `<select id="wk-user">${w.staff.map((u) => `<option value="${u.id}" ${u.id === w.user_id ? "selected" : ""}>${esc(u.name)}${u.id === S.user.id ? " (я)" : ""}</option>`).join("")}</select>` : ""}
     </div>
-    ${w.shifts_enabled?`<label class="planner-shift-filter">Показать <select id="wk-shift"><option value="all">Все смены</option><option value="morning">Утро и общие задачи</option><option value="evening">Вечер и общие задачи</option></select></label>`:''}
+    ${w.shifts_enabled?`<label class="planner-shift-filter">Показать <select id="wk-shift"><option value="all">Все смены</option><option value="morning">Утро и общие задачи</option><option value="evening">Основная и общие задачи</option></select></label>`:''}
     ${overdue.length ? `<section class="col overdue-col"><div class="col-head"><h3>Просрочено: перетащите на нужный день</h3><span class="count">${overdue.length}</span></div>
       <div class="col-body ov-body">${overdue.map(pcard).join("")}</div></section>` : ""}
-    <div class="board week-board">${days.map((d) => `<section class="col ${d.date === today ? "is-today" : ""} ${d.date < today ? "past" : ""}" data-day="${d.date}">
+    <div class="board week-board ${dayView?'planner-single-day':''}">${days.map((d) => `<section class="col ${d.date === today ? "is-today" : ""} ${d.date < today ? "past" : ""}" data-day="${d.date}">
       <div class="col-head"><h3>${PL_DAY.format(new Date(d.date + "T00:00"))}</h3><span class="count">${d.tasks.length}</span></div>
       <button type="button" class="btn sm pquick" data-pq="${d.date}" ${(w.can_add===undefined?C.readOnly:!w.can_add)?'disabled':''}>+ Добавить задачу</button>
       <div class="col-body">${groups(d.tasks,d.date)}</div>
     </section>`).join("")}</div>
     <input type="date" id="pmove-date" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px">`;
+  box.querySelectorAll('[data-period]').forEach(button=>button.onclick=()=>{C.layout=button.dataset.period;C.start=S.meta.today;renderWeek(box)});
   box.querySelectorAll("[data-wk]").forEach((b) => (b.onclick = () => { C.start = +b.dataset.wk ? addDays(w.start, +b.dataset.wk) : S.meta.today; renderWeek(box); }));
   if ($("#wk-user")) $("#wk-user").onchange = (e) => { C.user = +e.target.value; renderWeek(box); };
   box.querySelector("#wk-start").onchange = (e) => {
@@ -255,10 +259,21 @@ async function stopPlannerRepeat(id, button, done) {
 
 async function showPlannerTask(t) {
   if (!t) return;
-  openDrawer(`<div class="task-copyable"><h2>${esc(t.title)}</h2><div class="small muted">${esc(dtWhen(t.due_at))} · ${esc(t.assignee || "")}</div><div class="row" style="align-items:center;justify-content:space-between;gap:10px;margin-top:14px"><h3>Описание</h3>${t.note ? `<button type="button" class="btn sm" data-copy-task-description>Скопировать описание</button>` : ""}</div><div class="task-copyable" style="white-space:pre-wrap">${esc(t.note || "Описание не добавлено")}</div><h3>Комментарии</h3>${t.returned_note ? `<p style="white-space:pre-wrap"><b>Возврат на доработку:</b> ${esc(t.returned_note)}</p>` : ""}${t.result ? `<p style="white-space:pre-wrap"><b>Результат:</b> ${esc(t.result)}</p>` : ""}${!t.returned_note && !t.result ? `<p class="muted">Комментариев пока нет</p>` : ""}</div><div data-task-settings="${t.id}"></div>`);
+  openDrawer(`<div class="task-copyable"><h2>${esc(t.title)}</h2><div class="small muted">${esc(dtWhen(t.due_at))} · ${esc(t.assignee || "")}</div><div class="row" style="align-items:center;justify-content:space-between;gap:10px;margin-top:14px"><h3>Описание</h3>${t.note ? `<button type="button" class="btn sm" data-copy-task-description>Скопировать описание</button>` : ""}</div><div class="task-copyable" style="white-space:pre-wrap">${esc(t.note || "Описание не добавлено")}</div><h3>Комментарии</h3>${t.returned_note ? `<p style="white-space:pre-wrap"><b>Возврат на доработку:</b> ${esc(t.returned_note)}</p>` : ""}${t.result ? `<p style="white-space:pre-wrap"><b>Результат:</b> ${esc(t.result)}</p>` : ""}${!t.returned_note && !t.result ? `<p class="muted">Комментариев пока нет</p>` : ""}</div><div data-task-checklist="${t.id}"></div><div data-task-settings="${t.id}"></div>`);
   const copy = $("[data-copy-task-description]");
   if (copy) copy.onclick = () => copyTaskDescription(t.note);
   loadPlannerTaskSettings(t.id);
+}
+
+
+function showTaskChecklist(id,detail){
+  const host=$(`[data-task-checklist="${id}"]`);if(!host)return;
+  const items=detail.task.subtasks||[],canEdit=detail.can_check_subtasks;
+  host.innerHTML=`<section class="task-checklist"><h3>Подзадачи <span class="small muted">${items.filter(x=>x.done).length}/${items.length}</span></h3>${items.map(item=>`<div class="task-checklist-row"><label><input type="checkbox" data-subtask="${item.id}" ${item.done?'checked':''} ${canEdit?'':'disabled'}><span class="${item.done?'subtask-done':''}">${esc(item.title)}</span></label>${item.done?`<small class="muted">${esc(item.done_by)} · ${esc(dtWhen(item.done_at))}</small>`:''}${canEdit?`<button type="button" class="icon-btn" data-remove-subtask="${item.id}" aria-label="Удалить подзадачу">×</button>`:''}</div>`).join('')||'<p class="small muted">Подзадач пока нет</p>'}${canEdit?'<form data-subtask-add class="row"><input name="title" placeholder="Новая подзадача" maxlength="200" required><button class="btn sm" type="submit">Добавить</button></form>':''}</section>`;
+  const updateProgress=d=>{showTaskChecklist(id,d);document.querySelectorAll(`[data-pc="${id}"] [data-checklist-progress]`).forEach(el=>el.textContent=`${d.task.subtasks.filter(x=>x.done).length}/${d.task.subtasks.length} подзадач`)};
+  host.querySelectorAll('[data-subtask]').forEach(input=>input.onchange=async()=>{input.disabled=true;try{updateProgress(await api('PATCH',`/api/planner/tasks/${id}/subtasks/${input.dataset.subtask}`,{done:input.checked}))}catch(e){input.checked=!input.checked;input.disabled=false;fail(e)}});
+  host.querySelectorAll('[data-remove-subtask]').forEach(button=>button.onclick=async()=>{button.disabled=true;try{updateProgress(await api('PATCH',`/api/planner/tasks/${id}/subtasks/${button.dataset.removeSubtask}`,{remove:true}))}catch(e){button.disabled=false;fail(e)}});
+  const form=host.querySelector('[data-subtask-add]');if(form)form.onsubmit=async e=>{e.preventDefault();const button=form.querySelector('button');button.disabled=true;try{updateProgress(await api('POST',`/api/planner/tasks/${id}/subtasks`,{title:form.elements.title.value}))}catch(error){button.disabled=false;fail(error)}};
 }
 
 
@@ -278,6 +293,7 @@ async function loadPlannerTaskSettings(id) {
   } else if(d.repeat && d.repeat.id && !d.repeat.active) {
     const note=document.createElement('p');note.className='small muted';note.textContent='Повторы остановлены';host.before(note);
   }
+  showTaskChecklist(id,d);
   if (!d.can_edit) return;
   const t = d.task, repeat = d.repeat || {}, weekdays = repeat.weekdays || [];
   host.innerHTML = `<details class="planner-task-settings" style="margin-top:24px;padding-top:12px;border-top:1px solid var(--line)">
@@ -293,6 +309,7 @@ async function loadPlannerTaskSettings(id) {
       <div class="field"><label>Повтор</label><select name="rule"><option value="">Не повторять</option>${Object.entries({daily:"Каждый день",weekly:"Каждую неделю",monthly:"Каждый месяц",yearly:"Каждый год"}).map(([k,v]) => `<option value="${k}" ${repeat.rule === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
       <div class="chips" data-edit-weekdays>${WD_SHORT.map((label,i) => `<label class="check"><input type="checkbox" data-edit-weekday="${i}" ${weekdays.includes(i) ? "checked" : ""}>${label}</label>`).join("")}</div>
       ${t.recur_id ? `<p class="small muted" data-repeat-hint>Чтобы изменить повтор, выберите «Эта и будущие задачи».</p>` : ""}
+      <div class="field"><label>Список подзадач (каждая с новой строки)</label><textarea name="subtasks" rows="4">${esc((t.subtasks||[]).map(x=>x.title).join('\n'))}</textarea><small class="muted">Для изменения списка в следующих повторах выберите «Эта и будущие задачи». Отметки сохранятся у неизменённых пунктов этой задачи.</small></div>
       <label class="check"><input name="priority" type="checkbox" ${t.priority ? "checked" : ""}>Важно</label>
       <div class="error small" data-edit-error style="margin-top:8px"></div>
       <button type="submit" class="btn primary" style="margin-top:12px">Сохранить изменения</button>
@@ -325,7 +342,7 @@ async function loadPlannerTaskSettings(id) {
   form.onsubmit = async e => {
     e.preventDefault(); const button = form.querySelector("button[type=submit]"); button.disabled = true;
     const body = {title:form.elements.title.value,note:form.elements.note.value,date:form.elements.date.value,time:form.elements.time.value,
-      shift_mode:form.elements.shift_mode?.value||'common',assignee_id:+form.elements.assignee_id.value,priority:form.elements.priority.checked,scope:form.elements.scope.value,
+      subtasks:form.elements.subtasks.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean),shift_mode:form.elements.shift_mode?.value||'common',assignee_id:+form.elements.assignee_id.value,priority:form.elements.priority.checked,scope:form.elements.scope.value,
       repeat:{rule:rule.value,weekdays:[...host.querySelectorAll("[data-edit-weekday]:checked")].map(x => +x.dataset.editWeekday)}};
     try {
       await api("PATCH", `/api/planner/tasks/${id}`, body);

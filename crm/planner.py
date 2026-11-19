@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta
 
 from . import comms,offlineplanner
@@ -52,6 +53,12 @@ def init(con):
     for table,column in (('tasks','shift'),('recurring','shift_mode')):
         if column not in {r[1] for r in con.execute(f'PRAGMA table_info({table})')}:
             con.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT 'common'")
+    if 'checklist_template' not in {r[1] for r in con.execute('PRAGMA table_info(recurring)')}:
+        con.execute("ALTER TABLE recurring ADD COLUMN checklist_template TEXT NOT NULL DEFAULT '[]'")
+    con.execute("""CREATE TABLE IF NOT EXISTS planner_subtasks(id INTEGER PRIMARY KEY,
+        task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,title TEXT NOT NULL,
+        position INTEGER NOT NULL,done INTEGER NOT NULL DEFAULT 0,done_by TEXT NOT NULL DEFAULT '',done_at TEXT)""")
+    con.execute('CREATE INDEX IF NOT EXISTS planner_subtasks_task ON planner_subtasks(task_id,position,id)')
     ucols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
     if "birth" not in ucols:
         con.execute("ALTER TABLE users ADD COLUMN birth TEXT NOT NULL DEFAULT ''")
@@ -110,7 +117,46 @@ def _due(d: str, t: str) -> str:
     return f"{d}T{t or '23:59'}"
 
 
-SHIFT_LABELS = {'common':'Общие задачи дня','morning':'☀️ Утренняя смена','evening':'🌙 Вечерняя смена','both':'Обе смены'}
+def checklist_titles(value):
+    if not isinstance(value,list) or len(value)>50:raise PlanError('В списке может быть до 50 подзадач')
+    if any(not isinstance(t,str) or not t.strip() or len(t.strip())>200 for t in value):
+        raise PlanError('Название подзадачи: от 1 до 200 символов')
+    return [t.strip() for t in value]
+
+
+def sync_checklist(con,tid,titles):
+    existing=list(con.execute('SELECT * FROM planner_subtasks WHERE task_id=? ORDER BY position,id',(tid,)))
+    for position,title in enumerate(titles):
+        same=next((r for r in existing if r['title']==title),None)
+        if same:
+            con.execute('UPDATE planner_subtasks SET position=? WHERE id=?',(position,same['id']));existing.remove(same)
+        else:con.execute('INSERT INTO planner_subtasks(task_id,title,position) VALUES(?,?,?)',(tid,title,position))
+    for row in existing:con.execute('DELETE FROM planner_subtasks WHERE id=?',(row['id'],))
+
+
+def change_subtask(con,tid,user,data,item_id=None):
+    task=con.execute("SELECT * FROM tasks WHERE id=? AND kind='plan'",(tid,)).fetchone()
+    if not task or not can_change_plan(con,user,task['assignee_id']) or task['status']!='open':
+        raise PlanError('Подзадачи можно менять у доступной открытой задачи')
+    if item_id is None:
+        title=checklist_titles([data.get('title')])[0]
+        count=con.execute('SELECT count(*) FROM planner_subtasks WHERE task_id=?',(tid,)).fetchone()[0]
+        if count>=50:raise PlanError('В списке может быть до 50 подзадач')
+        con.execute('INSERT INTO planner_subtasks(task_id,title,position) VALUES(?,?,?)',(tid,title,count))
+    else:
+        row=con.execute('SELECT * FROM planner_subtasks WHERE task_id=? AND id=?',(tid,item_id)).fetchone()
+        if not row:raise PlanError('Подзадача не найдена')
+        if data.get('remove') is True:con.execute('DELETE FROM planner_subtasks WHERE id=?',(item_id,))
+        else:
+            done=data.get('done')
+            if not isinstance(done,bool):raise PlanError('Укажите отметку выполнения')
+            if bool(row['done'])!=done:
+                con.execute('UPDATE planner_subtasks SET done=?,done_by=?,done_at=? WHERE id=?',
+                    (int(done),user.get('name','') if done else '',_now().isoformat(timespec='minutes') if done else None,item_id))
+    return task_detail(con,tid,user)
+
+
+SHIFT_LABELS = {'common':'Общие задачи дня','morning':'☀️ Утренняя смена','evening':'🔵 Основная смена','both':'Обе смены'}
 
 
 def shift_mode(con,who,value):
@@ -129,9 +175,11 @@ def _emit(con,r,d,now):
     made=0
     for shift in shifts_for(dict(r).get('shift_mode','common'),d):
         key=f"recur:{r['id']}:{d}"+((':'+shift) if dict(r).get('shift_mode','common')!='common' else '')
-        made+=con.execute("""INSERT OR IGNORE INTO tasks(kind,title,assignee_id,due_at,source,auto_key,note,created_at,
+        cur=con.execute("""INSERT OR IGNORE INTO tasks(kind,title,assignee_id,due_at,source,auto_key,note,created_at,
             created_by_id,created_by,priority,recur_id,shift) VALUES('plan',?,?,?,'recurring',?,?,?,?,?,?,?,?)""",
-            (r['title'],r['assignee_id'],f"{d}T{r['time'] or '23:59'}",key,r['note'],now,r['created_by_id'],r['created_by'],r['priority'],r['id'],shift)).rowcount
+            (r['title'],r['assignee_id'],f"{d}T{r['time'] or '23:59'}",key,r['note'],now,r['created_by_id'],r['created_by'],r['priority'],r['id'],shift))
+        made+=cur.rowcount
+        if cur.rowcount:sync_checklist(con,cur.lastrowid,json.loads(dict(r).get('checklist_template') or '[]'))
     return made
 
 
@@ -151,6 +199,7 @@ def add(con, user: dict, data: dict) -> int:
     note = (data.get("note") or "").strip()[:1000]
     rep = data.get("repeat") or {}
     rule = rep.get("rule") or ""
+    titles=checklist_titles(data.get('subtasks',[]))
     mode=shift_mode(con,who,data.get('shift_mode'))
     rid = None
     if rule:
@@ -165,13 +214,14 @@ def add(con, user: dict, data: dict) -> int:
                              start_date, created_by_id, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                           (title, note, who, rule, wds, mday, yday, (data.get("time") or "").strip(), prio, d,
                            user["id"], user.get("name", ""), _now().isoformat(timespec="minutes"))).lastrowid
-        con.execute("UPDATE recurring SET shift_mode=? WHERE id=?",(mode,rid))
+        con.execute("UPDATE recurring SET shift_mode=?,checklist_template=? WHERE id=?",(mode,json.dumps(titles,ensure_ascii=False),rid))
         generate(con, date.today())
         return rid
     first=None
     for shift in shifts_for(mode,date.fromisoformat(d)):
         tid=con.execute("""INSERT INTO tasks(kind,title,assignee_id,due_at,source,note,created_at,created_by_id,created_by,priority,shift)
             VALUES('plan',?,?,?,'manual',?,?,?,?,?,?)""",(title,who,due,note,_now().isoformat(timespec='minutes'),user['id'],user.get('name',''),prio,shift)).lastrowid
+        sync_checklist(con,tid,titles)
         first=first or tid
     return first
 
@@ -242,7 +292,7 @@ def generate(con, today: date | None = None) -> int:
     return made
 
 
-def week(con, user: dict, start: str, who: int | None = None, *, rolling: bool = False) -> dict:
+def week(con, user: dict, start: str, who: int | None = None, *, rolling: bool = False, days: int = 7) -> dict:
     """Неделя колонками (как в Weeek): задачи по дням, повторы разложены на всю неделю."""
     d0 = date.fromisoformat(start)
     if not rolling:
@@ -253,12 +303,13 @@ def week(con, user: dict, start: str, who: int | None = None, *, rolling: bool =
         who=None
     uid = who or (offlineplanner.pool_id(con) if offlineplanner.member(con,user) else user['id'])
     today = date.today()
-    for i in range(7):  # повторы на эту неделю (не дальше двух месяцев вперёд)
+    day_count=1 if days==1 else 7
+    for i in range(day_count):  # повторы на эту неделю (не дальше двух месяцев вперёд)
         d = d0 + timedelta(days=i)
         if today <= d <= today + timedelta(days=62):
             _materialize(con, d)
     days = []
-    for i in range(7):
+    for i in range(day_count):
         d = (d0 + timedelta(days=i)).isoformat()
         rows = [_out(con, r) for r in con.execute(
             """SELECT * FROM tasks WHERE kind IN ('plan','bday') AND assignee_id=? AND substr(due_at,1,10)=? AND status IN ('open','done')
@@ -341,7 +392,9 @@ def stop_recurring(con, rid: int, user: dict):
 
 def _out(con, r) -> dict:
     from .tasks import _task_out
-    return _task_out(con, r)
+    out=_task_out(con,r)
+    out['subtasks']=[dict(x) for x in con.execute('SELECT * FROM planner_subtasks WHERE task_id=? ORDER BY position,id',(r['id'],))]
+    return out
 
 
 def view(con, user: dict) -> dict:
@@ -411,6 +464,7 @@ def task_detail(con, tid: int, user: dict) -> dict:
     if repeat:
         repeat["weekdays"] = [int(x) for x in repeat["weekdays"].split(",") if x]
     return {"task": task, "repeat": repeat, "staff": visible_staff(con, user),
+            "subtask_template":json.loads(repeat.get("checklist_template") or "[]"),"can_check_subtasks":row["kind"]=="plan" and row["status"]=="open" and can_change_plan(con,user,row["assignee_id"]),
             "can_assign": can_manage(con, user), "can_edit": row["kind"] == "plan" and row["status"] == "open" and can_change_plan(con,user,row['assignee_id']),
             "can_stop_repeat": bool(recurring and recurring['active'] and can_change_plan(con,user,recurring['assignee_id']))}
 
@@ -420,6 +474,7 @@ def edit_task(con, tid: int, user: dict, data: dict) -> dict:
     t = detail["task"]
     if not detail["can_edit"]:
         raise PlanError("Настройки можно менять у открытой задачи Планера")
+    titles=checklist_titles(data["subtasks"]) if "subtasks" in data else [x["title"] for x in t["subtasks"]]
     title = str(data.get("title") or "").strip()
     if not title or len(title) > 200:
         raise PlanError("Название: от 1 до 200 символов")
@@ -478,7 +533,7 @@ def edit_task(con, tid: int, user: dict, data: dict) -> dict:
                                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                                   (title,note,who,rule,",".join(map(str,weekdays)),date.fromisoformat(day).day if rule == "monthly" else 0,
                                    day[5:] if rule == "yearly" else "",tm,prio,day,user["id"],user.get("name", ""),_now().isoformat(timespec="minutes"))).lastrowid
-        if new_rid:con.execute('UPDATE recurring SET shift_mode=? WHERE id=?',(mode,new_rid))
+        if new_rid:con.execute('UPDATE recurring SET shift_mode=?,checklist_template=? WHERE id=?',(mode,json.dumps(titles,ensure_ascii=False),new_rid))
         current_shift=shifts_for(mode,date.fromisoformat(day))[0]
         key=(f"recur:{new_rid}:{day}"+((':'+current_shift) if mode!='common' else '')) if new_rid else None
         con.execute("UPDATE tasks SET recur_id=?,auto_key=?,source=? WHERE id=?", (new_rid,key,"recurring" if new_rid else "manual",tid))
@@ -486,7 +541,9 @@ def edit_task(con, tid: int, user: dict, data: dict) -> dict:
     current_shift=shifts_for(mode,date.fromisoformat(day))[0]
     con.execute("UPDATE tasks SET title=?,note=?,assignee_id=?,due_at=?,priority=?,shift=? WHERE id=?", (title,note,who,due,prio,current_shift,tid))
     if not rid and not rule and mode=='both' and current_shift=='morning':
-        con.execute("""INSERT INTO tasks(kind,title,assignee_id,due_at,source,note,created_at,created_by_id,created_by,priority,shift)
+        partner=con.execute("""INSERT INTO tasks(kind,title,assignee_id,due_at,source,note,created_at,created_by_id,created_by,priority,shift)
             VALUES('plan',?,?,?,'manual',?,?,?,?,?,'evening')""",(title,who,due,note,_now().isoformat(timespec='minutes'),user['id'],user.get('name',''),prio))
+        sync_checklist(con,partner.lastrowid,titles)
+    sync_checklist(con,tid,titles)
     generate(con)
     return {"ok": True, "id": tid}

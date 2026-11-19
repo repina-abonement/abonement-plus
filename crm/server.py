@@ -1689,12 +1689,22 @@ def planner_add(con, h, user, body, q):
 def planner_week(con, h, user, body, q):
     from datetime import date as _d
     return px(planner.week, con, user, q.get("start") or _d.today().isoformat(),
-              int(q["user"]) if q.get("user") else None, rolling=q.get("rolling") == "1")
+              int(q["user"]) if q.get("user") else None, rolling=q.get("rolling") == "1",days=1 if q.get("days")=="1" else 7)
 
 
 @route("GET", "/api/planner/tasks/{tid}", role="planner")
 def planner_task_detail(con, h, user, body, q, tid):
     return px(planner.task_detail, con, int(tid), user)
+
+
+@route("POST", "/api/planner/tasks/{tid}/subtasks", role="planner")
+def planner_subtask_add(con,h,user,body,q,tid):
+    return px(planner.change_subtask,con,int(tid),user,body)
+
+
+@route("PATCH", "/api/planner/tasks/{tid}/subtasks/{item_id}", role="planner")
+def planner_subtask_change(con,h,user,body,q,tid,item_id):
+    return px(planner.change_subtask,con,int(tid),user,body,int(item_id))
 
 
 @route("PATCH", "/api/planner/tasks/{tid}", role="planner")
