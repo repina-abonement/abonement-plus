@@ -85,6 +85,10 @@ def can_change_plan(con,user,uid):
     return can_view_plan(con,user,uid)
 
 
+def can_add_plan(con,user,uid):
+    return can_change_plan(con,user,uid) or (uid==offlineplanner.pool_id(con) and offlineplanner.can_assign(con,user))
+
+
 def visible_staff(con, user: dict, *, people=False) -> list[dict]:
     rows=[dict(row) for row in con.execute("SELECT id,name,role,birth FROM users WHERE active=1 ORDER BY role,name") if can_view_plan(con,user,row['id'])]
     if not people:rows=[r for r in rows if offlineplanner.board_id(con,r["id"])==r["id"]]
@@ -109,7 +113,7 @@ def add(con, user: dict, data: dict) -> int:
         raise PlanError("Напишите, что нужно сделать")
     who = offlineplanner.board_id(con,int(data.get("assignee_id") or user["id"]))
     if offlineplanner.member(con,user) and who==user['id']:who=offlineplanner.pool_id(con)
-    if not (can_change_plan(con, user, who) or (who==offlineplanner.pool_id(con) and offlineplanner.can_assign(con,user))):
+    if not can_add_plan(con,user,who):
         raise PlanError("Ставить задачи другим может администратор или контролёр")
     if who!=offlineplanner.pool_id(con) and not con.execute("SELECT 1 FROM users WHERE id=? AND active=1", (who,)).fetchone():
         raise PlanError("Сотрудник не найден")
@@ -236,7 +240,7 @@ def week(con, user: dict, start: str, who: int | None = None, *, rolling: bool =
            AND substr(due_at,1,10)<? ORDER BY due_at""",
         (uid, min(today.isoformat(), d0.isoformat())))]
     name = (con.execute("SELECT name FROM users WHERE id=?", (uid,)).fetchone() or [""])[0]
-    return {"start": d0.isoformat(), "days": days, "overdue": overdue, "user_id": uid, "user_name": name,"can_edit":can_change_plan(con,user,uid),
+    return {"start": d0.isoformat(), "days": days, "overdue": overdue, "user_id": uid, "user_name": name,"can_edit":can_change_plan(con,user,uid),"can_add":can_add_plan(con,user,uid),
             "can_manage": len(visible_staff(con,user))>1,
             "staff": visible_staff(con, user), "people":visible_staff(con,user,people=True)}
 

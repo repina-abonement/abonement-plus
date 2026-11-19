@@ -138,7 +138,7 @@ async function renderWeek(box) {
   const w = await api("GET", `/api/planner/week?rolling=1&start=${C.start}${C.user ? "&user=" + C.user : ""}`);
   const end = addDays(w.start, 6), today = S.meta.today;
   C.readOnly=w.can_edit===false;C.user=w.user_id;
-  const addButton=$('#pl-add');if(addButton)addButton.disabled=C.readOnly;
+  const addButton=$('#pl-add');if(addButton)addButton.disabled=w.can_add===undefined?C.readOnly:!w.can_add;
   const visible = (t) => C.status === "all" || t.status === C.status;
   const overdue = w.overdue.filter(visible);
   const days = w.days.map((day) => ({ ...day, tasks: day.tasks.filter(visible) }));
@@ -165,7 +165,7 @@ async function renderWeek(box) {
       <div class="col-body ov-body">${overdue.map(pcard).join("")}</div></section>` : ""}
     <div class="board week-board">${days.map((d) => `<section class="col ${d.date === today ? "is-today" : ""} ${d.date < today ? "past" : ""}" data-day="${d.date}">
       <div class="col-head"><h3>${PL_DAY.format(new Date(d.date + "T00:00"))}</h3><span class="count">${d.tasks.length}</span></div>
-      <button type="button" class="btn sm pquick" data-pq="${d.date}" ${C.readOnly?'disabled':''}>+ Добавить задачу</button>
+      <button type="button" class="btn sm pquick" data-pq="${d.date}" ${(w.can_add===undefined?C.readOnly:!w.can_add)?'disabled':''}>+ Добавить задачу</button>
       <div class="col-body">${groups(d.tasks)}</div>
     </section>`).join("")}</div>
     <input type="date" id="pmove-date" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px">`;
