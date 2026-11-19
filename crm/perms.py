@@ -28,6 +28,7 @@ SECTIONS: dict[str, dict[str, str]] = {
     "payments": {"owner": "full", "senior": "view"},
     "fiscal": {"owner": "full", "senior": "full"},
     "spend": {"owner": "full"},
+    "staffexpenses": {"owner": "full"},
     "posts": {"owner": "full", "senior": "full"},  # посты в каналы филиалов
     "dashboard": {"owner": "full"},
     "docs": {"owner": "full", "lawyer": "full"},
@@ -71,6 +72,9 @@ def level(user: dict, section: str) -> int:
             return 0
         if user.get("coach_nebo_only") and section not in ("today", "journal"):
             return 0
+    if section=='staffexpenses' and user.get('role')=='operator':
+        import re
+        if user.get('is_offline_admin') or {'варвара','батарева'}.issubset(set(re.findall(r'[а-яё]+',str(user.get('name','')).casefold()))):return LEVEL['own']
     if "offline" in roles_of(user):
         return LEVEL["full"] if section == "inbox" else LEVEL["view"] if section == "search" else LEVEL["own"] if section == "planner" else 0
     rules = SECTIONS.get(section, {})

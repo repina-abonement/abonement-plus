@@ -318,6 +318,8 @@ def init_db(con: sqlite3.Connection):
     channels.init(con)
     planner.init(con)
     expenses.init(con)
+    from . import staffexpenses
+    staffexpenses.init(con)
     fiscal.init(con)
     offers.init(con)
     fakegen.init(con)

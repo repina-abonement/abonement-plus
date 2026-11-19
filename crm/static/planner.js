@@ -144,6 +144,14 @@ function pcard(t) {
   </article>`;
 }
 
+function openPlannerEventForm(host,day,refresh,event={}){
+  host.innerHTML=`<form class="planner-event-form sub-form"><h3>${event.id?'Мероприятие':'Новое мероприятие'}</h3><label>Название<input name="title" required maxlength="200" value="${esc(event.title||'')}"></label><label>Дата<input name="day" type="date" required value="${esc(event.day||day)}"></label><div class="row"><label>С<input name="start_time" type="time" value="${esc(event.start_time||'')}"></label><label>До<input name="end_time" type="time" value="${esc(event.end_time||'')}"></label></div><label>Филиал<select name="branch_id"><option value="">Не указан</option>${(S.meta.branches||[]).map(b=>`<option value="${b.id}" ${b.id===event.branch_id?'selected':''}>${esc(b.name)}</option>`).join('')}</select></label><label>Участники<input name="participants" maxlength="1000" value="${esc(event.participants||'')}" placeholder="Кто участвует"></label><label>Подробности<textarea name="note" maxlength="2000">${esc(event.note||'')}</textarea></label><p class="need-err" data-event-error></p><div class="chips"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-event-close>Закрыть</button>${event.id?'<button class="btn danger" type="button" data-event-cancel>Отменить мероприятие</button>':''}</div></form>`;
+  const form=host.querySelector('form');form.querySelector('[data-event-close]').onclick=()=>host.remove();
+  const cancel=form.querySelector('[data-event-cancel]');if(cancel)cancel.onclick=async()=>{if(!confirm('Отменить мероприятие? Оно останется в истории'))return;try{await api('PATCH',`/api/planner/events/${event.id}`,{cancelled:true});refresh()}catch(e){form.querySelector('[data-event-error]').textContent=e.message}};
+  form.onsubmit=async e=>{e.preventDefault();const button=form.querySelector('[type=submit]');button.disabled=true;try{const data=Object.fromEntries(new FormData(form));data.branch_id=data.branch_id?+data.branch_id:null;await api(event.id?'PATCH':'POST',`/api/planner/events${event.id?'/'+event.id:''}`,data);refresh()}catch(error){form.querySelector('[data-event-error]').textContent=error.message;button.disabled=false}};
+  form.querySelector('input').focus();host.scrollIntoView({block:'nearest'});
+}
+
 async function renderWeek(box) {
   const C = S.planner;
   if (!C.start) C.start = S.meta.today;
@@ -182,8 +190,10 @@ async function renderWeek(box) {
     ${overdue.length ? `<section class="col overdue-col"><div class="col-head"><h3>Просрочено: перетащите на нужный день</h3><span class="count">${overdue.length}</span></div>
       <div class="col-body ov-body">${overdue.map(pcard).join("")}</div></section>` : ""}
     <div class="board week-board ${dayView?'planner-single-day':''}">${days.map((d) => `<section class="col ${d.date === today ? "is-today" : ""} ${d.date < today ? "past" : ""}" data-day="${d.date}">
-      <div class="col-head"><h3>${PL_DAY.format(new Date(d.date + "T00:00"))}</h3><span class="count">${d.tasks.length}</span></div>
+      <div class="col-head"><h3>${PL_DAY.format(new Date(d.date + "T00:00"))}</h3><span class="count">${d.tasks.length+(d.events||[]).length}</span></div>
       <button type="button" class="btn sm pquick" data-pq="${d.date}" ${(w.can_add===undefined?C.readOnly:!w.can_add)?'disabled':''}>+ Добавить задачу</button>
+      ${w.can_manage_events?`<button type="button" class="btn sm pquick" data-event-add="${d.date}">+ Мероприятие</button>`:''}
+      <div class="planner-events">${(d.events||[]).map(event=>`<button type="button" class="planner-event" data-event-edit="${event.id}"><b>🎉 ${esc(event.title)}</b><span>${event.start_time?esc(event.start_time+'–'+event.end_time):'Время не указано'}${event.branch_name?' · '+esc(event.branch_name):''}</span>${event.participants?`<span>${esc(event.participants)}</span>`:''}</button>`).join('')}</div>
       <div class="col-body">${groups(d.tasks,d.date)}</div>
     </section>`).join("")}</div>
     <input type="date" id="pmove-date" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px">`;
@@ -229,6 +239,13 @@ async function renderWeek(box) {
       reload();
     }, { date: button.dataset.pq, assignee_id: w.user_id,shift:button.dataset.pqshift||'common' });
   }));
+  const eventForm=(button,day,event)=>{box.querySelectorAll('.planner-event-host').forEach(el=>el.remove());const host=document.createElement('div');host.className='planner-event-host';button.after(host);openPlannerEventForm(host,day,reload,event)};
+  box.querySelectorAll('[data-event-add]').forEach(button=>button.onclick=()=>eventForm(button,button.dataset.eventAdd,{}));
+  box.querySelectorAll('[data-event-edit]').forEach(button=>button.onclick=()=>{const event=w.days.flatMap(day=>day.events||[]).find(e=>e.id===+button.dataset.eventEdit);if(event)eventForm(button,event.day,event)});
+  if(w.can_manage_events&&S.pendingPlannerEvent){
+    const draft=S.pendingPlannerEvent,button=[...box.querySelectorAll('[data-event-add]')].find(b=>b.dataset.eventAdd===draft.day);
+    if(button){delete S.pendingPlannerEvent;const branches=(S.meta.branches||[]).filter(b=>String(b.name).toLocaleLowerCase().includes(draft.branch_name.toLocaleLowerCase()));if(draft.branch_name&&branches.length===1)draft.branch_id=branches[0].id;eventForm(button,draft.day,draft)}
+  }
   // перенос: перетаскиванием (компьютер) или кнопкой 📅 (телефон)
   let dragId = null;
   box.querySelectorAll(".pcard[draggable=true]").forEach((el) => {

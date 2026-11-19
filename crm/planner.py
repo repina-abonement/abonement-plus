@@ -42,6 +42,8 @@ class PlanError(ValueError):
 def init(con):
     con.executescript(SCHEMA)
     offlineplanner.init(con)
+    from . import plannerevents
+    plannerevents.init(con)
     rcols = {r[1] for r in con.execute("PRAGMA table_info(recurring)")}
     if "end_date" not in rcols:
         con.execute("ALTER TABLE recurring ADD COLUMN end_date TEXT NOT NULL DEFAULT ''")
@@ -315,14 +317,15 @@ def week(con, user: dict, start: str, who: int | None = None, *, rolling: bool =
         rows = [_out(con, r) for r in con.execute(
             """SELECT * FROM tasks WHERE kind IN ('plan','bday') AND assignee_id=? AND substr(due_at,1,10)=? AND status IN ('open','done')
                ORDER BY status='done', priority DESC, due_at""", (uid, d))]
-        days.append({"date": d, "tasks": rows})
+        from . import plannerevents
+        days.append({"date": d, "tasks": rows,"events":plannerevents.listing(con,user,d)})
     overdue = [_out(con, r) for r in con.execute(
         """SELECT * FROM tasks WHERE kind IN ('plan','bday') AND assignee_id=? AND status='open'
            AND substr(due_at,1,10)<? ORDER BY due_at""",
         (uid, min(today.isoformat(), d0.isoformat())))]
     name = (con.execute("SELECT name FROM users WHERE id=?", (uid,)).fetchone() or [""])[0]
     return {"start": d0.isoformat(), "days": days, "overdue": overdue, "user_id": uid, "user_name": name,"can_edit":can_change_plan(con,user,uid),"can_add":can_add_plan(con,user,uid),
-            "can_manage": len(visible_staff(con,user))>1,"shifts_enabled":uid==offlineplanner.pool_id(con),
+            "can_manage": len(visible_staff(con,user))>1,"shifts_enabled":uid==offlineplanner.pool_id(con),"can_manage_events":plannerevents.allowed(user),
             "staff": visible_staff(con, user), "people":visible_staff(con,user,people=True),"shift_board_id":offlineplanner.pool_id(con)}
 
 

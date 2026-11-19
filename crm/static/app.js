@@ -301,7 +301,7 @@ async function renderLogin(force = false) {
 /* ---------- каркас ---------- */
 const VIEWS = [
   ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Действующие клиенты"], ["nodeadline", "Без дедлайнов"],
-  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["posts", "Посты в каналы"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["dashboard", "Дашборд"], ["search", "Клиенты"], ["docs", "Документы"], ["settings", "Настройки"],
+  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["posts", "Посты в каналы"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["staffexpenses", "Расходы админов"], ["dashboard", "Дашборд"], ["search", "Клиенты"], ["docs", "Документы"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
   team: '<circle cx="12" cy="6" r="2.5"/><circle cx="5.5" cy="17.5" r="2.5"/><circle cx="18.5" cy="17.5" r="2.5"/><path d="M12 8.5v3.5M5.5 15v-3h13v3"/>',
@@ -344,7 +344,7 @@ const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></s
 /* Боковое меню: главное сверху, остальное по папкам. Открыта папка с текущим разделом и те, что сотрудник раскрыл сам */
 const NAV_TOP = ["today", "sales", "inbox", "planner"];
 const NAV_FOLDERS = [["Клиенты", ["search", "members", "nodeadline"]], ["Занятия", ["journal", "schedule", "coaches"]],
-  ["Деньги", ["payments", "fiscal", "merch", "spend", "dashboard"]], ["Школа", ["team", "posts", "docs", "settings"]]];
+  ["Деньги", ["payments", "fiscal", "merch", "spend", "staffexpenses", "dashboard"]], ["Школа", ["team", "posts", "docs", "settings"]]];
 const navOpen = () => { try { return JSON.parse(localStorage.getItem("crm.nav_open") || "{}"); } catch (_) { return {}; } };
 function sideNav(views) {
   const item = ([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}<span>${t}</span>${badge(k)}</button>`;
@@ -586,6 +586,7 @@ async function renderView(page) {
     if (S.view === "planner") return await renderPlanner(page);
     // «Пропуски» и «Ручные задачи» теперь на рабочем столе, отдельных разделов нет (Юлия, 04.11)
     if (["manual", "skips"].includes(S.view)) { S.view = "sales"; return render(); }
+    if (S.view === "staffexpenses") return await renderStaffExpenses(page);
     if (S.view === "spend") return await renderSpend(page);
     if (S.view === "fiscal") return await renderFiscal(page);
     if (S.view === "schedule") return await renderSchedule(page);
@@ -2873,7 +2874,14 @@ async function boot() {
     S.user = S.meta.user;
   } catch (e) { if (e.message !== "Нужно войти") renderLogin(); return; }
   S.view = visibleViews()[0][0];
-  const requestedView = location.hash.slice(1);
+  const [requestedView,plannerQuery=''] = location.hash.slice(1).split('?');
+  if(requestedView==='planner'){
+    const q=new URLSearchParams(plannerQuery),day=q.get('event_day');
+    if(q.has('event_title')&&/^\d{4}-\d{2}-\d{2}$/.test(day||'')){
+      S.pendingPlannerEvent={title:q.get('event_title').slice(0,200),day,start_time:q.get('event_start')||'',end_time:q.get('event_end')||'',participants:(q.get('event_participants')||'').slice(0,1000),branch_name:q.get('event_branch')||''};
+      S.planner.start=day;S.planner.layout='day';
+    }
+  }
   if (visibleViews().some(([k]) => k === requestedView)) S.view = requestedView;
   else try { const v = localStorage.getItem("crm.view"); if (v && visibleViews().some(([k]) => k === v)) S.view = v; } catch (_) {}
   shell();

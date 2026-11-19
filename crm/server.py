@@ -1680,6 +1680,18 @@ def planner_view(con, h, user, body, q):
     return planner.view(con, user)
 
 
+@route("POST", "/api/planner/events", role="planner")
+def planner_event_create(con,h,user,body,q):
+    from . import plannerevents
+    return px(plannerevents.save,con,user,body)
+
+
+@route("PATCH", "/api/planner/events/{eid}", role="planner")
+def planner_event_edit(con,h,user,body,q,eid):
+    from . import plannerevents
+    return px(plannerevents.save,con,user,body,int(eid))
+
+
 @route("POST", "/api/planner/tasks", role="planner")
 def planner_add(con, h, user, body, q):
     return {"id": px(planner.add, con, user, body)}
@@ -1817,6 +1829,65 @@ def ex(fn, *a, **kw):
         return fn(*a, **kw)
     except expenses.ExpError as e:
         raise ApiError(str(e))
+
+
+def sxp(fn,*args):
+    from .staffexpenses import ExpenseError
+    try:return fn(*args)
+    except ExpenseError as e:raise ApiError(str(e))
+
+
+@route("GET", "/api/staff-expenses", role="staffexpenses")
+def staff_expenses_list(con,h,user,body,q):
+    from . import staffexpenses
+    return sxp(staffexpenses.listing,con,user)
+
+
+@route("POST", "/api/staff-expenses/preview", role="staffexpenses")
+def staff_expenses_preview(con,h,user,body,q):
+    from . import staffexpenses
+    sxp(staffexpenses.require,con,user)
+    return sxp(staffexpenses.parse,body.get('text'))
+
+
+@route("POST", "/api/staff-expenses", role="staffexpenses")
+def staff_expenses_create(con,h,user,body,q):
+    from . import staffexpenses
+    return sxp(staffexpenses.create_batch,con,user,body)
+
+
+@route("PATCH", "/api/staff-expenses/{eid}", role="staffexpenses")
+def staff_expenses_edit(con,h,user,body,q,eid):
+    from . import staffexpenses
+    return sxp(staffexpenses.edit,con,user,int(eid),body)
+
+
+@route("POST", "/api/staff-expenses/{eid}/reimburse", role="staffexpenses")
+def staff_expenses_reimburse(con,h,user,body,q,eid):
+    from . import staffexpenses
+    return sxp(staffexpenses.reimburse,con,user,int(eid),body)
+
+
+@route("PATCH", "/api/staff-reimbursements/{rid}", role="staffexpenses")
+def staff_expenses_received(con,h,user,body,q,rid):
+    from . import staffexpenses
+    return sxp(staffexpenses.receipt_money,con,user,int(rid),body)
+
+
+@route("POST", "/api/staff-expenses/{eid}/receipts", role="staffexpenses")
+def staff_expenses_upload(con,h,user,body,q,eid):
+    from . import staffexpenses
+    return sxp(staffexpenses.add_receipt,con,user,int(eid),body)
+
+
+@route("GET", "/api/staff-expense-receipts/{rid}", role="staffexpenses")
+def staff_expenses_receipt(con,h,user,body,q,rid):
+    from . import staffexpenses
+    sxp(staffexpenses.require,con,user)
+    row=con.execute('SELECT mime,data FROM staff_expense_receipts WHERE id=?',(int(rid),)).fetchone()
+    if not row:raise ApiError('Фото не найдено',404)
+    h.extra_headers=getattr(h,'extra_headers',[])+[('Cache-Control','private, no-store'),('X-Content-Type-Options','nosniff')]
+    return Raw(bytes(row['data']),row['mime'])
 
 
 @route("GET", "/api/bills", role="admin")
