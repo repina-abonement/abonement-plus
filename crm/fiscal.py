@@ -174,6 +174,8 @@ def init(con):
     fiscalcheck.init(con)
     from . import bankcheck
     bankcheck.init(con)
+    from . import paymentworker
+    paymentworker.init(con)
     con.execute('CREATE TABLE IF NOT EXISTS fiscal_ofd_days(day TEXT PRIMARY KEY,checked_at TEXT NOT NULL,ok INTEGER NOT NULL)')
     columns = {r[1] for r in con.execute('PRAGMA table_info(fx_receipts)')}
     for key in ('fiscal_fn', 'fiscal_fd', 'fiscal_fp'):
@@ -692,33 +694,16 @@ def run(con, now: datetime | None = None) -> dict:
 
 
 def run_worker_cycle(con):
-    # New read-only HTTP probes must not hold a SQLite write lock while waiting
-    # for providers: incoming messenger hooks need to save messages concurrently.
-    from . import fiscalcheck,reconciliation
-    fiscalcheck.run_automatic(con)
-    reconciliation.run_ofd_backlog(con)
-    from . import bankcheck
-    bankcheck.run_automatic(con)
-    con.execute("BEGIN IMMEDIATE")
-    try:
-        result=run(con)
-        con.execute("COMMIT")
-        return result
-    except BaseException:
-        con.execute("ROLLBACK")
-        raise
+    """Compatibility entry point: read-only checks, never legacy retries/printing."""
+    from . import fiscalcheck,bankcheck,paymentworker
+    return {'paykeeper':fiscalcheck.run_automatic(con,limit=3,include_ofd=False),
+            'ofd':paymentworker.run_ofd(con,_now(),limit=3),
+            'tochka':bankcheck.run_automatic(con,cached_only=True)}
 
 
 def start_worker(connect):
-    def loop():
-        con = connect()
-        while True:
-            try:
-                run_worker_cycle(con)
-            except Exception:  # noqa: BLE001
-                traceback.print_exc()
-            time.sleep(600)
-    threading.Thread(target=loop, name="fiscal-worker", daemon=True).start()
+    from . import paymentworker
+    return paymentworker.start_worker(connect)
 
 
 # ======================= для экрана =======================

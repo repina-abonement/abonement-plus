@@ -18,6 +18,8 @@ def inspect(con,payment,identifiers,as_of=None):
     wanted={str(v) for v in identifiers.values() if v}
     if not wanted:return result
     accounts=[]
+    registry_blocks=[]
+    transactions=[]
     stage='accounts'
     try:
         raw=fiscal.tochka_get(con,'/open-banking/v1.0/accounts')
@@ -46,6 +48,8 @@ def inspect(con,payment,identifiers,as_of=None):
                 result['responses'].append({'stage':stage,'shape':fiscal.shape(raw)})
                 blocks=raw.get('Data',{}).get('Registry') if isinstance(raw,dict) else None
                 if not isinstance(blocks,list):raise ValueError('Unverified registry')
+                if not isinstance(raw.get('Meta'),dict) or raw['Meta'].get('totalPages')!=1 or raw.get('Links',{}).get('next'):result['coverage_limited']=True
+                registry_blocks.extend(blocks)
                 for block in blocks:
                     if not isinstance(block,dict) or block.get('paymentType')!='sbp':continue
                     for item in block.get('payments',[]):
@@ -103,4 +107,10 @@ def inspect(con,payment,identifiers,as_of=None):
             if isinstance(error,fiscal.FxError):
                 result['statement_http_status']=error.http_status
                 result['statement_provider_message']=error.provider_message
+    from . import settlementproof
+    if not result.get('coverage_limited') and result.get('registry_status') not in ('permission_denied','unavailable'):
+        proof=settlementproof.prove(registry_blocks,transactions,{str(v) for v in identifiers.values() if v},payment)
+        if proof['status']=='confirmed':
+            result.update(status='confirmed',note=proof['note'],settlement_proof=proof)
+        elif registry_blocks:result['note']=proof['note']
     return result

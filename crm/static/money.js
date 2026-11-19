@@ -24,7 +24,13 @@ function dayTitle(iso, today) {
 function paymentControlHtml(control){
   if(!control)return '';
   const tone=control.status==='complete'?'green':control.status==='excluded'?'':'yellow';
-  return `<details class="payment-control-details"><summary><span class="pill ${tone}">${esc(control.label)}</span></summary>${[control.source,control.bank,control.ofd].filter(Boolean).map(item=>`<div class="small">${esc(item.label)}</div>`).join('')}${control.checked_at?`<div class="small muted">Проверено: ${esc(control.checked_at.replace('T',' '))} МСК</div>`:''}${control.issues?.length?`<ul class="small muted">${control.issues.map(issue=>`<li>${esc(issue)}</li>`).join('')}</ul>`:''}</details>`;
+  return `<details class="payment-control-details"><summary><span class="pill ${tone}">${esc(control.label)}</span></summary>${[control.source,control.bank,control.ofd].filter(Boolean).map(item=>`<div class="small">${esc(item.label)}${item.checked_at||item.source_checked_at?`<span class="muted"> · ${esc((item.checked_at||item.source_checked_at).replace('T',' '))} МСК</span>`:''}</div>`).join('')}${control.checked_at?`<div class="small muted">Проверено: ${esc(control.checked_at.replace('T',' '))} МСК</div>`:''}${control.issues?.length?`<ul class="small muted">${control.issues.map(issue=>`<li>${esc(issue)}</li>`).join('')}</ul>`:''}</details>`;
+}
+
+function paymentJobsView(jobs){
+  const names={paykeeper:'PayKeeper',tochka:'Точка',ofd:'ОФД'};
+  const labels={stale:'Давно не завершалась, проверьте службу CRM',waiting:'Ожидает запуска',running:'Проверка идёт',ok:'Проверка завершена',attention:'Есть ограничения доступа или ошибки',error:'Не удалось проверить, повтор автоматически',not_configured:'Доступ не настроен',interrupted:'Проверка прервана, будет повторена'};
+  return jobs?.length?`<details class="payment-control-jobs"><summary>Автоматические проверки на сервере · каждые 10 минут</summary>${jobs.map(j=>`<div class="small"><b>${names[j.source]||esc(j.source)}</b>: ${esc(labels[j.status]||j.status)}${j.last_finished_at?' · '+esc(j.last_finished_at.replace('T',' '))+' МСК':''}${j.next_at?' · следующая: '+esc(j.next_at.replace('T',' '))+' МСК':''}</div>`).join('')}<p class="small muted">Работают при закрытом браузере. Статус запуска не подтверждает конкретное зачисление или чек — результат указан у платежа</p></details>`:'';
 }
 
 async function renderPayments(page) {
@@ -55,7 +61,7 @@ async function renderPayments(page) {
         <button class="chip ${P.unconfirmed ? "on warn" : d.unconfirmed.count ? "warn" : ""}" id="p-unc">Ждут подтверждения${d.unconfirmed.count ? ` · ${d.unconfirmed.count} · ${rub(d.unconfirmed.sum)}` : ""}</button>
       </div>
     </div>
-    ${d.control_summary?`<section class="panel payment-control-summary"><b>Контроль оплат и чеков</b><div class="chips"><span>Подтверждено: ${d.control_summary.complete} из ${d.control_summary.total}</span><button type="button" class="chip ${P.controlOnly?'on':''}" id="p-control-attention">Требует проверки: ${d.control_summary.attention}</button>${P.controlOnly?'<button type="button" class="chip" id="p-control-all">Показать все</button>':''}</div></section>`:''}
+    ${d.control_summary?`<section class="panel payment-control-summary"><b>Контроль оплат и чеков</b>${paymentJobsView(d.control_jobs)}<div class="chips"><span>Подтверждено: ${d.control_summary.complete} из ${d.control_summary.total}</span><button type="button" class="chip ${P.controlOnly?'on':''}" id="p-control-attention">Требует проверки: ${d.control_summary.attention}</button>${P.controlOnly?'<button type="button" class="chip" id="p-control-all">Показать все</button>':''}</div></section>`:''}
     ${d.debtors.length ? `<details class="panel fold" style="margin-top:12px"><summary><h3>Должники · ${d.debtors.length}</h3><span class="muted small">${rub(d.debtors.reduce((a, x) => a + x.debt, 0))}</span></summary>
       <div class="chips" style="margin-top:8px">${d.debtors.slice(0, 60).map((x) => `<button class="chip" data-open="${x.id}">${esc(x.name)} · ${rub(x.debt)}</button>`).join("")}</div></details>` : ""}
     ${d.corrections.length ? `<details class="panel fold" style="margin-top:12px"><summary><h3>Корректировки цен · ${d.corrections.length}</h3><span class="muted small">исключения из правил: кто, на сколько и почему</span></summary>

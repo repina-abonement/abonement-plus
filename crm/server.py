@@ -1786,6 +1786,12 @@ def fiscal_source_status(con,h,user,body,q):
     return paykeepercheck.source_status(con)
 
 
+@route("GET", "/api/fiscal/control-payment", role="admin")
+def fiscal_control_payment(con,h,user,body,q):
+    from . import paymentcontrol
+    return paymentcontrol.inspect_existing(con,q.get('provider_payment_id'))
+
+
 @route("GET", "/api/fiscal/paykeeper-payment", role="admin")
 def fiscal_paykeeper_payment(con,h,user,body,q):
     from . import paykeepercheck
@@ -3731,9 +3737,9 @@ def _startup():
         print(f"Тестовые участники команды отправлены в архив: {n}", flush=True)
     con.commit()
     con.close()
+    fiscal.start_worker(db.connect)
     ai.start_worker(db.connect)
     tasks.start_worker(db.connect)
-    fiscal.start_worker(db.connect)
     from . import wazzupqueue
     wazzupqueue.start_worker(db.connect)
 

@@ -11,8 +11,8 @@ def init(con):
         checked_at TEXT NOT NULL, result TEXT NOT NULL)''')
 
 
-def run_automatic(con, now=None, limit=3):
-    if not all(fiscal.cfg(con,k) for k in ('fx_tochka_token','fx_pk_server','fx_pk_user','fx_pk_password')):
+def run_automatic(con, now=None, limit=3, cached_only=False):
+    if not fiscal.cfg(con,'fx_tochka_token'):
         return {'checked':0,'configured':False}
     current=now or datetime.now(ZoneInfo('Europe/Moscow'))
     if current.tzinfo is not None:
@@ -28,19 +28,28 @@ def run_automatic(con, now=None, limit=3):
         ORDER BY c.checked_at IS NOT NULL,c.checked_at,p.id LIMIT ?''',
         (cutoff,max(0,min(int(limit),10)))).fetchall()
     from . import paykeepercheck
+    denied=unavailable=0
     for row in rows:
         try:
-            inspection=paykeepercheck.inspect(con,row['pk_payment_id'],include_bank=True,include_ofd=False)
-            result=inspection['bank_settlement']
+            if cached_only:
+                from . import tochkacheck
+                cache=con.execute('SELECT result FROM fiscal_payment_checks WHERE payment_id=?',(row['id'],)).fetchone()
+                evidence=json.loads(cache['result']) if cache else {}
+                if evidence.get('provider_payment_id')!=row['pk_payment_id']:evidence={}
+                result=tochkacheck.inspect(con,evidence.get('bank_payment',{}),evidence.get('sbp_identifiers',{}))
+            else:
+                inspection=paykeepercheck.inspect(con,row['pk_payment_id'],include_bank=True,include_ofd=False)
+                result=inspection['bank_settlement']
         except Exception:
             result={'status':'unavailable','note':'Не удалось проверить зачисление. Деньги не отмечены как зачисленные'}
-        # Current registry/statement probe returns candidates, not final settlement proof.
-        result=dict(result,status='unverified')
+        denied+=result.get('registry_status')=='permission_denied'
+        unavailable+=result.get('registry_status')=='unavailable' or result.get('statement_status')=='unavailable' or result.get('status')=='unavailable'
+        if result.get('status')!='confirmed':result=dict(result,status='unverified')
         con.execute('''INSERT INTO bank_payment_checks VALUES(?,?,?,?)
             ON CONFLICT(payment_id) DO UPDATE SET provider_payment_id=excluded.provider_payment_id,
             checked_at=excluded.checked_at,result=excluded.result''',
             (row['id'],row['pk_payment_id'],stamp,json.dumps(result,ensure_ascii=False)))
-    return {'checked':len(rows),'configured':True}
+    return {'checked':len(rows),'configured':True,'blocked':denied,'registry_denied':denied,'unavailable':unavailable}
 
 
 def state(con,payment_id):
@@ -50,12 +59,19 @@ def state(con,payment_id):
     if not con.execute('SELECT 1 FROM pay_links WHERE payment_id=? AND pk_payment_id=?',
                        (payment_id,row['provider_payment_id'])).fetchone():return None
     result=json.loads(row['result'])
+    if result.get('status')=='confirmed':
+        current=con.execute('SELECT amount FROM payments WHERE id=? AND cancelled=0',(payment_id,)).fetchone()
+        ids=con.execute("SELECT DISTINCT pk_payment_id FROM pay_links WHERE payment_id=? AND pk_payment_id!=''",(payment_id,)).fetchall()
+        proof=result.get('settlement_proof',{})
+        if not current or len(ids)!=1 or proof.get('payment_gross_minor')!=fiscal.kop(current['amount']):
+            return {'status':'unverified','label':'Связь оплаты изменилась, нужна повторная проверка','checked_at':row['checked_at']}
+        return {'status':'confirmed','label':'Зачисление подтверждено выпиской','checked_at':row['checked_at'],'note':result['note'],'evidence':result.get('settlement_proof',{})}
     note=result.get('note') or 'Зачисление на расчётный счёт пока не подтверждено'
     if result.get('registry_status')=='permission_denied':
         note='Точка: ключу CRM не хватает права чтения эквайринга ReadAcquiringData'
-    elif result.get('registry_matches') or result.get('statement_candidates'):
+    elif (result.get('registry_matches') or result.get('statement_candidates')) and result.get('note') in (None,'Фактическая проводка по расчётному счёту ещё не подтверждена'):
         note='Найдены связанные операции. Сумма выплаты, комиссия и зачисление ещё требуют подтверждения'
-    elif result.get('statement_status')=='read':
+    elif result.get('statement_status')=='read' and result.get('note') in (None,'Фактическая проводка по расчётному счёту ещё не подтверждена'):
         note='Выписка прочитана. Подтверждённая связь с зачислением пока не найдена'
     return {'status':'unverified','label':'Зачисление на расчётный счёт не подтверждено',
             'checked_at':row['checked_at'],'note':note}

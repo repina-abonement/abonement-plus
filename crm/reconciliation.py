@@ -1,4 +1,5 @@
 """Read-only chain projection. Acquirer acceptance, bank settlement and OFD are distinct."""
+import json
 from . import fiscal
 
 
@@ -33,7 +34,16 @@ def payment_state(con, payment):
     ofd['source_checked_at'] = last['ts'] if last else None
     if not receipt and (not fiscal.cfg(con,'fx_ofd_token') or (last and not last['ok'])):
         ofd.update(status='unavailable', label='ОФД: источник недоступен')
-    return {'bank': bank, 'ofd': ofd, 'complete': False}
+    latest=con.execute('SELECT * FROM ofd_payment_checks WHERE payment_id=? AND provider_payment_id=?',(payment['id'],link['pk_payment_id'])).fetchone()
+    if latest:
+        evidence=json.loads(latest['result'])
+        ofd['check_scope']='payment'
+        ofd['source_checked_at']=latest['checked_at']
+        ofd['source_available']=evidence.get('status')!='unavailable'
+        ofd['note']=evidence.get('provider_message') or evidence.get('note') or ofd.get('note')
+        ofd['http_status']=evidence.get('http_status')
+        if not receipt and evidence.get('status')=='unavailable':ofd.update(status='unavailable',label='ОФД: источник недоступен')
+    return {'bank': bank, 'ofd': ofd, 'complete': bank['status']=='confirmed' and ofd['status']=='confirmed'}
 
 
 def run_ofd_backlog(con, now=None):

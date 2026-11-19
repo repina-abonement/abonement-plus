@@ -14,6 +14,8 @@ def inspect(con,provider_id,include_bank=True,include_ofd=True):
     provider_id=str(provider_id or '').strip()
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',provider_id):
         raise sv.ApiError('Укажите ID платежа PayKeeper',400)
+    bindings=con.execute("SELECT DISTINCT p.id FROM pay_links l JOIN payments p ON p.id=l.payment_id WHERE l.pk_payment_id=? AND p.cancelled=0",(provider_id,)).fetchall()
+    if len(bindings)>1:raise sv.ApiError('Один платёж PayKeeper связан с несколькими оплатами CRM. Требуется устранить неоднозначность',409)
     link=con.execute("SELECT l.*,p.amount AS recorded_amount FROM pay_links l JOIN payments p ON p.id=l.payment_id WHERE l.pk_payment_id=? AND p.cancelled=0 ORDER BY l.id DESC LIMIT 1",(provider_id,)).fetchone()
     if not link:raise sv.ApiError('Связанный платёж CRM не найден',404)
     result={'inspection_version':3,'provider_payment_id':provider_id,'crm_payment_id':link['payment_id'],
@@ -76,11 +78,15 @@ def source_status(con):
             'sber':{'connector_implemented':False},
             'legacy_automation_enabled':fiscal.cfg(con,'fx_enabled')=='1',
             'automatic_reprint_enabled':fiscal.cfg(con,'fx_auto_retry')=='1',
+            'legacy_background_started':False,'control_read_only':True,
             'note':'Доступ к источнику не подтверждает зачисление платежа или наличие конкретного чека'}
     checks=con.execute('SELECT count(*) AS total,max(checked_at) AS last_checked_at FROM bank_payment_checks').fetchone()
-    result['automatic_bank_checks']={'enabled':all(fiscal.cfg(con,k) for k in ('fx_tochka_token','fx_pk_server','fx_pk_user','fx_pk_password')),
+    result['automatic_bank_checks']={'enabled':bool(fiscal.cfg(con,'fx_tochka_token')),
         'interval_minutes':10,'batch_limit':3,'payments_checked':checks['total'],
-        'last_checked_at':checks['last_checked_at'],'settlement_confirmation_implemented':False}
+        'last_checked_at':checks['last_checked_at'],'settlement_confirmation_implemented':True,
+        'coverage_note':'Подтверждение только при точных структурированных идентификаторах и полном реестре; возвраты неизвестного формата блокируют результат'}
+    from . import paymentworker
+    result['control_jobs']=paymentworker.states(con)
     if result['tochka']['configured']:
         try:
             raw=fiscal.tochka_get(con,'/open-banking/v1.0/accounts')

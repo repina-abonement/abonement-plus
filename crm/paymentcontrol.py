@@ -18,7 +18,7 @@ def state(con,payment):
     provider_ok=False
     if links:
         provider_ok=len(links)==1 and provider.get('available') is True and str(provider.get('id'))==links[0]['pk_payment_id'] and provider.get('status') in ('obtained','success')
-        try:provider_ok=provider_ok and fiscal.kop(provider.get('pay_amount'))==fiscal.kop(payment['amount']) and fiscal.kop(provider.get('refund_amount') or 0)==0
+        try:provider_ok=provider_ok and fiscal.kop(provider.get('pay_amount'))==fiscal.kop(payment['amount']) and provider.get('refund_amount') is not None and fiscal.kop(provider['refund_amount'])==0
         except Exception:provider_ok=False
         source={'status':'confirmed' if provider_ok else 'unverified','label':'PayKeeper: оплата подтверждена' if provider_ok else 'PayKeeper: оплата требует проверки',
                 'provider_payment_id':links[0]['pk_payment_id'] if len(links)==1 else None,'checked_at':check.get('checked_at'),
@@ -36,7 +36,7 @@ def state(con,payment):
     ofd_ok=chain['ofd']['status']=='confirmed'
     if not ofd_ok:
         ofd_error=check.get('ofd_check',{})
-        reason=ofd_error.get('provider_message') or chain['ofd']['label']
+        reason=(chain['ofd'].get('note') if chain['ofd'].get('check_scope')=='payment' else None) or ofd_error.get('provider_message') or chain['ofd']['label']
         issues.append('ОФД: '+reason if not reason.startswith('ОФД') else reason)
     complete=bank_ok and ofd_ok and (provider_ok if links else payment['method']=='cash' and bool(payment['confirmed']))
     return {'status':'complete' if complete else 'attention','label':'Подтверждено' if complete else 'Требует проверки',
@@ -49,3 +49,15 @@ def summarize(rows):
     return {'total':len(active),'complete':sum(r['control']['status']=='complete' for r in active),
             'attention':sum(r['control']['status']=='attention' for r in active),
             'excluded':len(rows)-len(active)}
+
+
+def inspect_existing(con,provider_id):
+    """Inspect persisted evidence only, without provider requests or data mutations."""
+    from . import services,paymentworker
+    rows=con.execute("""SELECT DISTINCT p.* FROM payments p JOIN pay_links l ON l.payment_id=p.id
+        WHERE l.pk_payment_id=? AND p.cancelled=0""",(str(provider_id or ''),)).fetchall()
+    if len(rows)!=1:raise services.ApiError('Нужен один однозначно связанный существующий платёж',409 if rows else 404)
+    payment=rows[0]
+    return {'control_version':2,'provider_payment_id':str(provider_id),'crm_payment_id':payment['id'],
+            'amount_minor':fiscal.kop(payment['amount']),'control':state(con,payment),'control_jobs':paymentworker.states(con),
+            'read_only':True,'live_provider_requests':False}
