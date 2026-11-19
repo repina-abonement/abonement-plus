@@ -1862,6 +1862,12 @@ def staff_expenses_edit(con,h,user,body,q,eid):
     return sxp(staffexpenses.edit,con,user,int(eid),body)
 
 
+@route("POST", "/api/staff-expenses/{eid}/received", role="staffexpenses")
+def staff_expenses_employee_received(con,h,user,body,q,eid):
+    from . import staffexpenses
+    return sxp(staffexpenses.mark_received,con,user,int(eid),body)
+
+
 @route("POST", "/api/staff-expenses/{eid}/reimburse", role="staffexpenses")
 def staff_expenses_reimburse(con,h,user,body,q,eid):
     from . import staffexpenses

@@ -22,6 +22,17 @@ def init(con):
     CREATE TABLE IF NOT EXISTS staff_expense_history(id INTEGER PRIMARY KEY,expense_id INTEGER NOT NULL,actor_id INTEGER NOT NULL,at TEXT NOT NULL,action TEXT NOT NULL,details TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS staff_expense_receipts(id INTEGER PRIMARY KEY,expense_id INTEGER NOT NULL REFERENCES staff_expenses(id),mime TEXT NOT NULL,data BLOB NOT NULL,uploaded_by INTEGER NOT NULL,at TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS staff_expenses_day ON staff_expenses(paid_date,id);''')
+    if 'category' not in {r[1] for r in con.execute('PRAGMA table_info(staff_expenses)')}:
+        con.execute("ALTER TABLE staff_expenses ADD COLUMN category TEXT NOT NULL DEFAULT ''")
+
+
+CATEGORIES={'printing':'Печать','decor':'Украшения','supplies':'Хозтовары и инвентарь','laundry':'Стирка','maintenance':'Ремонт и работы','other':'Другое'}
+
+def category_for(title):
+    value=str(title).casefold()
+    for key,pattern in [('laundry',r'стир|прачеч'),('printing',r'печат|распечат|полиграф|прайс'),('decor',r'ёлк|елк|украш|декор|прищеп|пергамент|гирлянд'),('maintenance',r'ремонт|техник|электрик|сантехник|монтаж'),('supplies',r'крюч|хоз|инвентар|бумаг|мыл|салфет|вод[ауы]|моющ')]:
+        if re.search(pattern,value):return key
+    return 'other'
 
 
 def stamp():return datetime.now(ZoneInfo('Europe/Moscow')).isoformat(timespec='seconds')
@@ -63,7 +74,7 @@ def parse(text):
         if start:amount,title=start.group(1),start.group(2)
         elif end:title,amount=end.group(1),end.group(2)
         else:errors.append(f'Строка {number}: не удалось определить сумму');continue
-        try:rows.append({'title':title.strip(' -–—:'),'amount':minor(amount)/100})
+        try:rows.append({'title':title.strip(' -–—:'),'amount':minor(amount)/100,'category':category_for(title)})
         except ExpenseError as e:errors.append(f'Строка {number}: {e}')
     if len(rows)>100:raise ExpenseError('За один раз можно внести до 100 расходов')
     return {'rows':rows,'errors':errors,'warnings':warnings,'total_minor':sum(minor(r['amount']) for r in rows)}
@@ -79,7 +90,9 @@ def fields(con,data):
     if branch and not con.execute('SELECT 1 FROM branches WHERE id=?',(branch,)).fetchone():raise ExpenseError('Филиал не найден')
     source=data.get('funding')
     if source not in FUNDING:raise ExpenseError('Выберите источник денег')
-    return dict(title=title,amount=minor(data.get('amount')),paid_date=valid_day(data.get('paid_date')),branch_id=branch,paid_by_id=int(payer),funding=source,note=note)
+    category=data.get('category') or category_for(title)
+    if category not in CATEGORIES:raise ExpenseError('Выберите категорию')
+    return dict(category=category,title=title,amount=minor(data.get('amount')),paid_date=valid_day(data.get('paid_date')),branch_id=branch,paid_by_id=int(payer),funding=source,note=note)
 
 
 def create_batch(con,user,data):
@@ -145,13 +158,37 @@ def reimburse(con,user,eid,data):
     history(con,eid,user,'money_transferred',{'id':rid,'amount':amount,'method':method,'date':day});return {'id':rid}
 
 
+def mark_received(con,user,eid,data):
+    require(con,user);row=get_row(con,eid)
+    if row['cancelled'] or row['funding']!='personal' or row['paid_by_id']!=user['id']:
+        raise ExpenseError('Возмещение отмечает сотрудник, оплативший покупку личными деньгами')
+    request=str(data.get('request_id') or '')
+    if not re.fullmatch(r'[A-Za-z0-9_-]{8,100}',request):raise ExpenseError('Обновите страницу и попробуйте ещё раз')
+    request='received:'+request
+    previous=con.execute('SELECT * FROM staff_reimbursements WHERE recorded_by=? AND request_id=?',(user['id'],request)).fetchone()
+    if previous:
+        if previous['expense_id']!=eid or (data.get('amount') is not None and previous['amount']!=minor(data['amount'])):raise ExpenseError('Эта отметка уже сохранена с другими данными')
+        return {'id':previous['id']}
+    sent=con.execute('SELECT coalesce(sum(amount),0) FROM staff_reimbursements WHERE expense_id=? AND voided=0',(eid,)).fetchone()[0]
+    left=row['amount']-sent
+    if left<=0:return {'id':None,'already_reimbursed':True}
+    amount=minor(data['amount']) if data.get('amount') is not None else left
+    if amount>left:raise ExpenseError('Сумма больше остатка к возмещению')
+    now=stamp()
+    rid=con.execute("""INSERT INTO staff_reimbursements(expense_id,amount,transferred_at,method,note,recorded_by,recorded_at,received_at,received_by,request_id)
+        VALUES(?,?,?,'not_specified','Получение отмечено сотрудником',?,?,?,?,?)""",(eid,amount,now[:10],user['id'],now,now,user['id'],request)).lastrowid
+    history(con,eid,user,'reimbursement_received',{'id':rid,'amount':amount,'source':'employee_confirmation'})
+    return {'id':rid}
+
+
 def receipt_money(con,user,rid,data):
     require(con,user)
     transfer=con.execute('SELECT * FROM staff_reimbursements WHERE id=?',(rid,)).fetchone()
     if not transfer:raise ExpenseError('Отметка не найдена')
     row=get_row(con,transfer['expense_id'])
     if data.get('voided') is True:
-        if user['role']!='admin' or transfer['received_at']:raise ExpenseError('Отменить можно только неподтверждённую передачу денег от лица Юлии')
+        own_receipt=transfer['method']=='not_specified' and transfer['recorded_by']==transfer['received_by'] and (user['id']==row['paid_by_id'] or user['role']=='admin')
+        if not own_receipt and (user['role']!='admin' or transfer['received_at']):raise ExpenseError('Можно исправить свою отметку получения или неподтверждённую передачу денег от лица Юлии')
         if transfer['voided']:return {'id':rid}
         con.execute('UPDATE staff_reimbursements SET voided=1 WHERE id=?',(rid,));history(con,row['id'],user,'transfer_voided',{'id':rid})
     else:
@@ -183,9 +220,10 @@ def listing(con,user):
         transfers=[dict(r) for r in con.execute('SELECT * FROM staff_reimbursements WHERE expense_id=? ORDER BY id',(row['id'],))]
         active=[t for t in transfers if not t['voided']];sent=sum(t['amount'] for t in active);received=sum(t['amount'] for t in active if t['received_at'])
         personal=row['funding']=='personal' and not row['cancelled']
-        row.update(transfers=transfers,to_transfer=max(0,row['amount']-sent) if personal else 0,awaiting_receipt=sent-received if personal else 0,
-          received=received,status='Отменён' if row['cancelled'] else 'Не требует возмещения' if not personal else 'Получение подтверждено' if received==row['amount'] else 'Деньги переданы, ждём подтверждения' if sent==row['amount'] else 'Возмещено частично' if sent else 'К возмещению')
+        row['category']=row.get('category') or category_for(row['title'])
+        row.update(transfers=transfers,to_transfer=max(0,row['amount']-sent) if personal else 0,awaiting_receipt=0,
+          received=received,status='Отменён' if row['cancelled'] else 'Не требует возмещения' if not personal else 'Возмещено' if sent==row['amount'] else 'Возмещено частично' if sent else 'К возмещению')
         row['receipts']=[dict(r) for r in con.execute('SELECT id,at FROM staff_expense_receipts WHERE expense_id=?',(row['id'],))]
         row['history']=[dict(r) for r in con.execute('SELECT h.*,u.name AS actor FROM staff_expense_history h LEFT JOIN users u ON u.id=h.actor_id WHERE expense_id=? ORDER BY h.id',(row['id'],))]
-    return {'rows':rows,'funding':FUNDING,'can_reimburse':user['role']=='admin','staff':[{'id':r['id'],'name':r['name']} for r in con.execute("SELECT * FROM users WHERE active=1 AND role IN ('admin','operator') ORDER BY name") if allowed(con,dict(r))],
+    return {'rows':rows,'funding':FUNDING,'categories':CATEGORIES,'workflow':'simple','can_reimburse':user['role']=='admin','staff':[{'id':r['id'],'name':r['name']} for r in con.execute("SELECT * FROM users WHERE active=1 AND role IN ('admin','operator') ORDER BY name") if allowed(con,dict(r))],
       'summary':{'spent':sum(r['amount'] for r in rows if not r['cancelled']),'to_transfer':sum(r['to_transfer'] for r in rows),'awaiting_receipt':sum(r['awaiting_receipt'] for r in rows)}}
