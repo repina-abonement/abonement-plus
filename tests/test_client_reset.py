@@ -1,5 +1,6 @@
 import sqlite3
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -15,6 +16,7 @@ class ClientResetTest(unittest.TestCase):
         self.con = db.connect(str(self.path)); db.init_db(self.con)
         self.owner = dict(self.con.execute("SELECT * FROM users WHERE role='admin' LIMIT 1").fetchone())
         self.con.execute("INSERT INTO integrations(key,value) VALUES('backup_yadisk_token','test-token')")
+        self.con.execute("INSERT INTO integrations(key,value) VALUES('backup_key','test-encryption-key')")
         branch = self.con.execute("INSERT INTO branches(name) VALUES('Branch')").lastrowid
         self.group = self.con.execute("INSERT INTO groups(branch_id,name,weekdays) VALUES(?,?,'0,3')",(branch,'Group')).lastrowid
         family = self.con.execute("INSERT INTO families(name) VALUES('Family')").lastrowid
@@ -59,6 +61,18 @@ class ClientResetTest(unittest.TestCase):
         self.con.execute("DELETE FROM integrations WHERE key='backup_yadisk_token'")
         with self.assertRaisesRegex(Exception,'внешнюю'):
             clientreset.plan(self.con,self.owner)
+
+    def test_background_job_finishes_after_quick_start_response(self):
+        planned=clientreset.plan(self.con,self.owner)
+        with patch.object(backup,'DIR',str(self.root/'backups')), patch.object(backup,'upload',return_value='remote.enc'):
+            started=clientreset.start(self.con,self.owner,{'token':planned['token'],'confirmation':clientreset.CONFIRMATION},'async-commit')
+            self.assertTrue(started['started'])
+            for _ in range(100):
+                checked=clientreset.status(self.con)
+                if checked.get('job',{}).get('state') in ('completed','failed'): break
+                time.sleep(.02)
+        self.assertEqual(checked['job']['state'],'completed'); self.assertTrue(checked['completed'])
+        self.assertEqual(checked['client_rows_remaining'],0)
 
     def test_status_before_cleanup_is_read_only(self):
         before=self.con.serialize(); checked=clientreset.status(self.con)

@@ -24,6 +24,10 @@ ARCHIVE_SCHEMA = """CREATE TABLE IF NOT EXISTS client_data_archives(
  id INTEGER PRIMARY KEY,created_at TEXT NOT NULL,created_by TEXT NOT NULL,
  local_filename TEXT NOT NULL,remote_filename TEXT NOT NULL,sha256 TEXT NOT NULL,
  before_counts TEXT NOT NULL,after_counts TEXT NOT NULL,source_commit TEXT NOT NULL)"""
+JOB_SCHEMA = """CREATE TABLE IF NOT EXISTS client_data_reset_jobs(
+ id INTEGER PRIMARY KEY,state TEXT NOT NULL,stage TEXT NOT NULL,created_at TEXT NOT NULL,
+ started_at TEXT,finished_at TEXT,created_by TEXT NOT NULL,source_commit TEXT NOT NULL,
+ error TEXT NOT NULL DEFAULT '',result TEXT NOT NULL DEFAULT '')"""
 
 # Entire tables containing client cards, communication, attendance, sales,
 # money, fiscal evidence, or raw ERP imports.  Structural club tables are
@@ -66,6 +70,10 @@ _lock = threading.Lock()
 
 def init(con):
     con.execute(ARCHIVE_SCHEMA)
+    con.execute(JOB_SCHEMA)
+    con.execute("""UPDATE client_data_reset_jobs SET state='interrupted',stage='interrupted',
+        finished_at=?,error='Сервер был перезапущен до завершения. Проверьте результат перед новым планом.'
+        WHERE state IN ('queued','running')""",(_now().isoformat(timespec='seconds'),))
 
 
 def _tables(con):
@@ -122,7 +130,8 @@ def _now():
 
 
 def _remote_ready(con):
-    return bool(con.execute("SELECT 1 FROM integrations WHERE key='backup_yadisk_token' AND value!=''").fetchone())
+    keys={row['key'] for row in con.execute("SELECT key FROM integrations WHERE key IN ('backup_yadisk_token','backup_key') AND value!=''")}
+    return keys=={'backup_yadisk_token','backup_key'}
 
 
 def plan(con, user):
@@ -153,7 +162,7 @@ def _verify_archive(path, expected_counts):
     finally: check.close()
 
 
-def apply(con, user, body, source_commit=''):
+def _consume_plan(con, user, body):
     token=str((body or {}).get('token') or ''); phrase=str((body or {}).get('confirmation') or '')
     if phrase != CONFIRMATION: raise ApiError('Введите фразу подтверждения без изменений')
     with _lock: item=_plans.pop(token,None)
@@ -161,18 +170,29 @@ def apply(con, user, body, source_commit=''):
         raise ApiError('Проверка устарела. Сначала снова проверьте архив и очистку')
     if fingerprint(con) != item['fingerprint'] or counts(con) != item['counts']:
         raise ApiError('Данные изменились после проверки. Сначала сформируйте новый план')
+    return item
+
+
+def _apply_item(con, user, item, source_commit='', stage=None):
     from .erpsinglerecoveryweb import _backup_current
     from . import backup
+    if fingerprint(con) != item['fingerprint'] or counts(con) != item['counts']:
+        raise ApiError('Данные изменились после проверки. Сначала сформируйте новый план')
+    if stage: stage('local_archive')
     archive=_backup_current(con,prefix='client-data-archive')
     _verify_archive(archive,item['counts']); checksum=_sha(archive)
-    try:
-        remote=backup.upload(con,archive)
-    except Exception as exc:
-        raise ApiError('Внешняя зашифрованная копия не подтверждена. Очистка отменена') from exc
+    # Lock writers after the local snapshot is proven unchanged. Reads remain
+    # available in WAL mode while the encrypted external copy is uploaded.
+    if stage: stage('external_archive')
     con.execute('BEGIN IMMEDIATE')
     try:
         if fingerprint(con) != item['fingerprint'] or counts(con) != item['counts']:
             raise ApiError('Во время архивации данные изменились. Очистка отменена; повторите проверку')
+        try:
+            remote=backup.upload(con,archive)
+        except Exception as exc:
+            raise ApiError('Внешняя зашифрованная копия не подтверждена. Очистка отменена') from exc
+        if stage: stage('cleaning')
         con.execute('PRAGMA defer_foreign_keys=ON')
         available=_tables(con)
         for table,where in PARTIAL.items():
@@ -197,17 +217,70 @@ def apply(con, user, body, source_commit=''):
             'restoration':'Архив сохранён целиком; восстановление выполняется только как отдельная операция обслуживания'}
 
 
+def apply(con, user, body, source_commit=''):
+    """Synchronous core retained for isolated tests and maintenance scripts."""
+    return _apply_item(con,user,_consume_plan(con,user,body),source_commit)
+
+
+def _safe_error(error):
+    return error.message if isinstance(error,ApiError) else 'Не удалось завершить архивирование. Рабочие данные не очищены или требуют проверки.'
+
+
+def _job_worker(path, job_id, user, item, source_commit):
+    from . import db
+    con=db.connect(path)
+    try:
+        con.execute("UPDATE client_data_reset_jobs SET state='running',stage='local_archive',started_at=? WHERE id=?",
+                    (_now().isoformat(timespec='seconds'),job_id))
+        def stage(value):
+            # Before BEGIN this is immediately visible; inside the final write
+            # transaction it becomes visible together with the cleanup.
+            con.execute('UPDATE client_data_reset_jobs SET stage=? WHERE id=?',(value,job_id))
+        result=_apply_item(con,user,item,source_commit,stage)
+        con.execute("""UPDATE client_data_reset_jobs SET state='completed',stage='completed',finished_at=?,result=?
+            WHERE id=?""",(_now().isoformat(timespec='seconds'),json.dumps(result,ensure_ascii=False),job_id))
+    except BaseException as error:
+        if con.in_transaction: con.execute('ROLLBACK')
+        con.execute("""UPDATE client_data_reset_jobs SET state='failed',stage='failed',finished_at=?,error=? WHERE id=?""",
+                    (_now().isoformat(timespec='seconds'),_safe_error(error),job_id))
+    finally:
+        con.close()
+
+
+def start(con, user, body, source_commit=''):
+    active=con.execute("SELECT id FROM client_data_reset_jobs WHERE state IN ('queued','running') LIMIT 1").fetchone()
+    if active: raise ApiError('Архивирование уже выполняется. Нажмите «Проверить результат»')
+    item=_consume_plan(con,user,body)
+    path=con.execute('PRAGMA database_list').fetchone()['file']
+    if not path: raise ApiError('Не удалось определить рабочую базу. Очистка не начата')
+    job_id=con.execute("""INSERT INTO client_data_reset_jobs(state,stage,created_at,created_by,source_commit)
+        VALUES('queued','queued',?,?,?)""",(_now().isoformat(timespec='seconds'),user.get('name') or '',source_commit)).lastrowid
+    safe_user={key:user.get(key) for key in ('id','name','role')}
+    threading.Thread(target=_job_worker,args=(path,job_id,safe_user,item,source_commit),daemon=True,
+                     name='client-data-reset').start()
+    return {'started':True,'job_id':job_id,'state':'queued','stage':'queued'}
+
+
 def status(con):
-    current=counts(con); row=con.execute('SELECT * FROM client_data_archives ORDER BY id DESC LIMIT 1').fetchone()
+    row=con.execute('SELECT * FROM client_data_archives ORDER BY id DESC LIMIT 1').fetchone()
     archive=None
     if row:
         archive={'created_at':row['created_at'],'created_by':row['created_by'],
                  'local_filename':row['local_filename'],'remote_filename':row['remote_filename'],
                  'sha256':row['sha256'],'source_commit':row['source_commit']}
-    remaining=sum(current.values())
-    return {'completed':bool(archive) and remaining==0,'archive':archive,'counts':current,
+    job=con.execute('SELECT * FROM client_data_reset_jobs ORDER BY id DESC LIMIT 1').fetchone()
+    public_job=None
+    if job:
+        public_job={key:job[key] for key in ('id','state','stage','created_at','started_at','finished_at','error')}
+    running=public_job and public_job['state'] in ('queued','running')
+    if running:
+        return {'completed':False,'archive':archive,'job':public_job,'counts':{},
+                'client_rows_remaining':None,'read_only':True,'note':'Архивирование выполняется на сервере'}
+    current=counts(con); remaining=sum(current.values())
+    return {'completed':bool(archive) and remaining==0,'archive':archive,'job':public_job,'counts':current,
             'client_rows_remaining':remaining,'read_only':True,
             'note':'Архив и очистка подтверждены' if archive and remaining==0 else
+                   'Архивирование выполняется на сервере' if running else
                    'Клиентские данные остаются в рабочей CRM' if remaining else
                    'Клиентские строки отсутствуют, но завершённый архив не зарегистрирован'}
 
@@ -224,4 +297,4 @@ def register(route):
     @route('POST','/api/maintenance/client-reset/apply',role='admin',transactional=False)
     def reset_apply(con,h,user,body,q):
         from .erpbalancerecoveryweb import provenance
-        return apply(con,user,body,provenance().get('running_commit') or '')
+        return start(con,user,body,provenance().get('running_commit') or '')
