@@ -342,6 +342,8 @@ def init_db(con: sqlite3.Connection):
     erpbalancerecoveryweb.init(con)
     from . import clientreset
     clientreset.init(con)
+    from . import chatarchiverestore
+    chatarchiverestore.init(con)
     perms.init(con)
     from . import offlineplanner
     offlineplanner.provision_requested(con)

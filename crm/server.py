@@ -941,6 +941,8 @@ from . import erpbalancerecoveryweb as _erp_balance_recovery_web
 _erp_balance_recovery_web.register(route)
 from . import clientreset as _client_reset
 _client_reset.register(route)
+from . import chatarchiverestore as _chat_archive_restore
+_chat_archive_restore.register(route)
 
 
 @route('GET','/api/diagnostics/student-card',role='admin',transactional=False)
