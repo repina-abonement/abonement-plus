@@ -25,6 +25,22 @@ class NewClientTest(unittest.TestCase):
         for table in ('enrollments', 'subscriptions', 'payments', 'messages'):
             self.assertEqual(self.con.execute('SELECT COUNT(*) FROM '+table).fetchone()[0], 0)
 
+    def test_parent_email_on_creation_and_for_an_existing_family(self):
+        sid = sv.create_new_lead(self.con, {**self.data, 'email': '  parent@example.org '}, self.user)
+        family = sv.get_student_row(self.con, sid)['family_id']
+        contact = self.con.execute('SELECT id,email FROM parents WHERE family_id=?', (family,)).fetchone()
+        self.assertEqual(contact['email'], 'parent@example.org')
+        sibling = {**self.data, 'name': 'Sibling', 'family_id': family, 'email': 'other@example.org'}
+        sv.create_student(self.con, sibling, self.user)
+        def saved():
+            return self.con.execute('SELECT email FROM parents WHERE id=?', (contact['id'],)).fetchone()[0]
+        self.assertEqual(saved(), 'parent@example.org')
+        self.con.execute("UPDATE parents SET email='' WHERE id=?", (contact['id'],))
+        sv.create_student(self.con, {**sibling, 'phone': '+79009999999'}, self.user)
+        self.assertEqual(saved(), '')
+        sv.create_student(self.con, sibling, self.user)
+        self.assertEqual(saved(), 'other@example.org')
+
     def test_explicit_messenger_is_preserved(self):
         sid = sv.create_student(self.con, {**self.data, 'messenger': 'Telegram'}, self.user)
         self.assertEqual(self.con.execute('SELECT messenger FROM parents WHERE family_id=?', (sv.get_student_row(self.con, sid)['family_id'],)).fetchone()[0], 'Telegram')

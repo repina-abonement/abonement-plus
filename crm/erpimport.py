@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta
 from xml.etree import ElementTree as ET
 
 from . import logic
-from .db import normalize_phone
+from .db import fill_parent_email, normalize_phone
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS erp_uploads (
@@ -148,11 +148,11 @@ FIELDS = {
         ("child_name", "Ребёнок (ФИО или имя)", ["фио ребенка", "ребенок", "ученик", "фио ученика", "имя ребенка", "клиент", "фио", "имя"]),
         ("child_last", "Фамилия ребёнка (если отдельно)", ["фамилия ребенка", "фамилия"]),
         ("birth", "Дата рождения", ["дата рождения", "д.р", "др", "рождения"]),
+        ("email", "Почта", ["мейл", "email", "e-mail", "электронная почта", "эл. почта", "электронный адрес", "почта"]),
         ("parent_name", "Родитель", ["фио родителя", "родитель", "контактное лицо", "представитель", "мама", "папа"]),
         ("relation", "Кем приходится (мама, папа…)", ["кем приходится", "родство", "степень родства", "роль представителя", "кто это"]),
         ("phone", "Телефон", ["телефон родителя", "телефон", "моб", "тел"]),
         ("phone2", "Второй телефон", ["телефон 2", "доп. телефон", "второй телефон", "доп телефон"]),
-        ("email", "Почта", ["email", "e-mail", "почта", "эл. почта"]),
         ("branch", "Филиал", ["филиал", "площадка", "локация", "адрес"]),
         ("group", "Группа", ["группа", "расписание"]),
         ("status", "Статус / этап", ["статус", "этап", "состояние"]),
@@ -1051,6 +1051,8 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
                 pid2 = con.execute("INSERT INTO parents(family_id, name, phone, phone_norm) VALUES (?,?,?,?)",
                                    (fid, "Второй контакт", ph2, normalize_phone(ph2))).lastrowid
                 _track(con, batch, "parents", pid2)
+        else:
+            fill_parent_email(con, fid, ph, rec.get("email"))
         funnel, stage = info["funnel"], info["stage"]
         trial = parse_date(rec.get("trial_at", "")) or info["trial"]
         if trial and len(trial) == 10:
@@ -1278,6 +1280,8 @@ def update(con, user: dict, now: datetime | None = None) -> dict:
                 track("parents", con.execute("INSERT INTO parents(family_id, name, phone, phone_norm, email, relation) VALUES (?,?,?,?,?,?)",
                             (fam, parent or "Родитель", rec.get("phone", "").strip(), ph, (rec.get("email") or "").strip(),
                              guess_relation(rec.get("relation") or "") or guess_relation(rec.get("parent_name") or ""))).lastrowid)
+            else:
+                fill_parent_email(con, fam, ph, rec.get("email"))
             created = parse_date(rec.get("created", "")) or nowi
             created = created + "T10:00" if len(created) == 10 else created
             ev = parse_date(rec.get("status_at", "")) or (trial if trial and stage in ("trial_booked", "missed_trial", "how_was") else "") or created
@@ -1293,6 +1297,7 @@ def update(con, user: dict, now: datetime | None = None) -> dict:
             st["new"] += 1
         else:
             cur = dict(con.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone())
+            email_added = fill_parent_email(con, cur["family_id"], ph, rec.get("email"))
             sets, args = [], []
             if status and status != (cur.get("erp_status") or "") and (funnel, stage) != (cur["funnel"], cur["stage"]):
                 sets += ["funnel=?", "stage=?", "stage_changed_at=?"]; args += [funnel, stage, nowi]
@@ -1311,6 +1316,7 @@ def update(con, user: dict, now: datetime | None = None) -> dict:
                 sets.append("birth=?"); args.append(b)
             if sets:
                 con.execute(f"UPDATE students SET {', '.join(sets)} WHERE id=?", (*args, sid))
+            if sets or email_added:
                 st["updated"] += 1
         # группы ученика: как в ERP (где куплен текущий или следующий месяц)
         if funnel == "members" and info["groups"] and not info.get("preserve_profile"):

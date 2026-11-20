@@ -2409,6 +2409,7 @@ function openNewClient(preset = {}) {
       <div class="field"><label>Телефон родителя</label><input name="phone" type="tel" required placeholder="+7 900 000-00-00" value="${esc(preset.phone || "")}"></div>
       <div id="dup"></div>
       <div class="field"><label>Имя родителя</label><input name="parent_name" required value="${esc(preset.parent_name || "")}"></div>
+      <div class="field"><label for="nc-parent-email">Электронная почта родителя</label><input id="nc-parent-email" name="email" type="email" value="${esc(preset.email || "")}"></div>
       <div class="field"><label>Роль родителя</label><select name="parent_relation"><option value="">— выбрать —</option>${["мама", "папа", "бабушка", "дедушка", "тётя", "дядя", "сестра", "брат", "няня", "опекун", "другое"].map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join('')}</select></div>
       <div class="field"><label>Мессенджер</label><select name="messenger"><option>MAX</option><option>Telegram</option><option>WhatsApp</option><option value="">—</option></select></div>`}
     <div class="field"><label>Имя ребёнка</label><input name="name" required></div>
