@@ -21,6 +21,14 @@ def main():
     a, b = [r["id"] for r in inventory[:2]]
     name = dict(con.execute("SELECT id, name FROM merch_items").fetchall())
     VARYA = {"id": owner, "name": "Варя", "role": "operator", "is_senior": 1}
+    section = merch.planner_task_section(
+        con, {"title": "Учёт мерча", "note": "", "recur_id": 7, "due_at": "2026-11-20T12:00"},
+        {"weekdays": [4]}, VARYA)
+    check(section["schedule"] == "пятница" and len(section["stock_items"]) == 19,
+          "Пересчёт встроен в существующую пятничную задачу по мерчу")
+    check(merch.planner_task_section(con, {"title": "Другая задача", "note": "", "recur_id": 8},
+                                     {"weekdays": [4]}, VARYA) is None,
+          "В прочих карточках Планера раздел мерча не появляется")
     first = [{"id": x["id"], "stock": x["norm"], "norm": x["norm"]} for x in inventory]
     next(x for x in first if x["id"] == a).update(stock=5, norm=15)
     next(x for x in first if x["id"] == b).update(stock=8, norm=6)

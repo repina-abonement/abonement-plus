@@ -175,7 +175,7 @@ function merchStockHtml(it) {
       <button class="btn" id="mst-new-add" style="flex:0">Добавить</button></div></details></section>`;
 }
 
-function wireMerchStock(page, it) {
+function wireMerchStock(page, it, afterSave=render) {
   const btn = page.querySelector("#mst-save");
   if (!btn) return;
   const stockItems = it.stock_items || [];
@@ -193,13 +193,13 @@ function wireMerchStock(page, it) {
     try {
       const r = await api("POST", "/api/merch/stock", { items });
       toast(r.order.length ? `Заказать: ${r.order.map((o) => `${o.name} ${o.qty}`).join(", ")}. Задача руководителю в Планере` : "Всего хватает, заказывать нечего 👍");
-      render();
+      afterSave();
     } catch (e) { fail(e); }
   };
   const add = page.querySelector("#mst-new-add");
   if (add) add.onclick = async () => {
     try { await api("POST", "/api/merch/stock/items", { name: page.querySelector("#mst-new-name").value,
-      norm: page.querySelector("#mst-new-norm").value, unit: page.querySelector("#mst-new-unit").value }); toast("Позиция добавлена"); render(); }
+      norm: page.querySelector("#mst-new-norm").value, unit: page.querySelector("#mst-new-unit").value }); toast("Позиция добавлена"); afterSave(); }
     catch (e) { fail(e); }
   };
 }

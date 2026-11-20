@@ -312,6 +312,14 @@ async function loadPlannerTaskSettings(id) {
   try { d = await api("GET", `/api/planner/tasks/${id}`); }
   catch (e) { if (host.isConnected) host.textContent = e.message; return; }
   if (!host.isConnected) return;
+  if (d.merch_stock) {
+    host.parentElement?.querySelector('.planner-merch-stock')?.remove();
+    const section=document.createElement('section');
+    section.className='planner-merch-stock';
+    section.innerHTML=`<h3>Еженедельный учёт мерча</h3><p class="small muted">Задача в Планере: ${esc(d.merch_stock.schedule)}. Заполните фактический остаток каждой позиции.</p>${merchStockHtml(d.merch_stock)}`;
+    host.before(section);
+    wireMerchStock(section,d.merch_stock,()=>loadPlannerTaskSettings(id));
+  }
   if (d.can_stop_repeat) {
     const controls=document.createElement('div');
     controls.className='row';controls.style.marginTop='16px';

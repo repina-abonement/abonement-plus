@@ -1776,7 +1776,9 @@ def planner_week(con, h, user, body, q):
 
 @route("GET", "/api/planner/tasks/{tid}", role="planner")
 def planner_task_detail(con, h, user, body, q, tid):
-    return px(planner.task_detail, con, int(tid), user)
+    detail = px(planner.task_detail, con, int(tid), user)
+    detail["merch_stock"] = merch.planner_task_section(con, detail["task"], detail.get("repeat"), user)
+    return detail
 
 
 @route("POST", "/api/planner/tasks/{tid}/subtasks", role="planner")

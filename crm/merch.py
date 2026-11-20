@@ -62,6 +62,7 @@ STOCK_MINIMUMS = [
     ("Форма (размер S)", 6, "шт."), ("Форма (размер M)", 6, "шт."),
     ("Форма (размер L)", 6, "шт."), ("Форма (размер XL)", 5, "шт."),
 ]
+WEEKDAY_NAMES = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
 
 
 class MerchError(ValueError):
@@ -116,6 +117,18 @@ def stock_status(con, today: date | None = None) -> dict:
     return {"week_start": monday.isoformat(), "week_end": (monday + timedelta(days=6)).isoformat(),
             "weekly_due": not last or last["counted_at"][:10] < monday.isoformat(),
             "last_count": dict(last) if last else None, "shortages": shortages}
+
+
+def planner_task_section(con, task: dict, repeat: dict | None, user: dict) -> dict | None:
+    """Данные пересчёта только для существующей повторяемой задачи по мерчу."""
+    haystack = f"{task.get('title', '')} {task.get('note', '')}".lower().replace("ё", "е")
+    if not task.get("recur_id") or "мерч" not in haystack:
+        return None
+    weekdays = [int(x) for x in (repeat or {}).get("weekdays", [])]
+    labels = [WEEKDAY_NAMES[x] for x in weekdays if 0 <= x < len(WEEKDAY_NAMES)]
+    return {"stock_items": items(con, inventory=True), "stock_status": stock_status(con),
+            "can_norm": user.get("role") == "admin" or bool(user.get("is_senior")),
+            "schedule": ", ".join(labels) or task.get("due_at", "")[:10]}
 
 
 def stock_count(con, rows: list, user: dict, can_norm: bool) -> dict:
