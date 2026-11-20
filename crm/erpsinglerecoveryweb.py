@@ -12,10 +12,52 @@ from . import erpimport
 from .services import ApiError
 
 
+def _metadata_commit(root):
+    """Read only revision metadata; Git config and credentials are never read."""
+    git_dir = Path(root) / '.git'
+    try:
+        if git_dir.is_file():
+            pointer = git_dir.read_text().strip()
+            if not pointer.startswith('gitdir: '):
+                return None
+            git_dir = (Path(root) / pointer[8:]).resolve()
+        head = (git_dir / 'HEAD').read_text().strip()
+        if re.fullmatch('[0-9a-f]{40}', head):
+            return head
+        if not head.startswith('ref: '):
+            return None
+        ref = head[5:]
+        if not re.fullmatch(r'refs/[A-Za-z0-9._/-]+', ref) or '..' in Path(ref).parts:
+            return None
+        bases = [git_dir]
+        common = git_dir / 'commondir'
+        if common.is_file():
+            bases.append((git_dir / common.read_text().strip()).resolve())
+        for base in bases:
+            loose = base / ref
+            if loose.is_file():
+                value = loose.read_text().strip()
+                if re.fullmatch('[0-9a-f]{40}', value):
+                    return value
+            packed = base / 'packed-refs'
+            if packed.is_file():
+                for line in packed.read_text().splitlines():
+                    fields = line.split()
+                    if len(fields) == 2 and fields[1] == ref and re.fullmatch('[0-9a-f]{40}', fields[0]):
+                        return fields[0]
+    except (OSError, UnicodeError):
+        return None
+    return None
+
+
 def _checkout_commit():
+    root = Path(__file__).resolve().parent.parent
+    metadata = _metadata_commit(root)
+    if metadata:
+        return metadata
     try:
         value = subprocess.check_output(['git', 'rev-parse', 'HEAD'],
-            cwd=Path(__file__).resolve().parent.parent, stderr=subprocess.DEVNULL, timeout=3).decode().strip()
+            cwd=root, stderr=subprocess.DEVNULL, timeout=3).decode().strip()
         return value if re.fullmatch('[0-9a-f]{40}', value) else None
     except (OSError, subprocess.SubprocessError):
         return None
