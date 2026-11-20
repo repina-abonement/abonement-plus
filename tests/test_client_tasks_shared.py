@@ -15,10 +15,15 @@ def main():
     b=tasks.add_client_task(c,sid,{'title':'Приоритет','due':today,'priority':True},u)
     later=tasks.add_client_task(c,sid,{'title':'Завтра','due':tomorrow,'priority':True},u)
     personal=tasks.add_task(c,'plan',None,today+'T12:00',title='Личное',assignee=one)
+    unrelated=tasks.add_task(c,'manual',None,today+'T13:00',title='Чужое бытовое',assignee=two)
     # Задачи клиента видит другой администратор; личные поручения не становятся общими.
     cards=[t for col in tasks.erp_board(c,'today',v)['columns'] for t in col['cards']]
     assert [t['id'] for t in cards if t.get('student_id')==sid]==[b,a]
     assert personal not in [t['id'] for t in cards] and later not in [t['id'] for t in cards]
+    own_cards=[t for col in tasks.erp_board(c,'today',u)['columns'] for t in col['cards']]
+    assert personal in [t['id'] for t in own_cards] and unrelated not in [t['id'] for t in own_cards]
+    senior=dict(u,is_senior=1)
+    assert unrelated not in [t['id'] for col in tasks.erp_board(c,'today',senior)['columns'] for t in col['cards']]
     mine=tasks.my_tasks(c,v)['groups'];assert {a,b}.issubset({t['id'] for t in mine['today']})
     assert personal not in {t['id'] for x in mine.values() for t in x}
     assert tasks.for_student(c,sid)['open'][0]['id']==b

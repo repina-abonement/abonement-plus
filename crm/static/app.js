@@ -1285,6 +1285,7 @@ S.viewAs = (() => { try { return JSON.parse(localStorage.getItem("crm.viewAs") |
 async function viewAsBar() {
   if (S.user.role !== "admin") return "";
   if (!S.staff) S.staff = (await api("GET", "/api/users")).filter((u) => u.active);
+  if(S.viewAs){const fresh=S.staff.find(u=>u.id===S.viewAs.id);S.viewAs=fresh?{id:fresh.id,name:fresh.name,role:fresh.role,is_senior:!!fresh.is_senior,is_offline_admin:!!fresh.is_offline_admin,is_promoter:!!fresh.is_promoter,is_journal:!!fresh.is_journal}:null;try{localStorage.setItem("crm.viewAs",JSON.stringify(S.viewAs))}catch(_){}}
   const cur = S.viewAs ? S.viewAs.id : S.user.id;
   const opt = (u) => `<option value="${u.id}" ${u.id === cur ? "selected" : ""}>${esc(u.name)}${u.id === S.user.id ? " (я)" : ""}</option>`;
   const grp = (role, title) => { const l = S.staff.filter((u) => u.role === role); return l.length ? `<optgroup label="${title}">${l.map(opt).join("")}</optgroup>` : ""; };
@@ -1297,7 +1298,7 @@ function wireViewAs(page) {
   if (!sel) return;
   sel.onchange = () => {
     const u = S.staff.find((x) => x.id === +sel.value);
-    S.viewAs = u && u.id !== S.user.id ? { id: u.id, name: u.name, role: u.role } : null;
+    S.viewAs = u && u.id !== S.user.id ? { id: u.id, name: u.name, role: u.role, is_senior:!!u.is_senior, is_offline_admin:!!u.is_offline_admin, is_promoter:!!u.is_promoter, is_journal:!!u.is_journal } : null;
     try { localStorage.setItem("crm.viewAs", JSON.stringify(S.viewAs)); } catch (_) {}
     render();
   };
@@ -1310,7 +1311,7 @@ async function renderWorkdesk(page) {
   const bar = await viewAsBar().catch(() => "");
   if (S.viewAs && S.viewAs.role === "coach") { await renderCoachToday(page, S.viewAs.id, bar); return wireViewAs(page); }
   const [d, tasksHtml, schedHtml, erpHtml, skips, members] = await Promise.all([api("GET", "/api/workdesk" + (S.viewAs ? "?as_user=" + S.viewAs.id : "")), tasksSection(), scheduleWidget().catch(() => ""),
-    can("sales") ? erpTasksSection() : Promise.resolve(""), can("skips") ? api("GET", "/api/board/skips").catch(() => null) : Promise.resolve(null),
+    (can("sales") || S.viewAs || S.user.is_offline_admin) ? erpTasksSection(S.viewAs) : Promise.resolve(""), can("skips") ? api("GET", "/api/board/skips").catch(() => null) : Promise.resolve(null),
     can("members", "full") ? api("GET", "/api/board/members").catch(() => null) : Promise.resolve(null)]);
   // воронка «Продления» (Юлия, 04.11): разовые, не оплачен, продлить (с 20 числа), счёт выставлен, ушёл. Оплатившие не попадают
   const since30 = addDays(S.meta.today, -30);
@@ -1320,7 +1321,8 @@ async function renderWorkdesk(page) {
   const u = d.urgent, reds = u.filter((x) => x.level === "red").length;
   const scroll = page.querySelector(".board") ? page.querySelector(".board").scrollLeft : 0;
   // кто смотрит стол: руководитель, контролёр (проверяет приход тренеров) или администратор
-  const who = S.viewAs ? (d.checkins ? "control" : "operator") : S.user.role === "admin" ? "owner" : d.checkins ? "control" : "operator";
+  const deskUser = S.viewAs || S.user;
+  const who = deskUser.role === "admin" ? "owner" : deskUser.is_offline_admin ? "offline" : deskUser.is_senior || d.checkins ? "control" : "operator";
   const W = {
     call: { html: callFocusBox(d.call_focus), icon: "📞", label: "Звонки" },
     spend: { html: spendDeskBox(d), icon: "💳", label: "Платежи", n: (d.bills_due || []).filter((x) => x.level).length, red: (d.bills_due || []).some((x) => x.level === "red") },
@@ -1341,6 +1343,7 @@ async function renderWorkdesk(page) {
     owner: ["spend", "reports", "answers", "marks", "subs", "checkins", "tasks", "call", "wait", "merch", "sched", "bday"],
     control: ["reports", "answers", "marks", "checkins", "subs", "tasks", "wait", "sched", "bday", "call"],
     operator: ["tasks", "answers", "call", "wait", "sched", "bday", "marks", "subs", "checkins", "reports"],
+    offline: ["tasks", "sched", "bday", "call"],
   }[who];
   const widgets = ORDER.filter((k) => W[k].html);
   // на виду только то, где есть что делать, и задачи; остальное свёрнуто строкой внизу (раскрывается по нажатию)
@@ -1381,7 +1384,8 @@ async function renderWorkdesk(page) {
     ${erpHtml}
     <div class="desk">
       <div class="desk-main">
-        ${refundRequestsHtml(d.refund_requests||[],true)}
+        ${who === "offline" ? "" : refundRequestsHtml(d.refund_requests||[],true)}
+        ${who === "offline" ? `<section class="section"><h3>Сегодня на смене</h3><p class="muted small">Здесь только ваши дела. Общие клиентские воронки и контроль старшего администратора не показываются.</p></section>` : `
         <section class="section new-cards-today" id="dw-new-cards">
           <div class="now-head"><h3>✨ Новые карточки сегодня</h3><span class="count">${d.new_cards_today?.cards.length||0}</span></div>
           <p class="small muted">Приоритетная обработка · ${esc(dShort(d.new_cards_today?.date||S.meta.today))}</p>
@@ -1397,7 +1401,7 @@ async function renderWorkdesk(page) {
           ${boardHtml(renew)}</section>` : ""}
         ${skips ? `<section class="desk-funnel" id="dw-skips">
           <div class="now-head"><h3>🩹 Пропуски и отработки</h3><span class="small muted">${skips.columns.reduce((a, c) => a + c.cards.length, 0) || "пусто"}</span></div>
-          ${skips.note ? `<div class="note">${esc(skips.note)}</div>` : ""}${boardHtml(skips)}</section>` : ""}
+          ${skips.note ? `<div class="note">${esc(skips.note)}</div>` : ""}${boardHtml(skips)}</section>` : ""}`}
       </div>
       <div class="desk-side">${widgets.filter(dwShown).map((k) => `<div class="dw" id="dw-${k}">${W[k].html}</div>`).join("")}
         ${widgets.some((k) => !dwShown(k)) ? `<section class="dw-folded"><div class="dwf-title small muted">Ещё на столе: сейчас там пусто или не срочно</div>${widgets.filter((k) => !dwShown(k)).map((k) => `<details class="dwf" data-dwk="${k}" ${S.dwOpen[k] ? "open" : ""}>
@@ -1410,9 +1414,9 @@ async function renderWorkdesk(page) {
   page.querySelectorAll(".dwf").forEach((x) => x.addEventListener("toggle", () => { S.dwOpen[x.dataset.dwk] = x.open; }));
   page.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => { const el = document.getElementById(b.dataset.jump); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }));
   if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
-  wireBoard(page.querySelector(".desk-funnel") || page, "sales", d.board);
-  if (skips) wireBoard(page.querySelector("#dw-skips"), "skips", skips);
-  if (renew) wireBoard(page.querySelector("#dw-renew"), "members", renew);
+  const salesBoard=page.querySelector(".desk-funnel");if(salesBoard)wireBoard(salesBoard,"sales",d.board);
+  const skipsBoard=page.querySelector("#dw-skips");if(skips&&skipsBoard)wireBoard(skipsBoard,"skips",skips);
+  const renewBoard=page.querySelector("#dw-renew");if(renew&&renewBoard)wireBoard(renewBoard,"members",renew);
   wireErpTasks(page);
   wireTasks(page);
   wireViewAs(page);

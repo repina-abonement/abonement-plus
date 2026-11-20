@@ -3148,8 +3148,13 @@ def task_rebook(con, h, user, body, q, tid):
 
 @route("GET", "/api/tasks/erp-board", role="operator")
 def tasks_erp_board(con, h, user, body, q):
-    """Задачи как в ERP: общий список администраторов по статусам, Просрочено / Сегодня / Завтра."""
-    return tasks.erp_board(con, q.get("day", "today"), user)
+    """Задачи по роли: общие клиентские и лично назначенные, Просрочено / Сегодня / Завтра."""
+    effective = user
+    if q.get("as_user") and user["role"] == "admin":
+        target = con.execute("SELECT id,name,role,is_senior,is_offline_admin,is_promoter,is_journal FROM users WHERE id=? AND active=1", (int(q["as_user"]),)).fetchone()
+        if not target: raise ApiError("Участник команды не найден", 404)
+        effective = dict(target)
+    return tasks.erp_board(con, q.get("day", "today"), effective)
 
 
 @route("GET", "/api/tasks/manual", role="coach")

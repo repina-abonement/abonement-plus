@@ -794,13 +794,20 @@ def erp_board(con, day: str = "today", user: dict | None = None) -> dict:
                 AND (t.student_id IS NOT NULL OR t.family_id IS NOT NULL OR u.id IS NULL OR u.role != 'coach')"""
     privacy, visible_ids = _planner_privacy(con, user, "t.") if user is not None else ("", [])
     base += privacy
+    scope_args = []
+    # Рабочий стол участника команды: общие клиентские задачи + лично назначенные.
+    # Право старшего смотреть планеры команды не превращает его собственный стол
+    # в свалку всех бытовых поручений офлайн-администраторов.
+    if user is not None and user.get("role") != "admin":
+        base += " AND (t.student_id IS NOT NULL OR t.family_id IS NOT NULL OR t.assignee_id=?)"
+        scope_args.append(int(user["id"]))
     cond = {"overdue": ("substr(t.due_at,1,10) < ?", t0), "today": ("substr(t.due_at,1,10) = ?", t0),
             "tomorrow": ("substr(t.due_at,1,10) = ?", tomorrow)}
-    counts = {k: con.execute(f"SELECT COUNT(*) FROM ({base} AND {c})", (*visible_ids, v)).fetchone()[0] for k, (c, v) in cond.items()}
+    counts = {k: con.execute(f"SELECT COUNT(*) FROM ({base} AND {c})", (*visible_ids, *scope_args, v)).fetchone()[0] for k, (c, v) in cond.items()}
     c, v = cond.get(day, cond["today"])
     order = [k for k, _ in ERP_COLUMNS]
     cols: dict[str, dict] = {}
-    for r in con.execute(f"{base} AND {c} ORDER BY substr(t.due_at,1,10),t.priority DESC,t.due_at,t.id", (*visible_ids, v)):
+    for r in con.execute(f"{base} AND {c} ORDER BY substr(t.due_at,1,10),t.priority DESC,t.due_at,t.id", (*visible_ids, *scope_args, v)):
         t = _task_out(con, r)
         if t["kind"] == "rebook":
             m = con.execute("""SELECT kind FROM trial_misses WHERE (student_id=? OR student_id IN (SELECT id FROM students WHERE family_id=?))

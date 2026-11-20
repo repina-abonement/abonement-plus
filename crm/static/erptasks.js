@@ -3,9 +3,9 @@
    ручные в «Ручных». «Выполнено» ставит следующую задачу по цепочке */
 S.etDay = S.etDay || "today";
 
-async function erpTasksSection() {
+async function erpTasksSection(asUser=null) {
   let d;
-  try { d = await api("GET", "/api/tasks/erp-board?day=" + S.etDay); } catch (_) { return ""; }
+  try { d = await api("GET", "/api/tasks/erp-board?day=" + S.etDay + (asUser ? "&as_user=" + encodeURIComponent(asUser.id) : "")); } catch (_) { return ""; }
   S.taskById = S.taskById || {};
   d.columns.forEach((c) => c.cards.forEach((t) => (S.taskById[t.id] = t)));
   const tabs = [["overdue", "Просрочено"], ["today", "Сегодня"], ["tomorrow", "Завтра"]];
