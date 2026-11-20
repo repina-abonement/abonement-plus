@@ -34,6 +34,25 @@ class PayLinksTest(unittest.TestCase):
   form=self.sent[-1][1];self.assertEqual(form['client_email'],'customer@example.com');self.assertEqual(form['pay_amount'],'5400.00')
   self.assertEqual(self.con.execute('SELECT email FROM parents').fetchone()[0],'saved@example.com')
   self.assertEqual(self.con.execute('SELECT receipt_email FROM pay_links').fetchone()[0],'customer@example.com')
+ def test_checkout_fills_empty_card_and_prefills_next_link(self):
+  self.con.execute("UPDATE parents SET email=''")
+  _,token=self.new()
+  paylinks.checkout(self.con,token,'  receipt@example.org  ')
+  self.assertEqual(self.con.execute('SELECT email FROM parents').fetchone()[0],'receipt@example.org')
+  self.assertEqual(paylinks.payment_page(self.con,self.new()[1])['email'],'receipt@example.org')
+  paylinks.checkout(self.con,token,'different@example.org')
+  self.assertEqual(self.con.execute('SELECT email FROM parents').fetchone()[0],'receipt@example.org')
+
+ def test_multiple_parents_only_designated_primary_receives_email(self):
+  self.con.execute("UPDATE parents SET email='',is_primary=0")
+  fid=self.con.execute('SELECT family_id FROM students WHERE id=?',(self.sid,)).fetchone()[0]
+  second=self.con.execute("INSERT INTO parents(family_id,name) VALUES (?,'Second')",(fid,)).lastrowid
+  paylinks.checkout(self.con,self.new()[1],'receipt@example.org')
+  self.assertEqual(self.con.execute("SELECT COUNT(*) FROM parents WHERE email!=''").fetchone()[0],0)
+  self.con.execute("UPDATE parents SET is_primary=1 WHERE id=?",(second,))
+  paylinks.checkout(self.con,self.new()[1],'primary@example.org')
+  self.assertEqual([r[0] for r in self.con.execute('SELECT email FROM parents ORDER BY id')],['','primary@example.org'])
+
  def test_cancelled_expired_paid_or_cancelled_subscription_do_not_open(self):
   link,token=self.new();paylinks.cancel(self.con,link['id'])
   with self.assertRaises(paylinks.PayLinkError):paylinks.checkout(self.con,token,'a@example.com')
