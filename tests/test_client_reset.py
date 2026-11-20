@@ -87,5 +87,13 @@ class ClientResetTest(unittest.TestCase):
                 clientreset.apply(self.con,self.owner,{'token':planned['token'],'confirmation':clientreset.CONFIRMATION})
         self.assertEqual(self.con.serialize(),before)
 
+    def test_start_failure_is_visible_in_read_only_status(self):
+        with patch.object(clientreset,'_start',side_effect=RuntimeError('synthetic secret must stay hidden')):
+            with self.assertRaises(RuntimeError): clientreset.start(self.con,self.owner,{})
+        checked=clientreset.status(self.con)
+        self.assertEqual(checked['last_start_error']['type'],'RuntimeError')
+        self.assertEqual(checked['last_start_error']['message'],'')
+        self.assertNotIn('synthetic secret',str(checked['last_start_error']))
+
 
 if __name__ == '__main__': unittest.main()

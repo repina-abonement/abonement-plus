@@ -14,6 +14,7 @@ from pathlib import Path
 import secrets
 import sqlite3
 import threading
+import traceback
 from zoneinfo import ZoneInfo
 
 from .services import ApiError
@@ -66,6 +67,7 @@ PRESERVED_LABELS = ('Правила и тарифы','Филиалы и груп
                     'Настройки и подключения','Общие задачи и расходы')
 _plans: dict[str, dict] = {}
 _lock = threading.Lock()
+_last_start_error: dict | None = None
 
 
 def init(con):
@@ -247,14 +249,44 @@ def _job_worker(path, job_id, user, item, source_commit):
         con.close()
 
 
+def _record_start_error(error):
+    global _last_start_error
+    frames=[]
+    for frame in traceback.extract_tb(error.__traceback__)[-8:]:
+        path=Path(frame.filename)
+        try: name='crm/'+str(path.resolve().relative_to(Path(__file__).resolve().parent))
+        except ValueError: continue
+        frames.append({'file':name,'line':frame.lineno,'function':frame.name})
+    message='database is locked' if isinstance(error,sqlite3.OperationalError) and getattr(error,'sqlite_errorcode',None) in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED) else ''
+    _last_start_error={'type':type(error).__name__,'message':message,'frames':frames,
+                       'at':_now().isoformat(timespec='seconds')}
+
+
 def start(con, user, body, source_commit=''):
+    global _last_start_error
+    _last_start_error=None
+    try:
+        return _start(con,user,body,source_commit)
+    except BaseException as error:
+        _record_start_error(error)
+        if isinstance(error,sqlite3.OperationalError) and getattr(error,'sqlite_errorcode',None) in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED):
+            raise ApiError('База была занята фоновой записью. Данные не очищены; сформируйте новый план и повторите запуск') from error
+        raise
+
+
+def _start(con, user, body, source_commit=''):
     active=con.execute("SELECT id FROM client_data_reset_jobs WHERE state IN ('queued','running') LIMIT 1").fetchone()
     if active: raise ApiError('Архивирование уже выполняется. Нажмите «Проверить результат»')
     item=_consume_plan(con,user,body)
-    path=con.execute('PRAGMA database_list').fetchone()['file']
+    database=con.execute('PRAGMA database_list').fetchone(); path=database['file'] if hasattr(database,'keys') else database[2]
     if not path: raise ApiError('Не удалось определить рабочую базу. Очистка не начата')
-    job_id=con.execute("""INSERT INTO client_data_reset_jobs(state,stage,created_at,created_by,source_commit)
-        VALUES('queued','queued',?,?,?)""",(_now().isoformat(timespec='seconds'),user.get('name') or '',source_commit)).lastrowid
+    timeout=con.execute('PRAGMA busy_timeout').fetchone()[0]
+    try:
+        con.execute('PRAGMA busy_timeout=30000')
+        job_id=con.execute("""INSERT INTO client_data_reset_jobs(state,stage,created_at,created_by,source_commit)
+            VALUES('queued','queued',?,?,?)""",(_now().isoformat(timespec='seconds'),user.get('name') or '',source_commit)).lastrowid
+    finally:
+        con.execute('PRAGMA busy_timeout=' + str(int(timeout)))
     safe_user={key:user.get(key) for key in ('id','name','role')}
     threading.Thread(target=_job_worker,args=(path,job_id,safe_user,item,source_commit),daemon=True,
                      name='client-data-reset').start()
@@ -274,10 +306,11 @@ def status(con):
         public_job={key:job[key] for key in ('id','state','stage','created_at','started_at','finished_at','error')}
     running=public_job and public_job['state'] in ('queued','running')
     if running:
-        return {'completed':False,'archive':archive,'job':public_job,'counts':{},
+        return {'completed':False,'archive':archive,'job':public_job,'last_start_error':_last_start_error,'counts':{},
                 'client_rows_remaining':None,'read_only':True,'note':'Архивирование выполняется на сервере'}
     current=counts(con); remaining=sum(current.values())
-    return {'completed':bool(archive) and remaining==0,'archive':archive,'job':public_job,'counts':current,
+    return {'completed':bool(archive) and remaining==0,'archive':archive,'job':public_job,
+            'last_start_error':_last_start_error,'counts':current,
             'client_rows_remaining':remaining,'read_only':True,
             'note':'Архив и очистка подтверждены' if archive and remaining==0 else
                    'Архивирование выполняется на сервере' if running else
