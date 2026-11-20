@@ -49,6 +49,16 @@ class ClientResetTest(unittest.TestCase):
         checked=clientreset.status(self.con); self.assertTrue(checked['completed'])
         self.assertEqual(checked['client_rows_remaining'],0); self.assertEqual(checked['archive']['sha256'],row['sha256'])
 
+    def test_technical_rows_after_cleanup_do_not_revoke_completion(self):
+        planned=clientreset.plan(self.con,self.owner)
+        with patch.object(backup,'DIR',str(self.root/'backups')), patch.object(backup,'upload',return_value='remote.enc'):
+            clientreset.apply(self.con,self.owner,{'token':planned['token'],'confirmation':clientreset.CONFIRMATION},'test-commit')
+        self.con.execute("INSERT INTO audit(ts,user_id,action,detail) VALUES('2026-11-20',?,'login','')",(self.owner['id'],))
+        checked=clientreset.status(self.con)
+        self.assertTrue(checked['completed'])
+        self.assertEqual(checked['client_rows_remaining'],0)
+        self.assertEqual(checked['rows_observed_after_reset'],1)
+
     def test_changed_data_blocks_stale_plan_before_backup(self):
         planned=clientreset.plan(self.con,self.owner)
         self.con.execute("INSERT INTO families(name) VALUES('Later')")

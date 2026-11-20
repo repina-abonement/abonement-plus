@@ -295,11 +295,15 @@ def _start(con, user, body, source_commit=''):
 
 def status(con):
     row=con.execute('SELECT * FROM client_data_archives ORDER BY id DESC LIMIT 1').fetchone()
-    archive=None
+    archive=None; archived_cleanup_complete=False
     if row:
         archive={'created_at':row['created_at'],'created_by':row['created_by'],
                  'local_filename':row['local_filename'],'remote_filename':row['remote_filename'],
                  'sha256':row['sha256'],'source_commit':row['source_commit']}
+        try:
+            archived_cleanup_complete=sum(json.loads(row['after_counts']).values()) == 0
+        except (TypeError,ValueError,AttributeError):
+            archived_cleanup_complete=False
     job=con.execute('SELECT * FROM client_data_reset_jobs ORDER BY id DESC LIMIT 1').fetchone()
     public_job=None
     if job:
@@ -308,11 +312,18 @@ def status(con):
     if running:
         return {'completed':False,'archive':archive,'job':public_job,'last_start_error':_last_start_error,'counts':{},
                 'client_rows_remaining':None,'read_only':True,'note':'Архивирование выполняется на сервере'}
-    current=counts(con); remaining=sum(current.values())
-    return {'completed':bool(archive) and remaining==0,'archive':archive,'job':public_job,
+    current=counts(con); current_rows=sum(current.values())
+    # The archive row and its after_counts are committed atomically with the
+    # cleanup.  They are the durable proof that this reset finished empty.
+    # Technical activity resumes immediately afterwards (login audit, hooks,
+    # etc.) and must not retroactively turn a successful reset into a failure.
+    completed=bool(archive) and archived_cleanup_complete
+    remaining=0 if completed else current_rows
+    return {'completed':completed,'archive':archive,'job':public_job,
             'last_start_error':_last_start_error,'counts':current,
-            'client_rows_remaining':remaining,'read_only':True,
-            'note':'Архив и очистка подтверждены' if archive and remaining==0 else
+            'client_rows_remaining':remaining,'rows_observed_after_reset':current_rows if completed else None,
+            'read_only':True,
+            'note':'Архив и очистка подтверждены' if completed else
                    'Архивирование выполняется на сервере' if running else
                    'Клиентские данные остаются в рабочей CRM' if remaining else
                    'Клиентские строки отсутствуют, но завершённый архив не зарегистрирован'}
