@@ -42,7 +42,7 @@ def _records(payload):
     return rows
 
 
-def _student(con, row):
+def _student(con, row, selected_id=None):
     erp_id = str(row.get("erp_student_id") or "").strip()
     exact = [dict(r) for r in con.execute("SELECT id,name,birth,erp_id FROM students WHERE erp_id=?", (erp_id,))]
     if len(exact) == 1: return exact[0], "erp_id"
@@ -52,6 +52,15 @@ def _student(con, row):
             JOIN students s ON s.id=i.student_id WHERE i.namespace='student' AND i.source_id=?''', (erp_id,))]
         if len(linked) == 1: return linked[0], "saved_erp_link"
         if len(linked) > 1: return None, "Сохранённая связь ERP ведёт к нескольким карточкам"
+    if selected_id not in (None, ""):
+        try: selected_id = int(selected_id)
+        except (TypeError, ValueError): return None, "Некорректно выбрана карточка CRM"
+        selected = con.execute("SELECT id,name,birth,erp_id,archived FROM students WHERE id=?", (selected_id,)).fetchone()
+        source_name = _norm((row.get("child_profile") or {}).get("name") or row.get("child"))
+        if not selected or selected["archived"]: return None, "Выбранная карточка CRM не найдена"
+        if not source_name or _norm(selected["name"]) != source_name:
+            return None, "ФИО в выбранной карточке не совпадает с ФИО в файле"
+        return dict(selected), "manual_selection"
     child = row.get("child_profile") or {}
     name, birth, phone = _norm(child.get("name") or row.get("child")), str(child.get("birth") or "")[:10], normalize_phone(child.get("parent_phone") or "")
     if not (name and birth and phone): return None, "ERP ID не найден; для безопасной сверки нужны ФИО, дата рождения и телефон родителя"
@@ -78,12 +87,12 @@ def _group(con, source, day, tm, student_id=None, kind=""):
     return (rows[0], "") if len(rows) == 1 else (None, "Несколько групп подходят одинаково")
 
 
-def preview(con, payload, period=None):
+def preview(con, payload, period=None, student_ids=None):
     result = {"children": [], "added": 0, "existing": 0, "review": 0, "can_apply": True}
     for row in _records(payload):
         erp_id, month = str(row.get("erp_student_id") or "").strip(), str(period or row.get("month") or "")
         child = {"erp_id": erp_id, "period": month, "student": None, "subscription": None, "visits": [], "issues": []}
-        student, identity = _student(con, row)
+        student, identity = _student(con, row, (student_ids or {}).get(erp_id))
         if not student: child["issues"].append(identity)
         else: child["student"] = {"id": student["id"], "name": student["name"], "match": identity}
         if row.get("month") and str(row.get("month")) != month: child["issues"].append("Период файла не совпадает с выбранным периодом")
@@ -121,12 +130,12 @@ def preview(con, payload, period=None):
         result["existing" if sub_state == "already_exists" else "added" if sub_state == "add" else "review"] += 1
         if child["issues"] or sub_state == "review" or any(x["state"] == "review" for x in child["visits"]): result["can_apply"] = False
         result["children"].append(child)
-    result["token"] = _token([payload, period, result]) if result["can_apply"] else None
+    result["token"] = _token([payload, period, student_ids or {}, result]) if result["can_apply"] else None
     return result
 
 
-def apply(con, payload, period, token, user):
-    checked = preview(con, payload, period)
+def apply(con, payload, period, token, user, student_ids=None):
+    checked = preview(con, payload, period, student_ids)
     if not checked["can_apply"] or checked["token"] != token: raise HistoryError("Предпросмотр изменился. Проверьте данные повторно")
     if any(_pilot_key(c["erp_id"], c["period"]) not in PILOT_KEYS for c in checked["children"]): raise HistoryError("Этот ребёнок и период ещё не разрешены для рабочего переноса")
     now = datetime.now().isoformat(timespec="seconds"); created_subs = created_visits = 0
@@ -142,4 +151,4 @@ def apply(con, payload, period, token, user):
             item = by_id[visit["source_id"]]
             con.execute("INSERT INTO erp_history_visits(source_id,source_subscription_id,student_id,group_id,visit_date,visit_time,kind,status,absence_source_id,source_payload,imported_at,imported_by) VALUES (?,?,?,?,?,?,?,?,NULL,?,?,?)",
                 (visit["source_id"],visit["source_subscription_id"],sid,visit["group_id"],visit["date"],visit["time"],visit["kind"],visit["status"],_json(item),now,user.get("name", ""))); created_visits += 1
-    return {"ok": True, "subscriptions_added": created_subs, "visits_added": created_visits, "preview": preview(con, payload, period)}
+    return {"ok": True, "subscriptions_added": created_subs, "visits_added": created_visits, "preview": preview(con, payload, period, student_ids)}

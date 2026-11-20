@@ -43,6 +43,13 @@ def main():
     con.execute("INSERT INTO erp_full_identities(namespace,source_id,student_id) VALUES ('student','TEST-ERP',?)",(sid,))
     linked=erphistory.preview(con,payload,'2025-09')
     assert linked['children'][0]['student']['id']==sid and linked['children'][0]['student']['match']=='saved_erp_link'
+    con.execute("DELETE FROM erp_full_identities WHERE namespace='student' AND source_id='TEST-ERP'")
+    manual=erphistory.preview(con,payload,'2025-09',{'TEST-ERP':sid})
+    assert manual['can_apply'] and manual['children'][0]['student']['match']=='manual_selection',manual
+    other=con.execute("INSERT INTO students(family_id,name,birth,stage_changed_at,created_at) VALUES (?,?,?,?,?)",
+                      (fid,'Другой Ребёнок','2015-01-01','2026-01-01','2026-01-01')).lastrowid
+    wrong=erphistory.preview(con,payload,'2025-09',{'TEST-ERP':other})
+    assert not wrong['can_apply'] and 'ФИО' in wrong['children'][0]['issues'][0]
     print('ok')
 
 if __name__=='__main__':main()
