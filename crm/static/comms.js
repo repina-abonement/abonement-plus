@@ -143,6 +143,54 @@ document.addEventListener('click',async event=>{
   }catch(error){button.disabled=false;fail(error)}
 });
 
+let closeChatImageViewer = null;
+function openChatImageViewer(link) {
+  const source=link.getAttribute('href');
+  if(!/^\/api\/messages\/[1-9]\d*\/media$/.test(source||''))return false;
+  closeChatImageViewer?.();
+  const previous=document.activeElement,root=document.documentElement,overflow=root.style.overflow;
+  const viewer=document.createElement('dialog');
+  viewer.className='chat-media-viewer';viewer.setAttribute('aria-label','Просмотр вложения');
+  viewer.innerHTML='<div class="chat-media-toolbar"><span></span><button type="button" class="chat-media-close" aria-label="Закрыть вложение"><span aria-hidden="true">×</span> Закрыть</button></div><div class="chat-media-stage"><p class="chat-media-status" role="status">Загружаем вложение…</p></div>';
+  const title=viewer.querySelector('.chat-media-toolbar>span'),stage=viewer.querySelector('.chat-media-stage'),status=viewer.querySelector('.chat-media-status'),button=viewer.querySelector('.chat-media-close');
+  title.textContent=link.querySelector('img')?.alt||'Фото';
+  const image=document.createElement('img');image.alt=title.textContent;image.hidden=true;
+  image.onload=()=>{status.hidden=true;image.hidden=false;};
+  image.onerror=()=>{image.hidden=true;status.hidden=false;status.textContent='Не удалось открыть вложение. Закройте просмотр и попробуйте ещё раз.';};
+  stage.append(image);
+  let finished=false;
+  const close=()=>{
+    if(finished)return;finished=true;
+    window.removeEventListener('hashchange',close);
+    if(closeChatImageViewer===close)closeChatImageViewer=null;
+    image.onload=null;image.onerror=null;image.removeAttribute('src');
+    if(viewer.open)viewer.close();viewer.remove();root.style.overflow=overflow;
+    const focus=link.isConnected?link:previous?.isConnected?previous:null;
+    focus?.focus({preventScroll:true});
+  };
+  button.onclick=close;
+  stage.onclick=event=>{if(event.target===stage)close();};
+  viewer.addEventListener('cancel',event=>{event.preventDefault();close();});
+  viewer.addEventListener('close',close);
+  // Keep Escape and CRM shortcuts inside the viewer, including in a client card.
+  viewer.addEventListener('keydown',event=>{
+    event.stopPropagation();
+    if(event.key==='Escape'){event.preventDefault();close();}
+    else if(event.key==='Tab'){event.preventDefault();button.focus({preventScroll:true});}
+  });
+  document.body.append(viewer);
+  try{viewer.showModal();}catch(_){close();return false;}
+  closeChatImageViewer=close;root.style.overflow='hidden';
+  window.addEventListener('hashchange',close);
+  button.focus({preventScroll:true});image.src=source;
+  return true;
+}
+document.addEventListener('click',event=>{
+  if(event.defaultPrevented||event.button!==0||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
+  const link=event.target.closest('a[data-chat-image]');
+  if(link&&openChatImageViewer(link))event.preventDefault();
+});
+
 function msgHtml(m) {
   if(['requested','deleted'].includes(m.deletion_status))return `<div class="msg ${m.direction} msg-deleted"><div class="msg-text muted">${m.deletion_status==='deleted'?'Сообщение удалено':'Удаление запрошено — ждём подтверждения'}</div><div class="msg-meta">${dtWhen(m.ts)}</div></div>`;
   const copyable=typeof m.text==='string'&&m.text.trim().length>0;
@@ -153,7 +201,7 @@ function msgHtml(m) {
   const actions=copyAction||deleteAction?`<details class="msg-actions"><summary aria-label="Действия с сообщением" title="Действия с сообщением">⋯</summary><div class="msg-actions-menu">${copyAction}${deleteAction}</div></details>`:'';
   const deletionHint=uncertain?'<div class="small muted">Удаление не подтверждено — проверьте сообщение в мессенджере</div>':'';
   const media = m.media ? (["image", "sticker"].includes(m.kind)
-    ? `<a href="/api/messages/${m.id}/media" target="_blank" rel="noopener"><img class="msg-img${m.kind === "sticker" ? " msg-sticker" : ""}" loading="lazy" src="/api/messages/${m.id}/media" alt="${m.kind === "sticker" ? "Стикер" : "Фото"}">${m.kind === "sticker" ? `<span hidden>Стикер: открыть файл</span>` : ""}</a>`
+    ? `<a href="/api/messages/${m.id}/media" data-chat-image aria-haspopup="dialog" target="_blank" rel="noopener"><img class="msg-img${m.kind === "sticker" ? " msg-sticker" : ""}" loading="lazy" src="/api/messages/${m.id}/media" alt="${m.kind === "sticker" ? "Стикер" : "Фото"}">${m.kind === "sticker" ? `<span hidden>Стикер: открыть файл</span>` : ""}</a>`
     : m.kind === "audio" ? `<audio controls preload="none" src="/api/messages/${m.id}/media"></audio>`
     : `<a href="/api/messages/${m.id}/media" target="_blank" rel="noopener">Открыть вложение</a>`) : "";
   const label = !m.text && !media ? ({ sticker: "Стикер", contact: "Контакт", other: "Вложение" }[m.kind] || "") : "";
