@@ -334,6 +334,8 @@ def init_db(con: sqlite3.Connection):
     singles.init(con)
     from . import erpsinglerecovery
     erpsinglerecovery.init(con)
+    from . import historicalrefunds
+    historicalrefunds.init(con)
     perms.init(con)
     from . import offlineplanner
     offlineplanner.provision_requested(con)

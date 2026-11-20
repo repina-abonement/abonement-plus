@@ -117,21 +117,22 @@ def _sub(con, subid):
 
 
 def _sources(con, sub, amount=None, retain=0):
-    """Воспроизводим FIFO баланса. Не угадываем происхождение переносов/старых корректировок."""
+    """Use the same proved sources as the balance; old negatives need review."""
     rows = con.execute('SELECT * FROM payments WHERE student_id=? AND cancelled=0 ORDER BY paid_at,id', (sub['student_id'],)).fetchall()
     if any(p['amount'] < 0 for p in rows):
         raise sv.ApiError('Есть переносы или возвраты. Сначала согласуйте с Юлией сверку источника средств; автоматическое определение способа возврата недоступно')
-    offset = 0
-    for obligation in money.obligations(con,sub['student_id']):
-        if obligation['id']==sub['id']:
-            break
-        offset+=obligation['price']
-    offset+=retain
-    left = max(0, money.balance(con, sub['student_id'])['covered'].get(sub['id'], 0)) if amount is None else amount
+    from . import paymentallocation
+    allocated = paymentallocation.allocation(con, sub['student_id'])
+    if allocated['conflicts']:
+        raise sv.ApiError('Распределение оплат требует сверки; источник возврата не подтверждён')
+    payments = {p['id']:p for p in rows}
+    offset = retain
+    left = max(0, allocated['covered'].get(sub['id'], 0)) if amount is None else amount
     parts = []
-    for p in rows:
-        skip = min(offset, p['amount']); offset -= skip
-        take = min(left, p['amount'] - skip)
+    for source in allocated['sources'].get(sub['id'], []):
+        p = payments[source['payment_id']]
+        skip = min(offset, source['amount']); offset -= skip
+        take = min(left, source['amount'] - skip)
         if take <= 0:
             continue
         if not p['confirmed']:

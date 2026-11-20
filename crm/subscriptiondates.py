@@ -92,6 +92,21 @@ def guard_duplicate(con, sid, gid, ym, chosen=None):
             raise ApiError(f"На этот период уже есть абонемент №{row['id']}. Откройте существующий абонемент — повторно вносить его не нужно")
 
 
+def _historical_refund_groups(con, sid, ym):
+    """A refunded historical sale cannot fall back to its active enrollment.
+
+    The marker scopes this fence to the cancelled purchase's month and groups.
+    It is not an exclusion of attendance or of another valid purchase.
+    """
+    if not con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='historical_refund_exclusions'").fetchone():
+        return set()
+    return {row['group_id'] for row in con.execute("""SELECT marker.group_id
+        FROM historical_refund_exclusions marker JOIN subscriptions x ON x.id=marker.subscription_id
+        WHERE marker.student_id=? AND marker.month=? AND x.student_id=marker.student_id
+          AND x.month=marker.month AND x.status='cancelled'""",(sid,ym))
+        if type(row['group_id']) is int and row['group_id']>0}
+
+
 def calendar_entitlements(con, sid, ym):
     """Read the sale mode without turning a single purchase into recurring dates.
 
@@ -131,6 +146,7 @@ def calendar_entitlements(con, sid, ym):
         return groups
 
     current_monthly_groups=monthly_groups(monthly)
+    historical_refund_groups=_historical_refund_groups(con,sid,ym)
     historical_monthly_groups=monthly_groups(monthly_history)
     single_groups={r['group_id'] for r in history if r['id'] in history_single_ids and r['group_id']}
     single_groups.update(v['group_id'] for v in all_visits if v['status']=='booked')
@@ -213,10 +229,12 @@ def calendar_entitlements(con, sid, ym):
     if single_only and not visits and not warnings:
         warnings.append({'kind':'single_dates_not_booked','lessons':0,'message':'Разовые занятия: на этот месяц отдельные даты пока не записаны.'})
     return {'single_ids':single_ids,'monthly_groups':current_monthly_groups,'monthly_ids':{r['id'] for r in monthly},
-        'single_groups':single_groups,'single_only':single_only,'date_warnings':warnings}
+        'single_groups':single_groups,'single_only':single_only,'date_warnings':warnings,
+        'historical_refund_groups':historical_refund_groups}
 
 
 def recurring_calendar_allowed(gid, entitlements):
     """Single purchases never grant every date of an enrollment's schedule."""
     if gid in entitlements['monthly_groups']:return True
+    if gid in entitlements.get('historical_refund_groups',()):return False
     return not entitlements['single_only'] and gid not in entitlements['single_groups']

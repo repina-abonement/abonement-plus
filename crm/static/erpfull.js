@@ -79,6 +79,7 @@ function erpFullSetup(box, data) {
   };
   el.querySelector('#erp-full-last').onclick=async()=>{try{out.innerHTML=erpFullSummary(await api('GET','/api/erp/full/report'));}catch(e){fail(e);}};
   if (typeof erpSingleRecoverySetup === "function") erpSingleRecoverySetup(box);
+  if (typeof erpHistoricalRefundsSetup === "function") erpHistoricalRefundsSetup(box);
 }
 
 function erpFullClient(body, sid) {

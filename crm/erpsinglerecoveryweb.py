@@ -96,17 +96,19 @@ def _data(body):
         'reason': str(body.get('reason') or '').strip()}
 
 
-def _backup_current(con):
+def _backup_current(con, prefix='erp-single-recovery'):
     """Back up this request's database, never an unrelated global DB_PATH."""
     from . import backup
     import secrets
+    if not re.fullmatch(r'[a-z][a-z0-9-]{0,60}', prefix):
+        raise ValueError('Invalid internal backup label')
     if con.in_transaction:
         raise ApiError('Резервную копию нужно создать до начала изменения данных')
     path = None
     try:
         folder = Path(backup.DIR)
         folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-        path = folder / ('erp-single-recovery-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f') + '-' + secrets.token_hex(4) + '.sqlite3')
+        path = folder / (prefix + '-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f') + '-' + secrets.token_hex(4) + '.sqlite3')
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         os.close(fd)
         target = sqlite3.connect(path)

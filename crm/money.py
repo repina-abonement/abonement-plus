@@ -66,6 +66,8 @@ def _now() -> str:
 
 def init(con):
     con.executescript(SCHEMA)
+    from . import paymentallocation
+    paymentallocation.init(con)
     pcols = {r[1] for r in con.execute("PRAGMA table_info(payments)")}
     if "batch" not in pcols:  # части одного платежа (за семью) и переносы между детьми
         con.execute("ALTER TABLE payments ADD COLUMN batch TEXT NOT NULL DEFAULT ''")
@@ -89,13 +91,24 @@ def init(con):
     # ERP recovery imports the real payment register separately. Its historical
     # subscription status must never manufacture a second payment on restart.
     erp_guard = 'AND s.erp_full_managed=0' if 'erp_full_managed' in {r[1] for r in con.execute('PRAGMA table_info(subscriptions)')} else ''
-    con.execute(f"""INSERT INTO payments(student_id, amount, method, paid_at, comment, user_name, confirmed, subscription_id,
-                   created_at)
-                   SELECT s.student_id, s.price, 'unknown', COALESCE(s.paid_at, s.created_at), 'Оплата до реестра платежей',
-                          'Система', 1, s.id, COALESCE(s.paid_at, s.created_at) FROM subscriptions s
+    # A real receipt can be unbound: absence of subscription_id does not prove
+    # absence of money. Bootstrap only completely income-free legacy accounts.
+    # Materialize before inserting, so all eligible legacy invoices of one
+    # account are seeded together rather than the first row hiding the rest.
+    legacy = list(con.execute(f"""SELECT s.student_id, s.price,
+                          COALESCE(s.paid_at, s.created_at) AS received_at, s.id FROM subscriptions s
                    WHERE s.status='paid' AND s.price > 0 AND s.ledger_managed=0
                      {erp_guard}
+                     AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.student_id=s.student_id
+                                     AND p.cancelled=0 AND p.amount>0)
                      AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.subscription_id = s.id)""")
+    )
+    con.executemany("""INSERT INTO payments(student_id,amount,method,paid_at,comment,user_name,
+                        confirmed,subscription_id,created_at)
+                       SELECT ?,?,'unknown',?,'Оплата до реестра платежей','Система',1,?,?
+                       WHERE NOT EXISTS (SELECT 1 FROM payments WHERE subscription_id=?)""",
+                    [(r['student_id'], r['price'], r['received_at'], r['id'], r['received_at'], r['id'])
+                     for r in legacy])
 
 
 # ---------------- баланс ----------------
@@ -119,14 +132,15 @@ def obligations(con,sid):
 
 
 def _reconcile(con, sid: int) -> None:
-    pool = con.execute("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE student_id=? AND cancelled=0", (sid,)).fetchone()[0]
-    for sub in obligations(con,sid):
-        if pool >= sub["price"]:
-            pool -= sub["price"]
+    from . import paymentallocation
+    allocated = paymentallocation.allocation(con, sid)
+    if allocated['conflicts']:
+        raise ValueError('Распределение оплат требует сверки: ' + '; '.join(allocated['conflicts']))
+    for sub in allocated['obligations']:
+        if allocated['covered'][sub['id']] >= sub["price"]:
             if not sub["retained"] and sub["status"] != "paid":
                 con.execute("UPDATE subscriptions SET status='paid', paid_at=? WHERE id=?", (_now(), sub["id"]))
         else:
-            pool = 0 if pool < 0 else pool
             if not sub["retained"] and sub["status"] == "paid":
                 con.execute("UPDATE subscriptions SET status='invoiced', paid_at=NULL WHERE id=?", (sub["id"],))
 
@@ -135,18 +149,20 @@ def balance(con, sid: int, today: date | None = None) -> dict:
     """Долг — неоплаченное за прошлые и текущий месяц. К оплате — счета на будущие месяцы. Депозит — переплата."""
     today = today or date.today()
     cur = logic.month_of(today)
-    paid = con.execute("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE student_id=? AND cancelled=0", (sid,)).fetchone()[0]
-    pool, debt, upcoming, per_sub = paid, 0, 0, {}
-    for sub in obligations(con,sid):
-        covered = min(max(0,pool), sub["price"])
-        pool -= covered
-        per_sub[sub["id"]] = covered
+    from . import paymentallocation
+    allocated = paymentallocation.allocation(con, sid)
+    debt, upcoming = 0, 0
+    for sub in allocated['obligations']:
+        covered = allocated['covered'][sub['id']]
         left = sub["price"] - covered
         if sub["month"] <= cur:
             debt += left
         else:
             upcoming += left
-    return {"paid_total": paid, "debt": debt, "upcoming": upcoming, "deposit": pool, "covered": per_sub}
+    return {"paid_total": allocated['paid_total'], "debt": debt, "upcoming": upcoming,
+            "deposit": allocated['free_deposit'], "covered": allocated['covered'],
+            "restricted_deposit": allocated['restricted_deposit'],
+            "allocation_conflicts": allocated['conflicts']}
 
 
 # ---------------- платежи ----------------
@@ -300,6 +316,10 @@ def cancel_payment(con, pid: int, user: dict) -> None:
         raise ValueError("Оплата PayKeeper не отменяется как запись: оформите возврат через исходный платёж с фискальным чеком")
     if con.execute("SELECT 1 FROM subscription_refunds WHERE reserve_id=? OR payment_id=?",(pid,pid)).fetchone():
         raise ValueError("Эта строка связана с возвратом абонемента. Нельзя отменять резерв или подтверждённый возврат как обычный платёж")
+    source_tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('erp_payment_allocations','erp_refund_allocations')")}
+    if (('erp_payment_allocations' in source_tables and con.execute('SELECT 1 FROM erp_payment_allocations WHERE payment_id=?', (pid,)).fetchone())
+            or ('erp_refund_allocations' in source_tables and con.execute('SELECT 1 FROM erp_refund_allocations WHERE refund_payment_id=? OR original_payment_id=?', (pid, pid)).fetchone())):
+        raise ValueError('Эта операция связана с подтверждёнными зачётами или историческим возвратом. Для исправления нужна отдельная сверка источника')
     con.execute("UPDATE payments SET cancelled=1, cancelled_by=? WHERE id=?", (user.get("name", ""), pid))
     reconcile(con, p["student_id"])
     con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
@@ -514,26 +534,18 @@ def payment_receipt_info(con,payment):
 
 
 def subscription_payment_details(con,sid):
-    """Explain the existing chronological ledger allocation; no financial writes."""
-    payments=[dict(r) for r in con.execute('SELECT * FROM payments WHERE student_id=? AND cancelled=0 ORDER BY paid_at,id',(sid,))]
-    budget=max(0,sum(p['amount'] for p in payments))
-    sources=[]
-    for p in payments:
-        if p['amount']<=0 or not budget:continue
-        available=min(p['amount'],budget);budget-=available
-        sources.append([p,available])
-    from . import reconciliation
-    details={};index=0
-    for sub in obligations(con,sid):
-        need=sub['price'];rows=[]
-        while need>0 and index<len(sources):
-            p,available=sources[index];amount=min(need,available)
-            if amount:
-                rows.append({'payment_id':p['id'],'amount':amount,'payment_total':p['amount'],
+    """Explain the shared allocation, including proved historical sources."""
+    from . import reconciliation, paymentallocation
+    allocated = paymentallocation.allocation(con, sid)
+    payments={p['id']:dict(p) for p in con.execute('SELECT * FROM payments WHERE student_id=? AND cancelled=0',(sid,))}
+    details={}
+    for sub in allocated['obligations']:
+        rows=[]
+        for source in allocated['sources'][sub['id']]:
+            p=payments[source['payment_id']]
+            rows.append({'payment_id':p['id'],'amount':source['amount'],'payment_total':p['amount'],
                     'method':payment_method(con,p),'method_label':METHODS.get(payment_method(con,p),p['method']),
                     'paid_at':p['paid_at'],'created_at':p['created_at'],'receipt':payment_receipt_info(con,p),
                     'reconciliation':reconciliation.payment_state(con,p)})
-                need-=amount;sources[index][1]-=amount
-            if sources[index][1]<=0:index+=1
         if not sub['retained']:details[sub['id']]=rows
     return details
