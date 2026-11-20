@@ -48,5 +48,13 @@ class ChatArchiveRestoreTest(unittest.TestCase):
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM students').fetchone()[0],0)
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments').fetchone()[0],0)
 
+    def test_recovery_panel_mounts_before_legacy_import_widgets(self):
+        script=(Path(__file__).parents[1]/'crm/static/app.js').read_text()
+        mount=script.index('if (typeof chatArchiveRestoreSetup === "function") chatArchiveRestoreSetup(box);')
+        people=script.index('try { erpPeopleSetup(box, d); }',mount)
+        full=script.index('try { erpFullSetup(box, d); }',people)
+        self.assertLess(mount,people)
+        self.assertLess(people,full)
+
 
 if __name__=='__main__': unittest.main()

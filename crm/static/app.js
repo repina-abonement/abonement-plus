@@ -992,10 +992,13 @@ async function renderErp(box) {
   // The clean-start archive is independent of whether an earlier ERP import
   // has completed, so the owner must always see it in this section.
   if (typeof erpClientResetSetup === "function") erpClientResetSetup(box);
-  erpPeopleSetup(box, d);
-  erpTaskTransferSetup(box,d);
+  // Chat recovery is also independent. Mount it before the legacy import
+  // widgets: an old empty-import edge case must never hide the recovery tool.
+  if (typeof chatArchiveRestoreSetup === "function") chatArchiveRestoreSetup(box);
+  try { erpPeopleSetup(box, d); } catch (error) { fail(error); }
+  try { erpTaskTransferSetup(box,d); } catch (error) { fail(error); }
   if (done) {
-    erpFullSetup(box, d);
+    try { erpFullSetup(box, d); } catch (error) { fail(error); }
     erpWireFiles(box, d);
     api("GET", "/api/erp/reinvite-old").then((r) => {
       if (!r.n) return;
