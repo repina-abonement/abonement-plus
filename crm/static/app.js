@@ -1732,12 +1732,26 @@ async function openSell(d, reload) {
 async function copyTextWithNotice(text, notice='Текст скопирован') {
   try { await navigator.clipboard.writeText(text); }
   catch (_) {
-    const input=document.createElement('textarea'),previous=document.activeElement;
-    input.value=text;input.style.cssText='position:fixed;opacity:0;width:1px;height:1px';document.body.appendChild(input);input.focus();input.select();
-    const copied=document.execCommand('copy');input.remove();previous?.focus({preventScroll:true});
-    if(!copied){prompt('Скопируйте текст',text);return}
+    const input=document.createElement('textarea'),previous=document.activeElement,selection=window.getSelection();
+    const ranges=selection?Array.from({length:selection.rangeCount},(_,i)=>selection.getRangeAt(i).cloneRange()):[];
+    let copied=false;
+    input.value=text;input.style.cssText='position:fixed;opacity:0;width:1px;height:1px';
+    try {
+      document.body.appendChild(input);input.focus({preventScroll:true});input.select();
+      copied=document.execCommand('copy');
+    } catch (_) { /* Останется обычное ручное копирование. */ }
+    finally {
+      input.remove();
+      try { previous?.focus({preventScroll:true}); } catch (_) {}
+      if(selection&&ranges.length){
+        selection.removeAllRanges();
+        for(const range of ranges)if(range.startContainer.isConnected&&range.endContainer.isConnected)selection.addRange(range);
+      }
+    }
+    if(!copied){prompt('Скопируйте текст',text);return false}
   }
   toast(notice);
+  return true;
 }
 function clientSubscriptionMonth(sub) {
   if (/^\d{4}-\d{2}$/.test(sub.display_month || '')) return sub.display_month;
@@ -2951,14 +2965,24 @@ function offerAlerts() {
   draw();
 }
 
-/* Выгружать и копировать списки может только руководитель: остальным копирование из CRM не даём (кроме полей ввода) */
+/* Копирование списков ограничено; тексты задач, сообщений и поля ввода доступны отдельно. */
+function crmCopyableSelection(selection) {
+  if(!selection?.rangeCount)return false;
+  const anchor=selection.anchorNode;
+  const element=anchor?.nodeType===Node.ELEMENT_NODE?anchor:anchor?.parentElement;
+  const region=element?.closest('.task-copyable,.chat-message-copyable');
+  if(!region)return false;
+  for(let index=0;index<selection.rangeCount;index++){
+    const range=selection.getRangeAt(index);
+    if(!region.contains(range.startContainer)||!region.contains(range.endContainer))return false;
+  }
+  return true;
+}
 document.addEventListener("copy", (e) => {
   if (!S.user || can("export")) return;
   const t = document.activeElement;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
-  const selection = window.getSelection();
-  const region = selection?.anchorNode?.parentElement?.closest(".task-copyable");
-  if (region && selection.rangeCount && region.contains(selection.focusNode)) return;
+  if (crmCopyableSelection(window.getSelection())) return;
   e.preventDefault();
   toast("Копировать данные из CRM может только руководитель", true);
 });

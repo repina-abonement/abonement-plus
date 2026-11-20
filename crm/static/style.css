@@ -1916,6 +1916,10 @@ select:not([multiple]):not([size]){appearance:none;-webkit-appearance:none;paddi
 .msg-actions>summary::before,.msg-actions>summary::after{display:none!important}.msg-actions>summary::-webkit-details-marker{display:none}
 .msg-actions-menu{position:absolute;right:0;top:100%;min-width:190px;padding:5px;z-index:40;background:var(--surface);border:1px solid var(--line);border-radius:9px;box-shadow:0 6px 18px #0002}
 .msg-actions-menu .msg-delete{padding:8px;margin:0;width:100%;text-align:left}
+.msg-actions-menu .msg-copy{display:block;width:100%;padding:8px;margin:0;border:0;background:none;color:var(--ink);font:inherit;font-size:12px;text-align:left;cursor:pointer;border-radius:5px}
+.msg-actions-menu .msg-copy:hover:not(:disabled),.msg-actions-menu .msg-copy:focus-visible{background:var(--surface-2)}.msg-actions-menu .msg-copy:disabled{opacity:.45;cursor:wait}
+.chat-message-copyable,.no-copy .page .chat-message-copyable,.no-copy .drawer-panel .chat-message-copyable{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;cursor:text}
+
 .msg-error-details{margin-top:7px;font-size:12px;line-height:1.4;color:var(--red);overflow-wrap:anywhere}.msg-error-details>summary{cursor:pointer}
 html.theme-soft #comms-box .family-chat-feed{background:#182624}html.theme-soft #comms-box .msg.out{background:#214b3b}html.theme-soft #comms-box .family-trial-tools{background:#332d1c}html.theme-soft #comms-box .family-trial-tools>summary{color:#e4cf97}html.theme-soft #comms-box .msg.err{background:#492c2c}
 @media(max-width:600px){#comms-box .family-chat-header,#comms-box .composer{padding:12px}#comms-box .family-chat-feed{padding:14px 10px;max-height:55dvh}#comms-box .msg{max-width:90%}#comms-box .family-trial-tools{padding:11px 12px}.family-trial-tools>summary span{display:block;margin:3px 0 0 20px}#comms-box .composer>.row{display:flex;flex-direction:column;align-items:stretch}#comms-box .composer>.row textarea{width:100%}#comms-box .composer #cm-send{align-self:flex-end;min-width:120px}.family-contact-list{min-width:210px}}

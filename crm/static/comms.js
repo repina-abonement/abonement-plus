@@ -96,6 +96,40 @@ function chatHistoryHtml(items) {
   return html + (previous !== null ? "</section>" : "");
 }
 
+function positionMessageActions(details) {
+  const menu=details.querySelector('.msg-actions-menu');if(!details.open||!menu)return;
+  const feed=details.closest('.chat-feed')?.getBoundingClientRect();
+  const left=Math.max(8,feed?feed.left+6:8),right=Math.min(document.documentElement.clientWidth-8,feed?feed.right-6:Infinity);
+  const top=Math.max(8,feed?feed.top+6:8),bottom=Math.min(window.innerHeight-8,feed?feed.bottom-6:Infinity);
+  if(right<=left||bottom<=top)return;
+  menu.style.transform='';menu.style.maxWidth=(right-left)+'px';menu.style.minWidth=Math.min(190,right-left)+'px';
+  menu.style.maxHeight=(bottom-top)+'px';menu.style.overflowY='auto';
+  const rect=menu.getBoundingClientRect(),x=Math.max(left,Math.min(rect.left,right-rect.width))-rect.left,y=Math.max(top,Math.min(rect.top,bottom-rect.height))-rect.top;
+  menu.style.transform=`translate(${x}px,${y}px)`;
+}
+document.addEventListener('toggle',event=>{
+  const details=event.target;if(details instanceof HTMLDetailsElement&&details.matches('.msg-actions')&&details.open)positionMessageActions(details);
+},true);
+
+document.addEventListener('click',async event=>{
+  const button=event.target.closest('[data-copy-message]');if(!button||button.disabled)return;
+  event.preventDefault();
+  const body=button.closest('.msg')?.querySelector('.chat-message-copyable');
+  if(!body||!body.isConnected||!body.getClientRects().length||getComputedStyle(body).visibility!=='visible')return;
+  const raw=body.textContent;if(!raw.trim())return;
+  const menu=button.closest('.msg-actions'),summary=menu?.querySelector('summary'),wasFocused=document.activeElement===button;
+  let copied=false;button.disabled=true;
+  try{
+    copied=await copyTextWithNotice(raw,'Текст скопирован')===true;
+    if(copied&&menu?.isConnected){
+      menu.open=false;summary?.focus({preventScroll:true});
+    }
+  }catch(error){fail(error)}finally{
+    button.disabled=false;
+    if(!copied&&wasFocused&&button.isConnected&&menu?.open&&document.activeElement===document.body)button.focus({preventScroll:true});
+  }
+});
+
 document.addEventListener('click',async event=>{
   const button=event.target.closest('[data-delete-message]');if(!button||button.disabled)return;
   if(!confirm('Удалить это сообщение у клиента? Отменить удаление нельзя'))return;
@@ -111,7 +145,13 @@ document.addEventListener('click',async event=>{
 
 function msgHtml(m) {
   if(['requested','deleted'].includes(m.deletion_status))return `<div class="msg ${m.direction} msg-deleted"><div class="msg-text muted">${m.deletion_status==='deleted'?'Сообщение удалено':'Удаление запрошено — ждём подтверждения'}</div><div class="msg-meta">${dtWhen(m.ts)}</div></div>`;
-  const deletion=m.direction==='out'&&['admin','operator'].includes(S.user?.role)?m.deletion_status==='uncertain'?'<div class="small muted">Удаление не подтверждено — проверьте сообщение в мессенджере</div>':`<details class="msg-actions"><summary aria-label="Действия с сообщением" title="Действия с сообщением">⋯</summary><div class="msg-actions-menu"><button type="button" class="msg-delete" data-delete-message="${m.id}" ${m.can_delete?'':'disabled'} title="${esc(m.can_delete?'Удалить у клиента':m.delete_reason||'Удаление недоступно')}">Удалить сообщение</button></div></details>`:'';
+  const copyable=typeof m.text==='string'&&m.text.trim().length>0;
+  const mayDelete=m.direction==='out'&&['admin','operator'].includes(S.user?.role);
+  const uncertain=mayDelete&&m.deletion_status==='uncertain';
+  const copyAction=copyable?'<button type="button" class="msg-copy" data-copy-message>Скопировать текст</button>':'';
+  const deleteAction=mayDelete&&!uncertain?`<button type="button" class="msg-delete" data-delete-message="${m.id}" ${m.can_delete?'':'disabled'} title="${esc(m.can_delete?'Удалить у клиента':m.delete_reason||'Удаление недоступно')}">Удалить сообщение</button>`:'';
+  const actions=copyAction||deleteAction?`<details class="msg-actions"><summary aria-label="Действия с сообщением" title="Действия с сообщением">⋯</summary><div class="msg-actions-menu">${copyAction}${deleteAction}</div></details>`:'';
+  const deletionHint=uncertain?'<div class="small muted">Удаление не подтверждено — проверьте сообщение в мессенджере</div>':'';
   const media = m.media ? (["image", "sticker"].includes(m.kind)
     ? `<a href="/api/messages/${m.id}/media" target="_blank" rel="noopener"><img class="msg-img${m.kind === "sticker" ? " msg-sticker" : ""}" loading="lazy" src="/api/messages/${m.id}/media" alt="${m.kind === "sticker" ? "Стикер" : "Фото"}">${m.kind === "sticker" ? `<span hidden>Стикер: открыть файл</span>` : ""}</a>`
     : m.kind === "audio" ? `<audio controls preload="none" src="/api/messages/${m.id}/media"></audio>`
@@ -119,7 +159,7 @@ function msgHtml(m) {
   const label = !m.text && !media ? ({ sticker: "Стикер", contact: "Контакт", other: "Вложение" }[m.kind] || "") : "";
   const who = m.direction === "out" ? (m.user_name || "") : "";
   return `<div class="msg ${m.direction}${m.status === "error" ? " err" : ""}">
-    ${deletion}${media}${m.text ? `<div class="msg-text">${esc(m.text)}</div>` : ""}${label ? `<div class="msg-text muted">${label}</div>` : ""}
+    ${actions}${deletionHint}${media}${m.text ? `<div class="msg-text${copyable?' chat-message-copyable':''}">${esc(m.text)}</div>` : ""}${label ? `<div class="msg-text muted">${label}</div>` : ""}
     <div class="msg-meta">${[esc(who), esc(m.channel_label||""), dtWhen(m.ts), m.direction==='out'?({sent:"Отправлено",delivered:"Доставлено",read:"Прочитано",error:"Ошибка отправки",demo:"тест, не отправлено"}[m.status]||""):""].filter(Boolean).join(" · ")}</div>
     ${m.status==='error'&&m.error?`<details class="msg-error-details"><summary>Подробнее об ошибке</summary><div>${esc(m.error)}</div></details>`:''}
   </div>`;
