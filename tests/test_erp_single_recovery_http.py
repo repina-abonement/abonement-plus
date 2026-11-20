@@ -198,3 +198,30 @@ class SingleRecoveryHttpTest(unittest.TestCase):
         code,blocked=self.call('POST',self.BASE+'/'+str(result['run_id'])+'/rollback',{'run_id':result['run_id'],'token':result['rollback_token']})
         self.assertGreaterEqual(code,400,blocked)
         self.assertEqual(self.con.serialize(),before)
+
+    def test_delayed_apply_cannot_undo_a_completed_rollback(self):
+        original=self.financial_snapshot();body=self.body();plan=self.preview(body)
+        code,result=self.call('POST',self.BASE+'/apply',body|{'token':plan['token']})
+        self.assertEqual(code,200,result)
+        code,rolled=self.call('POST',self.BASE+'/'+str(result['run_id'])+'/rollback',
+            {'token':result['rollback_token']})
+        self.assertEqual(code,200,rolled)
+        self.assertEqual(self.financial_snapshot(),original)
+        backups=set(self.backups.iterdir());before=self.con.serialize()
+
+        # A browser/network retry can arrive after the owner has cancelled the
+        # operation. Restored business rows must not revive its old approval.
+        code,blocked=self.call('POST',self.BASE+'/apply',body|{'token':plan['token']})
+        self.assertGreaterEqual(code,400,blocked)
+        self.assertEqual(self.con.serialize(),before)
+        self.assertEqual(set(self.backups.iterdir()),backups)
+        self.assertEqual(self.con.execute('SELECT state FROM erp_single_recovery_runs WHERE id=?',
+            (result['run_id'],)).fetchone()[0],'rolled_back')
+
+        fresh=self.preview(body)
+        self.assertTrue(fresh['can_apply'],fresh.get('issues'))
+        self.assertNotEqual(fresh['token'],plan['token'])
+        code,reapplied=self.call('POST',self.BASE+'/apply',body|{'token':fresh['token']})
+        self.assertEqual(code,200,reapplied)
+        self.assertNotEqual(reapplied['run_id'],result['run_id'])
+        self.assertEqual(self.con.execute('SELECT count(*) FROM payments').fetchone()[0],4)

@@ -409,6 +409,75 @@ def pay_date(rec: dict) -> tuple[str | None, bool]:
 NO_NAME = "Ребёнок (имя не указано)"
 
 
+def _existing_child_id(con, key):
+    """Resolve classification to one existing child, never a first match."""
+    if not key:
+        return None
+    if key[0] == "id":
+        rows = con.execute("SELECT id FROM students WHERE erp_id=? AND archived=0", (key[1],)).fetchall()
+        return rows[0][0] if len(rows) == 1 else None
+    rows = con.execute("""SELECT DISTINCT s.id,s.name FROM students s JOIN parents p ON p.family_id=s.family_id
+        WHERE s.archived=0 AND substr(p.phone_norm,-10)=?""", (key[2],)).fetchall()
+    ids = {row["id"] for row in rows if _norm(row["name"]) == key[1]}
+    return next(iter(ids)) if len(ids) == 1 else None
+
+
+def _single_source_group(con, rec, sid=None):
+    """Validate a single source before it can affect the child's profile.
+
+    A stable, unchanged sale already linked to CRM retains its confirmed group
+    even when a shared ERP alias is stale. Conflicting source rows must not
+    change enrollments before the operational importer reports their review.
+    """
+    from . import erpsingles
+    source_id = str(rec.get("sale_id") or "").strip()
+    source = con.execute("SELECT * FROM erp_single_sales WHERE source_id=?", (source_id,)).fetchone() if source_id else None
+    raw_group = (rec.get("group") or "").strip()
+    mapped = _group_id(con, "", raw_group) if raw_group else None
+    if sub_kind(rec.get("tariff", "")) != "single":
+        return None, "Тип продажи ERP изменился с разового; исходная группа сохранена"
+    day = erpsingles._date(rec.get("lesson_date", ""))
+    ym = parse_month(rec.get("month", "")) or (day[:7] if day else None)
+    price = erpsingles._amount(rec.get("price", ""))
+    if not source_id or not ym or price is None or price < 0 or sub_lessons(rec) != 1:
+        return None, "Разовое: нужны ID продажи, месяц, точная стоимость и одно занятие; группа CRM сохранена"
+    if rec.get("lesson_date") and not day or day and day[:7] != ym:
+        return None, "Разовое: дата занятия ERP не соответствует месяцу; группа CRM сохранена"
+    if source:
+        if not sid or source["student_id"] != sid:
+            return None, "Разовое: ID продажи относится к другой или неустановленной карточке; группа CRM сохранена"
+        try:
+            payload = json.loads(source["source_payload"] or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        original_group = _norm(payload.get("group", "")) if isinstance(payload, dict) else ""
+        unchanged_label = bool(raw_group and original_group and _norm(raw_group) == original_group)
+        if not raw_group or (not unchanged_label and mapped != source["group_id"]):
+            return None, "Разовое: группа исходной продажи отличается от подтверждённой CRM; нужна сверка"
+        signature = erpsingles._json([sid, source["group_id"], ym, price, 1,
+            sub_status(rec.get("status", ""), price), rec.get("sale_at", "")])
+        native = con.execute("SELECT * FROM subscriptions WHERE id=?", (source["subscription_id"],)).fetchone()
+        op = str(rec.get("operation_id") or "").strip()
+        if (not native or signature != source["source_signature"] or
+                erpsingles._native_signature(native) != source["native_signature"] or
+                source["lesson_date"] and source["lesson_date"] != day or
+                source["payment_operation_id"] and op and source["payment_operation_id"] != op):
+            return None, "Разовое: продажа или покупка CRM изменились; исходная группа сохранена для сверки"
+        visits = con.execute("SELECT * FROM single_visits WHERE subscription_id=?", (source["subscription_id"],)).fetchall()
+        move = con.execute("SELECT * FROM erp_single_reschedules WHERE source_id=? ORDER BY id DESC LIMIT 1", (source_id,)).fetchone()
+        effective = move["to_date"] if move else day
+        if native["status"] != "cancelled" and visits and (len(visits) != 1 or
+                (visits[0]["student_id"], visits[0]["group_id"], visits[0]["date"], visits[0]["status"]) != (sid, source["group_id"], effective, "booked") or
+                move and (move["visit_id"], move["student_id"], move["group_id"]) != (visits[0]["id"], sid, source["group_id"])):
+            return None, "Разовое: запись на занятие изменена; исходная группа сохранена для сверки"
+        if native["status"] != "cancelled" and not visits and source["lesson_date"]:
+            return None, "Разовое: запись на занятие удалена; исходная группа сохранена для сверки"
+        return source["group_id"], ""
+    if not mapped:
+        return None, "Разовое: группа продажи ERP не определена однозначно; группа CRM сохранена"
+    return mapped, ""
+
+
 def _classify(con, children: list[dict], subs: list[dict], child_of, today: date) -> dict:
     """Статус и группы каждого ребёнка по проданным абонементам (правило Юлии, 01.11.2026):
     - есть абонемент (или разовое) на текущий или будущий месяц - занимается, действующие группы - только те, куда он продан;
@@ -420,12 +489,29 @@ def _classify(con, children: list[dict], subs: list[dict], child_of, today: date
     prev = logic.shift_month(cur, -1)
     by_child: dict[tuple, list] = {}
     trials: dict[tuple, str] = {}
+    guarded = set()
     gid_cache: dict[str, int | None] = {}
     for rec in subs:
         ck = child_of(rec)
         if ck is None:
             continue
         kind = sub_kind(rec.get("tariff", ""))
+        source_id = str(rec.get("sale_id") or "").strip()
+        identified_single = source_id and con.execute("SELECT 1 FROM erp_single_sales WHERE source_id=?", (source_id,)).fetchone()
+        single_gid = None
+        if kind == "single" or identified_single:
+            existing_sid = _existing_child_id(con, ck)
+            single_gid, conflict = _single_source_group(con, rec, existing_sid)
+            if conflict:
+                guarded.add(ck)
+                if not existing_sid and not identified_single and kind == "single":
+                    # Preserve the legacy active/left classification of a NEW
+                    # child from the reported sale month. An unresolved sale
+                    # establishes neither a group nor a booked lesson date.
+                    ym = parse_month(rec.get("month", ""))
+                    if ym:
+                        by_child.setdefault(ck, []).append((ym, None))
+                continue
         if kind == "trial":
             d = parse_date(rec.get("month", ""))
             if d and (ck not in trials or d < trials[ck]):
@@ -436,6 +522,9 @@ def _classify(con, children: list[dict], subs: list[dict], child_of, today: date
         if not ym:
             continue
         g = (rec.get("group") or "").strip()
+        if kind == "single":
+            by_child.setdefault(ck, []).append((ym, single_gid))
+            continue
         if g not in gid_cache:
             gid_cache[g] = _group_id(con, "", g) if g else None
         by_child.setdefault(ck, []).append((ym, gid_cache[g]))
@@ -443,7 +532,7 @@ def _classify(con, children: list[dict], subs: list[dict], child_of, today: date
     for c in children:
         ck = _key(c)
         sold = sorted(by_child.get(ck, []), key=lambda x: x[0], reverse=True)  # группа бывает без пары (None)
-        file_gid = _group_id(con, c.get("branch", ""), c.get("group", ""))
+        file_gid = _group_id(con, c.get("branch", ""), c.get("group", "")) if ck not in guarded else None
 
         def gids(pred):
             res = []
@@ -451,13 +540,21 @@ def _classify(con, children: list[dict], subs: list[dict], child_of, today: date
                 if pred(ym) and g and g not in res:
                     res.append(g)
             return res
+        def selected_groups(pred):
+            values = gids(pred)
+            if values:
+                return values
+            if ck in guarded:
+                known = next((ym for ym, gid in sold if gid), None)
+                return gids(lambda month: month == known) if known else []
+            return [file_gid] if file_gid else []
         if any(ym >= cur for ym, _ in sold):
-            info = {"funnel": "members", "stage": "active", "state": "paid_now", "groups": gids(lambda m: m >= cur) or ([file_gid] if file_gid else [])}
+            info = {"funnel": "members", "stage": "active", "state": "paid_now", "groups": selected_groups(lambda m: m >= cur)}
         elif any(ym == prev for ym, _ in sold):
-            info = {"funnel": "members", "stage": "active", "state": "unpaid_now", "groups": gids(lambda m: m == prev) or ([file_gid] if file_gid else [])}
+            info = {"funnel": "members", "stage": "active", "state": "unpaid_now", "groups": selected_groups(lambda m: m == prev)}
         elif sold:
             last = sold[0][0]
-            info = {"funnel": "members", "stage": "left", "state": "left", "groups": gids(lambda m: m == last) or ([file_gid] if file_gid else [])}
+            info = {"funnel": "members", "stage": "left", "state": "left", "groups": selected_groups(lambda m: m == last)}
         else:
             funnel, stage = client_stage(c.get("status", ""))
             if funnel == "members":
@@ -465,6 +562,14 @@ def _classify(con, children: list[dict], subs: list[dict], child_of, today: date
             info = {"funnel": funnel, "stage": stage, "state": "left" if funnel == "members" else "lead",
                     "groups": [file_gid] if file_gid and funnel == "members" else []}
         info["trial"] = trials.get(ck)
+        info["guarded_source"] = ck in guarded
+        info["preserve_profile"] = ck in guarded and bool(_existing_child_id(con, ck))
+        if info["preserve_profile"]:
+            existing = _existing_child_id(con, ck)
+            if existing:
+                current = con.execute("SELECT funnel,stage FROM students WHERE id=?", (existing,)).fetchone()
+                info.update(funnel=current["funnel"], stage=current["stage"], state="source_review",
+                            groups=[r[0] for r in con.execute("SELECT group_id FROM enrollments WHERE student_id=? AND active=1 ORDER BY id", (existing,))], trial=None)
         info["multi"] = len(info["groups"]) > 1
         out[ck] = info
     return out
@@ -790,7 +895,13 @@ def _track(con, batch: int, tbl: str, rid: int):
 
 def _single_result(con, rec, sid, gid, now, track, stats, issues):
     from . import erpsingles
-    result = erpsingles.import_sale(con, rec, sid, gid, now)
+    source_gid = gid
+    gid, conflict = _single_source_group(con, rec, sid)
+    if conflict:
+        review_gid = gid or source_gid
+        result = {"reason": conflict, **erpsingles.review(con, rec, sid, review_gid, conflict, now)}
+    else:
+        result = erpsingles.import_sale(con, rec, sid, gid, now)
     for table, rid in result.get("created", []):
         track(table, rid)
         if table == "subscriptions":
@@ -949,7 +1060,7 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
             stage = "missed_trial"
             st["missed_trial"] += 1
         # группа: та, куда продан абонемент на текущий или будущий месяц (решение Юлии 01.11.2026), см. _classify
-        gid = info["groups"][0] if info["groups"] else (_group_id(con, rec.get("branch", ""), rec.get("group", "")) if funnel == "members" else None)
+        gid = info["groups"][0] if info["groups"] else (_group_id(con, rec.get("branch", ""), rec.get("group", "")) if funnel == "members" and not info.get("guarded_source") else None)
         created = parse_date(rec.get("created", "")) or nowi
         if len(created) == 10:
             created += "T10:00"
@@ -1171,7 +1282,7 @@ def update(con, user: dict, now: datetime | None = None) -> dict:
             created = created + "T10:00" if len(created) == 10 else created
             ev = parse_date(rec.get("status_at", "")) or (trial if trial and stage in ("trial_booked", "missed_trial", "how_was") else "") or created
             ev = ev + "T10:00" if len(ev) == 10 else ev
-            gid = info["groups"][0] if info["groups"] else (_group_id(con, rec.get("branch", ""), rec.get("group", "")) if funnel == "members" else None)
+            gid = info["groups"][0] if info["groups"] else (_group_id(con, rec.get("branch", ""), rec.get("group", "")) if funnel == "members" and not info.get("guarded_source") else None)
             tariff = "flex" if "гибк" in _norm(rec.get("tariff", "")) else "fixed"
             sid = con.execute("""INSERT INTO students(family_id, name, birth, group_id, tariff, funnel, stage, stage_changed_at, trial_at,
                                  source, created_at, erp_id, erp_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -1202,7 +1313,7 @@ def update(con, user: dict, now: datetime | None = None) -> dict:
                 con.execute(f"UPDATE students SET {', '.join(sets)} WHERE id=?", (*args, sid))
                 st["updated"] += 1
         # группы ученика: как в ERP (где куплен текущий или следующий месяц)
-        if funnel == "members" and info["groups"]:
+        if funnel == "members" and info["groups"] and not info.get("preserve_profile"):
             have = {r[0]: r[1] for r in con.execute("SELECT group_id, active FROM enrollments WHERE student_id=?", (sid,))}
             for g in info["groups"]:
                 if g not in have:

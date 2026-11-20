@@ -360,6 +360,18 @@ def _execute(con, data, report, user, now):
     _verify_calendar(con, report)
 
 
+def _recovery_history_fingerprint(con, sid):
+    """Approval generation is independent from the reversible business state.
+
+    A completed rollback intentionally restores the prior business fingerprint,
+    but must never reactivate an old apply approval or a delayed HTTP retry.
+    Only runs for this child participate; unrelated recoveries stay independent.
+    """
+    return _hash(_dicts(con, """SELECT id,aggregate_id,state,before_fingerprint,after_fingerprint,
+        created_at,rolled_back_at,rolled_back_by FROM erp_single_recovery_runs
+        WHERE student_id=? ORDER BY id""", (sid,)))
+
+
 def plan(con, data):
     if not isinstance(data, dict):
         raise RecoveryError('Передайте сведения для сверки ERP')
@@ -369,6 +381,7 @@ def plan(con, data):
         report['before_summary'] = _summary(con, sid, report)
         report['after_summary'] = None
         report['state_fingerprint'] = _hash(_snapshot(con, sid))
+        report['recovery_history_fingerprint'] = _recovery_history_fingerprint(con, sid)
         if report['can_apply']:
             clone = _clone(con)
             try:

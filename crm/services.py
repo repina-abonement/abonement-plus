@@ -134,9 +134,9 @@ def enrollments_of(con, sid: int, active_only: bool = True) -> list[dict]:
 
 
 def unpaid_groups(con, sid: int, ym: str) -> list[str]:
-    """Группы ребёнка, за которые месяц не оплачен (у ребёнка в двух группах может быть оплачена только одна)."""
-    paid = {r[0] for r in con.execute("SELECT enrollment_id FROM subscriptions WHERE student_id=? AND month=? AND status='paid'", (sid, ym))}
-    return [e["group_name"] for e in enrollments_of(con, sid) if e["id"] not in paid]
+    """Непокрытые счета группы отдельно от отсутствующего месячного плана."""
+    from . import subscriptionpresentation
+    return subscriptionpresentation.unpaid_group_names(con,sid,ym,enrollments_of(con,sid))
 
 
 def enrollment_days(e: dict) -> list[int]:
@@ -921,10 +921,9 @@ def student_detail(con, sid: int) -> dict:
     siblings = _rows(con.execute("SELECT id, name, birth FROM students WHERE family_id=? AND id != ?",
                                  (s["family_id"], sid)))
     grp = dict(con.execute("SELECT * FROM groups WHERE id=?", (s["group_id"],)).fetchone()) if s["group_id"] else None
-    subs = _rows(con.execute("""SELECT x.*, COALESCE(g.name,sg.name) AS group_name,v.date AS single_date,COALESCE(e.group_id,v.group_id) AS group_id FROM subscriptions x
-                                LEFT JOIN enrollments e ON e.id=x.enrollment_id LEFT JOIN groups g ON g.id=e.group_id
-                                LEFT JOIN single_visits v ON v.subscription_id=x.id LEFT JOIN groups sg ON sg.id=v.group_id
-                                WHERE x.student_id=? ORDER BY x.month DESC, x.id""", (sid,)))
+    from . import subscriptionpresentation
+    balance = _balance_out(con,sid)
+    subs = subscriptionpresentation.rows_for_card(con,sid,balance['covered'])
     vacs = _rows(con.execute("SELECT * FROM vacations WHERE student_id=? ORDER BY start DESC", (sid,)))
     makeups = _rows(con.execute(
         """SELECT m.*, g.name AS group_name, a.date AS absence_date FROM makeups m
@@ -960,7 +959,7 @@ def student_detail(con, sid: int) -> dict:
         "enrollments": [e | {"age_warn": "" if e["program_id"] else logic.age_warning(s["birth"], e["group_age"], e["branch_name"])} for e in enrollments_of(con, sid)],
         "trial_age_warn": logic.age_warning(s["birth"], grp["age"], _branch_name(con, grp["branch_id"])) if grp and not grp["program_id"] and s["funnel"] == "sales" else "", "makeups": makeups, "history": hist,
         "counters": absence_counters(con, sid) if s["funnel"] == "members" else None,
-        "balance": _balance_out(con, sid),
+        "balance": balance,
         "trial_hold": __import__("crm.capacity", fromlist=["active_holds"]).active_holds(con, student_id=sid)[:1],
         "tasks": __import__("crm.tasks", fromlist=["for_student"]).for_student(con, sid),
         "unpaid_cur": unpaid_groups(con, sid, cur) if s["funnel"] == "members" and s["stage"] != "left" else [],

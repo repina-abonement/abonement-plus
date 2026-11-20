@@ -556,7 +556,16 @@ def _process(con, files, now):
                         reason = 'Вводное занятие или отработка сохранены как исходная продажа ERP'
                     elif kind == 'single':
                         from . import erpsingles
-                        single = erpsingles.import_sale(con, r, sid, gid, now)
+                        known = con.execute('SELECT subscription_id FROM erp_single_sales WHERE source_id=?',
+                                            (str(r.get('sale_id') or '').strip(),)).fetchone()
+                        conflict = ''
+                        if known:
+                            gid, conflict = ei._single_source_group(con, r, sid)
+                        if conflict:
+                            review = erpsingles.review(con, r, sid, gid, conflict, now)
+                            single = erpsingles._result(conflict, known['subscription_id'], review['created'])
+                        else:
+                            single = erpsingles.import_sale(con, r, sid, gid, now)
                         state, reason = single['state'], single['reason']
                         tbl, target = single['target_table'], single['target_id']
                         counts.update(single['counts'])

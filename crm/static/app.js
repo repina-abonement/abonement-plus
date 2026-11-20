@@ -1584,7 +1584,7 @@ function existingSaleCalendarHtml(sub, d) {
   if(sub.kind==='single'&&sub.single_date)selected.push(sub.single_date);
   const excluded = JSON.parse(sub.excluded_dates || '[]');
   if(!selected.length)return '<p class="small muted">Даты занятий этого абонемента не сохранены — требуется сверка</p>';
-  return saleCalendarHtml({dates:selected,calendar_dates:[...new Set([...selected,...excluded])],excluded_dates:excluded,single:sub.kind==='single',read_only:true},sub.month,[...(d.trial_visits||[]).map(v=>v.date),(d.student.trial_at||'').slice(0,10)]);
+  return saleCalendarHtml({dates:selected,calendar_dates:[...new Set([...selected,...excluded])],excluded_dates:excluded,single:sub.kind==='single',read_only:true},clientSubscriptionMonth(sub),[...(d.trial_visits||[]).map(v=>v.date),(d.student.trial_at||'').slice(0,10)]);
 }
 const clientGroupLabel = e => e.lesson_kind === 'arena' || /сборная.*арктика/i.test(e.group_name || e.name || '') ? 'Сборная Арктика' : e.group_name || e.name || '';
 async function openSell(d, reload) {
@@ -1739,11 +1739,20 @@ async function copyTextWithNotice(text, notice='Текст скопирован'
   }
   toast(notice);
 }
+function clientSubscriptionMonth(sub) {
+  if (/^\d{4}-\d{2}$/.test(sub.display_month || '')) return sub.display_month;
+  if (sub.kind === 'single' && /^\d{4}-\d{2}-\d{2}$/.test(sub.single_date || '')) return sub.single_date.slice(0, 7);
+  return sub.month || '';
+}
+function clientSubscriptionPaid(sub, balance) {
+  const covered = balance.covered || {}, raw = Object.prototype.hasOwnProperty.call(covered, sub.id) ? covered[sub.id] : sub.paid_amount;
+  return Math.max(0, Math.min(Number(sub.price) || 0, Number.isFinite(Number(raw)) ? Number(raw) : 0));
+}
 function clientSubscriptionsHtml(d) {
   const tariffs={fixed:'Негибкий',flex:'Гибкий',pkg:'Арктика + ОФП',arena_only:'Только Арктика',single:'Разовое занятие'};
   const card=x=>{
     const cancellation=(d.subscription_cancellations||[]).find(c=>c.subscription_id===x.id);
-    const paid=x.status==='cancelled'&&cancellation?.period_verified?cancellation.paid_before:x.status==='paid'?x.price:Math.min(x.price,(d.balance.covered||{})[x.id]||0),left=Math.max(0,x.price-paid),cancelled=x.status==='cancelled';
+    const paid=x.status==='cancelled'&&cancellation?.period_verified?cancellation.paid_before:clientSubscriptionPaid(x,d.balance),left=Math.max(0,x.price-paid),cancelled=x.status==='cancelled';
     const status=cancelled?'Отменён':!left?'Оплачен':paid?'Оплачен частично':'Ожидает оплаты';
     const own=d.enrollments.find(e=>e.id===x.enrollment_id),active=own&&x.kind!=='single'&&!cancelled&&x.month>=d.cur_month;
     const actions=[
@@ -1753,9 +1762,9 @@ function clientSubscriptionsHtml(d) {
       active?`<button type="button" class="btn sm" data-sub-transfer="${x.id}">Поменять группу</button>`:''
     ].filter(Boolean).join('');
     return `<li class="subscription-card compact-subscription ${cancelled?'is-cancelled':''}">
-      <div class="subscription-overview"><div class="subscription-identity"><h4>${x.kind==='single'?`Разовое занятие${x.single_date?' · '+dShort(x.single_date):''}`:monthLabel(x.month)}</h4><div class="subscription-group">${esc(clientGroupLabel(x))}</div><div class="small muted subscription-meta">${esc(tariffs[x.tariff]||'Абонемент')} · ${x.lessons} ${plural(x.lessons,'занятие','занятия','занятий')}${x.valid_from||x.valid_until?` · ${x.valid_from?'с '+dShort(x.valid_from):''}${x.valid_until?' по '+dShort(x.valid_until):''}`:''}</div><span class="pill ${!left&&!cancelled?'green':cancelled?'':'yellow'}">${status}</span></div>
+      <div class="subscription-overview"><div class="subscription-identity"><h4>${x.kind==='single'?`Разовое занятие${x.single_date?' · '+dShort(x.single_date):''}${x.single_time?' · '+esc(x.single_time):''}`:monthLabel(x.month)}</h4><div class="subscription-group">${esc(clientGroupLabel(x))}</div><div class="small muted subscription-meta">${esc(x.kind==='single'?'Разовое занятие':tariffs[x.tariff]||'Абонемент')} · ${x.lessons} ${plural(x.lessons,'занятие','занятия','занятий')}${x.valid_from||x.valid_until?` · ${x.valid_from?'с '+dShort(x.valid_from):''}${x.valid_until?' по '+dShort(x.valid_until):''}`:''}</div><span class="pill ${!left&&!cancelled?'green':cancelled?'':'yellow'}">${status}</span>${x.kind==='single'&&x.date_needs_review?'<div class="small finance-note">Дата занятия требует сверки</div>':''}</div>
       <div class="finance-numbers subscription-money"><div><small>Стоимость</small><b>${rub(x.price)}</b></div><div><small>Оплачено</small><b>${rub(paid)}</b></div><div><small>${cancelled?'Статус':'Остаток'}</small><b class="${left&&!cancelled?'finance-due':''}">${cancelled?'Отменён':rub(left)}</b></div></div></div>
-      <div class="subscription-card-footer"><details class="finance-detail"><summary>Подробнее</summary><div class="small muted">Оформил(а): ${esc(x.issued_by_name||'Автор не указан')}</div>${subscriptionPaymentDetailsHtml(x,d)}${x.credit_lessons?`<div>Перерасчёт пропусков: ${x.credit_lessons}</div>`:''}${x.late_fee?`<div>Надбавка: ${rub(x.late_fee)}</div>`:''}${x.discount_amount?`<div>Скидка: ${esc(x.discount_name||'Название не указано')} · ${rub(x.discount_amount)}</div>`:''}${x.calculation_reason?`<div>Причина: ${esc(x.calculation_reason)}</div>`:x.corrected&&!x.historical_sale?'<div>Сумма скорректирована · причина в ранней записи не указана</div>':''}${x.excluded_dates&&x.excluded_dates!=='[]'?`<div>Исключены: ${JSON.parse(x.excluded_dates).map(day=>esc(dShort(day))+': '+esc((JSON.parse(x.exclusion_reasons||'{}'))[day]||'Причина не указана')).join('<br>')}</div>`:''}${x.composition_corrected&&x.lesson_schedule?`<div class="small muted">${JSON.parse(x.lesson_schedule).map(c=>`${esc(c.group)}: ${c.dates.length} занятий · ${rub(c.amount??c.dates.length*c.rate)}${c.erp_subscription_id?' · ERP №'+esc(c.erp_subscription_id):''}`).join('<br>')}</div>`:''}</details>
+      <div class="subscription-card-footer"><details class="finance-detail"><summary>Подробнее</summary><div class="small muted">Оформил(а): ${esc(x.issued_by_name||'Автор не указан')}</div>${x.kind==='single'&&x.accounting_month&&x.accounting_month!==clientSubscriptionMonth(x)?`<div class="small muted">Исходный месяц покупки: ${esc(monthLabel(x.accounting_month))}</div>`:''}${x.kind==='single'&&x.source_lesson_date&&x.single_date&&x.source_lesson_date!==x.single_date?`<div class="small muted">Дата в источнике ERP: ${esc(dShort(x.source_lesson_date))}. Дата занятия после переноса: ${esc(dShort(x.single_date||''))}</div>`:''}${subscriptionPaymentDetailsHtml(x,d)}${x.credit_lessons?`<div>Перерасчёт пропусков: ${x.credit_lessons}</div>`:''}${x.late_fee?`<div>Надбавка: ${rub(x.late_fee)}</div>`:''}${x.discount_amount?`<div>Скидка: ${esc(x.discount_name||'Название не указано')} · ${rub(x.discount_amount)}</div>`:''}${x.calculation_reason?`<div>Причина: ${esc(x.calculation_reason)}</div>`:x.corrected&&!x.historical_sale?'<div>Сумма скорректирована · причина в ранней записи не указана</div>':''}${x.excluded_dates&&x.excluded_dates!=='[]'?`<div>Исключены: ${JSON.parse(x.excluded_dates).map(day=>esc(dShort(day))+': '+esc((JSON.parse(x.exclusion_reasons||'{}'))[day]||'Причина не указана')).join('<br>')}</div>`:''}${x.composition_corrected&&x.lesson_schedule?`<div class="small muted">${JSON.parse(x.lesson_schedule).map(c=>`${esc(c.group)}: ${c.dates.length} занятий · ${rub(c.amount??c.dates.length*c.rate)}${c.erp_subscription_id?' · ERP №'+esc(c.erp_subscription_id):''}`).join('<br>')}</div>`:''}</details>
       ${actions?`<details class="subscription-actions"><summary class="btn sm" aria-label="Действия с абонементом" title="Действия с абонементом">⋯</summary><div>${actions}</div></details>`:''}</div>
       ${!cancelled&&can('members','full')?`<div data-sub-cancel-box="${x.id}"></div>`:''}
       ${S.user.role==='admin'&&x.program_id?`<div data-composition-box="${x.id}"></div>`:''}
@@ -1763,18 +1772,19 @@ function clientSubscriptionsHtml(d) {
   };
   const key=String(d.student?.id||'preview');
   S.subscriptionCalendars=S.subscriptionCalendars||{};
-  const availableYears=[...new Set([d.cur_month.slice(0,4),...d.subscriptions.map(x=>x.month.slice(0,4))])].sort().reverse();
+  const availableYears=[...new Set([d.cur_month.slice(0,4),...d.subscriptions.map(x=>clientSubscriptionMonth(x).slice(0,4))])].sort().reverse();
   let selected=S.subscriptionCalendars[key];
-  if(!selected||!availableYears.includes(selected.slice(0,4))){selected=d.subscriptions.some(x=>x.month===d.cur_month)?d.cur_month:d.subscriptions.map(x=>x.month).sort().reverse()[0]||d.cur_month;S.subscriptionCalendars[key]=selected}
-  const year=selected.slice(0,4),shown=d.subscriptions.filter(x=>x.month===selected);
+  if(!selected||!availableYears.includes(selected.slice(0,4))){selected=d.subscriptions.some(x=>clientSubscriptionMonth(x)===d.cur_month)?d.cur_month:d.subscriptions.map(clientSubscriptionMonth).filter(Boolean).sort().reverse()[0]||d.cur_month;S.subscriptionCalendars[key]=selected}
+  const year=selected.slice(0,4),shown=d.subscriptions.filter(x=>clientSubscriptionMonth(x)===selected&&x.status!=='cancelled'),cancelledHistory=d.subscriptions.filter(x=>clientSubscriptionMonth(x)===selected&&x.status==='cancelled');
   const tiles=Array.from({length:12},(_,i)=>{
-    const month=year+'-'+String(i+1).padStart(2,'0'),all=d.subscriptions.filter(x=>x.month===month),live=all.filter(x=>x.status!=='cancelled');
-    const total=live.reduce((sum,x)=>sum+x.price,0),paid=live.reduce((sum,x)=>sum+(x.status==='paid'?x.price:Math.min(x.price,(d.balance.covered||{})[x.id]||0)),0),left=Math.max(0,total-paid);
+    const month=year+'-'+String(i+1).padStart(2,'0'),all=d.subscriptions.filter(x=>clientSubscriptionMonth(x)===month),live=all.filter(x=>x.status!=='cancelled');
+    const total=live.reduce((sum,x)=>sum+x.price,0),paid=live.reduce((sum,x)=>sum+clientSubscriptionPaid(x,d.balance),0),left=Math.max(0,total-paid);
     const state=!all.length?'empty':!live.length?'cancelled':!left?'paid':paid?'partial':'unpaid';
     const label={empty:'Нет абонемента',cancelled:'Отменён',paid:'Оплачен',partial:'Частично',unpaid:'Ждёт оплаты'}[state];
-    return `<button type="button" class="subscription-month ${state} ${month===selected?'selected':''}" data-sub-month="${month}" aria-pressed="${month===selected}"><strong>${esc(MONTHS[i])}</strong><span class="subscription-month-status">${label}</span>${live.length?`<b>${rub(total)}</b>${left?`<small>Остаток ${rub(left)}</small>`:'<small>Всё оплачено</small>'}`:'<b>—</b><small>&nbsp;</small>'}</button>`;
+    const singleCount=live.filter(x=>x.kind==='single').length,caption=singleCount&&singleCount===live.length?`${singleCount} ${plural(singleCount,'разовое','разовых','разовых')}`:label;
+    return `<button type="button" class="subscription-month ${state} ${month===selected?'selected':''}" data-sub-month="${month}" aria-pressed="${month===selected}"><strong>${esc(MONTHS[i])}</strong><span class="subscription-month-status">${caption}</span>${live.length?`<b>${rub(total)}</b>${left?`<small>Остаток ${rub(left)}</small>`:'<small>Всё оплачено</small>'}`:'<b>—</b><small>&nbsp;</small>'}</button>`;
   }).join('');
-  return `<div class="subscription-balance"><div><small>Свободный баланс</small><b>${rub(d.balance.deposit||0)}</b><span>Можно зачесть в оплату</span></div><div><small>Долг</small><b class="${d.balance.debt?'finance-due':''}">${rub(d.balance.debt||0)}</b><span>Прошлые и текущий месяц</span></div><div><small>Будущие абонементы</small><b>${rub(d.balance.upcoming||0)}</b><span>Осталось оплатить</span></div></div><div class="subscription-year-head"><h3>Абонементы</h3><select id="subscription-year" aria-label="Год абонементов">${availableYears.map(y=>`<option ${y===year?'selected':''}>${y}</option>`).join('')}</select></div><div class="subscription-year-grid">${tiles}</div><h4 class="subscription-selected-month">${esc(monthLabel(selected))}</h4>${shown.length?`<ul class="sub-list">${shown.map(card).join('')}</ul>`:'<p class="muted small">В этом месяце абонементов нет</p>'}${refundRequestsHtml(d.refund_requests||[])}${subscriptionRefundsHtml(d)}`;
+  return `<div class="subscription-balance"><div><small>Свободный баланс</small><b>${rub(d.balance.deposit||0)}</b><span>Можно зачесть в оплату</span></div><div><small>Долг</small><b class="${d.balance.debt?'finance-due':''}">${rub(d.balance.debt||0)}</b><span>Прошлые и текущий месяц</span></div><div><small>Будущие абонементы</small><b>${rub(d.balance.upcoming||0)}</b><span>Осталось оплатить</span></div></div><div class="subscription-year-head"><h3>Абонементы</h3><select id="subscription-year" aria-label="Год абонементов">${availableYears.map(y=>`<option ${y===year?'selected':''}>${y}</option>`).join('')}</select></div><div class="subscription-year-grid">${tiles}</div><h4 class="subscription-selected-month">${esc(monthLabel(selected))}</h4>${shown.length?`<ul class="sub-list subscription-live-list">${shown.map(card).join('')}</ul>`:'<p class="muted small">В этом месяце покупок нет</p>'}${cancelledHistory.length?`<details class="subscription-cancelled-history"><summary>Отменённые покупки · ${cancelledHistory.length}</summary><ul class="sub-list">${cancelledHistory.map(card).join('')}</ul></details>`:''}${refundRequestsHtml(d.refund_requests||[])}${subscriptionRefundsHtml(d)}`;
 }
 
 function wireSubscriptionCalendar(root,d) {
@@ -1782,7 +1792,7 @@ function wireSubscriptionCalendar(root,d) {
   root.querySelectorAll('[data-sub-month]').forEach(b=>b.onclick=()=>choose(b.dataset.subMonth));
   const year=root.querySelector('#subscription-year');
   if(year)year.onchange=()=>{
-    const months=d.subscriptions.filter(x=>x.month.startsWith(year.value+'-')).map(x=>x.month).sort().reverse();
+    const months=d.subscriptions.map(clientSubscriptionMonth).filter(month=>month.startsWith(year.value+'-')).sort().reverse();
     choose(months[0]||year.value+'-01');
   };
 
@@ -1877,9 +1887,12 @@ async function confirmSubscriptionRefund(rid,button,d,reload) {
   box.querySelector('form').onsubmit=async e=>{e.preventDefault();const form=e.target,submit=form.querySelector('button');submit.disabled=true;try{const result=await api('POST',`/api/subscription-refunds/${rid}/confirm`,{actually_returned:form.elements.returned?.checked,proof:form.elements.proof?.value,receipt_fn:form.elements.receipt_fn.value,receipt_fd:form.elements.receipt_fd.value,receipt_fp:form.elements.receipt_fp.value});toast(result.message||'Подтверждение сохранено',result.status!=='done');reload()}catch(err){box.querySelector('.need-err').textContent=err.message;submit.disabled=false}};
 }
 
+function clientUnpaidAlertsHtml(d) {
+  return (d.unpaid_cur || []).map(g=>`<span class="pill red" title="Есть неоплаченная покупка или не оформлены занятия текущего месяца">Требует оплаты: ${esc(g)}</span>`).join('');
+}
 function clientBalanceHtml(d) {
   return `<h3>Оплаты и баланс</h3><div class="balance-summary"><div class="${d.balance.debt?'has-debt':''}"><small>Задолженность</small><b>${rub(d.balance.debt)}</b><span>По прошедшим и текущим счетам</span></div><div><small>Будущие занятия</small><b>${rub(d.balance.upcoming)}</b><span>К оплате за следующий месяц</span></div><div><small>Деньги на балансе</small><b>${rub(d.balance.deposit)}</b><span>Доступны для оплаты занятий</span></div></div>
-    ${(d.unpaid_cur||[]).length?`<div class="finance-note">За текущий месяц ещё не оформлен или не оплачен абонемент: ${(d.unpaid_cur||[]).map(esc).join(', ')}</div>`:''}
+    ${(d.unpaid_cur||[]).length?`<div class="finance-note">Нужно проверить оплату текущих занятий: ${(d.unpaid_cur||[]).map(esc).join(', ')}</div>`:''}
     ${subscriptionCancellationsHtml(d)}<div id="pay-form"></div><div id="pay-links"></div>
     <h4 class="finance-history-title">История денег</h4>${d.payments.length?`<ul class="pay-list ${d.payments.length>4?'folded':''}">${d.payments.map(p=>`<li class="payment-card ${p.cancelled?'is-cancelled':''}"><div class="finance-card-head"><div><b class="payment-amount ${p.amount<0?'refund':''}">${p.amount<0?'−':'+'}${rub(Math.abs(p.amount))}</b><div class="small muted">${p.method==='refund_pending'?'Зарезервировано для возврата':p.amount<0?'Возврат':'Поступление'} · ${esc(p.method_label||PAY_METHODS[p.method]||p.method)}</div></div><time>${dtShort(p.paid_at)}</time></div>${p.comment?`<div class="payment-comment">${esc(p.comment)}</div>`:''}<div class="small muted">${esc(p.user_name||'')}${p.cancelled?' · отменён':p.confirmed?'':' · ждёт подтверждения'}</div>${S.user.role==='admin'&&!p.cancelled&&!['unknown','refund_pending','refund'].includes(p.method)?`<details class="finance-detail"><summary>Действия с платежом</summary>${p.confirmed?'':`<button class="btn sm" data-pconf="${p.id}">Подтвердить</button>`}<button class="btn sm danger" data-pcancel="${p.id}">Отменить платёж</button></details>`:''}</li>`).join('')}</ul>`:'<p class="muted">Платежей пока нет</p>'}${d.payments.length>4?`<button class="linkish" id="pay-more">Показать всю историю (${d.payments.length})</button>`:''}
     ${d.family_kids.length||d.balance.deposit?`<details class="finance-detail"><summary>Другие операции</summary><div class="sc-actions">${d.family_kids.length?'<button class="btn sm" id="pay-fam">Оплата за семью</button>':''}${d.balance.deposit&&d.family_kids.length?'<button class="btn sm" id="bal-move">Перенести баланс другому ребёнку</button>':''}${d.balance.deposit&&can('payments','view')?'<button class="btn sm" id="bal-refund">Вернуть деньги с баланса</button>':''}</div></details>`:''}`;
@@ -1919,7 +1932,7 @@ async function openStudent(id, options = {}) {
 
 
     ...(d.trial_hold || []).map((h) => `<span class="pill yellow" title="Пока родитель присылает данные, другим это время не предлагается">⏳ Держим место на пробное ${esc(dShort(h.date))} в ${esc(h.time)} до ${esc(h.until.slice(11, 16))}</span>`),
-    ...(d.unpaid_cur || []).map((g) => `<span class="pill red" title="Абонемент за этот месяц по этой группе не оплачен и счёт не выставлен">Не оплачен ${esc(monthLabel(S.meta.today.slice(0, 7)).split(" ")[0])}: ${esc(g)}</span>`),
+    clientUnpaidAlertsHtml(d),
 
 
     !s.birth ? `<span class="pill yellow">Нет даты рождения</span>` : "",
