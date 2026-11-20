@@ -629,12 +629,14 @@ def _group_id(con, branch: str, group: str) -> int | None:
     r = con.execute("SELECT group_id FROM erp_group_map WHERE erp_name=?", (k,)).fetchone()
     if r:
         return r[0]
-    if group and branch:  # в абонементах и посещениях филиала обычно нет
-        r = con.execute("SELECT group_id FROM erp_group_map WHERE erp_name LIKE ?", (f"% · {group.strip()}",)).fetchone()
-        if r:
-            return r[0]
-    r = con.execute("SELECT group_id FROM erp_group_map WHERE erp_name=? OR erp_name LIKE ?", (group.strip(), f"% · {group.strip()}")).fetchone()
-    return r[0] if r else None
+    # A sale label without a qualified mapping may match several branches.
+    # Never choose the first alias (or the group named by a payment record).
+    # '%' and '_' in ERP names are literal characters, not search wildcards.
+    literal = group.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    rows = con.execute("SELECT group_id FROM erp_group_map WHERE erp_name=? OR erp_name LIKE ? ESCAPE '\\'",
+                       (group.strip(), "% · " + literal)).fetchall()
+    targets = {row[0] for row in rows}
+    return next(iter(targets)) if len(targets) == 1 else None
 
 
 # ---------------- план переноса ----------------

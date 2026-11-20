@@ -78,6 +78,7 @@ function erpFullSetup(box, data) {
     catch(e){fail(e);out.textContent=e.message;}finally{plan.disabled=false;}
   };
   el.querySelector('#erp-full-last').onclick=async()=>{try{out.innerHTML=erpFullSummary(await api('GET','/api/erp/full/report'));}catch(e){fail(e);}};
+  if (typeof erpSingleRecoverySetup === "function") erpSingleRecoverySetup(box);
 }
 
 function erpFullClient(body, sid) {

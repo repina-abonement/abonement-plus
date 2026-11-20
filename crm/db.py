@@ -332,6 +332,8 @@ def init_db(con: sqlite3.Connection):
     nodeadline.init(con)
     from . import singles
     singles.init(con)
+    from . import erpsinglerecovery
+    erpsinglerecovery.init(con)
     perms.init(con)
     from . import offlineplanner
     offlineplanner.provision_requested(con)

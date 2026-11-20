@@ -250,5 +250,81 @@ class SingleCalendarEntitlements(unittest.TestCase):
         self.assertFalse(context['single_groups'])
 
 
+    def recovered_with_prior_month(self,old_wrong_group=False):
+        self.con.execute("UPDATE groups SET time='18:45' WHERE id=?",(self.group,))
+        old_group=self.group;old_enrollment=self.eid
+        if old_wrong_group:
+            old_group=self.other
+            self.con.execute("UPDATE groups SET time='17:45' WHERE id=?",(old_group,))
+            self.con.execute('UPDATE enrollments SET active=0 WHERE id=?',(self.eid,))
+            old_enrollment=self.con.execute("INSERT INTO enrollments(student_id,group_id,tariff,active,created_at,start_date) VALUES (?,?,'fixed',1,'2026-10-01','2026-10-01')",(self.sid,old_group)).lastrowid
+            self.con.execute('UPDATE students SET group_id=? WHERE id=?',(old_group,self.sid))
+        self.con.execute("UPDATE enrollments SET start_date='2026-10-01',created_at='2026-10-01' WHERE id=?",(old_enrollment,))
+        october=self.con.execute("INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,kind,lessons,per_lesson,price,status,created_at) VALUES (?,?,'2026-10','fixed','month',8,1000,8000,'paid','2026-10-01')",(self.sid,old_enrollment)).lastrowid
+        aggregate=self.con.execute("INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,kind,lessons,per_lesson,price,status,created_at) VALUES (?,?,'2026-11','fixed','month',4,2500,10000,'cancelled','2026-11-01')",(self.sid,old_enrollment)).lastrowid
+        before_october=[(event['date'],event['group_id'],event['kind']) for event in clientattendance.calendar(self.con,self.sid,'2026-10')['events']]
+        erpsingles.init(self.con)
+        for number,day in enumerate(['2026-12-02','2026-11-11','2026-11-18','2026-11-25']):
+            sub=self.sale();self.booking(sub,day)
+            self.con.execute("INSERT INTO erp_single_sales(source_id,student_id,group_id,subscription_id,source_signature,source_payload,lesson_date,native_signature) VALUES (?,?,?,?,'synthetic',?,?,'synthetic')",(f'synthetic-recovered-{number}',self.sid,self.group,sub,json.dumps({'recovery_aggregate_id':aggregate}),'2026-11-04' if not number else day))
+        return {'aggregate':aggregate,'october':october,'old_group':old_group,'before_october':before_october}
+
+    def assert_recovered_calendar_overrides_past_month_only(self,case):
+        before=[tuple(row) for row in self.con.execute('SELECT * FROM subscriptions ORDER BY id')]
+        november=self.calendar();december=clientattendance.calendar(self.con,self.sid,'2026-12')
+        self.assertEqual([(event['date'],event['kind'],event['group_id']) for event in november['events']],
+                         [(day,'single',self.group) for day in ['2026-11-11','2026-11-18','2026-11-25']])
+        self.assertEqual([(event['date'],event['kind'],event['group_id']) for event in december['events']],[('2026-12-02','single',self.group)])
+        self.assertFalse(november['date_warnings']);self.assertFalse(december['date_warnings'])
+        october=[(event['date'],event['group_id'],event['kind']) for event in clientattendance.calendar(self.con,self.sid,'2026-10')['events']]
+        self.assertEqual(october,case['before_october'])
+        self.assertEqual(len(october),8)
+        self.assertEqual([tuple(row) for row in self.con.execute('SELECT * FROM subscriptions ORDER BY id')],before)
+        self.assertTrue(self.con.execute('SELECT active FROM enrollments WHERE group_id=? AND student_id=?',(case['old_group'],self.sid)).fetchone()[0])
+        self.assertEqual(self.con.execute('SELECT count(*) FROM payments').fetchone()[0],0)
+
+    def test_audited_single_recovery_overrides_past_month_schedule_in_same_group(self):
+        case=self.recovered_with_prior_month()
+        self.assert_recovered_calendar_overrides_past_month_only(case)
+        self.con.execute("INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,kind,lessons,per_lesson,price,status,created_at) VALUES (?,?,'2027-01','fixed','month',9,1000,9000,'paid','2027-01-01')",(self.sid,self.eid))
+        january=clientattendance.calendar(self.con,self.sid,'2027-01')
+        self.assertGreater(len(january['events']),1)
+        self.assertTrue(all(event['kind']=='subscription' for event in january['events']))
+        self.assertTrue(subscriptiondates.recurring_calendar_allowed(self.group,subscriptiondates.calendar_entitlements(self.con,self.sid,'2027-01')))
+
+    def test_recovery_blocks_old_wrong_group_and_keeps_exact_new_group_dates(self):
+        case=self.recovered_with_prior_month(old_wrong_group=True)
+        self.assert_recovered_calendar_overrides_past_month_only(case)
+        context=subscriptiondates.calendar_entitlements(self.con,self.sid,'2026-12')
+        self.assertFalse(subscriptiondates.recurring_calendar_allowed(case['old_group'],context))
+        self.assertFalse(subscriptiondates.recurring_calendar_allowed(self.group,context))
+
+
+    def test_recovery_marker_must_match_cancelled_aggregate_owner_and_source_month(self):
+        case=self.recovered_with_prior_month()
+        other=sv.create_student(self.con,{'name':'Other Synthetic Child','parent_name':'Other Parent','phone':'+79000000888','funnel':'members'},self.user)
+        for invalid in ('string','active_aggregate','different_source_month','other_student'):
+            with self.subTest(invalid=invalid):
+                self.con.execute("UPDATE subscriptions SET student_id=?,month='2026-11',status='cancelled' WHERE id=?",(self.sid,case['aggregate']))
+                marker=case['aggregate']
+                if invalid=='string':marker=str(marker)
+                if invalid=='active_aggregate':self.con.execute("UPDATE subscriptions SET status='paid' WHERE id=?",(marker,))
+                if invalid=='different_source_month':self.con.execute("UPDATE subscriptions SET month='2026-12' WHERE id=?",(marker,))
+                if invalid=='other_student':self.con.execute('UPDATE subscriptions SET student_id=? WHERE id=?',(other,marker))
+                self.con.execute('UPDATE erp_single_sales SET source_payload=?',(json.dumps({'recovery_aggregate_id':marker}),))
+                context=subscriptiondates.calendar_entitlements(self.con,self.sid,'2026-12')
+                self.assertTrue(subscriptiondates.recurring_calendar_allowed(self.group,context))
+
+    def test_recovery_only_restricts_its_old_and_new_groups_for_this_student(self):
+        case=self.recovered_with_prior_month(old_wrong_group=True)
+        branch=self.con.execute('SELECT branch_id FROM groups WHERE id=?',(self.group,)).fetchone()[0]
+        unrelated=schedule.save_group(self.con,{'name':'Unrelated Synthetic','branch_id':branch,'weekdays':[1],'time':'20:00'})
+        context=subscriptiondates.calendar_entitlements(self.con,self.sid,'2026-12')
+        self.assertEqual(context['single_groups'],{case['old_group'],self.group})
+        self.assertTrue(subscriptiondates.recurring_calendar_allowed(unrelated,context))
+        other=sv.create_student(self.con,{'name':'Other Synthetic Child','parent_name':'Other Parent','phone':'+79000000888','funnel':'members','group_id':self.group},self.user)
+        self.assertTrue(subscriptiondates.recurring_calendar_allowed(self.group,subscriptiondates.calendar_entitlements(self.con,other,'2026-12')))
+
+
 
 if __name__=='__main__':unittest.main()

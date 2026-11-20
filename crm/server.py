@@ -901,6 +901,10 @@ def erp_full_apply(con, h, user, body, q):
         raise ApiError(str(e))
 
 
+from . import erpsinglerecoveryweb as _erp_single_recovery_web
+_erp_single_recovery_web.register(route)
+
+
 @route("POST", "/api/erp/tasks/transfer-plan", role="admin")
 def task_transfer_plan(con,h,user,body,q):
     from . import erptasktransfer
@@ -3557,6 +3561,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("X-CRM-Revision", _erp_single_recovery_web._RUNNING_COMMIT or "unknown")
         self.send_header("X-Content-Type-Options", "nosniff")
         if not any(k.lower()=="referrer-policy" for k,v in getattr(self,"extra_headers",[])):
             self.send_header("Referrer-Policy", "same-origin")

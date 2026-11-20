@@ -77,14 +77,15 @@ class ERPSingleRescheduleTest(unittest.TestCase):
         writer.writerows(rows)
         return erpimport.upload(self.con, 'synthetic-'+kind+'.csv', text.getvalue().encode(), kind)['id']
 
-    def stage(self, reverse=False, clients=False):
+    def stage(self, reverse=False, clients=False, payment_group=None, client_group=None,
+              paid_date="2026-11-01", payment_method="Наличные"):
         self.con.execute('DELETE FROM erp_uploads')
         ids = []
         if clients:
             ids.append(self.upload_csv('clients',
                 ['ID', 'ФИО ребенка', 'ФИО родителя', 'Телефон', 'Филиал', 'Группа', 'Статус'],
                 [[self.erp_client_id, 'Контрольный Ребёнок', 'Контрольный Родитель', '+79000000101',
-                  'Небо', self.group_name, 'Занимается']]))
+                  'Небо', self.group_name if client_group is None else client_group, 'Занимается']]))
         sources = list(self.source_dates.items())
         if reverse:
             sources.reverse()
@@ -92,14 +93,18 @@ class ERPSingleRescheduleTest(unittest.TestCase):
                   self.group_name, 2500, 1, 'Оплачен', 'Разовое занятие', day,
                   self.operation_id(sale_id), '2026-11-01'] for sale_id, day in sources]
         payments = [[self.operation_id(sale_id), sale_id, self.erp_client_id, 'Контрольный Ребёнок',
-                     '2026-11-01', 2500, 'Наличные', self.source_month,
+                     paid_date, 2500, payment_method, self.source_month,
                      'Синтетическая ранее учтённая оплата'] for sale_id, _ in sources]
         ids.append(self.upload_csv('subs',
             ['ID продажи', 'ID клиента', 'Ученик', 'Месяц', 'Группа', 'Стоимость', 'Занятий',
              'Статус', 'Тариф', 'Дата занятия', 'ID операции', 'Дата продажи'], sales))
-        ids.append(self.upload_csv('payments',
-            ['ID операции', 'ID продажи', 'ID клиента', 'Плательщик', 'Дата оплаты', 'Сумма',
-             'Способ оплаты', 'Месяц', 'Комментарий'], payments))
+        payment_headers = ['ID операции', 'ID продажи', 'ID клиента', 'Плательщик', 'Дата оплаты', 'Сумма',
+                           'Способ оплаты', 'Месяц', 'Комментарий']
+        if payment_group is not None:
+            payment_headers.append('Группа')
+            for payment in payments:
+                payment.append(payment_group)
+        ids.append(self.upload_csv('payments', payment_headers, payments))
         return ids
 
     def full_import(self, ids):
@@ -263,6 +268,84 @@ class ERPSingleRescheduleTest(unittest.TestCase):
                          [('2026-12-09', 'single')])
         audits = self.con.execute('SELECT from_date,to_date FROM erp_single_reschedules ORDER BY id').fetchall()
         self.assertEqual([tuple(row) for row in audits], [('2026-11-04', '2026-12-02'), ('2026-12-02', '2026-12-09')])
+
+    def wrong_payment_group(self):
+        branch=self.con.execute('SELECT branch_id FROM groups WHERE id=?',(self.gid,)).fetchone()[0]
+        name='Денежная метка Небо 17:45'
+        gid=self.con.execute("INSERT INTO groups(branch_id,name,weekdays,time) VALUES (?,?,'2,6','17:45')",(branch,name)).lastrowid
+        erpimport.save_groups(self.con,{name:gid})
+        return name,gid
+
+    def test_payment_group_and_card_payment_day_never_replace_sale_group_or_lesson_dates(self):
+        payment_group,wrong_gid=self.wrong_payment_group()
+        # Existing synthetic payments now model a card payment before the
+        # November lessons. Neither its group nor payment day is entitlement.
+        self.con.execute("UPDATE payments SET method='card',paid_at='2026-10-28T12:00'")
+        signature=json.dumps([self.sid,'2026-10-28',2500,'card'],ensure_ascii=False,sort_keys=True,separators=(',',':'))
+        self.con.execute('UPDATE erp_full_operations SET signature=?',(signature,))
+        def stage(clients=False,reverse=False):
+            return self.stage(clients=clients,reverse=reverse,payment_group=payment_group,
+                              client_group=payment_group,paid_date='2026-10-28',payment_method='Картой')
+        initial=self.full_import(stage())
+        self.assertTrue(initial['complete'],initial['issues'])
+        self.assertEqual(self.con.execute('SELECT count(*) FROM payments').fetchone()[0],4)
+        finances=self.financial_snapshot()
+        erpsingles.reschedule_sale(self.con,self.moved_sale,'2026-11-04',self.moved_date,self.user,self.reason)
+        for reverse in (False,True):
+            result=self.full_import(stage(reverse=reverse))
+            self.assertTrue(result['complete'],result['issues'])
+            stage(clients=True,reverse=reverse)
+            legacy=erpimport.update(self.con,self.user,now=datetime(2026,11,20,12))
+            self.assertFalse(legacy.get('issues'),legacy.get('issues'))
+            self.assert_only_recorded_lesson_dates()
+            self.assertEqual(self.financial_snapshot(),finances)
+            self.assertEqual({row[0] for row in self.con.execute('SELECT group_id FROM erp_single_sales')},{self.gid})
+            self.assertEqual(self.con.execute('SELECT count(*) FROM single_visits WHERE group_id=?',(wrong_gid,)).fetchone()[0],0)
+            self.assertEqual({row[0] for row in self.con.execute('SELECT method FROM payments')},{'card'})
+            self.assertEqual({row[0][:10] for row in self.con.execute('SELECT paid_at FROM payments')},{'2026-10-28'})
+
+    def test_unknown_sale_group_is_not_replaced_by_known_payment_or_client_group(self):
+        known=self.group_name
+        self.group_name='Неидентифицированная группа продажи'
+        result=self.full_import(self.stage(payment_group=known))
+        self.assertFalse(result['complete'])
+        self.stage(clients=True,payment_group=known,client_group=known)
+        legacy=erpimport.update(self.con,self.user,now=datetime(2026,11,20,12))
+        self.assertTrue(legacy.get('issues'))
+        self.assertEqual(self.con.execute('SELECT count(*) FROM subscriptions').fetchone()[0],0)
+        self.assertEqual(self.con.execute('SELECT count(*) FROM single_visits').fetchone()[0],0)
+        self.assertEqual(self.con.execute('SELECT count(*) FROM payments').fetchone()[0],4)
+        self.assertEqual({row['operation_id']:row['payment_id'] for row in self.con.execute('SELECT * FROM erp_full_operations')},self.payment_ids)
+        self.assertEqual(clientattendance.calendar(self.con,self.sid,'2026-11')['events'],[])
+
+    def test_ambiguous_saved_group_aliases_never_pick_the_first_payment_group(self):
+        payment_group,wrong_gid=self.wrong_payment_group()
+        self.group_name='Общее название исходной группы'
+        erpimport.save_groups(self.con,{'Небо · '+self.group_name:wrong_gid,
+                                      'Другой филиал · '+self.group_name:self.gid})
+        self.assertIsNone(erpimport._group_id(self.con,'',self.group_name))
+        self.stage(clients=True,payment_group=payment_group,client_group=payment_group)
+        legacy=erpimport.update(self.con,self.user,now=datetime(2026,11,20,12))
+        self.assertTrue(legacy.get('issues'))
+        self.assertEqual(self.con.execute('SELECT count(*) FROM subscriptions').fetchone()[0],0)
+        self.assertEqual(self.con.execute('SELECT count(*) FROM single_visits').fetchone()[0],0)
+        self.assertEqual(self.con.execute('SELECT count(*) FROM payments').fetchone()[0],4)
+
+
+    def test_unambiguous_shared_alias_and_explicit_mapping_remain_supported(self):
+        name='Общая метка исходной группы'
+        erpimport.save_groups(self.con,{'Небо · '+name:self.gid,'Другой филиал · '+name:self.gid})
+        self.assertEqual(erpimport._group_id(self.con,'',name),self.gid)
+        payment_group,wrong_gid=self.wrong_payment_group()
+        erpimport.save_groups(self.con,{'Неопределённый филиал · '+name:wrong_gid,name:self.gid})
+        self.assertEqual(erpimport._group_id(self.con,'',name),self.gid)
+
+    def test_group_label_wildcard_characters_cannot_select_a_different_sale_group(self):
+        payment_group,wrong_gid=self.wrong_payment_group()
+        erpimport.save_groups(self.con,{'Небо · Группа AX18:45':wrong_gid})
+        self.assertIsNone(erpimport._group_id(self.con,'','Группа A_18:45'))
+        self.assertIsNone(erpimport._group_id(self.con,'','Группа A%18:45'))
+
 
 
 if __name__ == '__main__':

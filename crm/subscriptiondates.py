@@ -139,6 +139,27 @@ def calendar_entitlements(con, sid, ym):
         source_sales={r['source_id']:dict(r) for r in con.execute('SELECT * FROM erp_single_sales WHERE student_id=?',(sid,))}
         single_groups.update(r['group_id'] for r in source_sales.values() if r['subscription_id'] in history_single_ids)
 
+    # Owner-reviewed recovery replaces a false monthly aggregate with singles.
+    # Preserve that explicit mode despite genuine earlier monthly purchases.
+    # The marker is available inside preview, before a recovery run is saved.
+    recovered_single_groups=set()
+    native_singles={r['id']:r for r in history if r['kind']=='single'}
+    for sale in source_sales.values():
+        native=native_singles.get(sale['subscription_id'])
+        if not native:continue
+        try:payload=json.loads(sale.get('source_payload') or '{}')
+        except (TypeError,ValueError):continue
+        aggregate_id=payload.get('recovery_aggregate_id') if isinstance(payload,dict) else None
+        if type(aggregate_id) is not int or aggregate_id<=0:continue
+        aggregate=con.execute("""SELECT x.student_id,x.month,x.kind,x.status,e.group_id
+            FROM subscriptions x LEFT JOIN enrollments e ON e.id=x.enrollment_id AND e.student_id=x.student_id
+            WHERE x.id=?""",(aggregate_id,)).fetchone()
+        if (not aggregate or aggregate['student_id']!=sid or aggregate['kind']!='month'
+                or aggregate['status']!='cancelled' or aggregate['month']!=native['month']
+                or aggregate['month']>ym):continue
+        recovered_single_groups.add(sale['group_id'])
+        if aggregate['group_id']:recovered_single_groups.add(aggregate['group_id'])
+
     reviews=[];review_identities=set();review_history=False
     if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_single_reviews'").fetchone():
         for review in con.execute('SELECT id,group_id,source_id,payload FROM erp_single_reviews WHERE student_id=?',(sid,)):
@@ -168,6 +189,7 @@ def calendar_entitlements(con, sid, ym):
     # A normal monthly client's occasional single purchase does not erase the
     # regular plan. Current monthly coverage also overrides a past single mode.
     single_groups-=historical_monthly_groups
+    single_groups.update(recovered_single_groups)
     single_only=bool(history_single_ids or any(v['status']=='booked' for v in all_visits) or review_history) and not monthly_history
     unknown=0;unknown_ids=[]
     for r in rows:
