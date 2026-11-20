@@ -197,7 +197,26 @@ def apply(con, user, body, source_commit=''):
             'restoration':'Архив сохранён целиком; восстановление выполняется только как отдельная операция обслуживания'}
 
 
+def status(con):
+    current=counts(con); row=con.execute('SELECT * FROM client_data_archives ORDER BY id DESC LIMIT 1').fetchone()
+    archive=None
+    if row:
+        archive={'created_at':row['created_at'],'created_by':row['created_by'],
+                 'local_filename':row['local_filename'],'remote_filename':row['remote_filename'],
+                 'sha256':row['sha256'],'source_commit':row['source_commit']}
+    remaining=sum(current.values())
+    return {'completed':bool(archive) and remaining==0,'archive':archive,'counts':current,
+            'client_rows_remaining':remaining,'read_only':True,
+            'note':'Архив и очистка подтверждены' if archive and remaining==0 else
+                   'Клиентские данные остаются в рабочей CRM' if remaining else
+                   'Клиентские строки отсутствуют, но завершённый архив не зарегистрирован'}
+
+
 def register(route):
+    @route('GET','/api/maintenance/client-reset/status',role='admin',transactional=False)
+    def reset_status(con,h,user,body,q):
+        return status(con)
+
     @route('POST','/api/maintenance/client-reset/plan',role='admin',transactional=False)
     def reset_plan(con,h,user,body,q):
         return plan(con,user)

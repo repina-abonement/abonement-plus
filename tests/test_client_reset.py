@@ -44,6 +44,8 @@ class ClientResetTest(unittest.TestCase):
         archive=self.root/'backups'/row['local_filename']; self.assertTrue(archive.is_file())
         saved=sqlite3.connect(archive); self.assertEqual(saved.execute('SELECT COUNT(*) FROM students').fetchone()[0],1); saved.close()
         self.assertEqual(row['remote_filename'],'remote.enc'); self.assertEqual(len(row['sha256']),64)
+        checked=clientreset.status(self.con); self.assertTrue(checked['completed'])
+        self.assertEqual(checked['client_rows_remaining'],0); self.assertEqual(checked['archive']['sha256'],row['sha256'])
 
     def test_changed_data_blocks_stale_plan_before_backup(self):
         planned=clientreset.plan(self.con,self.owner)
@@ -57,6 +59,11 @@ class ClientResetTest(unittest.TestCase):
         self.con.execute("DELETE FROM integrations WHERE key='backup_yadisk_token'")
         with self.assertRaisesRegex(Exception,'внешнюю'):
             clientreset.plan(self.con,self.owner)
+
+    def test_status_before_cleanup_is_read_only(self):
+        before=self.con.serialize(); checked=clientreset.status(self.con)
+        self.assertFalse(checked['completed']); self.assertGreater(checked['client_rows_remaining'],0)
+        self.assertEqual(self.con.serialize(),before)
 
     def test_failed_remote_archive_changes_nothing(self):
         planned=clientreset.plan(self.con,self.owner)
