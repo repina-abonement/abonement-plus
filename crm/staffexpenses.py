@@ -7,7 +7,7 @@ from . import offlineplanner
 
 
 class ExpenseError(ValueError):pass
-FUNDING={'personal':'Личные деньги','cash':'Конверт','advance':'Выданы Юлией заранее','company_card':'Корпоративная карта'}
+FUNDING={'personal':'Личные деньги','owner':'Оплатила Юлия','cash':'Конверт','advance':'Выданы Юлией заранее','company_card':'Корпоративная карта'}
 
 
 def init(con):
@@ -79,6 +79,14 @@ def parse(text):
     if len(rows)>100:raise ExpenseError('За один раз можно внести до 100 расходов')
     return {'rows':rows,'errors':errors,'warnings':warnings,'total_minor':sum(minor(r['amount']) for r in rows)}
 
+def owner_of(con):
+    """Resolve the owner only from unambiguous active admin accounts."""
+    people=[dict(r) for r in con.execute("SELECT id,name FROM users WHERE active=1 AND role='admin' ORDER BY id")]
+    named=[p for p in people if re.search(r'\bюлия\b',p['name'].casefold())]
+    person=named[0] if len(named)==1 else people[0] if len(people)==1 else None
+    return {'id':person['id'],'name':person['name']} if person else None
+
+
 def fields(con,data):
     title=str(data.get('title') or '').strip();note=str(data.get('note') or '').strip()
     if not title or len(title)>300 or len(note)>2000:raise ExpenseError('Проверьте описание расхода')
@@ -90,6 +98,10 @@ def fields(con,data):
     if branch and not con.execute('SELECT 1 FROM branches WHERE id=?',(branch,)).fetchone():raise ExpenseError('Филиал не найден')
     source=data.get('funding')
     if source not in FUNDING:raise ExpenseError('Выберите источник денег')
+    if source=='owner':
+        owner=owner_of(con)
+        if person['role']!='admin' or owner and payer!=owner['id']:
+            raise ExpenseError('Для покупки, оплаченной Юлией, выберите её учётную запись плательщика')
     category=data.get('category') or category_for(title)
     if category not in CATEGORIES:raise ExpenseError('Выберите категорию')
     return dict(category=category,title=title,amount=minor(data.get('amount')),paid_date=valid_day(data.get('paid_date')),branch_id=branch,paid_by_id=int(payer),funding=source,note=note)
@@ -186,6 +198,7 @@ def receipt_money(con,user,rid,data):
     transfer=con.execute('SELECT * FROM staff_reimbursements WHERE id=?',(rid,)).fetchone()
     if not transfer:raise ExpenseError('Отметка не найдена')
     row=get_row(con,transfer['expense_id'])
+    if row['funding']=='owner':raise ExpenseError('Покупка оплачена Юлией и не требует возмещения')
     if data.get('voided') is True:
         own_receipt=transfer['method']=='not_specified' and transfer['recorded_by']==transfer['received_by'] and (user['id']==row['paid_by_id'] or user['role']=='admin')
         if not own_receipt and (user['role']!='admin' or transfer['received_at']):raise ExpenseError('Можно исправить свою отметку получения или неподтверждённую передачу денег от лица Юлии')
@@ -225,5 +238,5 @@ def listing(con,user):
           received=received,status='Отменён' if row['cancelled'] else 'Не требует возмещения' if not personal else 'Возмещено' if sent==row['amount'] else 'Возмещено частично' if sent else 'К возмещению')
         row['receipts']=[dict(r) for r in con.execute('SELECT id,at FROM staff_expense_receipts WHERE expense_id=?',(row['id'],))]
         row['history']=[dict(r) for r in con.execute('SELECT h.*,u.name AS actor FROM staff_expense_history h LEFT JOIN users u ON u.id=h.actor_id WHERE expense_id=? ORDER BY h.id',(row['id'],))]
-    return {'rows':rows,'funding':FUNDING,'categories':CATEGORIES,'workflow':'simple','can_reimburse':user['role']=='admin','staff':[{'id':r['id'],'name':r['name']} for r in con.execute("SELECT * FROM users WHERE active=1 AND role IN ('admin','operator') ORDER BY name") if allowed(con,dict(r))],
+    return {'rows':rows,'funding':FUNDING,'categories':CATEGORIES,'workflow':'simple','owner':owner_of(con),'can_reimburse':user['role']=='admin','staff':[{'id':r['id'],'name':r['name'],'role':r['role']} for r in con.execute("SELECT * FROM users WHERE active=1 AND role IN ('admin','operator') ORDER BY name") if allowed(con,dict(r))],
       'summary':{'spent':sum(r['amount'] for r in rows if not r['cancelled']),'to_transfer':sum(r['to_transfer'] for r in rows),'awaiting_receipt':sum(r['awaiting_receipt'] for r in rows)}}

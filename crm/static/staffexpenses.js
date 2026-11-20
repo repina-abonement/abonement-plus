@@ -6,11 +6,53 @@ function expenseHistoryDetail(entry){
  try{const d=JSON.parse(entry.details||'{}');if(entry.action==='money_transferred'||entry.action==='money_received'||entry.action==='reimbursement_received')return d.amount?' · '+expenseRub(d.amount):'';if(entry.action==='edited'&&d.before&&d.after){const changes=[];if(d.after.amount!==undefined&&d.before.amount!==d.after.amount)changes.push(expenseRub(d.before.amount)+' → '+expenseRub(d.after.amount));if(d.after.title&&d.before.title!==d.after.title)changes.push(d.before.title+' → '+d.after.title);if(d.after.funding&&d.before.funding!==d.after.funding)changes.push('Источник денег изменён');if(d.after.paid_by_id&&d.before.paid_by_id!==d.after.paid_by_id)changes.push('Плательщик изменён');return changes.length?' · '+changes.join('; '):''}}catch(_){}return '';
 }
 function expenseOptions(rows,value,empty='Не указан'){return `<option value="">${empty}</option>`+rows.map(x=>`<option value="${x.id}" ${+value===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}
-function expenseCommonFields(data,row={}){return `<div class="row"><label>Дата покупки<input name="paid_date" type="date" max="${S.meta.today}" required value="${esc(row.paid_date||S.meta.today)}"></label><label>Филиал<select name="branch_id">${expenseOptions(S.meta.branches||[],row.branch_id)}</select></label></div><div class="row"><label>Кто оплатил<select name="paid_by_id" required>${expenseOptions(data.staff,row.paid_by_id||S.user.id,'Выберите участника команды')}</select></label><label>Откуда деньги<select name="funding">${Object.entries(data.funding).map(([k,v])=>`<option value="${k}" ${k===(row.funding||'personal')?'selected':''}>${esc(v)}</option>`).join('')}</select></label></div>`}
+function expensePayerDefaults(data,row={}){
+ const paid_by_id=+(row.paid_by_id||S.user.id);
+ return {paid_by_id,funding:row.funding||(data.owner?.id===paid_by_id?'owner':'personal')};
+}
+function expenseOwnerChoice(data,row={}){
+ return data.owner?`<label class="check"><input type="checkbox" data-expense-owner-paid ${expensePayerDefaults(data,row).funding==='owner'?'checked':''}>Оплатила Юлия — возмещать не нужно</label>`:'';
+}
+function expenseCommonFields(data,row={}){
+ const defaults=expensePayerDefaults(data,row);
+ return `<div class="row"><label>Дата покупки<input name="paid_date" type="date" max="${S.meta.today}" required value="${esc(row.paid_date||S.meta.today)}"></label><label>Филиал<select name="branch_id">${expenseOptions(S.meta.branches||[],row.branch_id)}</select></label></div><div class="row"><label>Кто оплатил<select name="paid_by_id" required>${expenseOptions(data.staff,defaults.paid_by_id,'Выберите участника команды')}</select></label><label>Откуда деньги<select name="funding">${Object.entries(data.funding).map(([k,v])=>`<option value="${k}" ${k===defaults.funding?'selected':''}>${esc(v)}</option>`).join('')}</select></label></div>`;
+}
+function wireExpenseFunding(form,data){
+ const payer=form.querySelector('[name="paid_by_id"]'),funding=form.querySelector('[name="funding"]');
+ const toggle=form.querySelector('[data-expense-owner-paid]'),summary=form.querySelector('.expense-entry-options summary');
+ let previous=funding.value==='owner'?{payer:S.user.id,funding:'personal'}:{payer:payer.value,funding:funding.value};
+ const personalPayer=()=>+previous.payer!==data.owner?.id?previous.payer:S.user.id!==data.owner?.id?S.user.id:'';
+ const refresh=(selected=payer.value)=>{
+  const people=funding.value==='owner'&&!data.owner?data.staff.filter(x=>x.role==='admin'):data.staff;
+  payer.innerHTML=expenseOptions(people,selected,'Выберите, кто оплатил');
+  if(!people.some(x=>x.id===+selected))payer.value='';
+  if(toggle)toggle.checked=funding.value==='owner';
+  if(summary)summary.textContent=funding.value==='owner'?'Оплатила Юлия · возмещать не нужно · изменить':`${people.find(x=>x.id===+payer.value)?.name||'Кто оплатил'} · ${data.funding[funding.value]||''} · изменить`;
+ };
+ funding.addEventListener('change',()=>{
+  if(funding.value==='owner')refresh(data.owner?.id||payer.value);
+  else{
+   refresh(funding.value==='personal'&&+payer.value===data.owner?.id?personalPayer():payer.value);
+   previous={payer:payer.value,funding:funding.value};
+  }
+ });
+ payer.addEventListener('change',()=>{
+  if(data.owner&&+payer.value===data.owner.id&&funding.value==='personal')funding.value='owner';
+  else if(data.owner&&funding.value==='owner'&&+payer.value!==data.owner.id)funding.value='personal';
+  if(funding.value!=='owner')previous={payer:payer.value,funding:funding.value};
+  refresh();
+ });
+ if(toggle)toggle.addEventListener('change',()=>{
+  if(toggle.checked){previous={payer:payer.value,funding:funding.value};funding.value='owner';refresh(data.owner.id)}
+  else{funding.value=previous.funding==='owner'?'personal':previous.funding;refresh(funding.value==='personal'?personalPayer():previous.payer)}
+  if(!payer.value){const options=form.querySelector('.expense-entry-options');if(options)options.open=true}
+ });
+ refresh(funding.value==='owner'&&data.owner?data.owner.id:payer.value);
+}
 async function renderStaffExpenses(page){
  const oldFilters=page.querySelector('.expense-simple-filters');if(oldFilters)S.staffExpenses.filtersOpen=oldFilters.open;
  const previous=page.querySelector('[data-expense-text]');
- const draft=previous?.value?{text:previous.value,defaults:Object.fromEntries(new FormData(previous.closest('form')))}:null;
+ const draft=previous?{text:previous.value,defaults:Object.fromEntries(new FormData(previous.closest('form')))}:null;
  const data=await api('GET','/api/staff-expenses'),f=S.staffExpenses,categories=data.categories||{other:'Другое'};
  if(f.filter==='no_receipt')f.filter='all';
  const rows=data.rows.filter(r=>(!r.cancelled||f.filter==='cancelled')&&(!f.branch||+f.branch===r.branch_id)&&(!f.payer||+f.payer===r.paid_by_id)&&(!f.category||f.category===r.category)&&(!f.from||r.paid_date>=f.from)&&(!f.to||r.paid_date<=f.to)&&(f.filter==='all'||f.filter==='due'&&r.to_transfer>0||f.filter==='paid'&&r.funding==='personal'&&!r.cancelled&&!r.to_transfer||f.filter==='cancelled'&&r.cancelled));
@@ -32,7 +74,7 @@ async function renderStaffExpenses(page){
 }
 function openExpenseBatch(host,data,reload,draft=null){
  const requestId=crypto.randomUUID(),categories=data.categories||{other:'Другое'};
- host.innerHTML=`<form class="expense-quick-entry"><label>Вставьте расходы списком<textarea data-expense-text rows="4" placeholder="Печать расписания 264&#10;Стирка формы 800&#10;4800 - технику"></textarea></label><details class="expense-entry-options"><summary>${esc(data.staff.find(x=>x.id===+(draft?.defaults?.paid_by_id||S.user.id))?.name||'Кто оплатил')} · ${esc(data.funding[draft?.defaults?.funding||'personal'])} · изменить</summary>${expenseCommonFields(data,draft?.defaults||{})}</details><div data-expense-preview-table></div><p class="need-err" data-expense-errors></p><button type="submit" class="btn primary" data-expense-save disabled hidden>Сохранить расходы</button></form>`;
+ host.innerHTML=`<form class="expense-quick-entry"><label>Вставьте расходы списком<textarea data-expense-text rows="4" placeholder="Печать расписания 264&#10;Стирка формы 800&#10;4800 - технику"></textarea></label>${expenseOwnerChoice(data,draft?.defaults||{})}<details class="expense-entry-options"><summary></summary>${expenseCommonFields(data,draft?.defaults||{})}</details><div data-expense-preview-table></div><p class="need-err" data-expense-errors></p><button type="submit" class="btn primary" data-expense-save disabled hidden>Сохранить расходы</button></form>`;
  const form=host.querySelector('form'),text=form.querySelector('[data-expense-text]'),table=form.querySelector('[data-expense-preview-table]'),error=form.querySelector('[data-expense-errors]'),save=form.querySelector('[data-expense-save]');
  const rows=()=>[...table.querySelectorAll('[data-expense-line]')].map(tr=>({title:tr.querySelector('[data-line-title]').value,amount:tr.querySelector('[data-line-amount]').value,category:tr.querySelector('[data-line-category]').value}));
  const count=()=>{const all=rows();save.textContent=all.length?`Сохранить ${all.length} · ${expenseRub(all.reduce((n,r)=>n+Math.round(Number(String(r.amount).replace(',','.'))*100),0))}`:'Сохранить расходы';save.hidden=!all.length;save.disabled=!all.length||!!form._parseErrors};
@@ -40,9 +82,10 @@ function openExpenseBatch(host,data,reload,draft=null){
  const preview=async()=>{const current=++version;save.disabled=true;if(!text.value.trim()){table.innerHTML='';error.textContent='';save.hidden=true;return}try{const result=await api('POST','/api/staff-expenses/preview',{text:text.value});if(current!==version||!host.isConnected)return;form._parseErrors=result.errors.length;error.textContent=[...result.errors,...result.warnings].join('\n');table.innerHTML=`<div class="expense-preview-scroll"><table>${result.rows.map(r=>`<tbody data-expense-line><tr><td><span data-preview-title>${esc(r.title)}</span><small class="muted" data-preview-category>${esc(categories[r.category]||'Другое')}</small></td><td class="expense-preview-price" data-preview-amount>${expenseRub(Math.round(r.amount*100))}</td><td><button type="button" class="icon-btn" data-edit-line aria-label="Исправить строку">⋯</button></td></tr><tr data-line-options hidden><td colspan="3"><div class="expense-line-options"><label>На что<input data-line-title required maxlength="300" value="${esc(r.title)}"></label><label>Категория<select data-line-category>${Object.entries(categories).map(([k,v])=>`<option value="${k}" ${k===(r.category||'other')?'selected':''}>${esc(v)}</option>`).join('')}</select></label><label>Сумма<input data-line-amount type="number" step="0.01" min="0.01" required value="${r.amount}"></label><button type="button" class="btn sm" data-line-remove>Убрать строку</button></div></td></tr></tbody>`).join('')}</table></div>`;table.querySelectorAll('[data-line-remove]').forEach(b=>b.onclick=()=>{b.closest('[data-expense-line]').remove();count()});table.querySelectorAll('[data-edit-line]').forEach(b=>b.onclick=()=>{const options=b.closest('[data-expense-line]').querySelector('[data-line-options]');options.hidden=!options.hidden});table.oninput=()=>{table.querySelectorAll('[data-expense-line]').forEach(row=>{row.querySelector('[data-preview-title]').textContent=row.querySelector('[data-line-title]').value;row.querySelector('[data-preview-category]').textContent=categories[row.querySelector('[data-line-category]').value]||'Другое';row.querySelector('[data-preview-amount]').textContent=expenseRub(Math.round(Number(row.querySelector('[data-line-amount]').value)*100))});count()};count()}catch(e){if(current===version&&host.isConnected)error.textContent=e.message}};
  text.oninput=()=>{form._parseErrors=1;version++;save.disabled=true;clearTimeout(timer);timer=setTimeout(preview,350)};
  if(draft){text.value=draft.text;preview()}
+ wireExpenseFunding(form,data);
  form.onsubmit=async e=>{e.preventDefault();save.disabled=true;error.textContent='';try{const defaults=Object.fromEntries(new FormData(form));defaults.paid_by_id=+defaults.paid_by_id;defaults.branch_id=defaults.branch_id?+defaults.branch_id:null;await api('POST','/api/staff-expenses',{request_id:requestId,defaults,rows:rows()});host.innerHTML='';toast('Расходы сохранены');await reload()}catch(err){error.textContent=err.message;save.disabled=false}};
 }
 function openExpenseEdit(data,row,reload){
- openDrawer(`<form class="staff-expense-edit"><h2>Исправить расход</h2><label>На что<input name="title" required maxlength="300" value="${esc(row.title)}"></label><label>Сумма, ₽<input name="amount" type="number" step="0.01" min="0.01" required value="${row.amount/100}"></label>${expenseCommonFields(data,row)}<label>Категория<select name="category">${Object.entries(data.categories||{other:'Другое'}).map(([k,v])=>`<option value="${k}" ${k===row.category?'selected':''}>${esc(v)}</option>`).join('')}</select></label><label>Комментарий<textarea name="note" maxlength="2000">${esc(row.note)}</textarea></label><p class="need-err" data-error></p><button class="btn primary" type="submit">Сохранить</button></form>`);
- const form=$('.staff-expense-edit');form.onsubmit=async e=>{e.preventDefault();const b=form.querySelector('button');b.disabled=true;try{const values={...Object.fromEntries(new FormData(form)),version:row.version};values.paid_by_id=+values.paid_by_id;values.branch_id=values.branch_id?+values.branch_id:null;await api('PATCH',`/api/staff-expenses/${row.id}`,values);closeDrawer();reload()}catch(error){form.querySelector('[data-error]').textContent=error.message;b.disabled=false}};
+ openDrawer(`<form class="staff-expense-edit"><h2>Исправить расход</h2><label>На что<input name="title" required maxlength="300" value="${esc(row.title)}"></label><label>Сумма, ₽<input name="amount" type="number" step="0.01" min="0.01" required value="${row.amount/100}"></label>${expenseOwnerChoice(data,row)}${expenseCommonFields(data,row)}<label>Категория<select name="category">${Object.entries(data.categories||{other:'Другое'}).map(([k,v])=>`<option value="${k}" ${k===row.category?'selected':''}>${esc(v)}</option>`).join('')}</select></label><label>Комментарий<textarea name="note" maxlength="2000">${esc(row.note)}</textarea></label><p class="need-err" data-error></p><button class="btn primary" type="submit">Сохранить</button></form>`);
+ const form=$('.staff-expense-edit');wireExpenseFunding(form,data);form.onsubmit=async e=>{e.preventDefault();const b=form.querySelector('button');b.disabled=true;try{const values={...Object.fromEntries(new FormData(form)),version:row.version};values.paid_by_id=+values.paid_by_id;values.branch_id=values.branch_id?+values.branch_id:null;await api('PATCH',`/api/staff-expenses/${row.id}`,values);closeDrawer();reload()}catch(error){form.querySelector('[data-error]').textContent=error.message;b.disabled=false}};
 }

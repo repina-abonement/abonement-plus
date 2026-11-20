@@ -1,4 +1,4 @@
-import unittest,base64
+import unittest,base64,json
 from crm import staffexpenses as ex,perms
 from tests.test_planner_shifts import PlannerShifts
 
@@ -114,3 +114,88 @@ class StaffExpenses(unittest.TestCase):
         self.assertEqual(ex.parse('Печать расписания 264')['rows'][0]['category'],'printing')
         self.assertEqual(ex.parse('Стирка формы 800')['rows'][0]['category'],'laundry')
         self.assertEqual(ex.parse('4800 - работа техника')['rows'][0]['category'],'maintenance')
+
+    def owner_purchase(self,actor,request='synthetic-owner-batch'):
+        return ex.create_batch(self.con,actor,{'request_id':request,'defaults':{
+            'paid_by_id':self.owner()['id'],'paid_date':'2026-11-18','funding':'owner'},
+            'rows':[{'title':'Барьеры для тренировок','amount':'1200.50'}]})['ids'][0]
+
+    def test_offline_and_varya_record_owner_paid_purchase_with_distinct_author(self):
+        for actor in (self.offline,self.varya):
+            eid=self.owner_purchase(actor)
+            row=next(r for r in ex.listing(self.con,actor)['rows'] if r['id']==eid)
+            self.assertEqual(row['paid_by_id'],self.owner()['id'])
+            self.assertEqual(row['created_by'],actor['id'])
+            self.assertEqual(row['funding'],'owner')
+            self.assertEqual(row['to_transfer'],0)
+            self.assertEqual(row['awaiting_receipt'],0)
+            self.assertEqual(row['status'],'Не требует возмещения')
+            self.assertEqual(row['transfers'],[])
+            self.assertEqual(row['history'][0]['actor_id'],actor['id'])
+        result=ex.listing(self.con,self.varya)
+        self.assertEqual(result['summary']['spent'],240100)
+        self.assertEqual(result['summary']['to_transfer'],0)
+        self.assertEqual(result['owner'],{'id':self.owner()['id'],'name':self.owner()['name']})
+        self.assertEqual(result['funding']['owner'],'Оплатила Юлия')
+        self.assertEqual(next(u for u in result['staff'] if u['id']==self.owner()['id'])['role'],'admin')
+        self.assertEqual(self.con.execute('SELECT count(*) FROM payments').fetchone()[0],0)
+
+    def test_owner_paid_purchase_is_idempotent_and_cannot_be_reimbursed(self):
+        eid=self.owner_purchase(self.offline)
+        self.assertEqual(self.owner_purchase(self.offline),eid)
+        self.assertEqual(self.con.execute('SELECT count(*) FROM staff_expenses').fetchone()[0],1)
+        for actor in (self.offline,self.varya,self.owner()):
+            with self.assertRaises(ex.ExpenseError):ex.mark_received(self.con,actor,eid,{'request_id':'owner-paid-received'})
+            with self.assertRaises(ex.ExpenseError):ex.reimburse(self.con,actor,eid,{
+                'amount':'1200.50','transferred_at':'2026-11-18','method':'transfer','request_id':'owner-paid-transfer'})
+        self.assertEqual(self.con.execute('SELECT count(*) FROM staff_reimbursements').fetchone()[0],0)
+        # Old inconsistent transfer data cannot reopen reimbursement actions.
+        rid=self.con.execute("INSERT INTO staff_reimbursements(expense_id,amount,transferred_at,method,recorded_by,recorded_at,request_id) VALUES(?,120050,'2026-11-18','transfer',?,'2026-11-18','synthetic-old-owner-transfer')",(eid,self.owner()['id'])).lastrowid
+        for action in ({'received':True},{'voided':True}):
+            with self.assertRaises(ex.ExpenseError):ex.receipt_money(self.con,self.owner(),rid,action)
+
+    def test_existing_unreimbursed_personal_expense_can_be_corrected_to_owner_paid(self):
+        eid=self.create()
+        untouched=self.create(request='another-personal-batch')
+        old=dict(ex.get_row(self.con,eid));other=dict(ex.get_row(self.con,untouched))
+        ex.edit(self.con,self.varya,eid,{'version':1,'title':old['title'],'amount':'1000.50',
+            'paid_date':old['paid_date'],'paid_by_id':self.owner()['id'],'funding':'owner'})
+        row=next(r for r in ex.listing(self.con,self.offline)['rows'] if r['id']==eid)
+        self.assertEqual(row['created_by'],self.offline['id'])
+        self.assertEqual(row['updated_by'],self.varya['id'])
+        self.assertEqual(row['paid_by_id'],self.owner()['id'])
+        self.assertEqual(row['to_transfer'],0)
+        details=json.loads(row['history'][-1]['details'])
+        self.assertEqual(details['before']['paid_by_id'],self.offline['id'])
+        self.assertEqual(details['before']['funding'],'personal')
+        self.assertEqual(dict(ex.get_row(self.con,untouched)),other)
+        self.assertEqual(self.con.execute('SELECT count(*) FROM staff_reimbursements').fetchone()[0],0)
+
+    def test_owner_payer_must_be_the_canonical_active_admin(self):
+        owner=self.owner()
+        self.con.execute("UPDATE users SET name='Юлия Репина' WHERE id=?",(owner['id'],))
+        other_admin=self.con.execute("INSERT INTO users(login,name,role,pw_hash) VALUES ('another-admin','Другой руководитель','admin','disabled')").lastrowid
+        body={'request_id':'owner-payer-check','defaults':{'paid_date':'2026-11-18','funding':'owner'},
+              'rows':[{'title':'Барьеры','amount':1200}]}
+        for payer in (self.offline['id'],self.varya['id'],other_admin):
+            body['defaults']['paid_by_id']=payer
+            with self.assertRaises(ex.ExpenseError):ex.create_batch(self.con,self.offline,body)
+        self.assertEqual(self.con.execute('SELECT count(*) FROM staff_expenses').fetchone()[0],0)
+        self.assertEqual(ex.listing(self.con,self.varya)['owner']['id'],owner['id'])
+        self.con.execute('UPDATE users SET active=0 WHERE id=?',(owner['id'],))
+        body['defaults']['paid_by_id']=owner['id']
+        with self.assertRaises(ex.ExpenseError):ex.create_batch(self.con,self.offline,body)
+
+    def test_ambiguous_admin_accounts_are_not_guessed_and_need_explicit_admin_payer(self):
+        owner=self.owner()
+        self.con.execute("UPDATE users SET name='Юлия Первая' WHERE id=?",(owner['id'],))
+        another=self.con.execute("INSERT INTO users(login,name,role,pw_hash) VALUES ('second-yulia','Юлия Вторая','admin','disabled')").lastrowid
+        self.assertIsNone(ex.listing(self.con,self.varya)['owner'])
+        eid=ex.create_batch(self.con,self.offline,{'request_id':'explicit-owner-choice','defaults':{
+            'paid_by_id':another,'paid_date':'2026-11-18','funding':'owner'},'rows':[{'title':'Барьеры','amount':1200}]})['ids'][0]
+        self.assertEqual(ex.get_row(self.con,eid)['paid_by_id'],another)
+        self.assertIsNone(ex.listing(self.con,self.varya)['owner'])
+
+    def test_outsider_cannot_record_owner_paid_purchase(self):
+        with self.assertRaises(ex.ExpenseError):self.owner_purchase(self.other)
+        self.assertEqual(self.con.execute('SELECT count(*) FROM staff_expenses').fetchone()[0],0)
