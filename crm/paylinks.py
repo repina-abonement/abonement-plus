@@ -167,6 +167,15 @@ def checkout(con, token, email):
         con.execute("UPDATE pay_links SET checkout_state='uncertain' WHERE id=?",(link['id'],))
         raise PayLinkError('Нет подтверждения создания счёта. Сообщите администратору; повторный счёт автоматически не создаётся') from None
     con.execute("UPDATE pay_links SET invoice_id=?,invoice_url=?,checkout_state='ready' WHERE id=?",(invoice_id,target,link['id']))
+    # A payment link identifies a family, not a particular secondary contact.
+    parents = con.execute(
+        """SELECT p.id, p.is_primary FROM parents p
+           JOIN students s ON s.family_id=p.family_id WHERE s.id=?
+           ORDER BY p.is_primary DESC, p.id LIMIT 2""", (link['student_id'],)
+    ).fetchall()
+    if len(parents) == 1 or (parents and parents[0]['is_primary'] and not parents[1]['is_primary']):
+        con.execute("UPDATE parents SET email=? WHERE id=? AND TRIM(COALESCE(email,''))=''",
+                    (email, parents[0]['id']))
     return {'url':target}
 
 
