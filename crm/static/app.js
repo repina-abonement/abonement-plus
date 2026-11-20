@@ -1596,6 +1596,24 @@ function invoiceBalancePreviewHtml(preview) {
   return `<div class="finance-numbers" data-sale-balance-preview><div><small>Доступно на балансе</small><b data-balance-available>${rub(preview.available_balance)}</b>${balanceLabelsHtml(preview.labels)}</div><div><small>Зачтётся с баланса</small><b data-balance-apply>${rub(preview.apply_amount)}</b></div><div><small>К оплате</small><b data-balance-payable>${rub(preview.payable)}</b></div><div><small>Останется на балансе</small><b data-balance-remaining>${rub(preview.remaining_balance)}</b></div></div>${Number(preview.already_applied)>0?`<p class="small muted" data-balance-applied>Ранее зачтено с баланса: ${rub(preview.already_applied)}. Повторного списания не будет.</p>`:'<p class="small muted">Зачёт произойдёт только после подтверждения оформления.</p>'}`;
 }
 
+async function validatePaymentLinkForSharing(link,studentId,subscriptionId=null,fullPayment=false) {
+  const bundleIds=Array.isArray(subscriptionId)?subscriptionId:null;
+  const params=new URLSearchParams({student_id:studentId,require_full:fullPayment?'1':'0'});if(bundleIds)params.set('subscription_ids',bundleIds.join(','));else if(subscriptionId)params.set('subscription_id',subscriptionId);
+  const state=await api('GET',`/api/paylinks/${link.id}/validate?${params}`);
+  const returnedIds=(state.invoice_scope||[]).map(row=>Number(row.subscription_id));
+  if(state.valid!==true||Number(state.link_id)!==Number(link.id)||Number(state.student_id)!==Number(studentId)||(bundleIds?(new Set(returnedIds).size!==new Set(bundleIds.map(Number)).size||!bundleIds.every(id=>returnedIds.includes(Number(id)))):(subscriptionId&&Number(state.subscription_id)!==Number(subscriptionId)))||state.url!==link.url||state.amount!==link.amount||!Number.isInteger(state.amount)||state.amount<=0||(fullPayment&&state.amount!==state.current_due)){
+    const error=new Error(state.reason||'Сумма или состояние ссылки изменились. Обновите ссылку перед отправкой');error.linkState=state;throw error;
+  }
+  return state;
+}
+async function renewInvoicePaymentLink(studentId,subscriptionId,purpose='') {
+  if(!subscriptionId)throw Error('Откройте оформление абонемента и создайте новую общую ссылку');
+  const quote=await api('GET',`/api/subscriptions/${subscriptionId}/payment-quote?use_balance=0`),amount=quote.balance_preview?.payable??quote.total;
+  if(!Number.isInteger(amount)||amount<=0)throw Error('По счёту сейчас нет суммы к оплате. Обновите карточку');
+  const link=await api('POST',`/api/students/${studentId}/paylinks`,{amount,purpose,subscription_id:subscriptionId,full_payment:true});
+  await validatePaymentLinkForSharing(link,studentId,subscriptionId,true);return link;
+}
+
 async function openSell(d, reload) {
   if (!(await ensureRequired(d.student.id,'sale'))) return;
   const id=d.student.id;
@@ -1629,7 +1647,7 @@ async function openSell(d, reload) {
     <label class="sale-credit" id="sl-credit-box" hidden><input type="checkbox" id="sl-credit"> Клиент запросил перерасчёт пропусков прошлого месяца <span class="small muted" id="sl-credit-info"></span></label>
     <div class="field"><label>Фактическая дата оплаты</label><input type="date" id="sl-paid-date" value="${S.meta.today}" max="${S.meta.today}" required><small class="muted">Если оплата уже была, укажите день получения денег</small></div><div class="quote" id="sl-q">Считаю…</div><div id="sl-balance-box"><label class="check"><input type="checkbox" id="sl-use-balance"> Зачесть деньги с баланса</label><div id="sl-balance-preview" aria-live="polite"></div></div><div class="sc-actions"><button class="btn primary" id="sl-link">Ссылка на оплату</button><button class="btn" id="sl-now">Отметить оплату</button></div><div id="sl-res"></div></div>`;
   const en=()=>choices.find(e=>e.group_id===+$('#sl-en').value), single=()=>$('#sl-kind').value==='single';
-  let total=0,version=0,singleDay=null,existing=null,autoDates=true,balancePreview=null,controlsLocked=false,linkBusy=false,savedInvoice=null;
+  let total=0,version=0,singleDay=null,existing=null,autoDates=true,balancePreview=null,controlsLocked=false,linkBusy=false,savedInvoice=null,shareVersion=0;
   const exclusions=new Set();
   const busy=on=>{box.querySelectorAll('.sc-actions button').forEach(b=>b.disabled=on);$('#sl-link').disabled=on||$('#sl-paid-date').value!==S.meta.today;$('#sl-now').disabled=on||total<=0};
   const lock=on=>{controlsLocked=on;box.querySelectorAll('select,input').forEach(e=>e.disabled=on);if(!on)syncFields()};
@@ -1656,7 +1674,7 @@ async function openSell(d, reload) {
     $('#sl-ofp').innerHTML=(p?.ofp_groups||[]).map(g=>`<option value="${g.id}" ${g.id===effective?.ofp_group_id?'selected':''}>${esc(g.name)}</option>`).join('');syncFields();
   };
   const quote=async(preserveCalendar=false)=>{
-    const request=++version;busy(true);existing=null;balancePreview=null;$('#sl-balance-preview').textContent='Считаю…';$('#sl-res').innerHTML='';if(preserveCalendar!==true||!$('#sl-calendar'))$('#sl-q').innerHTML='Считаю…';
+    const request=++version;shareVersion++;busy(true);existing=null;balancePreview=null;$('#sl-balance-preview').textContent='Считаю…';$('#sl-res').innerHTML='';if(preserveCalendar!==true||!$('#sl-calendar'))$('#sl-q').innerHTML='Считаю…';
     ['#sl-tar','#sl-disc','#sl-ofp'].forEach(s=>$(s).disabled=false);syncFields();$('#sl-credit-box').hidden=true;
     const own=ens.find(e=>e.group_id===en().group_id);
     const sub=single()?pendingSingles.find(s=>s.id===+$('#sl-single-invoice').value):d.subscriptions.find(s=>(s.group_id===en().group_id||own&&s.enrollment_id===own.id)&&s.month===$('#sl-month').value&&s.kind!=='single'&&s.status!=='cancelled');
@@ -1729,6 +1747,37 @@ async function openSell(d, reload) {
       }catch(e){fail(e);if(isCurrent()&&$('#sl-ok')){$('#sl-payment-error').textContent=e.message||'Не удалось подтвердить сохранение оплаты';$('#sl-ok').disabled=false;$('#sl-amount').disabled=false;$('#sl-m').disabled=false;if(!prepared)$('#sl-payment-date').disabled=false}}
     };
   };
+  const showSaleLink=async(order,subscriptionId,link)=>{
+    const generation=++shareVersion,current=()=>isCurrent()&&generation===shareVersion;
+    const title=order.single?`Разовое занятие${order.date?' '+dShort(order.date):''}`:`Абонемент на ${monthLabel(order.month)}`;
+    $('#sl-res').innerHTML=`<p class="small muted" id="sl-link-check" role="status">Проверяем актуальную сумму ссылки…</p><p class="need-err" id="sl-link-warning" role="alert" hidden></p><button type="button" class="btn" id="sl-refresh-link" hidden>Обновить ссылку</button><div id="sl-link-content" hidden><p class="small muted">По ссылке родитель проверит email для чека. Перед копированием и вставкой ещё раз проверим сумму.</p><label style="margin-top:14px">Сообщение родителю</label><textarea id="sl-msg" rows="9"></textarea><div class="sc-actions" style="margin-top:10px"><button type="button" class="btn primary" id="sl-send">Вставить в чат с семьёй</button><button type="button" class="btn" id="sl-copy">Скопировать</button><button type="button" class="btn" id="sl-done">Готово</button></div></div>`;
+    const message=$('#sl-msg'),content=$('#sl-link-content'),status=$('#sl-link-check'),warning=$('#sl-link-warning'),refresh=$('#sl-refresh-link'),copy=$('#sl-copy'),send=$('#sl-send');
+    let sharing=false,invalid=false;
+    const setPending=value=>{copy.disabled=send.disabled=value||invalid;message.disabled=value||invalid;refresh.disabled=value;};
+    const block=error=>{if(!current())return;invalid=true;message.value='';content.hidden=true;warning.hidden=false;warning.textContent=(error.message||'Не удалось проверить ссылку')+(Number.isInteger(error.linkState?.current_due)?` Сейчас к оплате: ${rub(error.linkState.current_due)}.`:'')+' Старая ссылка не скопирована и не вставлена в чат.';refresh.hidden=false;status.textContent='Ссылка требует обновления';setPending(false);};
+    const share=async action=>{
+      if(sharing||invalid||!current())return;sharing=true;setPending(true);status.textContent='Проверяем актуальную сумму ссылки…';
+      try{
+        await validatePaymentLinkForSharing(link,id,subscriptionId,true);if(!current())return;
+        const paymentUrls=(message.value.match(/https?:\/\/[^\s<>"']+/gi)||[]).map(value=>value.replace(/[)\]},.;!?]+$/g,'')).filter(value=>{try{return new URL(value).pathname.startsWith('/pay/')}catch(_){return false}});
+        if(paymentUrls.length!==1||paymentUrls[0]!==link.url)throw Error('Ссылка в сообщении изменена или добавлена другая ссылка на оплату. Обновите сообщение перед копированием или вставкой');
+        if(action==='copy')await copyTextWithNotice(message.value,'Текст скопирован');
+        else{scTab('feed');const target=$('#cm-text');if(!target)return toast('Откройте чат в карточке или скопируйте сообщение',true);target.value=message.value;target.dispatchEvent(new Event('input',{bubbles:true}));target.focus();target.scrollIntoView({block:'center',behavior:'smooth'});toast('Сообщение вставлено. Проверьте и отправьте')}
+        if(current())status.textContent='Сумма ссылки проверена';
+      }catch(error){block(error)}finally{sharing=false;if(current())setPending(false)}
+    };
+    copy.onclick=()=>share('copy');send.onclick=()=>share('paste');$('#sl-done').onclick=reload;
+    refresh.onclick=async()=>{
+      if(sharing||!current())return;sharing=true;setPending(true);status.textContent='Обновляем расчёт и ссылку…';
+      try{const fresh=await renewInvoicePaymentLink(id,subscriptionId,title);if(current())await showSaleLink(order,subscriptionId,fresh)}catch(error){block(error)}finally{sharing=false;if(current())setPending(false)}
+    };
+    setPending(true);
+    try{
+      await validatePaymentLinkForSharing(link,id,subscriptionId,true);if(!current())return;
+      message.value=`${title}\n${displayChildName(d.student.name)}\n\n${order.group?'Группа: '+order.group+'\n':''}Тариф: ${order.tariffLabel}\n\nК оплате: ${rub(link.amount)}\n\nСсылка для оплаты:\n${link.url}`;
+      invalid=false;content.hidden=false;status.textContent='Сумма ссылки проверена';resizeMessageInput(message);setPending(false);
+    }catch(error){block(error)}
+  };
   $('#sl-link').onclick=async()=>{
     if(linkBusy)return;const order=selection();if(order.paid_date!==S.meta.today)return toast('Для состоявшейся оплаты нажмите «Отметить оплату»',true);linkBusy=true;busy(true);lock(true);
     try{
@@ -1738,11 +1787,7 @@ async function openSell(d, reload) {
       const title=order.single?`Разовое занятие${order.date?' '+dShort(order.date):''}`:`Абонемент на ${monthLabel(order.month)}`;
       const previousLink=(st.links||[]).find(l=>l.status==='open'&&l.subscription_id===r.id&&l.amount===r.payable);
       const l=previousLink||await api('POST',`/api/students/${id}/paylinks`,{amount:r.payable,purpose:`${title}: ${displayChildName(d.student.name)}`,subscription_id:r.id,full_payment:true});if(!isCurrent())return;
-      const msg=`${title}\n${displayChildName(d.student.name)}\n\n${order.group?'Группа: '+order.group+'\n':''}Тариф: ${order.tariffLabel}\n\nК оплате: ${rub(l.amount)}\n\nСсылка для оплаты:\n${l.url}`;
-      $('#sl-res').innerHTML=`<p class="small muted">По ссылке родитель проверит email для чека — сохранённый адрес подставится автоматически</p><label style="margin-top:14px">Сообщение родителю</label><textarea id="sl-msg" rows="9">${esc(msg)}</textarea><div class="sc-actions" style="margin-top:10px"><button class="btn primary" id="sl-send">Вставить в чат с семьёй</button><button class="btn" id="sl-copy">Скопировать</button><button class="btn" id="sl-done">Готово</button></div>`;
-      resizeMessageInput($('#sl-msg'));
-      $('#sl-copy').onclick=()=>copyTextWithNotice($('#sl-msg').value,'Текст скопирован');
-      $('#sl-send').onclick=()=>{scTab('feed');const t=$('#cm-text');if(!t)return toast('Нет открытого чата: скопируйте сообщение',true);t.value=$('#sl-msg').value;t.dispatchEvent(new Event('input',{bubbles:true}));t.focus();t.scrollIntoView({block:'center',behavior:'smooth'});toast('Сообщение вставлено. Проверьте и отправьте')};$('#sl-done').onclick=reload;
+      await showSaleLink(order,r.id,l);
     }catch(e){fail(e);if(isCurrent()){lock(!!savedInvoice);busy(false)}}finally{linkBusy=false}
   };
   recommend();pastGroupSearch($('#sl-en'));pastGroupSearch($('#sl-ofp'));quote();box.scrollIntoView({block:'start',behavior:'smooth'});
@@ -1932,10 +1977,19 @@ function clientBalanceHtml(d) {
 }
 async function loadClientPaymentLinks(sid) {
   const box=$('#pay-links');if(!box)return;
-  const data=await api('GET',`/api/students/${sid}/paylinks`).catch(()=>({links:[]}));if($('#pay-links')!==box)return;
+  const generation=String(Number(box.dataset.linkLoad||0)+1);box.dataset.linkLoad=generation;
+  const data=await api('GET',`/api/students/${sid}/paylinks`).catch(()=>({links:[]}));if($('#pay-links')!==box||box.dataset.linkLoad!==generation)return;
   const links=data.links.filter(l=>l.status==='open');
-  box.innerHTML=links.length?`<details class="finance-detail payment-links"><summary>Ссылки, по которым ждём оплату (${links.length})</summary>${links.map(l=>`<div class="payment-link-card"><b>${rub(l.amount)}</b><div>${esc(l.purpose)}</div><div class="small muted">Создана ${dtShort(l.created_at)}</div><button class="btn sm" data-plcopy="${esc(l.url)}">Скопировать ссылку</button><details class="finance-detail"><summary>Другие действия</summary><button class="btn sm" data-plx="${l.id}">Отменить ссылку</button></details></div>`).join('')}</details>`:'';
-  box.querySelectorAll('[data-plcopy]').forEach(b=>b.onclick=()=>copyTextWithNotice(b.dataset.plcopy,'Ссылка скопирована'));
+  box.innerHTML=links.length?`<details class="finance-detail payment-links"><summary>Ссылки, по которым ждём оплату (${links.length})</summary>${links.map(l=>`<div class="payment-link-card"><b>${rub(l.amount)}</b><div>${esc(l.purpose)}</div><div class="small muted">Создана ${dtShort(l.created_at)}</div><button type="button" class="btn sm" data-plcopy="${l.id}">Скопировать ссылку</button><p class="need-err" data-pl-warning role="alert" hidden></p><button type="button" class="btn sm" data-pl-renew="${l.id}" hidden>${l.subscription_id?'Обновить ссылку':'Открыть оформление'}</button><details class="finance-detail"><summary>Другие действия</summary><button class="btn sm" data-plx="${l.id}">Отменить ссылку</button></details></div>`).join('')}</details>`:'';
+  box.querySelectorAll('[data-plcopy]').forEach(b=>b.onclick=async()=>{
+    if(b.disabled)return;const link=links.find(l=>Number(l.id)===Number(b.dataset.plcopy)),row=b.closest('.payment-link-card');b.disabled=true;
+    try{await validatePaymentLinkForSharing(link,sid,link.subscription_id);if(b.isConnected&&$('#pay-links')===box&&box.dataset.linkLoad===generation)await copyTextWithNotice(link.url,'Ссылка скопирована');if(b.isConnected&&box.dataset.linkLoad===generation)b.disabled=false}
+    catch(error){if(!b.isConnected||box.dataset.linkLoad!==generation)return;const warning=row.querySelector('[data-pl-warning]');warning.hidden=false;warning.textContent=(error.message||'Не удалось проверить ссылку')+' Ссылка не скопирована.';row.querySelector('[data-pl-renew]').hidden=false;}
+  });
+  box.querySelectorAll('[data-pl-renew]').forEach(b=>b.onclick=async()=>{
+    if(b.disabled)return;const link=links.find(l=>Number(l.id)===Number(b.dataset.plRenew));b.disabled=true;
+    try{if(!link.subscription_id){await openStudent(sid,{tab:'abon'});$('#act-sell')?.click();return}await renewInvoicePaymentLink(sid,link.subscription_id,link.purpose);if($('#pay-links')===box)await loadClientPaymentLinks(sid)}catch(error){if(b.isConnected){b.closest('.payment-link-card').querySelector('[data-pl-warning]').textContent=error.message;b.disabled=false}}
+  });
   box.querySelectorAll('[data-plx]').forEach(b=>b.onclick=async()=>{await api('POST',`/api/paylinks/${b.dataset.plx}/cancel`,{});loadClientPaymentLinks(sid)});
 }
 
@@ -3199,9 +3253,10 @@ async function logoutCurrentAccount() {
 async function openMultiMonthSale(d,id,box,reload,preset={}) {
   const groups=(S.meta.groups||[]).filter(g=>g.active!==0&&!g.is_makeup&&g.lesson_kind!=='ofp');
   const months=Array.from({length:12},(_,i)=>{const dt=new Date(d.cur_month+'-01T12:00');dt.setMonth(dt.getMonth()+i);return isoDate(dt).slice(0,7)});
-  box.dataset.saleSession='multi-'+Date.now();
+  const session='multi-'+String(S.saleSequence=(S.saleSequence||0)+1);box.dataset.saleSession=session;
   box.innerHTML=`<form class="section sell" data-multi-sale><div class="row"><h3 class="grow">Абонементы на несколько месяцев</h3><button type="button" class="icon-btn" data-multi-close aria-label="Закрыть">✕</button></div><p class="small muted">На каждый месяц — отдельный абонемент. Общую оплату распределим по месяцам, начиная с первого</p><div class="multi-month-choices">${months.map((m,i)=>`<label><input type="checkbox" name="months" value="${m}" ${i<2?'checked':''}>${esc(monthLabel(m))}</label>`).join('')}</div><div class="row"><div class="field"><label>Группа</label><select name="group_id">${groups.map(g=>`<option value="${g.id}" ${g.id===preset.group_id?'selected':''}>${esc(g.name)}</option>`).join('')}</select></div><div class="field"><label>Тариф</label><select name="tariff"></select></div></div><div class="field" data-multi-ofp hidden><label>Группа ОФП</label><select name="ofp_group_id"></select></div><div class="field"><label>Скидка</label><select name="discount_id"><option value="">По правилам</option>${(d.discounts||[]).map(x=>`<option value="${x.id}">${esc(x.name)}, ${x.percent}%</option>`).join('')}</select></div><p class="small muted">Ручная скидка заменяет автоматическую для каждого выбранного месяца</p><div class="field"><label>Фактическая дата оплаты</label><input name="paid_date" type="date" required value="${S.meta.today}" max="${S.meta.today}"></div><div class="field"><label>Причина исключения занятий</label><input name="exclusion_reason" maxlength="1000" placeholder="Если исключаете занятия по согласованию"></div><label class="check"><input type="checkbox" name="use_balance"> Зачесть деньги с баланса</label><div data-multi-quote>Считаю…</div><div class="row"><div class="field"><label>Получено, ₽</label><input name="amount" type="number" min="1" step="1"></div><div class="field"><label>Как оплатили</label><select name="method">${Object.entries(PAY_METHODS).filter(([k])=>PAY_MANUAL_METHODS.includes(k)).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('')}</select></div></div><p class="small muted">«Отметить оплату» — только для денег, которые уже получены</p><p class="need-err" data-multi-error role="alert"></p><div class="sc-actions"><button type="button" class="btn" data-multi-save="invoice" disabled>Оформить без оплаты</button><button type="button" class="btn primary" data-multi-save="pay" disabled>Отметить оплату</button><button type="button" class="btn" data-multi-save="links" disabled>Общая ссылка на оплату</button></div><div data-multi-result></div></form>`;
   const form=box.querySelector('form'),f=form.elements,output=form.querySelector('[data-multi-quote]'),error=form.querySelector('[data-multi-error]'),result=form.querySelector('[data-multi-result]');
+  const isCurrent=()=>box.isConnected&&form.isConnected&&box.dataset.saleSession===session;
   let checked=null,generation=0,busy=false,excluded={};
   const requestId=window.crypto?.randomUUID?.()||Date.now()+'-'+Math.random().toString(36).slice(2);
   const payload=()=>({months:[...form.querySelectorAll('[name=months]:checked')].map(x=>x.value),group_id:+f.group_id.value,tariff:f.tariff.value,ofp_group_id:f.tariff.value==='pkg'?+f.ofp_group_id.value:null,discount_id:f.discount_id.value||null,paid_date:f.paid_date.value,exclusion_reason:f.exclusion_reason.value,excluded_by_month:excluded,group_action:'add',use_balance:f.use_balance.checked});
@@ -3239,16 +3294,32 @@ async function openMultiMonthSale(d,id,box,reload,preset={}) {
   form.querySelectorAll('[data-multi-save]').forEach(b=>b.onclick=async()=>{
     if(busy||!checked)return;const mode=b.dataset.multiSave;
     if(mode==='pay'&&(!Number.isInteger(+f.amount.value)||+f.amount.value<1||+f.amount.value>checked.due)){error.textContent='Проверьте полученную сумму';return}
-    const order={...payload(),expected_token:checked.token,mode,request_id:requestId,...(mode==='pay'?{amount:+f.amount.value,method:f.method.value}:{})};
+    const order={...payload(),expected_token:checked.token,mode,request_id:requestId,...(mode==='pay'?{amount:+f.amount.value,method:f.method.value}:{})},saleGeneration=++generation;
     busy=true;buttons();form.querySelectorAll('input,select').forEach(x=>x.disabled=true);error.textContent='';
     try{
       const saved=await api('POST',`/api/students/${id}/multi-month-sale`,order);
+      if(!isCurrent()||generation!==saleGeneration)return;
+      const issuedLinks=[...(saved.link?[{link:saved.link,scope:saved.subscriptions.map(s=>s.id)}]:[]),...saved.subscriptions.filter(s=>s.link).map(s=>({link:s.link,scope:s.id}))];
+      const validateLinks=()=>Promise.all(issuedLinks.map(item=>validatePaymentLinkForSharing(item.link,id,item.scope,true)));
       const msg=`Абонементы: ${displayChildName(d.student.name)}\nГруппа: ${groups.find(g=>g.id===order.group_id)?.name||''}\n\n`+saved.subscriptions.map(s=>`${monthLabel(s.month)} — ${rub(s.price)}${s.link?'\n'+s.link.url:''}`).join('\n\n')+`\n\nВсего: ${rub(saved.total)}\nОсталось оплатить: ${rub(saved.due)}${saved.link?'\n\nОплатить все месяцы по одной ссылке:\n'+saved.link.url:''}`;
-      result.innerHTML='<h4>Абонементы оформлены</h4><textarea rows="8" readonly></textarea><div class="sc-actions"><button type="button" class="btn" data-copy>Скопировать</button><button type="button" class="btn" data-chat>Вставить в чат</button><button type="button" class="btn primary" data-done>Готово</button></div>';
-      result.querySelector('textarea').value=msg;
-      result.querySelector('[data-copy]').onclick=()=>copyTextWithNotice(msg);
-      result.querySelector('[data-chat]').onclick=()=>{scTab('feed');const t=$('#cm-text');if(!t)return toast('Откройте чат в карточке',true);t.value=msg;t.dispatchEvent(new Event('input',{bubbles:true}));t.focus()};
+      result.innerHTML='<h4>Абонементы оформлены</h4><p class="small muted" data-multi-link-status role="status">Проверяем сумму ссылки…</p><p class="need-err" data-multi-link-warning role="alert" hidden></p><textarea rows="8" hidden></textarea><div class="sc-actions"><button type="button" class="btn" data-copy disabled>Скопировать</button><button type="button" class="btn" data-chat disabled>Вставить в чат</button><button type="button" class="btn primary" data-done>Готово</button></div>';
+      const message=result.querySelector('textarea'),copy=result.querySelector('[data-copy]'),chat=result.querySelector('[data-chat]'),status=result.querySelector('[data-multi-link-status]'),warning=result.querySelector('[data-multi-link-warning]');
+      let sharing=false,invalid=false;
+      const current=()=>isCurrent()&&generation===saleGeneration&&message.isConnected;
+      const block=error=>{if(!current())return;invalid=true;copy.disabled=chat.disabled=true;message.disabled=true;warning.hidden=false;warning.textContent=(error.message||'Не удалось проверить общую ссылку')+(Number.isInteger(error.linkState?.current_due)?` Сейчас к оплате: ${rub(error.linkState.current_due)}.`:'')+' Обновите карточку и проверьте текущие суммы перед отправкой.';status.textContent='Ссылка не скопирована и не вставлена в чат';result.querySelector('[data-done]').textContent='Обновить карточку';};
+      const share=async action=>{
+        if(sharing||invalid||!current())return;sharing=true;copy.disabled=chat.disabled=true;message.disabled=true;status.textContent='Проверяем сумму ссылки…';
+        try{
+          await validateLinks();if(!current())return;
+          if(issuedLinks.length){const expected=[...new Set(issuedLinks.map(item=>item.link.url))],urls=(message.value.match(/https?:\/\/[^\s<>"']+/gi)||[]).map(value=>value.replace(/[)\]},.;!?]+$/g,'')).filter(value=>{try{return new URL(value).pathname.startsWith('/pay/')}catch(_){return false}});if(urls.length!==expected.length||!expected.every(url=>urls.includes(url)))throw Error('Ссылка в сообщении изменена или добавлена другая ссылка на оплату')}
+          if(action==='copy')await copyTextWithNotice(message.value);
+          else{scTab('feed');const target=$('#cm-text');if(!target)return toast('Откройте чат в карточке',true);target.value=message.value;target.dispatchEvent(new Event('input',{bubbles:true}));target.focus()}
+          if(current())status.textContent='Сумма ссылки проверена';
+        }catch(error){block(error)}finally{sharing=false;if(current()&&!invalid){copy.disabled=chat.disabled=false;message.disabled=false}}
+      };
+      copy.onclick=()=>share('copy');chat.onclick=()=>share('paste');
       result.querySelector('[data-done]').onclick=reload;
+      try{await validateLinks();if(current()){message.value=msg;message.hidden=false;copy.disabled=chat.disabled=false;status.textContent=issuedLinks.length?'Сумма ссылки проверена':''}}catch(error){block(error)}
     }catch(e){error.textContent=e.message;busy=false;form.querySelectorAll('input,select').forEach(x=>x.disabled=false);f.tariff.disabled=!!groups.find(g=>g.id===+f.group_id.value)?.fixed_only;buttons()}
   });
   tariffs();pastGroupSearch(f.group_id);await preview();box.scrollIntoView({block:'start',behavior:'smooth'});

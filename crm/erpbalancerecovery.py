@@ -54,10 +54,19 @@ def _preserved(con,sid,subid):
         'other_purchases':[row for row in _rows(con,'subscriptions',sid) if row['id']!=subid]}
 
 
+def _purchase_terms(row):
+    return {key:value for key,value in dict(row).items() if key not in ('status','paid_at')}
+
+
+def _other_coverage(summary,subid):
+    return {key:value for key,value in summary['balance']['covered'].items() if key!=subid}
+
+
 def _summary(con,sid,subid,on):
     sub=dict(con.execute('SELECT * FROM subscriptions WHERE id=? AND student_id=?',(subid,sid)).fetchone())
     value=money.balance(con,sid,date.fromisoformat(on))
     return {'balance':value,'invoice':{'id':subid,'month':sub['month'],'price':sub['price'],
+        'lessons':sub['lessons'],'enrollment_id':sub['enrollment_id'],
         'status':sub['status'],'covered':value['covered'].get(subid,0),
         'payable':max(0,sub['price']-value['covered'].get(subid,0))},
         'payments_count':len(_rows(con,'payments',sid)),
@@ -112,16 +121,19 @@ def _preview_snapshot(con,erp_id,*,case=None):
         snapshot=balancecredit.record_snapshot(copy,sid,**arguments)
         fund_arguments=dict(source_ref=case['credit_ref'],label=case['credit_label'],
             evidence_id=case['credit_ref'],snapshot_id=snapshot,user=who)
-        fund=balancecredit.add_existing_fund(copy,sid,case['existing_credit'],**fund_arguments)
+        fund=balancecredit.add_existing_fund(copy,sid,case['existing_credit'],**fund_arguments) if case['existing_credit'] else None
         money._reconcile(copy,sid)
         if original!=_preserved(copy,sid,subid):
             raise ValueError('Проверка затронула исходные оплаты, другие покупки или посещения')
         off=_summary(copy,sid,subid,case['as_of_date'])
+        if _other_coverage(off,subid)!=_other_coverage(result['before'],subid):
+            raise ValueError('Изменилось покрытие прошлых покупок. Нужна отдельная сверка сохранённых начислений')
         off['use_balance']=False;off['credit_label']=case['credit_label']
-        if off['invoice']['price']!=target['price']:
-            raise ValueError('Проверка изменила полную стоимость абонемента')
+        copied_target=copy.execute('SELECT * FROM subscriptions WHERE id=?',(subid,)).fetchone()
+        if _purchase_terms(copied_target)!=_purchase_terms(target):
+            raise ValueError('Проверка изменила стоимость, занятия или условия абонемента')
         repeat_snapshot=balancecredit.record_snapshot(copy,sid,**arguments)
-        repeat_fund=balancecredit.add_existing_fund(copy,sid,case['existing_credit'],**fund_arguments)
+        repeat_fund=balancecredit.add_existing_fund(copy,sid,case['existing_credit'],**fund_arguments) if case['existing_credit'] else None
         if (snapshot,fund)!=(repeat_snapshot,repeat_fund) or _summary(copy,sid,subid,case['as_of_date'])!= {k:v for k,v in off.items() if k not in ('use_balance','credit_label')}:
             raise ValueError('Повторное восстановление изменило сумму или создало дубль зачёта')
         result['without_balance']=off
@@ -133,25 +145,29 @@ def _preview_snapshot(con,erp_id,*,case=None):
             applied=balancecredit.apply_to_invoice(selected,subid,who,**apply_args)
             money._reconcile(selected,sid)
             on=_summary(selected,sid,subid,case['as_of_date'])
+            if _other_coverage(on,subid)!=_other_coverage(result['before'],subid):
+                raise ValueError('Зачёт изменил покрытие других покупок')
             repeated=balancecredit.apply_to_invoice(selected,subid,who,**apply_args)
             reopened=balancecredit.preview(selected,sid,target['price'],False,subid)
             if on!=_summary(selected,sid,subid,case['as_of_date']):
                 raise ValueError('Повторное подтверждение ещё раз изменило баланс')
             if original!=_preserved(selected,sid,subid):
                 raise ValueError('Зачёт изменил исходные оплаты, другие покупки или посещения')
+            if _purchase_terms(selected.execute('SELECT * FROM subscriptions WHERE id=?',(subid,)).fetchone())!=_purchase_terms(target):
+                raise ValueError('Зачёт изменил стоимость, занятия или условия абонемента')
             on.update(use_balance=True,applied_amount=quoted['apply_amount'],
                 repeat_unchanged=True,reopened=reopened)
             result['with_balance']=on
         finally:
             selected.close()
-        result.update(plan_ready=True,payments_preserved=True,other_purchases_preserved=True,
+        result.update(plan_ready=True,payments_preserved=True,other_purchases_preserved=True,past_coverage_preserved=True,purchase_terms_preserved=True,
             attendance_preserved=True,repeat_carry_unchanged=True,
             selected_for_current_invoice='without_balance',
-            authority={'base_amount':case['base_amount'],'available_balance':case['existing_credit'],
+            authority={'base_amount':case['base_amount'],'available_balance':off['balance']['deposit'],
                 'source_ref':case['credit_ref'],'label':case['credit_label'],
                 'provenance':'owner_confirmation','cash_rows_created':0},
             source_coverage_complete=False,
-            source_note='Старый реестр неполон. Подтверждение владельца задаёт баланс; операции после 02.11 сверяются отдельно')
+            source_note='Старый реестр неполон. Подтверждение владельца задаёт баланс; операции после '+case['cutoff_date']+' сверяются отдельно')
     except (ValueError,KeyError) as error:
         result.update(plan_ready=False,without_balance=None,with_balance=None)
         result['issues'].append(str(error))

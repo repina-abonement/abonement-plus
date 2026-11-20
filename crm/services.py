@@ -584,7 +584,8 @@ def payment_quote(con, sub_id, paid_date=None, use_balance=False):
             else max(0,money.balance(con,row["student_id"])["covered"].get(sub_id,0)))
         preview=_invoice_balance_preview(con,row['student_id'],row['price'],use_balance,sub_id)
         return {"id":sub_id,"price":row["price"],"paid":paid,"total":preview['payable'],
-            "late_fee":row["late_fee"],"balance_preview":preview}
+            "late_fee":row["late_fee"],"discount_name":row['discount_name'],
+            "discount_amount":row['discount_amount'],"balance_preview":preview}
     finally:
         con.execute("ROLLBACK TO payment_preview")
         con.execute("RELEASE payment_preview")

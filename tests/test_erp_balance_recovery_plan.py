@@ -71,6 +71,39 @@ class ERPBalanceRecoveryPlanTest(unittest.TestCase):
                 self.assertTrue(any('изменились' in issue for issue in result['issues']))
                 self.assertEqual(self.con.serialize(),before)
 
+    def test_zero_balance_case_does_not_create_a_tournament_fund_or_spend_old_money(self):
+        self.con.execute('UPDATE subscriptions SET price=9450,lessons=7 WHERE id=2')
+        self.con.execute("ALTER TABLE subscriptions ADD COLUMN lesson_schedule TEXT DEFAULT ''")
+        schedule='[{"group_id":1,"dates":["2026-12-03","2026-12-07","2026-12-10","2026-12-14","2026-12-17","2026-12-21","2026-12-24"]}]'
+        self.con.execute('UPDATE subscriptions SET lesson_schedule=? WHERE id=2',(schedule,))
+        case=dict(self.case,existing_credit=0,credit_ref='synthetic-no-advance',
+            credit_label='Аванса не было',evidence_id='synthetic-reviewed-zero',
+            reviewed_fingerprint=recovery.financial_fingerprint(self.con,1,'synthetic-copy'))
+        before=self.con.serialize()
+        result=recovery.preview(self.con,'synthetic-copy',case=case)
+        self.assertTrue(result['plan_ready'],result['issues'])
+        for variant in ('without_balance','with_balance'):
+            state=result[variant]
+            self.assertEqual((state['invoice']['price'],state['invoice']['covered'],
+                state['invoice']['payable'],state['balance']['deposit']),(9450,0,9450,0))
+            self.assertEqual(state['funds'],[])
+            self.assertEqual(state['invoice']['lessons'],7)
+            self.assertEqual(state['payments_count'],2)
+        self.assertEqual(result['authority']['available_balance'],0)
+        self.assertTrue(result['repeat_carry_unchanged'])
+        self.assertTrue(result['purchase_terms_preserved'])
+        self.assertEqual(self.con.serialize(),before)
+
+    def test_reviewed_past_purchase_status_and_date_are_preserved_even_if_legacy_coverage_differs(self):
+        self.con.execute("UPDATE subscriptions SET status='invoiced',paid_at=NULL WHERE id=1")
+        case=dict(self.case,existing_credit=0,
+            reviewed_fingerprint=recovery.financial_fingerprint(self.con,1,'synthetic-copy'))
+        before=self.con.serialize()
+        result=recovery.preview(self.con,'synthetic-copy',case=case)
+        self.assertTrue(result['plan_ready'],result['issues'])
+        self.assertTrue(result['other_purchases_preserved'])
+        self.assertEqual(self.con.serialize(),before)
+
     def test_projection_failure_and_unknown_case_do_not_leave_accounting_rows(self):
         before=self.con.serialize()
         with patch.object(recovery.balancecredit,'add_existing_fund',side_effect=ValueError('Synthetic conflict')):
@@ -78,6 +111,19 @@ class ERPBalanceRecoveryPlanTest(unittest.TestCase):
         self.assertFalse(result['plan_ready']);self.assertEqual(result['issues'],['Synthetic conflict'])
         self.assertEqual(self.con.serialize(),before)
         self.assertFalse(recovery.preview(self.con,'unreviewed-client')['plan_ready'])
+        self.assertEqual(self.con.serialize(),before)
+
+    def test_retained_charge_coverage_cannot_be_silently_lost_by_a_zero_baseline(self):
+        self.con.execute("UPDATE subscriptions SET status='cancelled' WHERE id=1")
+        self.con.execute('''INSERT INTO cancelled_service_charges
+            VALUES(1,1,'2026-11',159780,8,'2026-11-20','2026-11-20')''')
+        case=dict(self.case,existing_credit=0,
+            reviewed_fingerprint=recovery.financial_fingerprint(self.con,1,'synthetic-copy'))
+        before=self.con.serialize()
+        result=recovery.preview(self.con,'synthetic-copy',case=case)
+        self.assertFalse(result['plan_ready'])
+        self.assertTrue(any('покрытие прошлых покупок' in issue for issue in result['issues']))
+        self.assertIsNone(result['without_balance'])
         self.assertEqual(self.con.serialize(),before)
 
 

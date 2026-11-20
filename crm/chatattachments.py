@@ -72,6 +72,11 @@ def send(con,cid,aid,user,caption=''):
         if current['reason'] or current['text']!=meta['text'] or not png or hashlib.sha256(png).hexdigest()!=meta['image_hash']:raise comms.CommsError('Правила или ссылки изменились. Выберите скрипт заново перед отправкой')
     caption=str(caption or '').strip()
     if len(caption)>1024:raise comms.CommsError('Подпись к файлу должна быть не длиннее 1024 символов')
+    from . import paylinkguard,paylinks
+    try:
+        paylinkguard.guard_message(con,caption,conv)
+    except paylinks.PayLinkError as error:
+        raise comms.CommsError(str(error)) from error
     base=(comms.get(con,'public_url') or 'https://ab-plus.ru').rstrip('/')
     url=urlsplit(base)
     if url.scheme!='https' or not url.netloc or url.username or url.password or url.query or url.fragment:raise comms.CommsError('Для файлов нужен публичный HTTPS-адрес CRM в настройках подключения')

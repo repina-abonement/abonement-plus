@@ -379,9 +379,30 @@ def paylinks_create(con, h, user, body, q, sid):
         sub = int(body["subscription_id"]) if body.get("subscription_id") else None
         if sub and not con.execute("SELECT 1 FROM subscriptions WHERE id=? AND student_id=?", (sub, int(sid))).fetchone():
             raise ApiError("Абонемент не найден")
-        return paylinks.create(con, int(sid), body.get("amount"), user, body.get("purpose") or "", sub, full_payment=bool(body.get("full_payment")))
+        return paylinks.create(con, int(sid), body.get("amount"), user, body.get("purpose") or "", sub, full_payment=body.get("full_payment"))
     except paylinks.PayLinkError as e:
         raise ApiError(str(e))
+
+
+@route('GET','/api/paylinks/{lid}/validate',role='members:full',transactional=False)
+def paylink_validate(con,h,user,body,q,lid):
+    from . import paylinkguard,paylinks
+    try:
+        sid=int(q['student_id']) if q.get('student_id') else None
+        sub=int(q['subscription_id']) if q.get('subscription_id') else None
+        subs=[int(value) for value in q['subscription_ids'].split(',')] if q.get('subscription_ids') else None
+        if q.get('require_full') not in (None,'','0','1'):
+            raise ValueError()
+    except (ValueError,TypeError):
+        raise ApiError('Проверьте выбранного клиента и счёт') from None
+    try:
+        result=paylinkguard.by_id(con,int(lid),student_id=sid,subscription_id=sub,
+            subscription_ids=subs,require_full=q.get('require_full')=='1')
+        if h:
+            h.extra_headers.extend([('Cache-Control','no-store')])
+        return result
+    except paylinks.PayLinkError as error:
+        raise ApiError(str(error),404) from error
 
 
 @route("GET", "/api/public/pay-links/{token}", role="public")

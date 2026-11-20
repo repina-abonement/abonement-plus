@@ -36,6 +36,14 @@ def _snapshot_copy(con):
 
 
 def register(route):
+    @route('GET', '/api/erp/balance-recovery/mamedov-review', role='admin', transactional=False)
+    def mamedov_review(con,h,user,body,q):
+        from . import erpmamedovreview
+        try:
+            return erpmamedovreview.review(con)|_metadata()
+        except (erpimport.ImportError_,ValueError) as exc:
+            raise ApiError(str(exc)) from exc
+
     @route('GET', '/api/erp/balance-recovery/plan', role='admin', transactional=False)
     def balance_recovery_plan(con,h,user,body,q):
         from . import erpbalancerecovery

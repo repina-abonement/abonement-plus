@@ -1193,6 +1193,11 @@ def send(con, cid: int, text: str, user: dict) -> dict:
     if not conv:
         raise CommsError("Переписка не найдена")
     conv = dict(conv)
+    from . import paylinkguard,paylinks
+    try:
+        paylinkguard.guard_message(con,text,conv)
+    except paylinks.PayLinkError as error:
+        raise CommsError(str(error)) from error
     name = user.get("name") or ""
     if conv["channel"] == "tg_archive":
         raise CommsError("Это архив переписки до CRM: ответьте в Telegram, MAX или WhatsApp")

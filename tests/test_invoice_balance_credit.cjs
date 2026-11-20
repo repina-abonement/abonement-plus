@@ -84,6 +84,7 @@ print(json.dumps(result,ensure_ascii=False))
         if(method==='GET'&&url.pathname==='/api/students/1')return json(route,student());
         if(method==='GET'&&url.pathname==='/api/students/1/required')return json(route,{missing:[],optional:[]});
         if(method==='GET'&&url.pathname==='/api/students/1/paylinks')return json(route,{ready:true,links:[]});
+        if(method==='GET'&&/^\/api\/paylinks\/\d+\/validate$/.test(url.pathname))return json(route,{valid:true,link_id:Number(url.pathname.split('/')[3]),student_id:1,subscription_id:10,amount:state.price-state.paid,current_due:state.price-state.paid,url:'https://example.invalid/synthetic-link',read_only:true});
         if(method==='GET'&&url.pathname==='/api/students/1/quote'){
           const data=state.actualDtos?structuredClone(actual[url.searchParams.get('use_balance')==='1'?'on':'off']):{...quote(url.searchParams.get('month')),balance_preview:preview(url.searchParams.get('use_balance')==='1')};
           if(state.omitPreview)delete data.balance_preview;

@@ -69,10 +69,22 @@ class HistoricalRefundHttpTest(unittest.TestCase):
             for method,path,body in (('GET',self.BASE+'/context?erp_id=120486',None),
                     ('GET','/api/erp/financial-audit?erp_id=120486',None),
                     ('GET','/api/erp/balance-recovery/plan?erp_id=117559',None),
+                    ('GET','/api/erp/balance-recovery/mamedov-review',None),
                     ('POST',self.BASE+'/plan',self.body()),('POST',self.BASE+'/apply',self.body())):
                 with self.subTest(actor=actor,path=path):
                     self.assertEqual(self.call(method,path,body,actor)[0],status)
         self.assertEqual(self.con.serialize(),before)
+
+    def test_mamedov_review_is_owner_only_readonly_even_when_identity_is_missing(self):
+        before=self.con.serialize()
+        code,result=self.call('GET','/api/erp/balance-recovery/mamedov-review')
+        self.assertEqual(code,200,result)
+        self.assertTrue(result['read_only']);self.assertTrue(result['snapshot_on_copy'])
+        self.assertEqual(result['copy_scope'],'full_server_database')
+        self.assertFalse(result['can_apply']);self.assertFalse(result['production_apply_available'])
+        self.assertFalse(result['live_provider_requests']);self.assertFalse(result['independent_source_verified'])
+        self.assertIsNone(result['projection']);self.assertTrue(result['issues'])
+        self.assertEqual(self.con.serialize(),before);self.assertFalse(self.backups.exists())
 
     def test_context_and_incomplete_receipt_preview_are_readonly(self):
         before=self.con.serialize()

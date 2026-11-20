@@ -139,6 +139,10 @@ def _reconcile(con, sid: int) -> None:
     if allocated['conflicts']:
         raise ValueError('Распределение оплат требует сверки: ' + '; '.join(allocated['conflicts']))
     for sub in allocated['obligations']:
+        if sub['id'] in allocated.get('historical_sources',{}):
+            # A reviewed opening snapshot preserves the historical state and
+            # dates; a new invoice or payment is not a new payment of the past.
+            continue
         if allocated['covered'][sub['id']] >= sub["price"]:
             if not sub["retained"] and sub["status"] != "paid":
                 con.execute("UPDATE subscriptions SET status='paid', paid_at=? WHERE id=?", (_now(), sub["id"]))

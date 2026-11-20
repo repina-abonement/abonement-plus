@@ -39,7 +39,8 @@ def init(con):
         link_id INTEGER NOT NULL REFERENCES pay_links(id),subscription_id INTEGER NOT NULL REFERENCES subscriptions(id),
         amount INTEGER NOT NULL,PRIMARY KEY(link_id,subscription_id))""")
     columns = {r[1] for r in con.execute("PRAGMA table_info(pay_links)")}
-    for name, definition in {'subscription_id':'INTEGER','receipt_token':"TEXT NOT NULL DEFAULT ''",'receipt_email':"TEXT NOT NULL DEFAULT ''",'invoice_url':"TEXT NOT NULL DEFAULT ''",'checkout_state':"TEXT NOT NULL DEFAULT ''"}.items():
+    for name, definition in {'subscription_id':'INTEGER','receipt_token':"TEXT NOT NULL DEFAULT ''",'receipt_email':"TEXT NOT NULL DEFAULT ''",'invoice_url':"TEXT NOT NULL DEFAULT ''",'checkout_state':"TEXT NOT NULL DEFAULT ''",
+            'full_payment':'INTEGER','scope_snapshot':"TEXT NOT NULL DEFAULT ''"}.items():
         if name not in columns:
             con.execute(f"ALTER TABLE pay_links ADD COLUMN {name} {definition}")
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS pay_link_receipt_token ON pay_links(receipt_token) WHERE receipt_token!=''")
@@ -53,22 +54,28 @@ def ready(con) -> bool:
     return all(fiscal.cfg(con, k) for k in ("fx_pk_server", "fx_pk_user", "fx_pk_password"))
 
 
-def create(con, sid: int, amount: int, user: dict, purpose: str = "", subscription_id: int | None = None, full_payment: bool = False) -> dict:
+def create(con, sid: int, amount: int, user: dict, purpose: str = "", subscription_id: int | None = None, full_payment: bool | None = False) -> dict:
     if not ready(con):
         raise PayLinkError("PayKeeper не подключён: Чеки → Подключение, адрес, логин и пароль PayKeeper")
     amount = int(amount or 0)
     if amount <= 0:
         raise PayLinkError("Укажите сумму")
+    if full_payment is not None and type(full_payment) is not bool:
+        raise PayLinkError('Подтвердите, на всю ли сумму счёта создаётся ссылка')
+    if full_payment is True and not subscription_id:
+        raise PayLinkError('Для полной оплаты выберите исходный счёт')
     if subscription_id:
-        from . import program, pricing
+        from . import program, pricing, services as sv
         row=con.execute("SELECT student_id,status,kind FROM subscriptions WHERE id=?",(subscription_id,)).fetchone()
         if not row or row["student_id"]!=sid or row["status"]=='cancelled':
             raise PayLinkError("Абонемент не найден или отменён")
-        program.reprice(con,subscription_id)
-        pricing.reprice(con,subscription_id)
+        program.reprice(con,subscription_id,on=sv.today())
+        pricing.reprice(con,subscription_id,on=sv.today())
         price=con.execute("SELECT price FROM subscriptions WHERE id=?",(subscription_id,)).fetchone()[0]
         left=0 if row["status"]=="paid" else max(0,price-money.balance(con,sid)["covered"].get(subscription_id,0))
-        if full_payment and amount!=left:
+        if left<=0:
+            raise PayLinkError('Этот счёт уже оплачен. Ссылка на оплату не требуется')
+        if amount>left or full_payment is not False and amount!=left:
             raise PayLinkError("Сумма к оплате изменилась. Обновите расчёт и создайте ссылку заново")
     s = con.execute("""SELECT s.name, (SELECT p.name FROM parents p WHERE p.family_id=s.family_id ORDER BY p.id LIMIT 1),
                        (SELECT p.phone FROM parents p WHERE p.family_id=s.family_id AND p.phone!='' ORDER BY p.id LIMIT 1)
@@ -84,9 +91,12 @@ def create(con, sid: int, amount: int, user: dict, purpose: str = "", subscripti
     receipt_token = secrets.token_urlsafe(32)
     base = (comms.get(con, 'public_url') or 'https://ab-plus.ru').rstrip('/')
     url = base + '/pay/' + receipt_token
-    lid = con.execute("""INSERT INTO pay_links(student_id,amount,orderid,url,purpose,created_at,created_by,subscription_id,receipt_token,checkout_state)
-                         VALUES (?,?,?,?,?,?,?,?,?,'new')""",
-                      (sid,amount,orderid,url,purpose,_now(),user.get('name',''),subscription_id,receipt_token)).lastrowid
+    from . import paylinkguard
+    scope=paylinkguard.snapshot(con,sid,subscription_id,full_payment=full_payment)
+    lid = con.execute("""INSERT INTO pay_links(student_id,amount,orderid,url,purpose,created_at,created_by,subscription_id,receipt_token,checkout_state,full_payment,scope_snapshot)
+                         VALUES (?,?,?,?,?,?,?,?,?,'new',?,?)""",
+                      (sid,amount,orderid,url,purpose,_now(),user.get('name',''),subscription_id,receipt_token,
+                       None if full_payment is None else int(full_payment),scope)).lastrowid
     con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
                 (sid, _now(), user.get("name", ""), "payment", f"Создана ссылка на оплату {amount} ₽; email для чека введёт клиент"))
     return {"id": lid, "url": url, "amount": amount, "purpose": purpose}
@@ -102,23 +112,10 @@ def receipt_link(con, token):
     try: expired = datetime.fromisoformat(link['created_at']) + timedelta(days=LIVE_DAYS) <= datetime.now()
     except (TypeError,ValueError): expired = True
     if expired: raise PayLinkError('Срок действия ссылки истёк. Попросите администратора прислать новую')
-    parts=con.execute('SELECT subscription_id,amount FROM pay_link_subscriptions WHERE link_id=?',(link['id'],)).fetchall()
-    if parts:
-        covered=money.balance(con,link['student_id'])['covered']
-        selected={p['subscription_id'] for p in parts}
-        last_month=max(con.execute('SELECT month FROM subscriptions WHERE id=?',(p['subscription_id'],)).fetchone()[0] for p in parts)
-        if any(s['id'] not in selected and s['month']<=last_month and s['price']>covered.get(s['id'],0) for s in money.obligations(con,link['student_id'])):
-            raise PayLinkError('Есть другие неоплаченные абонементы. Попросите администратора обновить общую ссылку')
-        for part in parts:
-            sub=con.execute('SELECT * FROM subscriptions WHERE id=? AND student_id=?',(part['subscription_id'],link['student_id'])).fetchone()
-            if not sub or sub['status']=='cancelled' or max(0,sub['price']-covered.get(sub['id'],0))!=part['amount']:
-                raise PayLinkError('Один из абонементов изменён или оплачен. Попросите администратора обновить общую ссылку')
-    if link['subscription_id']:
-        sub=con.execute('SELECT status,student_id,price FROM subscriptions WHERE id=?',(link['subscription_id'],)).fetchone()
-        if not sub or sub['student_id']!=link['student_id'] or sub['status'] in ('cancelled','paid'):
-            raise PayLinkError('Абонемент отменён или уже оплачен. Уточните у администратора')
-        left=max(0,sub['price']-money.balance(con,sub['student_id'])['covered'].get(link['subscription_id'],0))
-        if link['amount']>left:raise PayLinkError('Сумма к оплате изменилась. Попросите администратора прислать новую ссылку')
+    from . import paylinkguard
+    checked=paylinkguard.inspect(con,link)
+    if not checked['valid']:
+        raise PayLinkError(checked['reason'])
     return link
 
 
@@ -247,6 +244,7 @@ def sync(con, today: date | None = None) -> int:
 def payment_page(con,token):
     """Only details of this opaque payment link, never family contacts/history."""
     import json
+    from . import services as sv
     link=receipt_link(con,token)
     student=con.execute('SELECT id,name,family_id FROM students WHERE id=?',(link['student_id'],)).fetchone()
     if not student:raise PayLinkError('Ссылка недоступна')
@@ -267,14 +265,19 @@ def payment_page(con,token):
         out['subscriptions']=[]
         for part in parts:
             sub=con.execute('SELECT * FROM subscriptions WHERE id=?',(part['subscription_id'],)).fetchone()
+            current=sv.payment_quote(con,sub['id'],sv.today().isoformat())
             group=con.execute('SELECT g.name,b.name AS branch FROM enrollments e JOIN groups g ON g.id=e.group_id JOIN branches b ON b.id=g.branch_id WHERE e.id=?',(sub['enrollment_id'],)).fetchone()
-            out['subscriptions'].append({'month':sub['month'],'price':sub['price'],'amount':part['amount'],'lessons':sub['lessons'],
-                'group':dict(group) if group else {},'discount_name':sub['discount_name'],'discount_amount':sub['discount_amount']})
+            out['subscriptions'].append({'month':sub['month'],'price':current['price'],'amount':part['amount'],'lessons':sub['lessons'],
+                'paid':current['paid'],'remaining':current['total'],'late_fee':current['late_fee'],
+                'group':dict(group) if group else {},'discount_name':current['discount_name'],'discount_amount':current['discount_amount']})
         return out
     if not link['subscription_id']:return out
     sub=con.execute('SELECT * FROM subscriptions WHERE id=? AND student_id=?',(link['subscription_id'],student['id'])).fetchone()
     if not sub:raise PayLinkError('Ссылка недоступна')
-    covered=min(sub['price'],max(0,money.balance(con,student['id'])['covered'].get(sub['id'],0)))
+    current=sv.payment_quote(con,sub['id'],sv.today().isoformat())
+    sub=dict(sub,price=current['price'],late_fee=current['late_fee'],
+        discount_name=current['discount_name'],discount_amount=current['discount_amount'])
+    covered=current['paid']
     schedule=json.loads(sub['lesson_schedule'] or '[]') or json.loads(sub['program_selection'] or '{}').get('contract',{}).get('components',[])
     groups=[]
     for part in schedule:
@@ -285,7 +288,7 @@ def payment_page(con,token):
         if group:groups=[{'name':group['name'],'branch':group['branch'],'dates':[]}]
     single=con.execute('SELECT date,g.name,b.name AS branch FROM single_visits v JOIN groups g ON g.id=v.group_id JOIN branches b ON b.id=g.branch_id WHERE v.subscription_id=?',(sub['id'],)).fetchone() if sub['kind']=='single' else None
     if single:groups=[{'name':single['name'],'branch':single['branch'],'dates':[single['date']]}]
-    out['subscription']={'month':sub['month'],'kind':sub['kind'],'tariff':sub['tariff'],'lessons':sub['lessons'],'valid_from':sub['valid_from'],'valid_until':sub['valid_until'],'price':sub['price'],'paid':covered,'remaining':max(0,sub['price']-covered),'discount_name':sub['discount_name'],'discount_amount':sub['discount_amount'],'late_fee':sub['late_fee'],'groups':groups,'excluded_dates':json.loads(sub['excluded_dates'] or '[]')}
+    out['subscription']={'month':sub['month'],'kind':sub['kind'],'tariff':sub['tariff'],'lessons':sub['lessons'],'valid_from':sub['valid_from'],'valid_until':sub['valid_until'],'price':sub['price'],'paid':covered,'remaining':current['total'],'discount_name':sub['discount_name'],'discount_amount':sub['discount_amount'],'late_fee':sub['late_fee'],'groups':groups,'excluded_dates':json.loads(sub['excluded_dates'] or '[]')}
     return out
 
 
@@ -296,13 +299,16 @@ def create_bundle(con,sid,sub_ids,user):
     for sub_id in sub_ids:
         sub=con.execute("SELECT * FROM subscriptions WHERE id=? AND student_id=? AND status!='cancelled'",(sub_id,sid)).fetchone()
         if not sub:raise PayLinkError('Абонемент не найден')
-        due=sv.payment_quote(con,sub_id)['total']
+        due=sv.payment_quote(con,sub_id,sv.today().isoformat())['total']
         if due:parts.append((sub_id,due,sub['month']))
     if not parts:raise PayLinkError('Все выбранные абонементы уже оплачены')
     child=sv.get_student_row(con,sid)['name']
     purpose=customer_payment_purpose(child)
     link=create(con,sid,sum(amount for _,amount,_ in parts),user,purpose)
     con.executemany('INSERT INTO pay_link_subscriptions(link_id,subscription_id,amount) VALUES (?,?,?)',[(link['id'],sub,amount) for sub,amount,_ in parts])
+    from . import paylinkguard
+    con.execute('UPDATE pay_links SET full_payment=1,scope_snapshot=? WHERE id=?',
+        (paylinkguard.snapshot(con,sid,parts=[{'subscription_id':sub} for sub,_,_ in parts],full_payment=True),link['id']))
     return link
 
 
