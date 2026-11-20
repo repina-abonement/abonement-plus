@@ -48,6 +48,12 @@ CREATE TABLE IF NOT EXISTS merch_stock_counts (
     counted_by_name TEXT NOT NULL,
     item_count INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS merch_stock_count_lines (
+    count_id INTEGER NOT NULL REFERENCES merch_stock_counts(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES merch_items(id),
+    item_name TEXT NOT NULL, stock INTEGER NOT NULL, norm INTEGER NOT NULL, unit TEXT NOT NULL,
+    PRIMARY KEY(count_id,item_id)
+);
 """
 
 PRICE = [("Форма", 3800), ("Рюкзак большой", 3000), ("Сумка-шоппер", 1650), ("Рюкзак для обуви", 1300), ("Вымпел", 1200),
@@ -109,7 +115,7 @@ def items(con, all_=False, inventory=False) -> list[dict]:
 def stock_status(con, today: date | None = None) -> dict:
     today = today or _now().date()
     monday = today - timedelta(days=today.weekday())
-    last = con.execute("SELECT * FROM merch_stock_counts ORDER BY id DESC LIMIT 1").fetchone()
+    last = con.execute("SELECT * FROM merch_stock_counts ORDER BY counted_at DESC,id DESC LIMIT 1").fetchone()
     shortages = [{"id": r["id"], "name": r["name"], "stock": r["stock"], "norm": r["norm"],
                   "missing": r["norm"] - r["stock"], "unit": r["stock_unit"]}
                  for r in con.execute("""SELECT * FROM merch_items WHERE active=1 AND norm>0 AND stock IS NOT NULL
@@ -131,11 +137,15 @@ def planner_task_section(con, task: dict, repeat: dict | None, user: dict) -> di
             "schedule": ", ".join(labels) or task.get("due_at", "")[:10]}
 
 
-def stock_count(con, rows: list, user: dict, can_norm: bool) -> dict:
+def stock_count(con, rows: list, user: dict, can_norm: bool, counted_on: str | None = None) -> dict:
     """Пересчёт мерча (общий склад): вписали, сколько есть, CRM считает, что заказать, и ставит задачу руководителю.
     Например, кружки 5 при норме 15: заказать 10. Норму меняют руководитель и старший администратор."""
     from . import planner
-    now = _now().isoformat(timespec="minutes")
+    today = _now().date()
+    try: count_day = date.fromisoformat(counted_on) if counted_on else today
+    except (TypeError, ValueError): raise MerchError("Выберите корректную дату пересчёта")
+    if count_day > today: raise MerchError("Нельзя внести пересчёт будущей датой")
+    now = count_day.isoformat() + "T" + _now().strftime("%H:%M")
     inventory = items(con, inventory=True)
     submitted = {int(r.get("id") or 0): r for r in rows}
     missing = [item["name"] for item in inventory if item["id"] not in submitted or submitted[item["id"]].get("stock") in (None, "")]
@@ -145,23 +155,32 @@ def stock_count(con, rows: list, user: dict, can_norm: bool) -> dict:
         iid = int(r.get("id") or 0)
         if not con.execute("SELECT 1 FROM merch_items WHERE id=?", (iid,)).fetchone():
             continue
-        if can_norm and r.get("norm") not in (None, ""):
+        if can_norm and count_day == today and r.get("norm") not in (None, ""):
             con.execute("UPDATE merch_items SET norm=? WHERE id=?", (max(0, int(r["norm"])), iid))
-        if r.get("stock") not in (None, ""):
+        current = con.execute("SELECT stock_at FROM merch_items WHERE id=?", (iid,)).fetchone()
+        if r.get("stock") not in (None, "") and (not current[0] or current[0][:10] <= count_day.isoformat()):
             con.execute("UPDATE merch_items SET stock=?, stock_at=?, stock_by=? WHERE id=?", (max(0, int(r["stock"])), now, user.get("name", ""), iid))
-    con.execute("INSERT INTO merch_stock_counts(counted_at,counted_by_id,counted_by_name,item_count) VALUES (?,?,?,?)",
-                (now, user["id"], user.get("name", ""), len(inventory)))
-    order = [{"name": i["name"], "qty": i["norm"] - i["stock"], "stock": i["stock"], "norm": i["norm"]}
-             for i in con.execute("SELECT * FROM merch_items WHERE active=1 AND stock IS NOT NULL AND norm > stock ORDER BY sort, name")]
+    count_id = con.execute("INSERT INTO merch_stock_counts(counted_at,counted_by_id,counted_by_name,item_count) VALUES (?,?,?,?)",
+                (now, user["id"], user.get("name", ""), len(inventory))).lastrowid
+    current_items = {i["id"]: i for i in items(con, inventory=True)}
+    order = []
+    for r in rows:
+        item = current_items.get(int(r.get("id") or 0))
+        if not item: continue
+        stock = max(0, int(r["stock"])); norm = max(0, int(r.get("norm") or item["norm"])) if can_norm else item["norm"]
+        con.execute("INSERT INTO merch_stock_count_lines(count_id,item_id,item_name,stock,norm,unit) VALUES (?,?,?,?,?,?)",
+                    (count_id,item["id"],item["name"],stock,norm,item["stock_unit"]))
+        if norm > stock: order.append({"name":item["name"],"qty":norm-stock,"stock":stock,"norm":norm})
     task = None
-    if order:
+    if order and count_day == today:
         owner = con.execute("SELECT id FROM users WHERE role='admin' AND active=1 ORDER BY id LIMIT 1").fetchone()
         if owner:
             title = "Заказать мерч: " + ", ".join(f"{o['name']} {o['qty']}" for o in order)
             note = f"Пересчёт {now[8:10]}.{now[5:7]} ({user.get('name', '')}). " + "; ".join(f"{o['name']}: есть {o['stock']} из {o['norm']}" for o in order)
             # задачу руководителю ставит сама CRM, поэтому и администратор, который считал, может её создать
             task = planner.add(con, user | {"role": "admin"}, {"title": title[:300], "assignee_id": owner[0], "note": note})
-    return {"order": order, "task": task, "stock_status": stock_status(con)}
+    return {"order": order, "task": task, "counted_on": count_day.isoformat(), "historical": count_day < today,
+            "stock_status": stock_status(con)}
 
 
 def add_stock_item(con, data: dict) -> int:

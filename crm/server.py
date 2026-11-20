@@ -1704,7 +1704,7 @@ def merch_items(con, h, user, body, q):
 def merch_stock(con, h, user, body, q):
     """Пересчёт склада мерча: остатки, норма, список к заказу и задача руководителю в Планер."""
     try:
-        return merch.stock_count(con, body.get("items") or [], user, user["role"] == "admin")
+        return merch.stock_count(con, body.get("items") or [], user, user["role"] == "admin", body.get("counted_on"))
     except planner.PlanError as e:
         raise ApiError(str(e))
 

@@ -2,6 +2,7 @@
 import os
 import sys
 import tempfile
+from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -42,6 +43,16 @@ def main():
     r = merch.stock_count(con, second, {"id": olga, "name": "Ольга", "role": "operator"}, False)
     check(not r["order"] and con.execute("SELECT norm FROM merch_items WHERE id=?", (a,)).fetchone()[0] == 15,
           "Администратор вписывает остатки, но норму не меняет; всего хватает - задачи нет")
+    before = tuple(con.execute("SELECT stock,norm,stock_at FROM merch_items WHERE id=?", (a,)).fetchone())
+    old_day = (date.today() - timedelta(days=34)).isoformat()
+    historical = [{"id": x["id"], "stock": 2, "norm": 99} for x in merch.items(con, inventory=True)]
+    r = merch.stock_count(con, historical, VARYA, True, old_day)
+    check(r["historical"] and r["counted_on"] == old_day and r["task"] is None,
+          "Старый пересчёт сохраняется выбранной датой и не создаёт сегодняшнюю задачу")
+    check(tuple(con.execute("SELECT stock,norm,stock_at FROM merch_items WHERE id=?", (a,)).fetchone()) == before,
+          "Исторический пересчёт не заменяет более свежий остаток и текущую норму")
+    check(con.execute("SELECT count(*) FROM merch_stock_count_lines WHERE count_id=(SELECT max(id) FROM merch_stock_counts)").fetchone()[0] == len(inventory),
+          "Полный исторический список хранится отдельным снимком")
     extra = merch.add_stock_item(con, {"name": "Пакеты", "unit": "шт."})
     check(tuple(con.execute("SELECT norm,stock_only FROM merch_items WHERE id=?", (extra,)).fetchone()) == (0, 1),
           "Администратор может добавить дополнительную складскую позицию без минимума и цены")

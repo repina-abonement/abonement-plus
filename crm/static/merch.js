@@ -163,6 +163,7 @@ function merchStockHtml(it) {
   const status = it.stock_status || {};
   return `<section class="panel" style="padding:14px;margin-top:14px"><h3 style="margin-top:0">Еженедельный пересчёт и заказ</h3>
     <div class="small ${status.weekly_due ? "" : "muted"}" style="margin-bottom:8px">${status.weekly_due ? "На этой неделе остатки ещё не внесены. " : "✅ Остатки за эту неделю внесены. "}${last ? `Последний пересчёт ${dShort(last.stock_at)} ${esc(last.stock_by)}. ` : ""}Заполните все позиции. Если остаток ниже минимума, руководитель увидит предупреждение на рабочем столе.</div>
+    <label style="max-width:220px">Дата пересчёта<input type="date" data-mst-date value="${S.meta.today}" max="${S.meta.today}"></label>
     <table class="tbl"><thead><tr><th>Товар</th><th>Есть</th><th>Норма</th><th>Заказать</th></tr></thead><tbody>
     ${items.map((i) => `<tr><td>${esc(i.name)}</td><td><input type="number" min="0" inputmode="numeric" data-mst="${i.id}" value="${i.stock ?? ""}" style="width:80px"></td>
       <td>${it.can_norm ? `<input type="number" min="0" inputmode="numeric" data-mno="${i.id}" value="${i.norm || ""}" style="width:80px">` : i.norm || "—"} <span class="small muted">${esc(i.stock_unit || "шт.")}</span></td>
@@ -191,8 +192,9 @@ function wireMerchStock(page, it, afterSave=render) {
     const items = stockItems.filter((i) => i.active).map((i) => ({ id: i.id, stock: page.querySelector(`[data-mst="${i.id}"]`).value,
       norm: page.querySelector(`[data-mno="${i.id}"]`) ? page.querySelector(`[data-mno="${i.id}"]`).value : undefined }));
     try {
-      const r = await api("POST", "/api/merch/stock", { items });
-      toast(r.order.length ? `Заказать: ${r.order.map((o) => `${o.name} ${o.qty}`).join(", ")}. Задача руководителю в Планере` : "Всего хватает, заказывать нечего 👍");
+      const counted_on=page.querySelector('[data-mst-date]').value;
+      const r = await api("POST", "/api/merch/stock", { items, counted_on });
+      toast(r.historical ? `Пересчёт за ${dShort(r.counted_on)} сохранён. Более свежие остатки не изменены` : r.order.length ? `Заказать: ${r.order.map((o) => `${o.name} ${o.qty}`).join(", ")}. Задача руководителю в Планере` : "Всего хватает, заказывать нечего 👍");
       afterSave();
     } catch (e) { fail(e); }
   };
