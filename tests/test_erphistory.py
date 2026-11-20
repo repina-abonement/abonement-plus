@@ -16,6 +16,9 @@ def main():
     fid=con.execute("INSERT INTO families(name) VALUES ('Тестовая семья')").lastrowid
     sid=con.execute("INSERT INTO students(family_id,name,birth,erp_id,stage_changed_at,created_at) VALUES (?,?,?,?,?,?)",
                     (fid,'Тестовый Ребёнок','2015-01-01','TEST-ERP','2026-01-01','2026-01-01')).lastrowid
+    con.execute("INSERT INTO enrollments(student_id,group_id,created_at) VALUES (?,?,?)",(sid,main_group,'2025-01-01'))
+    duplicate=schedule.save_group(con,{'name':'Сборная Север копия','branch_id':ar,'weekdays':[1,6],'time':'18:30','day_times':{'6':'19:30'}})
+    con.execute("UPDATE groups SET active=0 WHERE id=?",(duplicate,))
     main_dates=[('2025-09-02','18:30'),('2025-09-07','19:30'),('2025-09-09','18:30'),('2025-09-14','19:30'),('2025-09-16','18:30'),('2025-09-21','19:30'),('2025-09-23','18:30'),('2025-09-28','19:30')]
     visits=[{'date':d,'time':t,'group':'Север, сборная','type':'Абонемент','erp_subscription_id':'SUB-X','erp_attendance_id':'M'+str(i),'status':'присутствовал'} for i,(d,t) in enumerate(main_dates)]
     visits += [
@@ -36,6 +39,10 @@ def main():
     detail=services.student_detail(con,sid);hist=[x for x in detail['subscriptions'] if x.get('history_import')];assert len(hist)==1 and hist[0]['price'] is None
     after=(con.execute('SELECT count(*) FROM payments').fetchone()[0],money.balance(con,sid),dict(con.execute('SELECT * FROM students WHERE id=?',(sid,)).fetchone()))
     assert before==after
+    con.execute("UPDATE students SET erp_id='' WHERE id=?",(sid,))
+    con.execute("INSERT INTO erp_full_identities(namespace,source_id,student_id) VALUES ('student','TEST-ERP',?)",(sid,))
+    linked=erphistory.preview(con,payload,'2025-09')
+    assert linked['children'][0]['student']['id']==sid and linked['children'][0]['student']['match']=='saved_erp_link'
     print('ok')
 
 if __name__=='__main__':main()

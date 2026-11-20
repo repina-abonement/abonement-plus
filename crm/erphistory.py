@@ -47,6 +47,11 @@ def _student(con, row):
     exact = [dict(r) for r in con.execute("SELECT id,name,birth,erp_id FROM students WHERE erp_id=?", (erp_id,))]
     if len(exact) == 1: return exact[0], "erp_id"
     if len(exact) > 1: return None, "Один ERP ID указан у нескольких карточек"
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_full_identities'").fetchone():
+        linked = [dict(r) for r in con.execute('''SELECT s.id,s.name,s.birth,s.erp_id FROM erp_full_identities i
+            JOIN students s ON s.id=i.student_id WHERE i.namespace='student' AND i.source_id=?''', (erp_id,))]
+        if len(linked) == 1: return linked[0], "saved_erp_link"
+        if len(linked) > 1: return None, "Сохранённая связь ERP ведёт к нескольким карточкам"
     child = row.get("child_profile") or {}
     name, birth, phone = _norm(child.get("name") or row.get("child")), str(child.get("birth") or "")[:10], normalize_phone(child.get("parent_phone") or "")
     if not (name and birth and phone): return None, "ERP ID не найден; для безопасной сверки нужны ФИО, дата рождения и телефон родителя"
@@ -55,17 +60,19 @@ def _student(con, row):
     return (candidates[0], "profile") if len(candidates) == 1 else (None, "Несколько подходящих карточек" if candidates else "Карточка CRM не найдена")
 
 
-def _group(con, source, day, tm):
+def _group(con, source, day, tm, student_id=None, kind=""):
     before_journal = _norm(str(source).split("журнал", 1)[0])
     source_tokens = {x for x in before_journal.split() if x not in SKIP and not x.isdigit()}
     candidates = []
-    for raw in con.execute("SELECT g.*,b.name branch_name FROM groups g JOIN branches b ON b.id=g.branch_id"):
+    enrolled = {r[0] for r in con.execute("SELECT group_id FROM enrollments WHERE student_id=?", (student_id,))} if student_id else set()
+    for raw in con.execute("SELECT g.*,b.name branch_name FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.active=1 AND b.active=1"):
         g = dict(raw); version = schedule.on(con, g, date.fromisoformat(day))
         if logic.group_time(version, date.fromisoformat(day).weekday()) != tm: continue
-        whole = set(_norm(version.get("name", "") + " " + g["branch_name"]).split())
+        whole = set(_norm(version.get("name", "") + " " + g.get("source_name", "") + " " + g["branch_name"]).split())
         overlap = source_tokens & whole
         branch_ok = bool(set(_norm(g["branch_name"]).split()) & set(before_journal.split()))
-        if branch_ok and overlap: candidates.append((len(overlap), g["id"], version.get("name") or g["name"], g["branch_name"]))
+        membership = 4 if kind == "subscription" and g["id"] in enrolled else 0
+        if branch_ok and overlap: candidates.append((len(overlap) + membership, g["id"], version.get("name") or g["name"], g["branch_name"]))
     if not candidates: return None, "Группа не найдена по дате, времени и названию"
     best = max(x[0] for x in candidates); rows = [x for x in candidates if x[0] == best]
     return (rows[0], "") if len(rows) == 1 else (None, "Несколько групп подходят одинаково")
@@ -86,7 +93,7 @@ def preview(con, payload, period=None):
             source_id = str(item.get("erp_attendance_id") or "").strip()
             kind = "makeup" if _norm(item.get("type")) == "отработка" else "subscription" if _norm(item.get("type")) == "абонемент" else ""
             status = "present" if _norm(item.get("status")) in ("присутствовал", "был", "present") else "absent" if _norm(item.get("status")) in ("отсутствовал", "не был", "absent") else ""
-            group, issue = _group(con, item.get("group"), str(item.get("date") or ""), str(item.get("time") or "")) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(item.get("date") or "")) else (None, "Некорректная дата")
+            group, issue = _group(con, item.get("group"), str(item.get("date") or ""), str(item.get("time") or ""), student["id"] if student else None, kind) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(item.get("date") or "")) else (None, "Некорректная дата")
             existing = con.execute("SELECT * FROM erp_history_visits WHERE source_id=?", (source_id,)).fetchone() if source_id else None
             source_conflict = bool(existing and student and group and (existing["student_id"] != student["id"] or existing["group_id"] != group[1] or existing["visit_date"] != item.get("date") or existing["visit_time"] != item.get("time") or existing["kind"] != kind or existing["status"] != status))
             native = bool(student and group and con.execute("SELECT 1 FROM attendance WHERE student_id=? AND group_id=? AND date=? AND status=?", (student["id"],group[1],item.get("date"),status)).fetchone())
