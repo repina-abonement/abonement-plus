@@ -731,6 +731,16 @@ function donut(parts) {
     <ul class="donut-legend">${parts.map((p) => `<li><span style="background:${p.c}"></span>${esc(p.l)}: ${total ? Math.round((p.v / total) * 100) : 0}% (${p.fmt ? p.fmt(p.v) : p.v})</li>`).join("")}</ul></div>`;
 }
 
+function dashboardMonths() {
+  const months = [];
+  for (let offset = 3; offset >= -17; offset--) {
+    const dt = new Date(`${S.meta.today.slice(0, 7)}-01T12:00:00`);
+    dt.setMonth(dt.getMonth() + offset);
+    months.push(isoDate(dt).slice(0, 7));
+  }
+  return months;
+}
+
 async function renderDashboard(page) {
   if (!S.dashMonth) S.dashMonth = S.meta.today.slice(0, 7);
   if (S.dashBranch === undefined) S.dashBranch = "";
@@ -739,8 +749,7 @@ async function renderDashboard(page) {
   if(S.dashGroup&&!dashGroups.some(g=>String(g.id)===String(S.dashGroup)))S.dashGroup='';
   if (!S.dashSeg) S.dashSeg = "count";
   if (S.dashTab && S.dashTab !== "overview") {
-    const ms = [];
-    for (let i = 0; i < 18; i++) { const dt = new Date(S.meta.today); dt.setDate(1); dt.setMonth(dt.getMonth() - i); ms.push(isoDate(dt).slice(0, 7)); }
+    const ms = dashboardMonths();
     page.innerHTML = `<div class="dash-filters">
       <select id="dash-month">${ms.map((x) => `<option value="${x}" ${x === S.dashMonth ? "selected" : ""}>${monthLabel(x)}</option>`).join("")}</select>
       ${S.dashTab === "sources" || S.dashTab === "program" ? "" : `<select id="dash-branch"><option value="">Все филиалы</option>${S.meta.branches.map((b) => `<option value="${b.id}" ${String(b.id) === String(S.dashBranch) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>`}
@@ -751,8 +760,7 @@ async function renderDashboard(page) {
     return renderAnalytics($("#an-box"));
   }
   const d = await api("GET", `/api/dashboard?month=${S.dashMonth}${S.dashBranch ? "&branch_id=" + S.dashBranch : ""}${S.dashGroup?"&group_id="+S.dashGroup:""}`);
-  const months = [];
-  for (let i = 0; i < 18; i++) { const dt = new Date(S.meta.today); dt.setDate(1); dt.setMonth(dt.getMonth() - i); months.push(isoDate(dt).slice(0, 7)); }
+  const months = dashboardMonths();
   const k = d.kpi, sr = d.series;
   const kRub = (t) => t >= 1e6 ? (t / 1e6).toFixed(1).replace(".0", "") + " млн" : t >= 1000 ? Math.round(t / 1000) + " тыс" : fmtNum(t);
   const segColors = { new: "#8cc9a4", regular: "#1f7a4d", returned: "#d9a441" };
