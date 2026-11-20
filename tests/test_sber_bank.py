@@ -174,14 +174,22 @@ class SberBank(unittest.TestCase):
         token.assert_called_once()
 
     def test_account_envelope_requires_complete_unique_account_list(self):
-        def envelope(accounts):
-            payload = base64.urlsafe_b64encode(json.dumps({'accounts': accounts}).encode()).decode().rstrip('=')
+        def envelope(claims):
+            payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
             return 'synthetic-header.' + payload + '.synthetic-signature'
-        with patch.object(sberbank, 'read', return_value=envelope([{'accountNumber': self.account}])):
+        with patch.object(sberbank, 'read', return_value=envelope({'accounts': [{'accountNumber': self.account}]})+'\n'):
             self.assertEqual(sberbank.accounts(self.con), [self.account])
-        for accounts in ([], [{'accountNumber': self.account}] * 2, [{'accountNumber': 'not-account'}]):
-            with self.subTest(accounts=accounts), patch.object(sberbank, 'read', return_value=envelope(accounts)):
-                with self.assertRaises(fiscal.FxError): sberbank.accounts(self.con)
+        for response, reason in (
+            ('not-an-envelope', 'неожиданном формате'),
+            (envelope({}), 'нет списка'),
+            (envelope({'accounts': []}), 'пустой список'),
+            (envelope({'accounts': [{'accountNumber': self.account}] * 2}), 'повторяющиеся'),
+            (envelope({'accounts': [{'accountNumber': 'not-account'}]}), 'форматом номера'),
+        ):
+            with self.subTest(reason=reason), patch.object(sberbank, 'read', return_value=response):
+                with self.assertRaisesRegex(fiscal.FxError, reason) as raised:
+                    sberbank.accounts(self.con)
+                self.assertNotIn(self.account, str(raised.exception))
 
     def test_discovery_preserves_bank_ids_and_does_not_create_crm_payments(self):
         self.con.execute('CREATE TABLE payments(id INTEGER PRIMARY KEY,amount INTEGER)')

@@ -302,16 +302,28 @@ def accounts(con):
     """Accounts data received directly from bank through verified mTLS, not a browser JWT login."""
     raw=read(con,USERINFO,text=True)
     try:
-        # This JWT is used only as the bank's account-data envelope; never as CRM authentication.
-        parts=raw.split('.')
-        if len(parts)!=3:raise ValueError()
-        claims=json.loads(base64.urlsafe_b64decode(parts[1]+'='*(-len(parts[1])%4)))
-        rows=claims['accounts']
-        if not isinstance(rows,list) or not rows:raise ValueError()
-        out=[str(row['accountNumber']) for row in rows]
-        if len(out)!=len(set(out)) or len(out)>30 or any(not re.fullmatch(r'\d{20}',a) for a in out):raise ValueError()
-        return out
-    except Exception:raise fiscal.FxError('Сбер не вернул проверяемый список счетов. Охват счетов пока не подтверждён') from None
+        # The envelope is used only for account data from the bank's verified connection.
+        header,payload,signature=raw.strip().split('.')
+        if not header or not payload or not signature:
+            raise ValueError()
+        claims=json.loads(base64.urlsafe_b64decode(payload+'='*(-len(payload)%4)))
+        if not isinstance(claims,dict):
+            raise ValueError()
+    except (AttributeError,TypeError,ValueError):
+        raise fiscal.FxError('Сбер вернул список счетов в неожиданном формате') from None
+    if 'accounts' not in claims:
+        raise fiscal.FxError('В ответе Сбера нет списка счетов')
+    rows=claims['accounts']
+    if rows==[]:
+        raise fiscal.FxError('Сбер вернул пустой список счетов, доступных для чтения')
+    if not isinstance(rows,list) or len(rows)>30:
+        raise fiscal.FxError('Сбер вернул список счетов в неожиданном формате')
+    numbers=[row.get('accountNumber') if isinstance(row,dict) else None for row in rows]
+    if any(not isinstance(number,str) or not re.fullmatch(r'[0-9]{20}',number) for number in numbers):
+        raise fiscal.FxError('В списке Сбера есть счёт с неподдерживаемым форматом номера')
+    if len(numbers)!=len(set(numbers)):
+        raise fiscal.FxError('В списке Сбера есть повторяющиеся счета')
+    return numbers
 
 
 def normalize(row,account,day):
