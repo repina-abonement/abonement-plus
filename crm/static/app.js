@@ -591,6 +591,7 @@ window.addEventListener("popstate", (e) => {
     if (!st?.studentCard) return;
   }
   if (!st || !st.view) return;
+  if (st.view === "settings") S.setTab = st.settingsTab || null;
   navRestore(st.sub);
   go(st.view, true);
   if (st.drawer && mayRestoreStudent(st.studentCard)) {
@@ -2759,8 +2760,17 @@ function settingsTiles(page) {
   box.innerHTML = cur
     ? `<div class="row" style="align-items:center;gap:10px;margin-bottom:12px"><button class="btn sm" id="set-back" style="flex:0 0 auto;width:auto">← Все настройки</button><b>${cur[1]} ${esc(cur[2])}</b></div>`
     : `<div class="set-tiles">${tabs.map(([k, e, t, d]) => `<button class="set-tile" data-tile="${k}"><span class="set-tile-emoji">${e}</span><b>${esc(t)}</b><span class="small muted">${esc(d)}</span></button>`).join("")}</div>`;
-  box.querySelectorAll("[data-tile]").forEach((b) => (b.onclick = () => { S.setTab = b.dataset.tile; settingsTiles(page); window.scrollTo(0, 0); }));
-  if ($("#set-back")) $("#set-back").onclick = () => { S.setTab = null; settingsTiles(page); window.scrollTo(0, 0); };
+  const navigate = (tab) => {
+    S.setTab = tab || null;
+    const query = tab ? `?settings_tab=${encodeURIComponent(tab)}` : "";
+    try { history.pushState({ view:"settings", sub:navSnap(), depth:navDepth()+1, menu:false, settingsTab:S.setTab }, "", `#settings${query}`); } catch (_) {}
+    settingsTiles(page);window.scrollTo(0,0);
+  };
+  box.querySelectorAll("[data-tile]").forEach((b) => (b.onclick = () => navigate(b.dataset.tile)));
+  if ($("#set-back")) $("#set-back").onclick = () => {
+    if (history.state?.settingsTab && navDepth()>0) history.back();
+    else navigate(null);
+  };
 }
 
 async function renderSettings(page) {
@@ -3070,6 +3080,7 @@ async function boot() {
   const routedStudent = Number(routeParams.get("student")) || 0;
   const routedConversation = Number(routeParams.get("conversation")) || 0;
   try { history.replaceState({ view: S.view, sub: navSnap(), depth: previousState?.depth || 0,
+    ...(S.view === "settings" && S.setTab ? { settingsTab:S.setTab } : {}),
     ...(restoreCard ? { drawer: true, studentCard: restoreCard } : {}) }, "", location.hash || "#" + S.view); } catch (_) {}
   await render();
   if (routedStudent && ["members", "sales", "search", "inbox"].some((section) => can(section))) {
