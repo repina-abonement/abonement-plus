@@ -194,22 +194,39 @@ def apply_payments(con, pays: list[dict]) -> int:
             continue
         amount = int(round(float(str(p.get("pay_amount") or link["amount"]).replace(",", "."))))
         paid_at = str(p.get("success_datetime") or p.get("obtain_datetime") or _now())[:16].replace(" ", "T")
-        parts=con.execute('SELECT subscription_id FROM pay_link_subscriptions WHERE link_id=?',(link['id'],)).fetchall()
+        parts=con.execute('SELECT subscription_id,amount FROM pay_link_subscriptions WHERE link_id=? ORDER BY subscription_id',(link['id'],)).fetchall()
+        if not parts and link['subscription_id']:
+            parts=[{'subscription_id':link['subscription_id'],'amount':link['amount']}]
         if parts:
             from . import program, pricing
             try:paid_day=date.fromisoformat(paid_at[:10])
             except ValueError:paid_day=date.today()
             for part in parts:
-                program.reprice(con,part['subscription_id'],on=paid_day)
-                pricing.reprice(con,part['subscription_id'],on=paid_day)
-        if link["subscription_id"]:
-            from . import program, pricing
-            try:paid_day=date.fromisoformat(paid_at[:10])
-            except ValueError:paid_day=date.today()
-            program.reprice(con,link["subscription_id"],on=paid_day)
-            pricing.reprice(con,link["subscription_id"],on=paid_day)
+                sub=con.execute('SELECT status FROM subscriptions WHERE id=? AND student_id=?',
+                    (part['subscription_id'],link['student_id'])).fetchone()
+                if sub and sub['status']!='cancelled':
+                    program.reprice(con,part['subscription_id'],on=paid_day)
+                    pricing.reprice(con,part['subscription_id'],on=paid_day)
+        remaining=amount
+        invoice_parts=[]
+        covered_before=money.balance(con,link['student_id'])['covered']
+        for part in parts:
+            if remaining<=0:
+                break
+            # Each slice belongs to its original link component. A slice which
+            # is now paid/cancelled stays free; it cannot spill into the next
+            # component or replace another historical payment's allocation.
+            portion=min(max(0,part['amount']),remaining)
+            if portion:
+                sub=con.execute('SELECT price,status FROM subscriptions WHERE id=? AND student_id=?',
+                    (part['subscription_id'],link['student_id'])).fetchone()
+                due=max(0,sub['price']-covered_before.get(part['subscription_id'],0)) if sub and sub['status']!='cancelled' else 0
+                # Zero is trusted purpose metadata, never a zero-money income.
+                invoice_parts.append({'subscription_id':part['subscription_id'],'amount':min(portion,due)})
+                remaining-=portion
         pid = money.add_payment(con, link["student_id"], amount, "paykeeper", ROBOT, subscription_id=link["subscription_id"],
-                                comment=f"по ссылке PayKeeper №{p.get('id', '')}", paid_at=paid_at)
+                                comment=f"по ссылке PayKeeper №{p.get('id', '')}", paid_at=paid_at,
+                                invoice_parts=invoice_parts,allow_cancelled_targets=True)
         con.execute("UPDATE pay_links SET status='paid', paid_at=?, payment_id=?, pk_payment_id=? WHERE id=?",
                     (paid_at, pid, str(p.get("id", "")), link["id"]))
         n += 1

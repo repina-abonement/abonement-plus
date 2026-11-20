@@ -68,6 +68,8 @@ def init(con):
     con.executescript(SCHEMA)
     from . import paymentallocation
     paymentallocation.init(con)
+    from . import balancecredit
+    balancecredit.init(con)
     pcols = {r[1] for r in con.execute("PRAGMA table_info(payments)")}
     if "batch" not in pcols:  # части одного платежа (за семью) и переносы между детьми
         con.execute("ALTER TABLE payments ADD COLUMN batch TEXT NOT NULL DEFAULT ''")
@@ -162,13 +164,20 @@ def balance(con, sid: int, today: date | None = None) -> dict:
     return {"paid_total": allocated['paid_total'], "debt": debt, "upcoming": upcoming,
             "deposit": allocated['free_deposit'], "covered": allocated['covered'],
             "restricted_deposit": allocated['restricted_deposit'],
-            "allocation_conflicts": allocated['conflicts']}
+            "allocation_conflicts": allocated['conflicts'],
+            "cash_free_deposit": allocated.get('cash_free_deposit', allocated['free_deposit']),
+            "fund_free_deposit": allocated.get('fund_free_deposit', 0),
+            "fund_sources": allocated.get('fund_sources', {}),
+            "balance_labels": allocated.get('fund_labels', []),
+            "active_snapshot": allocated.get('active_snapshot', False),
+            "accounting_basis": 'reviewed_snapshot' if allocated.get('active_snapshot') else 'ledger'}
 
 
 # ---------------- платежи ----------------
 
 def add_payment(con, sid: int, amount: int, method: str, user: dict, *, subscription_id: int | None = None,
-                comment: str = "", paid_at: str | None = None) -> int:
+                comment: str = "", paid_at: str | None = None, invoice_parts: list | None = None,
+                allow_cancelled_targets: bool = False) -> int:
     amount = int(amount)
     if amount <= 0:
         raise ValueError("Сумма должна быть больше нуля")
@@ -176,12 +185,38 @@ def add_payment(con, sid: int, amount: int, method: str, user: dict, *, subscrip
         raise ValueError("Выберите способ оплаты")
     if method=='paykeeper' and user.get('id')!=0:
         raise ValueError('Оплата PayKeeper зачисляется по исходному платежу автоматически; не создавайте её повторно вручную')
+    if allow_cancelled_targets is not False and not (
+            allow_cancelled_targets is True and method=='paykeeper' and user.get('id')==0):
+        raise ValueError('Назначение отменённого счёта сохраняется только у исходной оплаты PayKeeper')
+    if invoice_parts is not None:
+        if not isinstance(invoice_parts, list):
+            raise ValueError('Нужен список счетов исходной оплаты')
+        seen=set(); attributed=0
+        for part in invoice_parts:
+            if (not isinstance(part,dict) or type(part.get('subscription_id')) is not int
+                    or type(part.get('amount')) is not int or part['amount']<0
+                    or (part['amount']==0 and not allow_cancelled_targets)
+                    or part['subscription_id'] in seen):
+                raise ValueError('Проверьте точное распределение оплаты по счетам')
+            sub=con.execute('SELECT student_id,status FROM subscriptions WHERE id=?',
+                            (part['subscription_id'],)).fetchone()
+            if not sub or sub['student_id']!=sid or (sub['status']=='cancelled' and not allow_cancelled_targets):
+                raise ValueError('Счёт исходной оплаты не найден в этой карточке')
+            seen.add(part['subscription_id']);attributed+=part['amount']
+        if attributed>amount:
+            raise ValueError('Зачёты по счетам превышают полученную оплату')
     confirmed = 1 if user.get("role") == "admin" or method in ("online", "sbp", "paykeeper", "sber_qr_branch", "tochka_qr_link") else 0
     pid = con.execute("""INSERT INTO payments(student_id, amount, method, paid_at, comment, user_name, confirmed,
                          confirmed_by, confirmed_at, subscription_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                       (sid, amount, method, paid_at or _now(), comment.strip(), user.get("name", ""), confirmed,
                        user.get("name", "") if confirmed else "", _now() if confirmed else None, subscription_id,
                        _now())).lastrowid
+    if invoice_parts:
+        from . import balancecredit
+        for part in invoice_parts:
+            balancecredit.target_payment(con,pid,part['subscription_id'],part['amount'],
+                                         allow_cancelled=allow_cancelled_targets,
+                                         allow_zero=allow_cancelled_targets)
     reconcile(con, sid)
     con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
                 (sid, _now(), user.get("name", ""), "payment",
@@ -214,13 +249,14 @@ def pay_family(con, sid: int, amount: int, method: str, user: dict, comment: str
         raise ValueError("Выберите способ оплаты")
     import secrets
     batch = "fam-" + secrets.token_hex(4)
-    left, parts = amount, {}
+    left, parts, invoice_parts = amount, {}, {}
     for x in con.execute(f"""SELECT x.id, x.student_id, x.price, x.month FROM subscriptions x WHERE x.status='invoiced'
                              AND x.student_id IN ({','.join('?' * len(_family(con, sid)))}) ORDER BY x.month, x.id""", _family(con, sid)).fetchall():
-        need = x["price"] - balance(con, x["student_id"])["covered"].get(x["id"], 0) - parts.get(x["student_id"], 0)
+        need = x["price"] - balance(con, x["student_id"])["covered"].get(x["id"], 0)
         take = min(left, max(0, need))
         if take:
             parts[x["student_id"]] = parts.get(x["student_id"], 0) + take
+            invoice_parts.setdefault(x['student_id'],[]).append({'subscription_id':x['id'],'amount':take})
             left -= take
         if not left:
             break
@@ -229,7 +265,8 @@ def pay_family(con, sid: int, amount: int, method: str, user: dict, comment: str
     names = dict(con.execute(f"SELECT id, name FROM students WHERE id IN ({','.join('?' * len(parts))})", list(parts)).fetchall())
     note = f"Платёж за семью {amount} ₽: " + ", ".join(f"{names[k]} {v} ₽" for k, v in parts.items())
     for k, v in parts.items():
-        pid = add_payment(con, k, v, method, user, comment=(comment.strip() + ". " if comment.strip() else "") + note)
+        pid = add_payment(con, k, v, method, user, comment=(comment.strip() + ". " if comment.strip() else "") + note,
+                          invoice_parts=invoice_parts.get(k))
         con.execute("UPDATE payments SET batch=? WHERE id=?", (batch, pid))
     return {"batch": batch, "parts": [{"student_id": k, "name": names[k], "amount": v} for k, v in parts.items()]}
 
@@ -241,6 +278,8 @@ def move_balance(con, from_sid: int, to_sid: int, amount: int, user: dict) -> No
         raise ValueError("Переносить можно только между детьми одной семьи")
     if amount <= 0 or amount > balance(con, from_sid)["deposit"]:
         raise ValueError("Сумма должна быть не больше переплаты на балансе")
+    if amount>balance(con,from_sid).get('cash_free_deposit',0):
+        raise ValueError('Для этих средств доступен зачёт в счёт. Перенос требует проверки исходной оплаты')
     import secrets
     batch = "mv-" + secrets.token_hex(4)
     names = dict(con.execute("SELECT id, name FROM students WHERE id IN (?,?)", (from_sid, to_sid)).fetchall())
@@ -259,6 +298,8 @@ def refund(con, sid: int, amount: int, user: dict, comment: str) -> None:
         raise ValueError("Напишите, почему возврат и как вернули деньги")
     if amount <= 0 or amount > balance(con, sid)["deposit"]:
         raise ValueError("Вернуть можно не больше переплаты на балансе")
+    if amount>balance(con,sid).get('cash_free_deposit',0):
+        raise ValueError('Возврат этих средств требует проверки исходной оплаты. Запись возврата не создана')
     _row(con, sid, -amount, "refund", user, comment.strip())
     con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
                 (sid, _now(), user.get("name", ""), "payment", f"Возврат {amount} ₽: {comment.strip()}. Пробейте чек возврата"))
@@ -547,5 +588,21 @@ def subscription_payment_details(con,sid):
                     'method':payment_method(con,p),'method_label':METHODS.get(payment_method(con,p),p['method']),
                     'paid_at':p['paid_at'],'created_at':p['created_at'],'receipt':payment_receipt_info(con,p),
                     'reconciliation':reconciliation.payment_state(con,p)})
+        for source in allocated.get('fund_sources',{}).get(sub['id'],[]):
+            rows.append({'record_kind':'balance_credit','payment_id':None,'fund_id':source['fund_id'],
+                'amount':source['amount'],'payment_total':source['amount'],'method':'balance',
+                'method_label':'Зачтено с баланса','fund_label':source['label'],
+                'paid_at':None,'created_at':None,
+                'receipt':{'status':'unverified','label':'Чек исходной оплаты требует сверки'},
+                'reconciliation':None})
+        for source in allocated.get('historical_sources',{}).get(sub['id'],[]):
+            if source['amount']:
+                rows.append({'record_kind':'historical_settlement','payment_id':None,
+                    'amount':source['amount'],'payment_total':source['amount'],'method':'balance',
+                    'method_label':'Оплата сохранена по сверке ERP',
+                    'fund_label':'Исходные поступления сохранены в истории денег',
+                    'paid_at':None,'created_at':None,
+                    'receipt':{'status':'unverified','label':'Чек исходной оплаты требует сверки'},
+                    'reconciliation':None})
         if not sub['retained']:details[sub['id']]=rows
     return details

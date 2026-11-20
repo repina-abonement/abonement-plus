@@ -35,7 +35,11 @@ class SubscriptionPaymentDetails(unittest.TestCase):
 
     def test_single_payment_allocates_to_months_without_duplicate_total(self):
         first=self.invoice();second=self.invoice('2026-12')
-        money.add_payment(self.con,self.sid,20000,'card_branch',self.u,paid_at='2026-11-18T12:02')
+        # New invoices do not consume an unbound balance automatically. This
+        # scenario is one received bundle with explicitly identified invoices.
+        parts=[{'subscription_id':sub,'amount':self.con.execute('SELECT price FROM subscriptions WHERE id=?',(sub,)).fetchone()[0]}
+               for sub in (first,second)]
+        money.add_payment(self.con,self.sid,20000,'card_branch',self.u,paid_at='2026-11-18T12:02',invoice_parts=parts)
         details=money.subscription_payment_details(self.con,self.sid)
         covered=money.balance(self.con,self.sid)['covered']
         for sub in (first,second):self.assertEqual(sum(p['amount'] for p in details[sub]),covered[sub])

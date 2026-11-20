@@ -51,12 +51,14 @@ def main():
         bal=money.balance(con,sid);c=subcancel.cancellations(con,sid)[0]
         assert bal['deposit']==0 and bal['covered'][future]==5400
         assert c['applied_to_invoices']==5400 and c['balance_available']==0
-        # Новый абонемент, оплаченный с депозита, не называется просто выставленным счётом.
+        # Новый счёт тратит баланс только после явного подтверждения зачёта.
         sid2,sub2,e2=make()
         con.execute("UPDATE parents SET email='test@example.invalid'")
         subcancel.cancel(con,sub2,WHO,DATA)
         money.add_payment(con,sid2,20000,'cash',WHO)
-        sale=sv.create_invoice(con,sid2,'2026-12',WHO)
+        selected=sv.quote_for(con,sid2,'2026-12',user=WHO,use_balance=True)
+        sale=sv.create_invoice(con,sid2,'2026-12',WHO,use_balance=True,
+            expected_balance_token=selected['balance_preview']['token'],request_id='synthetic-explicit-cancellation-credit')
         text=con.execute("SELECT text FROM history WHERE student_id=? AND text LIKE 'Абонемент оплачен средствами с баланса:%'",(sid2,)).fetchone()
         assert text and str(sale['quote']['total']) in text[0]
         before_restart=money.balance(con,sid2)

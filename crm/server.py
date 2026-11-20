@@ -1305,7 +1305,8 @@ def vacation_del(con, h, user, body, q, vid):
 
 @route("GET", "/api/students/{sid}/quote", role="operator")
 def quote(con, h, user, body, q, sid):
-    return sv.quote_for(con, int(sid), q.get("month"), q.get("enrollment_id"), q.get("discount_id"), q.get("tariff"), (q.get("excluded_dates") or []) if q.get("dates_selected")=="1" else q.get("excluded_dates"), q.get("credit_requested"), q.get("group_id"), q.get("ofp_group_id"),q.get("paid_date"),user=user)
+    from . import invoicebalanceweb
+    return sv.quote_for(con, int(sid), q.get("month"), q.get("enrollment_id"), q.get("discount_id"), q.get("tariff"), (q.get("excluded_dates") or []) if q.get("dates_selected")=="1" else q.get("excluded_dates"), q.get("credit_requested"), q.get("group_id"), q.get("ofp_group_id"),q.get("paid_date"),user=user,use_balance=invoicebalanceweb.query_choice(q))
 
 
 @route("POST", "/api/students/{sid}/multi-month-preview", role="members:full")
@@ -1326,7 +1327,11 @@ def multi_month_sale(con,h,user,body,q,sid):
 
 @route("POST", "/api/students/{sid}/invoice", role="operator")
 def invoice(con, h, user, body, q, sid):
-    return sv.create_invoice(con, int(sid), body.get("month"), user, body.get("enrollment_id"), body.get("discount_id"), body.get("tariff"), body.get("excluded_dates"), body.get("credit_requested", False), body.get("group_id"), body.get("ofp_group_id"), body.get("group_action", "transfer"),body.get("paid_date"),str(body.get("exclusion_reason") or "")[:1000])
+    return sv.create_invoice(con, int(sid), body.get("month"), user, body.get("enrollment_id"), body.get("discount_id"), body.get("tariff"), body.get("excluded_dates"), body.get("credit_requested", False), body.get("group_id"), body.get("ofp_group_id"), body.get("group_action", "transfer"),body.get("paid_date"),str(body.get("exclusion_reason") or "")[:1000],use_balance=body.get('use_balance',False),expected_balance_token=body.get('expected_balance_token',body.get('balance_token')),request_id=body.get('request_id'))
+
+
+from . import invoicebalanceweb as _invoice_balance_web
+_invoice_balance_web.register(route)
 
 
 @route("POST", "/api/students/{sid}/enrollments", role="operator")
@@ -1355,7 +1360,7 @@ def enrollment_transfer(con, h, user, body, q, eid):
 
 @route("GET", "/api/subscriptions/{sub}/payment-quote", role="operator")
 def subscription_payment_quote(con,h,user,body,q,sub):
-    return sv.payment_quote(con,int(sub),q.get("paid_date"))
+    return sv.payment_quote(con,int(sub),q.get("paid_date"),_invoice_balance_web.query_choice(q))
 
 
 @route("POST", "/api/payments/{pid}/fiscal-check", role="payments:view")

@@ -1,10 +1,13 @@
 """Atomic multi-month sales using the regular monthly calculation and ledger."""
 import hashlib
 import json
-from . import services as sv, logic, money
+from . import services as sv, logic, money, balancecredit
 
 
 def preview(con, sid, data, user):
+    use_balance=data.get('use_balance',False)
+    if type(use_balance) is not bool:
+        raise sv.ApiError('Подтвердите выбор зачёта денег с баланса')
     months=data.get('months')
     if not isinstance(months,list) or not 2<=len(months)<=12 or any(not isinstance(m,str) for m in months) or len(set(months))!=len(months):
         raise sv.ApiError('Выберите от 2 до 12 разных месяцев')
@@ -37,9 +40,10 @@ def preview(con, sid, data, user):
     if any(sub['month']<=max(months) and sub['price']>covered.get(sub['id'],0) for sub in money.obligations(con,sid)):
         raise sv.ApiError('Есть ранее выставленные неоплаченные абонементы. Сначала сверьте их, чтобы общая оплата попала в выбранные месяцы')
     total=sum(r['quote']['total'] for r in rows)
-    credit=min(total,max(0,money.balance(con,sid)['deposit']))
-    token=hashlib.sha256(json.dumps({'rows':rows,'credit':credit},sort_keys=True,ensure_ascii=False).encode()).hexdigest()
-    return {'months':rows,'total':total,'credit':credit,'due':total-credit,'token':token}
+    balance=sv._invoice_balance_preview(con,sid,total,use_balance)
+    credit=balance['apply_amount']
+    token=hashlib.sha256(json.dumps({'rows':rows,'balance_preview':balance,'use_balance':use_balance},sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    return {'months':rows,'total':total,'credit':credit,'due':balance['payable'],'token':token,'balance_preview':balance}
 
 
 def create(con,sid,data,user):
@@ -70,10 +74,26 @@ def create(con,sid,data,user):
         for row in quote['months']:
             invoice=sv.create_invoice(con,sid,row['month'],user,discount_id=row['effective_discount_id'],tariff=data.get('tariff'),
                 excluded_dates=row['excluded_dates'],group_id=data['group_id'],ofp_group_id=data.get('ofp_group_id'),
-                group_action=data.get('group_action') or 'add',paid_date=data.get('paid_date'),exclusion_reason=data.get('exclusion_reason') or '')
+                group_action=data.get('group_action') or 'add',paid_date=data.get('paid_date'),exclusion_reason=data.get('exclusion_reason') or '',
+                request_id='multi-invoice:'+hashlib.sha256((key+':'+row['month']).encode()).hexdigest())
             if con.execute('SELECT price FROM subscriptions WHERE id=?',(invoice['id'],)).fetchone()[0]!=row['quote']['total']:
                 raise sv.ApiError('Стоимость месяца изменилась — обновите расчёт',409)
             subs.append({'id':invoice['id'],'month':row['month'],'price':row['quote']['total']})
+        remaining_credit=quote['credit']
+        if data.get('use_balance',False):
+            for sub in subs:
+                if not remaining_credit:
+                    break
+                balance=sv._invoice_balance_preview(con,sid,sub['price'],True,sub['id'])
+                if balance['apply_amount']>remaining_credit:
+                    raise sv.ApiError('Сумма зачёта изменилась — обновите расчёт',409)
+                if balance['apply_amount']:
+                    request='multi-balance:'+hashlib.sha256((key+':'+str(sub['id'])).encode()).hexdigest()
+                    balancecredit.apply_to_invoice(con,sub['id'],user,True,balance['token'],request)
+                    remaining_credit-=balance['apply_amount']
+            if remaining_credit:
+                raise sv.ApiError('Баланс изменился — обновите расчёт',409)
+            money.reconcile(con,sid)
         remaining=data.get('amount',0) if mode=='pay' else 0
         for sub in subs:
             due=sv.payment_quote(con,sub['id'],data.get('paid_date'))['total']
@@ -88,8 +108,12 @@ def create(con,sid,data,user):
             from . import paylinks
             link=paylinks.create_bundle(con,sid,[s['id'] for s in subs],user)
         result={'link':link,'subscriptions':subs,'total':sum(s['price'] for s in subs),'due':sum(s['due'] for s in subs)}
+        result['payable']=result['due']
         con.execute('INSERT INTO multi_month_orders VALUES (?,?,?,?)',(key,sid,signature,json.dumps(result,ensure_ascii=False)))
         con.execute('RELEASE multi_month_sale')
         return result
-    except BaseException:
-        con.execute('ROLLBACK TO multi_month_sale');con.execute('RELEASE multi_month_sale');raise
+    except BaseException as error:
+        con.execute('ROLLBACK TO multi_month_sale');con.execute('RELEASE multi_month_sale')
+        if isinstance(error,ValueError):
+            raise sv.ApiError(str(error),409) from error
+        raise

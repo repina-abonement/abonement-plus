@@ -15,6 +15,13 @@ OWNER_SNAPSHOT = {'erp_id': '117559', 'amount': 0, 'currency': 'RUB', 'as_of_dat
     'provenance': 'owner_confirmation', 'confirmed': True, 'history_complete': False,
     'live_erp_read': False, 'evidence_id': 'owner:erp117559:balance:2026-11-20'}
 
+OWNER_CARRY = {'requirement_id': 'owner:erp117559:tournament:2026-11-14:next',
+    'credit_key': 'owner:erp117559:tournament:2026-11-14:next',
+    'amount': 2700, 'label': 'На следующий турнир', 'event_date': '2026-11-14',
+    'destination': 'next_tournament', 'target_invoice_id': None, 'destination_pending': True,
+    'once': True, 'provenance': 'owner_confirmation', 'confirmed': True,
+    'income_effect': 0, 'free_balance_effect': 0, 'source_verified': False}
+
 
 def resolve_balance_snapshot(erp_id, evidence=None):
     """Validate explicit balance evidence; absence is never interpreted as zero.
@@ -66,6 +73,60 @@ def _one(record, key):
 def _amount(record, *keys):
     values = {trace._amount(value) for key in keys for value in trace._values(record, key)}
     return next(iter(values)) if len(values) == 1 and None not in values else None
+
+
+def _technical(payment):
+    return (payment.get('user_name') == 'Система'
+            and payment.get('comment') == 'Оплата до реестра платежей')
+
+
+def _source_coverage(source, snapshot=None):
+    """Describe retained evidence, never infer completeness from an empty range.
+
+    An import fallback date remains labelled as such. Neither a technical
+    backfill's timestamp nor a purchase's month proves when money arrived.
+    """
+    operations = {}
+    for record in source['source_rows']:
+        if record.get('source_kind') != 'payments' or not record.get('owner_matches'):
+            continue
+        opid, amount = _one(record, 'operation_id'), _amount(record, 'amount')
+        if not opid or amount is None:
+            continue
+        explicit = _one(record, 'payment_at')
+        fallback = _one(record, 'event_at') if not explicit else None
+        stamp = trace._date(explicit or fallback)
+        fields = record['fields'].get('payment_at' if explicit else 'event_at', [])
+        value = {'operation_id': opid, 'amount': amount, 'source_date': stamp,
+            'date_origin': fields[0]['field'] if len(fields) == 1 else None,
+            'date_is_fallback': bool(fallback), 'payment_date_confirmed': bool(explicit and stamp),
+            'evidence_id': record['evidence_id'],
+            'payment_id': record['target_id'] if record.get('target_table') == 'payments' else None}
+        operations.setdefault(opid, []).append(value)
+    retained, conflicts = [], []
+    for opid, rows in sorted(operations.items()):
+        facts = {(r['amount'], r['source_date'], r['date_is_fallback']) for r in rows}
+        if len(facts) != 1:
+            conflicts.append(opid)
+            continue
+        retained.append(dict(rows[0], evidence_ids=sorted({r['evidence_id'] for r in rows})))
+    income = [r for r in retained if r['amount'] > 0 and r['source_date']]
+    last = max(income, key=lambda r: (r['source_date'], r['operation_id']), default=None)
+    real = [p for p in source['payments'] if not p['cancelled'] and not _technical(p)]
+    technical = [p for p in source['payments'] if not p['cancelled'] and _technical(p)]
+    cutoff = snapshot['cutoff_date'] if snapshot else None
+    return {'scope': 'retained_erp_payment_rows', 'complete': False,
+        'last_retained_payment_date': last['source_date'][:10] if last else None,
+        'last_retained_payment': last, 'retained_operation_count': len(retained),
+        'source_date_fallback_count': sum(r['date_is_fallback'] for r in retained),
+        'conflicting_operation_ids': conflicts,
+        'since_cutoff': {'after_date': cutoff, 'covered': False,
+            'retained_operation_count': sum(bool(r['source_date'] and cutoff and r['source_date'][:10] > cutoff) for r in retained),
+            'note': 'Полнота источника за этот период не подтверждена; отсутствие сохранённых операций не доказывает отсутствие оплат'},
+        'native_real_net': sum(p['amount'] for p in real),
+        'native_real_count': len(real), 'technical_total': sum(p['amount'] for p in technical),
+        'technical_count': len(technical),
+        'note': 'Последняя сохранённая дата относится к доступной истории ERP; текущие поступления нужно сверять отдельно'}
 
 
 def _purchase_amount_proved(source, subid, invoice_id):
@@ -260,10 +321,10 @@ def _post_cutoff(con, source, links, snapshot):
             'included_in_snapshot': True if day < snapshot['as_of_date'] else False if day > snapshot['as_of_date'] else None,
             'snapshot_inclusion': relation, 'snapshot_coverage_confirmed': False,
             'cancelled': bool(payment['cancelled']), 'native_present': True,
-            'origin': 'technical_backfill' if payment['user_name'] == 'Система'
-                and payment['comment'] == 'Оплата до реестра платежей' else 'ledger',
+            'origin': 'technical_backfill' if _technical(payment) else 'ledger',
             'apply_as_new_income': False,
-            'issues': [] if confirmed else ['Исходная операция и её исполнение не подтверждены полностью по идентификаторам']})
+            'issues': (['Техническая запись CRM; не считается новым поступлением'] if _technical(payment)
+                else [] if confirmed else ['Исходная операция и её исполнение не подтверждены полностью по идентификаторам'])})
         seen.update(ids)
     # Retained operations absent from the native ledger remain visible for
     # review. Merely finding a raw row is not permission to create cash.
@@ -286,23 +347,31 @@ def _post_cutoff(con, source, links, snapshot):
             'snapshot_inclusion': relation, 'snapshot_coverage_confirmed': False,
             'cancelled': False, 'native_present': False, 'origin': 'unposted_source',
             'apply_as_new_income': False, 'issues': ['Операция источника не связана с записью CRM; требуется сверка']})
-    totals = {'confirmed_income': 0, 'confirmed_refunds': 0, 'unverified_income': 0, 'unverified_refunds': 0}
+    totals = {'confirmed_income': 0, 'confirmed_refunds': 0, 'unverified_income': 0, 'unverified_refunds': 0,
+              'technical_total': 0, 'technical_count': 0}
     for row in rows:
         if row['cancelled'] or row['direction'] == 'zero':
             continue
+        if row['origin'] == 'technical_backfill':
+            totals['technical_total'] += row['amount']
+            totals['technical_count'] += 1
+            continue
         prefix = 'confirmed' if row['confirmation'] == 'source_confirmed' else 'unverified'
         totals[prefix + ('_income' if row['direction'] == 'income' else '_refunds')] += abs(row['amount'])
-    newer = [r for r in rows if not r['cancelled'] and r['snapshot_inclusion'] == 'after_snapshot']
+    newer = [r for r in rows if not r['cancelled'] and r['snapshot_inclusion'] == 'after_snapshot'
+             and r['origin'] != 'technical_backfill']
     same_day = [r for r in rows if not r['cancelled'] and r['snapshot_inclusion'] == 'requires_same_day_reconciliation'
                 and r['origin'] != 'technical_backfill']
     return {'after_date': snapshot['cutoff_date'], 'start_exclusive': True,
         'as_of_date': snapshot['as_of_date'], 'operations': rows, 'totals': totals,
+        'technical_total': totals['technical_total'], 'technical_count': totals['technical_count'],
+        'source_coverage': _source_coverage(source, snapshot),
         'apply_as_new_income': False, 'newer_operations_present': bool(newer),
         'requires_new_snapshot': bool(newer), 'operations_after_snapshot': newer,
         'requires_same_day_reconciliation': bool(same_day), 'same_day_operations': same_day}
 
 
-def _owner_snapshot_plan(con, source, before, links, post, snapshot):
+def _owner_snapshot_plan(con, source, before, links, post, snapshot, carry_credit=None):
     payments = {p['id']: p for p in source['payments']}
     confirmations = {r['payment_id']: r for r in post['operations'] if r['payment_id'] is not None}
     refunded, coverage_blockers = {}, []
@@ -331,8 +400,7 @@ def _owner_snapshot_plan(con, source, before, links, post, snapshot):
             for r in links if r['subscription_id'] == sub['id']
             and r['payment_id'] in confirmations
             and confirmations[r['payment_id']]['confirmation'] == 'source_confirmed'
-            and confirmations[r['payment_id']]['origin'] != 'technical_backfill'
-            and confirmations[r['payment_id']]['included_in_snapshot'])
+            and confirmations[r['payment_id']]['origin'] != 'technical_backfill')
         if coverage_blockers:
             confirmed = 0
         confirmed = min(sub['price'], confirmed)
@@ -340,13 +408,18 @@ def _owner_snapshot_plan(con, source, before, links, post, snapshot):
             'crm_covered': before['balance']['covered'].get(sub['id'], 0),
             'historical_covered': old, 'historical_funds_allowed': 0,
             'confirmed_post_cutoff_covered': confirmed, 'planned_covered': confirmed,
+            'planned_payable': sub['price'] - confirmed,
             'planned_unpaid': None, 'coverage_unverified': sub['price'] - confirmed,
-            'debt_created': 0, 'plan_only': True, 'proof': 'post_cutoff_source_ids_only',
+            'debt_created': 0, 'plan_only': True, 'proof': 'direct_post_cutoff_source_ids_only',
             'status': 'source_confirmed' if confirmed == sub['price'] else 'requires_source_reconciliation',
             'coverage_blockers': list(dict.fromkeys(coverage_blockers)),
-            'note': 'Неподтверждённая часть требует сверки; снимок свободного баланса не создаёт новый долг'})
-    return {'plan_only': True, 'applied': False, 'provenance': snapshot['provenance'],
+            'note': 'Точная прямая оплата подтверждает свою покупку независимо от даты снимка; общий текущий остаток этим не подтверждается'})
+    carry_amount = carry_credit['amount'] if carry_credit else 0
+    return {'plan_only': True, 'applied': False, 'enabled': False, 'provenance': snapshot['provenance'],
         'snapshot_evidence_id': snapshot['evidence_id'], 'free_balance': snapshot['amount'],
+        'available_balance': snapshot['amount'] + carry_amount,
+        'existing_carry_balance': carry_amount, 'carry_credit_plan': carry_credit,
+        'balance_use_selected': False,
         'free_balance_as_of_date': snapshot['as_of_date'], 'current_free_balance': None,
         'historical_funds_available_for_future': 0, 'history_recalculation_allowed': False,
         'snapshot_funds_available_for_future': snapshot['amount'],
@@ -433,7 +506,7 @@ def audit(con, erp_id, target_month=None, *, balance_snapshot=None):
     result = {'read_only': True, 'apply_allowed': False, 'provenance': 'current_connection',
         'erp_id': str(erp_id).strip(), 'student': source['student'], 'target_month': target_month,
         'before': None, 'after': None, 'proposed_after': None, 'synthetic_candidates': [],
-        'after_scope': None, 'plan_complete': False,
+        'after_scope': None, 'plan_complete': False, 'source_coverage': None,
         'cross_period_allocations': [], 'event_carry': {'expected': [], 'source_candidates': [],
             'plans': [], 'state': 'not_observed', 'blockers': []}, 'expectations': [],
         'proposed_changes': [], 'blockers': [], 'issues': [], 'source_trace': source}
@@ -446,10 +519,7 @@ def audit(con, erp_id, target_month=None, *, balance_snapshot=None):
             {'kind': 'reported_fifo_split', 'month': '2026-12', 'parts': [
                 {'source_month': '2026-08', 'amount': 2100}, {'source_month': '2026-09', 'amount': 10050}], 'verified': False},
             ]
-        requirement = {'requirement_id': 'owner:erp117559:tournament:2026-11-14:next',
-            'amount': 2700, 'event_date': '2026-11-14', 'destination': 'next_tournament',
-            'once': True, 'provenance': 'owner_confirmation', 'confirmed': True,
-            'income_effect': 0, 'free_balance_effect': 0, 'source_verified': False}
+        requirement = dict(OWNER_CARRY)
         result['event_carry']['owner_requirement'] = requirement
         result['event_carry']['expected'] = [dict(requirement, verified=True, confirmation_type='requirement')]
     if not source['student']:
@@ -458,6 +528,7 @@ def audit(con, erp_id, target_month=None, *, balance_snapshot=None):
     sid = source['student']['id']
     result['before'] = _summary(con, sid)
     result['crm_observed'] = result['before']
+    result['source_coverage'] = _source_coverage(source, result['erp_balance_snapshot'])
     links, link_issues = _verified_links(source)
     result['synthetic_candidates'] = _synthetic_candidates(source, links)
     result['cross_period_allocations'] = _cross_period(source, target_month, links)
@@ -465,24 +536,26 @@ def audit(con, erp_id, target_month=None, *, balance_snapshot=None):
     carry['expected'] = result['event_carry']['expected']
     if result['event_carry'].get('owner_requirement'):
         carry['owner_requirement'] = result['event_carry']['owner_requirement']
-        carry['plans'] = [{'action': 'verify_one_time_carry',
-            'requirement_id': carry['owner_requirement']['requirement_id'], 'amount': 2700,
-            'destination': 'next_tournament', 'once': True, 'state': 'blocked',
-            'financial_effect_applied': False, 'income_effect': 0, 'free_balance_effect': 0,
-            'blockers': ['Для однократного целевого переноса нужны исходная операция и ID следующего турнира']}]
-        carry['state'] = 'blocked'
-        carry['blockers'] = list(dict.fromkeys(carry['blockers'] + carry['plans'][0]['blockers']))
-    if carry['expected'] and not carry['source_candidates']:
-        carry['state'] = 'blocked'
-        carry['blockers'] = list(dict.fromkeys(carry['blockers'] + [
-            'Перенос подтверждён владельцем; исходная операция мероприятия пока не найдена']))
+        carry['plans'] = [dict(carry['owner_requirement'], action='preserve_owner_confirmed_carry',
+            state='destination_pending', applied=False, financial_effect_applied=False,
+            apply_as_new_income=False, source_kind='existing_carry',
+            source_ref=carry['owner_requirement']['credit_key'], spend_requires_explicit_choice=True,
+            source_place_unknown=not carry['owner_requirement']['source_verified'],
+            source_reconciliation_required=True, blockers=[])]
+        carry['state'] = 'destination_pending'
+        carry['blockers'] = []
+        carry['notes'] = ['Перенос подтверждён владельцем и сохраняется один раз как существующий остаток; новая оплата не создаётся',
+                          'Следующий турнир пока не выбран; его ID не требуется для сохранения остатка']
+        if not carry['source_candidates']:
+            carry['notes'].append('Исходная операция мероприятия пока не найдена в доступном архиве')
     result['event_carry'] = carry
     result['issues'] = list(dict.fromkeys(source['issues'] + link_issues))
     if result['erp_balance_snapshot']:
         snapshot = result['erp_balance_snapshot']
         result['post_cutoff'] = _post_cutoff(con, source, links, snapshot)
         result['authoritative_balance_plan'] = _owner_snapshot_plan(
-            con, source, result['before'], links, result['post_cutoff'], snapshot)
+            con, source, result['before'], links, result['post_cutoff'], snapshot,
+            carry['plans'][0] if carry.get('owner_requirement') else None)
         result['after_scope'] = ('owner_confirmed_balance_snapshot_plan' if snapshot['provenance'] == 'owner_confirmation'
                                  else 'confirmed_erp_export_balance_snapshot_plan')
         result['proposed_changes'] = [
@@ -492,13 +565,15 @@ def audit(con, erp_id, target_month=None, *, balance_snapshot=None):
             {'action': 'exclude_old_history_from_free_and_future_funding', 'cutoff_date': snapshot['cutoff_date'],
              'future_funds': 0, 'financial_effect_applied': False},
             {'action': 'preserve_sold_purchases_and_attendance', 'financial_effect_applied': False}]
+        if carry.get('owner_requirement'):
+            result['proposed_changes'].append(carry['plans'][0])
         result['blockers'] = list(dict.fromkeys(result['issues'] + carry['blockers']
             + result['authoritative_balance_plan']['coverage_blockers']))
         if result['post_cutoff']['requires_new_snapshot']:
             result['blockers'].append('Есть операции после даты подтверждённого снимка; нужна новая сверка баланса')
         if result['post_cutoff']['requires_same_day_reconciliation']:
             result['blockers'].append('У снимка нет точного времени: операции за тот же день требуют отдельной сверки охвата')
-        if any(r['confirmation'] != 'source_confirmed' and not r['cancelled']
+        if any(r['confirmation'] != 'source_confirmed' and not r['cancelled'] and r['origin'] != 'technical_backfill'
                for r in result['post_cutoff']['operations']):
             result['blockers'].append('Не все операции после '+snapshot['cutoff_date']+' подтверждены по исходным идентификаторам')
         # The incomplete historical ledger cannot determine a corrected net

@@ -68,6 +68,7 @@ class HistoricalRefundHttpTest(unittest.TestCase):
         for actor,status in ((None,401),('operator',403)):
             for method,path,body in (('GET',self.BASE+'/context?erp_id=120486',None),
                     ('GET','/api/erp/financial-audit?erp_id=120486',None),
+                    ('GET','/api/erp/balance-recovery/plan?erp_id=117559',None),
                     ('POST',self.BASE+'/plan',self.body()),('POST',self.BASE+'/apply',self.body())):
                 with self.subTest(actor=actor,path=path):
                     self.assertEqual(self.call(method,path,body,actor)[0],status)
@@ -112,6 +113,26 @@ class HistoricalRefundHttpTest(unittest.TestCase):
         self.assertEqual(plan['free_balance'],0);self.assertIsNone(plan['current_free_balance'])
         self.assertFalse(result['apply_allowed']);self.assertIsNone(result['after'])
         self.assertTrue(result['snapshot_on_copy']);self.assertFalse(result['live_provider_requests'])
+        self.assertEqual(self.con.serialize(),before);self.assertFalse(self.backups.exists())
+
+    def test_balance_recovery_previews_full_server_copy_without_applying_working_records(self):
+        from crm import erpbalancerecovery as recovery
+        case={'erp_id':'120486','subscription_id':self.fixture.target,'as_of_date':'2026-11-20',
+            'cutoff_date':'2026-11-02','base_amount':0,'existing_credit':2700,
+            'credit_label':'На следующий турнир','credit_ref':'synthetic-http-existing-credit',
+            'evidence_id':'synthetic-http-reviewed-balance',
+            'reviewed_fingerprint':recovery.financial_fingerprint(self.con,self.fixture.sid,'120486')}
+        before=self.con.serialize()
+        with patch.dict(recovery.CASES,{'120486':case}):
+            code,result=self.call('GET','/api/erp/balance-recovery/plan?erp_id=120486')
+        self.assertEqual(code,200,result);self.assertTrue(result['plan_ready'],result['issues'])
+        self.assertEqual(result['copy_scope'],'full_server_database')
+        self.assertTrue(result['read_only']);self.assertTrue(result['snapshot_on_copy'])
+        self.assertFalse(result['production_apply_available']);self.assertFalse(result['live_provider_requests'])
+        off,on=result['without_balance'],result['with_balance']
+        self.assertEqual((off['invoice']['payable'],off['balance']['deposit']),(9450,2700))
+        self.assertEqual((on['invoice']['payable'],on['balance']['deposit']),(6750,0))
+        self.assertTrue(result['payments_preserved']);self.assertTrue(result['attendance_preserved'])
         self.assertEqual(self.con.serialize(),before);self.assertFalse(self.backups.exists())
 
     def test_verified_apply_and_transport_token_replay_do_not_duplicate_money(self):

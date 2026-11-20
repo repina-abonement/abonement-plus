@@ -6,7 +6,7 @@ from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from crm import db, money, services as sv  # noqa: E402
+from crm import db, money, balancecredit, services as sv  # noqa: E402
 from tests.test_crm import check  # noqa: E402
 
 OP = {"id": 2, "name": "Оля", "role": "operator"}
@@ -40,7 +40,13 @@ def main():
     check(b["deposit"] == 3000 and b["debt"] == 0, "Лишние деньги лежат на депозите")
     inv2 = sv.create_invoice(con, sid, "2026-11", OP)
     b = money.balance(con, sid, date(2026, 10, 20))
-    check(b["deposit"] == 0 and b["upcoming"] == inv2["quote"]["total"] - 3000, "Депозит сам ушёл в счёт на ноябрь")
+    # The changed default requires an explicit confirmation, including on a
+    # reopened invoice. Creation alone keeps existing money available.
+    check(b["deposit"] == 3000 and b["upcoming"] == inv2["quote"]["total"], "Новый счёт не списал деньги с баланса без выбора")
+    preview=balancecredit.preview(con,sid,inv2['quote']['total'],True,inv2['id'])
+    balancecredit.apply_to_invoice(con,inv2['id'],OP,True,preview['token'],'money-test-explicit-credit-001')
+    b=money.balance(con,sid,date(2026,10,20))
+    check(b['deposit']==0 and b['upcoming']==inv2['quote']['total']-3000,'Подтверждённый зачёт уменьшил остаток счёта на 3 000 ₽')
     pid = con.execute("SELECT id FROM payments WHERE method='card'").fetchone()[0]
     money.cancel_payment(con, pid, ADMIN)
     check(con.execute("SELECT status FROM subscriptions WHERE id=?", (inv["id"],)).fetchone()[0] == "invoiced"

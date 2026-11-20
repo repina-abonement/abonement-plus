@@ -112,6 +112,105 @@ class HistoricalRefundTest(unittest.TestCase):
         unresolved=copy.deepcopy(self.body);unresolved['payment_allocations']=[]
         self.assert_blocked_unchanged(unresolved,'распределение')
 
+    def test_full_prior_ledger_shape_explains_own_sources_and_keeps_old_free_balance(self):
+        """Anonymized shape, not source evidence for any production refund.
+
+        Amounts reproduce a multi-period FIFO carry. All identities, source
+        proofs and receipt details below are explicitly synthetic mocks.
+        """
+        self.con.execute('DELETE FROM pay_links WHERE student_id=?',(self.sid,))
+        self.con.execute('DELETE FROM erp_full_operations WHERE payment_id IN (SELECT id FROM payments WHERE student_id=?)',(self.sid,))
+        self.con.execute('DELETE FROM payments WHERE student_id=?',(self.sid,))
+        self.con.execute('DELETE FROM subscriptions WHERE student_id=?',(self.sid,))
+        self.con.execute("UPDATE students SET erp_id='synthetic-multi-period-card' WHERE id=?",(self.sid,))
+        alternate_enrollment = self.con.execute('''INSERT INTO enrollments(student_id,group_id,created_at)
+            VALUES(?,?,'2026-01-01')''',(self.sid,self.gid)).lastrowid
+        original_enrollment = self.eid
+        purchases = []
+        for index,(month,amount) in enumerate((
+            ('2026-02',7560),('2026-03',9450),('2026-04',2700),('2026-04',5400),
+            ('2026-05',6750),('2026-06',8100),('2026-08',1350),('2026-08',4050),
+            ('2026-09',10800),('2026-10',8100),('2026-11',9450))):
+            self.eid = alternate_enrollment if index in (3,7) else original_enrollment
+            purchases.append(self.invoice(month,amount))
+        self.eid = original_enrollment
+        payments = [self.payment(amount,day,'shape-income-'+str(index))
+                    for index,(amount,day) in enumerate((
+                        (7560,'2026-02-03'),(9450,'2026-02-25'),(8100,'2026-03-24'),
+                        (6750,'2026-04-29'),(8100,'2026-05-26'),(6750,'2026-07-29'),
+                        (4050,'2026-08-17'),(10800,'2026-08-24'),
+                        (8100,'2026-09-24'),(9450,'2026-10-24')))]
+        first,target = purchases[-2:]
+        source_a,source_b = payments[-2:]
+        self.invoices = {'synthetic-order-A':first,'synthetic-order-B':target}
+        self.refunds = {'synthetic-return':{'amount':9450,'executed_at':'2026-11-08',
+            'source_method':'online','source_invoice_id':'synthetic-order-B',
+            'execution_confirmed':True,'evidence_id':'synthetic-return-proof',
+            'source_signature':'synthetic-return-signature'}}
+        body = {'erp_id':'synthetic-multi-period-card','source_namespace':'erp',
+            'source_invoice_id':'synthetic-order-B','refund_operation_id':'synthetic-return',
+            'subscription_id':target,'amount_minor':945000,'executed_at':'2026-11-08',
+            'mapping_reviewed':True,'reason':'Explicitly mocked proof for isolated accounting regression',
+            'payment_allocations':[
+                self.binding(source_a,first,8100,'synthetic-order-A','shape-income-8'),
+                self.binding(source_b,target,9450,'synthetic-order-B','shape-income-9')],
+            'refund_sources':[{'payment_id':source_b,'amount':9450,'source_operation_id':'shape-income-9'}],
+            'receipt':{'fn':'5555555555555555','fd':'101','fp':'1234567890','operation':2,
+                'total_minor':945000,'cashless_minor':945000,'issued_at':'2026-11-08T11:22:33'}}
+
+        def synthetic_operation_proof(con,sid,operation):
+            mapping = {'shape-income-8':('synthetic-order-A',source_a),
+                       'shape-income-9':('synthetic-order-B',source_b)}
+            if sid!=self.sid or operation not in mapping:
+                return {'payment_ids':[],'ambiguous':False,'candidates':[]}
+            invoice,pid = mapping[operation]
+            payment = con.execute('SELECT * FROM payments WHERE id=?',(pid,)).fetchone()
+            return {'payment_ids':[pid],'ambiguous':False,'candidates':[{
+                'payment_id':pid,'source_kind':'payments','source_invoice_id':invoice,
+                'amount':payment['amount'],'paid_at':payment['paid_at'],'source_method':'online',
+                'evidence_id':f'archive:{invoice}:{operation}',
+                'source_signature':'synthetic-operation-proof-'+operation}]}
+
+        money._reconcile(self.con,self.sid);self.con.commit()
+        original_income = [tuple(row) for row in self.con.execute('SELECT * FROM payments ORDER BY id')]
+        self.assertEqual(sum(row['price'] for row in self.con.execute('SELECT price FROM subscriptions WHERE student_id=?',(self.sid,))),73710)
+        self.assertEqual(sum(row['amount'] for row in self.con.execute('SELECT amount FROM payments WHERE student_id=?',(self.sid,))),79110)
+        from crm import historicalrefundtrace
+        with patch.object(historicalrefundtrace,'resolve_payment_operation',side_effect=synthetic_operation_proof):
+            before_bytes = self.fingerprint()
+            report = hr.plan(self.con,body)
+            self.assertTrue(report['can_apply'],report['issues'])
+            self.assertEqual(self.fingerprint(),before_bytes,'Preview must leave the temporary source DB unchanged')
+            before = report['before_summary']
+            self.assertEqual((before['paid_total'],before['debt'],before['free_deposit'],before['restricted_deposit']),(79110,0,5400,0))
+            invoice_a,invoice_b = (before['invoice_totals'][invoice] for invoice in ('synthetic-order-A','synthetic-order-B'))
+            self.assertEqual((invoice_a['source_payment_total'],invoice_a['allocated_total'],invoice_a['covered']),(8100,2700,8100))
+            self.assertEqual((invoice_b['source_payment_total'],invoice_b['allocated_total'],invoice_b['covered']),(9450,4050,9450))
+            self.assertFalse(invoice_a['allocations_reviewed']);self.assertFalse(invoice_b['allocations_reviewed'])
+            self.assertEqual(before['sources'][first],[{'payment_id':payments[7],'amount':5400},{'payment_id':source_a,'amount':2700}])
+            self.assertEqual(before['sources'][target],[{'payment_id':source_a,'amount':5400},{'payment_id':source_b,'amount':4050}])
+            result = hr.apply(self.con,body,report['token'],self.owner,self.backup())
+            after = result['after_summary']
+            self.assertEqual((after['paid_total'],after['debt'],after['free_deposit'],after['restricted_deposit']),(69660,0,5400,0))
+            self.assertEqual(sum(row['price'] for row in after['purchases'] if row['status']!='cancelled'),64260)
+            invoice_a,invoice_b = (after['invoice_totals'][invoice] for invoice in ('synthetic-order-A','synthetic-order-B'))
+            self.assertEqual((invoice_a['allocated_total'],invoice_a['refunded_total'],invoice_a['net_paid'],invoice_a['covered']),(8100,0,8100,8100))
+            self.assertEqual((invoice_b['allocated_total'],invoice_b['refunded_total'],invoice_b['net_paid'],invoice_b['current_charge'],invoice_b['covered'],invoice_b['due']),(9450,9450,0,0,0,0))
+            for subid in purchases[:-1]:self.assertEqual(after['covered'][subid],before['covered'][subid])
+            self.assertEqual([tuple(row) for row in self.con.execute('SELECT * FROM payments WHERE amount>0 ORDER BY id')],original_income)
+            self.assertEqual(after['payment_remaining'][payments[7]],5400)
+            self.assertEqual(after['payment_remaining'][source_a],0);self.assertEqual(after['payment_remaining'][source_b],0)
+            self.con.commit()
+            with redirect_stdout(StringIO()):db.init_db(self.con)
+            stable = self.fingerprint()
+            self.assertTrue(hr.plan(self.con,body)['already_applied'])
+            retry = hr.apply(self.con,body,report['token'],self.owner,None)
+            self.assertTrue(retry['already_applied']);self.assertEqual(retry['run_id'],result['run_id'])
+            self.assertEqual(self.fingerprint(),stable)
+            self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments WHERE amount<0').fetchone()[0],1)
+            self.assertEqual(self.con.execute('SELECT COUNT(*) FROM historical_refund_runs').fetchone()[0],1)
+            self.assertEqual(self.con.execute('SELECT COUNT(*) FROM historical_refund_receipts').fetchone()[0],1)
+
     def test_actual_missing_identifiers_is_only_a_blocked_preview(self):
         body=copy.deepcopy(self.body);body['refund_operation_id']='';body['subscription_id']=None
         body['receipt']['fn']='';body['receipt']['issued_at']=''
@@ -218,6 +317,27 @@ class HistoricalRefundTest(unittest.TestCase):
         self.con.execute("UPDATE payments SET comment='Reviewed later' WHERE id=?",(self.october,));self.con.commit();before=self.fingerprint()
         with self.assertRaises(hr.HistoricalRefundError):hr.apply(self.con,self.body,report['token'],self.owner,backup)
         self.assertEqual(self.fingerprint(),before)
+
+    def test_optional_balance_fund_metadata_is_part_of_plan_and_backup_state(self):
+        from crm import balancecredit
+        balancecredit.init(self.con)
+        fid = self.con.execute('''INSERT INTO balance_credit_funds(student_id,amount,source_kind,
+            source_ref,label,evidence_id,created_at,created_by)
+            VALUES(?,100,'synthetic_review','synthetic-fund-ref','Reviewed label',
+                'synthetic-fund-proof','2026-11-01','Synthetic owner')''',(self.sid,)).lastrowid
+        self.con.commit()
+        before_bytes = self.fingerprint()
+        before = hr._snapshot(self.con,self.sid)
+        self.assertEqual(self.fingerprint(),before_bytes,'Snapshot must not initialize or modify financial data')
+        self.assertTrue(any(row['id']==fid for row in before['_balancecredit_state']['funds']))
+        token_before = hr.plan(self.con,self.body)['token']
+        backup = self.backup()
+        self.con.execute("UPDATE balance_credit_funds SET label='Reviewed later' WHERE id=?",(fid,));self.con.commit()
+        self.assertNotEqual(hr._hash(hr._snapshot(self.con,self.sid)),hr._hash(before))
+        self.assertNotEqual(hr.plan(self.con,self.body)['token'],token_before)
+        stable = self.fingerprint()
+        with self.assertRaises(hr.HistoricalRefundError):hr._verify_backup(self.con,backup,self.sid)
+        self.assertEqual(self.fingerprint(),stable)
 
     def test_late_error_rolls_back_every_financial_and_receipt_change(self):
         report=hr.plan(self.con,self.body);backup=self.backup();before=self.fingerprint()

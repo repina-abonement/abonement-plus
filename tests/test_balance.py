@@ -6,7 +6,7 @@ from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from crm import db, money, services as sv  # noqa: E402
+from crm import db, money, balancecredit, services as sv  # noqa: E402
 from crm.services import ApiError  # noqa: E402
 from tests.test_crm import check  # noqa: E402
 
@@ -28,8 +28,11 @@ def main():
     total = sum(x["quote"]["total"] for x in inv.values())
     check(total == 3 * 4 * 1350, f"Три счёта на декабрь: {total} ₽")
 
-    print("Пример Юлии: СБП 11 400 + переплата 1 350 закрывают три счёта")
+    print("Пример Юлии: СБП и подтверждённый зачёт 1 350 закрывают три счёта")
     money.add_payment(con, a, 1350, "cash", OP, comment="переплата с прошлого месяца")
+    # A previous overpayment is used only after selecting and confirming it.
+    preview=balancecredit.preview(con,a,inv[a]['quote']['total'],True,inv[a]['id'])
+    balancecredit.apply_to_invoice(con,inv[a]['id'],OP,True,preview['token'],'family-test-explicit-credit-001')
     r = money.pay_family(con, a, total - 1350 - 4800 + 4800 - 4800, "sbp", OP)  # сначала частично
     paid_now = sum(p["amount"] for p in r["parts"])
     check(paid_now == total - 1350 - 4800, "Части платежа в сумме дают ровно внесённую сумму")

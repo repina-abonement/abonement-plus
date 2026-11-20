@@ -1,7 +1,7 @@
 """ERP replay preserves records and keeps a reviewed balance plan separate.
 
-Only the owner rule (ERP117559: free zero as of 20 November) is confirmed case
-input. The test's old gross payments/earlier charge are synthetic arithmetic to
+The owner rules retain ERP117559's zero ERP baseline as of 20 November and a
+separate existing 2700 carry. The old gross payments/earlier charge are synthetic arithmetic to
 reproduce the reported FIFO split and are not assertions about working data.
 No balance baseline is activated by these read-only audit tests.
 """
@@ -122,11 +122,20 @@ class ERPBalanceSnapshotImportTest(unittest.TestCase):
         self.assertFalse(report['erp_balance_snapshot']['history_complete'])
         plan = report['authoritative_balance_plan']
         self.assertEqual(plan['free_balance'], 0)
+        self.assertEqual(plan['available_balance'], 2700)
+        self.assertEqual(plan['existing_carry_balance'], 2700)
+        self.assertEqual(plan['carry_credit_plan']['label'], 'На следующий турнир')
+        self.assertTrue(plan['carry_credit_plan']['destination_pending'])
+        self.assertFalse(plan['carry_credit_plan']['apply_as_new_income'])
+        self.assertFalse(plan['balance_use_selected'])
+        self.assertFalse(plan['enabled'])
+        self.assertIsNone(plan['current_free_balance'])
         self.assertEqual(plan['historical_funds_available_for_future'], 0)
         self.assertFalse(plan['applied'])
         self.assertFalse(plan['history_recalculation_allowed'])
         december = next(row for row in plan['protected_invoices'] if row['subscription_id'] == self.december)
         self.assertEqual(december['planned_covered'], 0)
+        self.assertEqual(december['planned_payable'], 12150)
         self.assertIsNone(december['planned_unpaid'])
         self.assertEqual(december['coverage_unverified'], 12150)
         self.assertEqual(december['debt_created'], 0)

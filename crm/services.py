@@ -318,7 +318,17 @@ def first_sale_trial_date(con,sid,ym):
     return max(dates,default='')
 
 
-def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None, paid_date=None, user=None) -> dict:
+def _invoice_balance_preview(con,sid,total,use_balance=False,subscription_id=None):
+    from . import balancecredit
+    try:
+        return balancecredit.preview(con,sid,total,use_balance,subscription_id)
+    except ValueError as error:
+        raise ApiError(str(error),409) from error
+
+
+def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None, paid_date=None, user=None, use_balance=False) -> dict:
+    if type(use_balance) is not bool:
+        raise ApiError('Подтвердите выбор зачёта денег с баланса')
     get_student_row(con, sid)
     e = sale_enrollment(con, sid, enrollment_id, group_id)
     from . import groupterms
@@ -356,6 +366,7 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
             q=program.quote(con,sid,ym,e,discount_id=discount_id,on=on,excluded_dates=[d for d in q['calendar_dates'] if d<=cutoff],selection={"tariff":tariff,"ofp_group_id":ofp_group_id} if tariff is not None else None,validate_selection=True,user=user)
         q['trial_cutoff']=cutoff
         q['pricing_date']=on.isoformat()
+        q['balance_preview']=_invoice_balance_preview(con,sid,q['total'],use_balance)
         return q
     pr = pricing.prices_for(con, ym)  # прайс оплачиваемого месяца (pricing.py)
     if special:pr=dict(pr,fixed=special['per_lesson'],flex=special['per_lesson'])
@@ -412,15 +423,31 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
     q["group"] = e["group_name"]
     q["enrollment_id"] = e["id"]
     q["days_label"] = _days_label(e["weekdays"]) if e["weekdays"] else ""
+    q['balance_preview']=_invoice_balance_preview(con,sid,q['total'],use_balance)
     return q
 
 
 def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id=None, tariff=None,
-                   excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None, group_action="transfer", paid_date=None, exclusion_reason="") -> dict:
+                   excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None, group_action="transfer", paid_date=None, exclusion_reason="",
+                   use_balance=False, expected_balance_token=None, request_id=None) -> dict:
     from . import program, transfer, smart
+    from . import invoicebalanceweb
+    if type(use_balance) is not bool:
+        raise ApiError('Подтвердите выбор зачёта денег с баланса')
+    request_data={'month':ym,'enrollment_id':enrollment_id,'discount_id':discount_id,'tariff':tariff,
+        'excluded_dates':excluded_dates,'credit_requested':credit_requested,'group_id':group_id,
+        'ofp_group_id':ofp_group_id,'group_action':group_action,'paid_date':paid_date,
+        'exclusion_reason':exclusion_reason,'use_balance':use_balance,
+        'expected_balance_token':expected_balance_token}
+    previous=invoicebalanceweb.creation_replay(con,sid,request_id,request_data,required=use_balance)
+    if previous is not None:
+        return previous
     smart.require(con, sid, "sale")
     e = sale_enrollment(con, sid, enrollment_id, group_id)
-    q = quote_for(con, sid, ym, enrollment_id, discount_id, tariff, excluded_dates, credit_requested, group_id, ofp_group_id, paid_date,user=user)
+    q = quote_for(con, sid, ym, enrollment_id, discount_id, tariff, excluded_dates, credit_requested, group_id, ofp_group_id, paid_date,user=user,use_balance=use_balance)
+    if (use_balance and not expected_balance_token or expected_balance_token is not None
+            and expected_balance_token != q['balance_preview']['token']):
+        raise ApiError('Баланс или сумма счёта изменились — обновите расчёт перед подтверждением',409)
     con.execute("SAVEPOINT sale_invoice")
     try:
         if e["id"] is None:
@@ -459,18 +486,23 @@ def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id
             if any(effective.get(k) != v for k, v in selected.items()):
                 program.set_plan(con, sid, e["program_id"], selected["tariff"], selected["ofp_group_id"], user)
         q["enrollment_id"] = eid
-        result = _create_invoice(con, sid, ym, user, eid, quote=q)
+        result = _create_invoice(con, sid, ym, user, eid, quote=q,use_balance=use_balance,
+            expected_balance_token=expected_balance_token,request_id=request_id)
         from . import saleinfo
         saleinfo.record(con,result["id"],user,q,exclusion_reason)
+        invoicebalanceweb.remember_creation(con,sid,request_id,request_data,result)
         con.execute("RELEASE sale_invoice")
         return result
-    except BaseException:
+    except BaseException as error:
         con.execute("ROLLBACK TO sale_invoice")
         con.execute("RELEASE sale_invoice")
+        if isinstance(error,ValueError):
+            raise ApiError(str(error),409) from error
         raise
 
 
-def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False, quote=None) -> dict:
+def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False, quote=None,
+                    use_balance=False,expected_balance_token=None,request_id=None) -> dict:
     from . import smart
     smart.require(con, sid, "sale")  # почта родителя нужна для чека PayKeeper
     e = _pick_enrollment(con, sid, enrollment_id)
@@ -485,8 +517,9 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
         raise ApiError(f"На {logic.month_label(ym)} в группу {e['group_name']} уже есть абонемент")
     q = quote or quote_for(con, sid, ym, e["id"], discount_id, tariff, excluded_dates, credit_requested,user=user)
     d = q.get("discount") or {}
-    from . import money
-    available_before = max(0, money.balance(con,sid)['deposit'])
+    from . import money, balancecredit
+    if expected_balance_token is not None and expected_balance_token != _invoice_balance_preview(con,sid,q['total'],use_balance)['token']:
+        raise ApiError('Баланс изменился — обновите расчёт перед подтверждением',409)
     sub_id = con.execute(
         """INSERT INTO subscriptions(student_id, enrollment_id, month, tariff, lessons, per_lesson, credit_lessons,
            late_fee, price, status, created_at, discount_name, discount_amount) VALUES (?,?,?,?,?,?,?,?,?,'invoiced',?,?,?)""",
@@ -501,8 +534,14 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
                 (json.dumps(q.get("excluded_dates", [])), json.dumps(snapshot) if snapshot else "", sub_id))
     schedule_snapshot = q.get('components') or [{'group_id':e['group_id'],'rate':1,'dates':q['dates']}]
     con.execute('UPDATE subscriptions SET lesson_schedule=?,ledger_managed=1 WHERE id=?',(json.dumps(schedule_snapshot),sub_id))
-    from . import money
-    money.reconcile(con, sid)  # депозит сам закрывает новый счёт
+    balancecredit.protect_invoice(con,sub_id,user)
+    if use_balance:
+        # The external quote was checked before creating the invoice. The
+        # transaction still owns that state; this token scopes the allocation
+        # to the newly protected invoice without creating another income.
+        current=balancecredit.preview(con,sid,q['total'],True,sub_id)
+        balancecredit.apply_to_invoice(con,sub_id,user,True,current['token'],str(request_id or ''))
+    money.reconcile(con, sid)
     for aid in q["credit_absence_ids"]:
         con.execute("UPDATE attendance SET resolved='credit', resolved_month=? WHERE id=?", (ym, aid))
     extra = f", перерасчёт {q['credit_lessons']} пропуск(а) −{q['credit']} ₽" if q["credit_lessons"] else ""
@@ -511,7 +550,8 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
     if d:
         extra += f", скидка «{d['name']}» −{d['amount']} ₽"
     covered = max(0,money.balance(con,sid)['covered'].get(sub_id,0))
-    from_balance = min(available_before,covered)
+    current_balance=balancecredit.preview(con,sid,q['total'],False,sub_id)
+    from_balance=current_balance['already_applied']
     details=f"{q['month_label']}, {e['group_name']}: {q['total']} ₽ ({q['lessons_paid']} занятий{extra})"
     if q['total']>0 and from_balance==q['total']:
         message=f"Абонемент оплачен средствами с баланса: {details}. Списано с баланса {from_balance} ₽"
@@ -524,12 +564,14 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
     log(con,sid,message,user,'payment')
     from . import tasks
     tasks.schedule_renewal(con, sid)
-    return {"id": sub_id, "quote": q}
+    return {"id":sub_id,"quote":q,"due":current_balance['payable'],"payable":current_balance['payable'],"balance_preview":current_balance}
 
 
-def payment_quote(con, sub_id, paid_date=None):
+def payment_quote(con, sub_id, paid_date=None, use_balance=False):
     """Сумма к оплате на выбранную дату; временные изменения расчёта откатываются."""
-    from . import program, pricing, money
+    from . import program, pricing, money, balancecredit
+    if type(use_balance) is not bool:
+        raise ApiError('Подтвердите выбор зачёта денег с баланса')
     on=sale_payment_day(paid_date)
     con.execute("SAVEPOINT payment_preview")
     try:
@@ -538,8 +580,11 @@ def payment_quote(con, sub_id, paid_date=None):
         row=con.execute("SELECT * FROM subscriptions WHERE id=? AND status!='cancelled'",(sub_id,)).fetchone()
         if not row:
             raise ApiError("Счёт не найден или отменён",404)
-        paid=row["price"] if row["status"]=="paid" else max(0,money.balance(con,row["student_id"])["covered"].get(sub_id,0))
-        return {"id":sub_id,"price":row["price"],"paid":paid,"total":max(0,row["price"]-paid),"late_fee":row["late_fee"]}
+        paid=(row["price"] if row["status"]=="paid" and not balancecredit.is_protected(con,sub_id)
+            else max(0,money.balance(con,row["student_id"])["covered"].get(sub_id,0)))
+        preview=_invoice_balance_preview(con,row['student_id'],row['price'],use_balance,sub_id)
+        return {"id":sub_id,"price":row["price"],"paid":paid,"total":preview['payable'],
+            "late_fee":row["late_fee"],"balance_preview":preview}
     finally:
         con.execute("ROLLBACK TO payment_preview")
         con.execute("RELEASE payment_preview")

@@ -36,6 +36,13 @@ def _snapshot_copy(con):
 
 
 def register(route):
+    @route('GET', '/api/erp/balance-recovery/plan', role='admin', transactional=False)
+    def balance_recovery_plan(con,h,user,body,q):
+        from . import erpbalancerecovery
+        result=erpbalancerecovery.preview(con,str(q.get('erp_id') or '').strip())
+        return result|_metadata()|{'read_only':True,'snapshot_on_copy':True,
+            'copy_scope':'full_server_database','production_apply_available':False}
+
     @route('GET', '/api/erp/financial-audit', role='admin', transactional=False)
     def financial_audit(con, h, user, body, q):
         from . import erpfinancialaudit

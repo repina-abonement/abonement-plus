@@ -128,6 +128,10 @@ def _snapshot(con, sid):
     for table in ('erp_full_operations', 'erp_payment_allocations'):
         if _exists(con, table):
             result[table] = _rows(con, 'SELECT * FROM '+table+' WHERE payment_id IN (SELECT id FROM payments WHERE student_id=?) ORDER BY 1,2', (sid,))
+    if any(_exists(con, table) for table in ('invoice_funding_policies', 'invoice_payment_targets',
+                                           'invoice_balance_uses', 'balance_account_snapshots', 'balance_credit_funds')):
+        from . import balancecredit
+        result['_balancecredit_state'] = balancecredit.snapshot_state(con, sid)
     if _exists(con, 'erp_refund_allocations'):
         result['erp_refund_allocations'] = _rows(con, '''SELECT * FROM erp_refund_allocations WHERE refund_payment_id IN
             (SELECT id FROM payments WHERE student_id=?) OR original_payment_id IN (SELECT id FROM payments WHERE student_id=?) ORDER BY 1,2,3''', (sid, sid))
@@ -196,8 +200,14 @@ def _summary(con, sid, report=None):
             else:
                 charge += sub['price'];covered += allocation['covered'].get(subid, 0)
         exact = [row for row in bindings.values() if row['source_invoice_id']==invoice]
+        # Coverage may include older money or a different source invoice. The
+        # unreviewed view must explain only this invoice's own source payments;
+        # total bill coverage remains a separate, unchanged financial value.
+        own_allocation = sum(part['amount'] for subid in subids
+                             for part in allocation['sources'].get(-subid if native[subid]['status']=='cancelled' else subid, [])
+                             if part.get('payment_id') in pids)
         invoice_totals[invoice] = {'source_invoice_id':invoice,'source_payment_ids':sorted(pids),'subscription_ids':sorted(subids),
-            'source_payment_total':gross,'allocated_total':sum(row['amount'] for row in exact) if exact else covered,
+            'source_payment_total':gross,'allocated_total':sum(row['amount'] for row in exact) if exact else own_allocation,
             'refunded_total':refunded,'net_paid':gross-refunded,'current_charge':charge,'covered':covered,'due':max(0,charge-covered),
             'original_native_price':sum(native[subid]['price'] for subid in subids),
             'source_price':next(iter(refs['source_prices'])) if len(refs['source_prices'])==1 else None,

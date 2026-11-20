@@ -247,7 +247,7 @@ class ERPFinancialAuditTest(unittest.TestCase):
         self.assertTrue(result['event_carry']['owner_requirement']['confirmed'])
         self.assertEqual(result['event_carry']['owner_requirement']['amount'], 2700)
         self.assertEqual(result['event_carry']['source_candidates'], [])
-        self.assertEqual(result['event_carry']['state'], 'blocked')
+        self.assertEqual(result['event_carry']['state'], 'destination_pending')
         self.assertIsNone(result['after'])
 
     def test_owner_snapshot_supersedes_history_clone_while_duplicate_evidence_is_preserved(self):
@@ -266,7 +266,7 @@ class ERPFinancialAuditTest(unittest.TestCase):
         self.assertEqual(result['before']['balance']['paid_total'], 16200)
         self.assertEqual(result['before']['balance']['deposit'], 8100)
         self.assertEqual(result['authoritative_balance_plan']['free_balance'], 0)
-        self.assertTrue(any('Перенос подтверждён владельцем' in r for r in result['blockers']))
+        self.assertTrue(any('Перенос подтверждён владельцем' in r for r in result['event_carry']['notes']))
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments').fetchone()[0], 2)
 
     def test_owner_zero_snapshot_has_fixed_provenance_and_never_changes_runtime_balance(self):
@@ -284,6 +284,7 @@ class ERPFinancialAuditTest(unittest.TestCase):
         self.assertEqual(first['crm_observed']['balance'], actual)
         self.assertEqual(first['before']['balance']['deposit'], 39300)
         self.assertEqual(first['authoritative_balance_plan']['free_balance'], 0)
+        self.assertEqual(first['authoritative_balance_plan']['available_balance'], 2700)
         self.assertIsNone(first['authoritative_balance_plan']['current_free_balance'])
         self.assertEqual(first['erp_balance_snapshot'], second['erp_balance_snapshot'])
         self.assertEqual(first['authoritative_balance_plan'], second['authoritative_balance_plan'])
@@ -301,6 +302,8 @@ class ERPFinancialAuditTest(unittest.TestCase):
         self.assertEqual((plan['free_balance'], plan['historical_funds_available_for_future']), (0, 0))
         self.assertEqual((row['crm_covered'], row['historical_covered'], row['planned_covered']), (12150, 12150, 0))
         self.assertEqual(row['coverage_unverified'], 12150)
+        self.assertEqual(row['planned_payable'], 12150)
+        self.assertFalse(plan['balance_use_selected'])
         self.assertIsNone(row['planned_unpaid'])
         self.assertEqual(row['debt_created'], 0)
         self.assertTrue(row['plan_only'])
@@ -366,7 +369,9 @@ class ERPFinancialAuditTest(unittest.TestCase):
         self.assertTrue(plan['requires_new_snapshot'])
         self.assertIsNone(plan['current_free_balance'])
         self.assertEqual({r['subscription_id']: r['planned_covered'] for r in plan['protected_invoices']},
-                         {before_cutoff: 0, after_cutoff: 1000, newer: 0})
+                         {before_cutoff: 0, after_cutoff: 1000, newer: 1000})
+        self.assertEqual(next(r for r in plan['protected_invoices'] if r['subscription_id'] == newer)['planned_payable'], 0)
+        self.assertEqual(plan['available_balance'], 2700)
         self.assertEqual(self.con.execute('SELECT SUM(amount) FROM payments').fetchone()[0], 3000)
 
     def test_confirmed_post_cutoff_refund_is_reported_separately_without_new_debit(self):
@@ -433,7 +438,38 @@ class ERPFinancialAuditTest(unittest.TestCase):
         self.assertFalse(row['snapshot_coverage_confirmed'])
         self.assertTrue(result['post_cutoff']['requires_same_day_reconciliation'])
         self.assertEqual(result['post_cutoff']['operations_after_snapshot'], [])
-        self.assertEqual(result['authoritative_balance_plan']['protected_invoices'][0]['planned_covered'], 0)
+        self.assertEqual(result['authoritative_balance_plan']['protected_invoices'][0]['planned_covered'], 1000)
+        self.assertEqual(result['authoritative_balance_plan']['protected_invoices'][0]['planned_payable'], 0)
+        self.assertIsNone(result['authoritative_balance_plan']['current_free_balance'])
+        self.assertEqual(result['authoritative_balance_plan']['available_balance'], 2700)
+
+    def test_exact_direct_payment_and_refund_after_snapshot_confirm_only_their_net_purchase_coverage(self):
+        self.owner_case()
+        december = self.invoice(10000, '2026-12')
+        pid = self.payment(10000, '2026-11-21')
+        self.sources(december, pid, invoice='synthetic-newer-december', operation='synthetic-newer-income')
+        debit = self.payment(-2000, '2026-11-22')
+        self.con.execute("UPDATE payments SET method='refund' WHERE id=?", (debit,))
+        self.archive('payments', ['ID клиента', 'ID счёта', 'ID операции', 'Дата оплаты', 'Сумма',
+            'Вид оплаты', 'Тип платежа', 'Статус возврата', 'Дата исполнения возврата'],
+            [[self.erp, 'synthetic-newer-december', 'synthetic-newer-return', '2026-11-22', '-2000',
+              'Безналичными', 'Возврат', 'Исполнен', '2026-11-22']], [('payments', debit)])
+        self.con.execute('INSERT INTO erp_full_operations VALUES(?,?,?)',
+            ('synthetic-newer-return', debit, json.dumps([self.sid, '2026-11-22', -2000, 'refund'])))
+        paymentallocation.bind_payment(self.con, pid, december, 10000,
+            source_namespace='erp', source_invoice_id='synthetic-newer-december',
+            source_operation_id='synthetic-newer-income', evidence_id='synthetic-newer-exact-source')
+        paymentallocation.register_refund(self.con, debit, pid, december, 2000)
+        result = self.run_audit('2026-12')
+        row = result['authoritative_balance_plan']['protected_invoices'][0]
+        self.assertEqual((row['planned_covered'], row['planned_payable']), (8000, 2000))
+        self.assertTrue(result['post_cutoff']['requires_new_snapshot'])
+        self.assertEqual(result['post_cutoff']['totals']['confirmed_income'], 10000)
+        self.assertEqual(result['post_cutoff']['totals']['confirmed_refunds'], 2000)
+        self.assertIsNone(result['authoritative_balance_plan']['current_free_balance'])
+        self.assertEqual(result['authoritative_balance_plan']['available_balance'], 2700)
+        self.assertFalse(result['post_cutoff']['apply_as_new_income'])
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments').fetchone()[0], 2)
 
     def test_unposted_source_operation_after_cutoff_remains_visible_without_creating_payment(self):
         self.owner_case()
@@ -459,10 +495,101 @@ class ERPFinancialAuditTest(unittest.TestCase):
         self.assertEqual((carry['owner_requirement']['income_effect'], carry['owner_requirement']['free_balance_effect']), (0, 0))
         self.assertEqual(len(carry['plans']), 1)
         self.assertEqual(carry['plans'][0]['amount'], 2700)
+        self.assertEqual(carry['plans'][0]['label'], 'На следующий турнир')
+        self.assertTrue(carry['plans'][0]['destination_pending'])
+        self.assertIsNone(carry['plans'][0]['target_invoice_id'])
+        self.assertEqual(carry['plans'][0]['state'], 'destination_pending')
+        self.assertEqual(carry['plans'][0]['blockers'], [])
+        self.assertFalse(carry['plans'][0]['apply_as_new_income'])
+        self.assertTrue(carry['plans'][0]['source_place_unknown'])
+        self.assertEqual(first['authoritative_balance_plan']['existing_carry_balance'], 2700)
+        self.assertEqual(first['authoritative_balance_plan']['available_balance'], 2700)
         self.assertEqual(carry, second['event_carry'])
         self.assertFalse(first['plan_complete'])
         self.assertIsNone(first['after'])
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments').fetchone()[0], 0)
+
+    def test_imported_shape_separates_technical_money_owner_carry_and_december_plan(self):
+        # Reproduce the supplied response's arithmetic with synthetic native
+        # and operation IDs. No source invoice identity is invented here.
+        self.owner_case()
+        # Only aggregate counts/totals reproduce the working response.
+        # Individual historical amounts and dates below are deliberately
+        # invented, so this fixture does not retain a client's transaction list.
+        charges = [(6000, '2026-10')]*23 + [(21780, '2026-11')]
+        purchases = [self.invoice(amount, month) for amount, month in charges]
+        december = self.invoice(12150, '2026-12')
+        real = [(6000, '2026-01-15')]*20 + [(17150, '2026-03-12'),
+            (11830, '2026-07-12'), (10800, '2026-10-22')]
+        source, targets = [], []
+        for index, (amount, day) in enumerate(real):
+            pid = self.payment(amount, day)
+            opid = 'synthetic-retained-operation-'+str(index)
+            source.append([self.erp, opid, amount, day, 'Картой'])
+            targets.append(('payments', pid))
+            self.con.execute('INSERT INTO erp_full_operations VALUES(?,?,?)',
+                (opid, pid, json.dumps([self.sid, day, amount, 'card'])))
+        self.archive('payments', ['ID клиента', 'ID операции', 'Сумма', 'Дата оплаты', 'Вид оплаты'], source, targets)
+        markers = [(4200, '2026-01-02', index) for index in range(5)]
+        markers += [(5000, '2026-11-20', index) for index in range(5, 10)]
+        markers.append((5450, '2026-11-20', 10))
+        for amount, day, index in markers:
+            self.payment(amount, day, subid=purchases[index], technical=True)
+        first, second = self.run_audit('2026-12'), self.run_audit('2026-12')
+        self.assertEqual(sum(amount for amount, _ in real), 159780)
+        self.assertEqual(sum(amount for amount, _ in charges), 159780)
+        self.assertEqual(first['before']['balance']['deposit'], 39300)
+        self.assertEqual(first['before']['balance']['covered'][december], 12150)
+        coverage = first['source_coverage']
+        self.assertEqual((coverage['technical_count'], coverage['technical_total']), (11, 51450))
+        self.assertEqual((coverage['native_real_count'], coverage['native_real_net']), (23, 159780))
+        self.assertEqual(coverage['last_retained_payment_date'], '2026-10-22')
+        self.assertFalse(coverage['complete'])
+        self.assertFalse(coverage['since_cutoff']['covered'])
+        self.assertEqual(coverage['since_cutoff']['retained_operation_count'], 0)
+        post = first['post_cutoff']
+        self.assertEqual((post['technical_count'], post['technical_total']), (6, 30450))
+        self.assertEqual(post['totals']['unverified_income'], 0)
+        self.assertEqual(post['totals']['confirmed_income'], 0)
+        self.assertTrue(all(row['origin'] == 'technical_backfill' for row in post['operations']))
+        self.assertFalse(post['requires_same_day_reconciliation'])
+        self.assertFalse(any('Не все операции после' in r for r in first['blockers']))
+        plan = first['authoritative_balance_plan']
+        self.assertEqual((first['erp_balance_snapshot']['amount'], plan['free_balance'], plan['available_balance']), (0, 0, 2700))
+        self.assertEqual(plan['existing_carry_balance'], 2700)
+        self.assertFalse(plan['enabled'])
+        self.assertFalse(plan['balance_use_selected'])
+        self.assertIsNone(plan['current_free_balance'])
+        row = next(r for r in plan['protected_invoices'] if r['subscription_id'] == december)
+        self.assertEqual((row['planned_covered'], row['planned_payable']), (0, 12150))
+        self.assertEqual(plan['carry_credit_plan'], second['authoritative_balance_plan']['carry_credit_plan'])
+        self.assertEqual(plan['carry_credit_plan']['income_effect'], 0)
+        self.assertEqual(len(first['event_carry']['plans']), 1)
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments').fetchone()[0], 34)
+
+    def test_source_date_fallback_is_visible_without_claiming_a_real_payment_timestamp(self):
+        self.owner_case()
+        pid = self.payment(4050, '2026-10-22')
+        self.archive('payments', ['ID клиента', 'ID операции', 'Сумма', 'Дата события', 'Вид оплаты'],
+            [[self.erp, 'synthetic-fallback-operation', '4050', '22/10/2026', 'Картой']], [('payments', pid)])
+        first = self.run_audit()
+        coverage = first['source_coverage']
+        self.assertEqual(coverage['last_retained_payment_date'], '2026-10-22')
+        self.assertEqual(coverage['source_date_fallback_count'], 1)
+        self.assertEqual(coverage['last_retained_payment']['date_origin'], 'Дата события')
+        self.assertTrue(coverage['last_retained_payment']['date_is_fallback'])
+        self.assertFalse(coverage['last_retained_payment']['payment_date_confirmed'])
+        self.assertFalse(coverage['since_cutoff']['covered'])
+
+    def test_newer_technical_timestamp_does_not_claim_new_receipts_or_a_new_balance_snapshot(self):
+        self.owner_case()
+        sub = self.invoice(2700)
+        self.payment(2700, '2026-11-21', subid=sub, technical=True)
+        result = self.run_audit()
+        self.assertEqual(result['post_cutoff']['totals']['unverified_income'], 0)
+        self.assertEqual(result['post_cutoff']['technical_total'], 2700)
+        self.assertFalse(result['post_cutoff']['requires_new_snapshot'])
+        self.assertEqual(result['post_cutoff']['operations_after_snapshot'], [])
 
     def test_sold_purchases_and_actual_attendance_survive_snapshot_plan(self):
         self.owner_case()
@@ -494,6 +621,9 @@ class ERPFinancialAuditTest(unittest.TestCase):
         self.assertEqual(result['authoritative_balance_plan']['protected_invoices'][0]['subscription_id'], december)
         self.assertEqual(result['authoritative_balance_plan']['protected_invoices'][0]['planned_covered'], 0)
         self.assertNotIn('owner_requirement', result['event_carry'])
+        self.assertEqual(result['authoritative_balance_plan']['available_balance'], 0)
+        self.assertEqual(result['authoritative_balance_plan']['existing_carry_balance'], 0)
+        self.assertIsNone(result['authoritative_balance_plan']['carry_credit_plan'])
 
     def test_positive_explicit_export_balance_is_preserved_without_manufacturing_a_payment(self):
         snapshot = self.snapshot(amount=3200, provenance='erp_export', source_field='Баланс', source_value='3 200')
