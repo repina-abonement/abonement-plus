@@ -941,6 +941,20 @@ from . import erpbalancerecoveryweb as _erp_balance_recovery_web
 _erp_balance_recovery_web.register(route)
 
 
+@route('GET','/api/diagnostics/student-card',role='admin',transactional=False)
+def student_card_diagnostics(con,h,user,body,q):
+    from . import carderrors
+    from .erpsinglerecoveryweb import provenance
+    sid=str(q.get('student_id') or '')
+    error_id=q.get('error_id')
+    if not re.fullmatch(r'[1-9][0-9]{0,17}',sid) or (error_id is not None and not re.fullmatch(r'[a-f0-9]{12}',error_id)):
+        raise ApiError('Укажите ID карточки и корректный номер ошибки')
+    if h:
+        h.extra_headers.extend([('Cache-Control','no-store')])
+    return carderrors.latest(sid,error_id)|{'provenance':provenance(),
+        'read_only':True,'live_provider_requests':False}
+
+
 @route("POST", "/api/erp/tasks/transfer-plan", role="admin")
 def task_transfer_plan(con,h,user,body,q):
     from . import erptasktransfer
@@ -3758,9 +3772,20 @@ class Handler(BaseHTTPRequestHandler):
         except (json.JSONDecodeError, ValueError, TypeError) as e:
             traceback.print_exc()
             return self._send(400, {"error": "Неверные данные запроса"})
-        except Exception:
+        except Exception as error:
             traceback.print_exc()
-            return self._send(500, {"error": "Ошибка сервера"})
+            result={"error":"Ошибка сервера"}
+            if method=='GET':
+                # No request/query/body/locals enter the bounded diagnostic.
+                # A capture failure must never replace the original response.
+                try:
+                    from . import carderrors
+                    error_id=carderrors.record(url.path,error)
+                    if error_id:
+                        result['error_id']=error_id
+                except Exception:
+                    pass
+            return self._send(500,result)
 
     def do_GET(self):
         self._handle("GET")
