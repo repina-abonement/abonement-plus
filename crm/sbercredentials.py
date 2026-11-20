@@ -239,9 +239,9 @@ def save(con, body):
                 certificate_client_id=changes.get('client_id') or before.get('client_id') or '')
         changes['redirect_uri'] = REDIRECT_URI
         data.update(changes)
-        # Rotating just client_secret must retain the renewable token. A new
-        # identity, certificate or account consent must be authorized again.
-        if any(key in changes and changes[key] != before.get(key) for key in ('client_id', 'accounts', 'certificate_file', 'redirect_uri')):
+        # The local list controls requests; the bank enforces the existing consent.
+        # Only a new identity or certificate invalidates the token.
+        if any(key in changes and changes[key] != before.get(key) for key in ('client_id', 'certificate_file', 'redirect_uri')):
             for key in _TOKEN_KEYS:
                 data.pop(key, None)
         _write(con, data)

@@ -298,6 +298,10 @@ def read(con,path,params=None,*,text=False):
             if error.http_status!=401 or attempt:raise
 
 
+class AccountListMissing(fiscal.FxError):
+    pass
+
+
 def accounts(con):
     """Accounts data received directly from bank through verified mTLS, not a browser JWT login."""
     raw=read(con,USERINFO,text=True)
@@ -312,7 +316,7 @@ def accounts(con):
     except (AttributeError,TypeError,ValueError):
         raise fiscal.FxError('Сбер вернул список счетов в неожиданном формате') from None
     if 'accounts' not in claims:
-        raise fiscal.FxError('В ответе Сбера нет списка счетов')
+        raise AccountListMissing('В ответе Сбера нет списка счетов')
     rows=claims['accounts']
     if rows==[]:
         raise fiscal.FxError('Сбер вернул пустой список счетов, доступных для чтения')
@@ -369,6 +373,19 @@ def statement(con,account,day):
     raise fiscal.FxError('Выписка Сбера превышает предел страниц; полнота не подтверждена')
 
 
+def statement_accounts(con):
+    selected=credentials.get(con,'accounts') or []
+    try:
+        visible=accounts(con)
+    except AccountListMissing:
+        if selected and all(re.fullmatch(r'[0-9]{20}', account) for account in selected):
+            return selected, True
+        raise AccountListMissing('В ответе Сбера нет списка счетов. Укажите 20-значный номер в настройках подключения Сбер Бизнес') from None
+    if set(selected)-set(visible):
+        raise fiscal.FxError('В списке Сбера отсутствует один из указанных счетов')
+    return visible, False
+
+
 def discover(con,current):
     from . import incomingcontrol
     if not configured(con):
@@ -383,11 +400,11 @@ def discover(con,current):
     if not floor<=cursor<=current.date().isoformat():cursor=floor
     days=list(dict.fromkeys(day for day in (current.date().isoformat(),(current.date()-timedelta(days=1)).isoformat(),cursor)
                             if floor<=day<=current.date().isoformat()))
-    errors=[];successful=[];count=0;account_count=0
+    errors=[];successful=[];count=0;account_count=0;selected_only=False
     try:
-        visible=accounts(con);selected=credentials.get(con,'accounts') or visible
-        if set(selected)-set(visible):raise fiscal.FxError('Сбер не разрешил чтение одного из выбранных счетов')
-        credentials.update_private(con,{'discovered_accounts':visible,'accounts_checked_at':current.isoformat(timespec='seconds')})
+        visible,selected_only=statement_accounts(con)
+        if not selected_only:
+            credentials.update_private(con,{'discovered_accounts':visible,'accounts_checked_at':current.isoformat(timespec='seconds')})
         account_count=len(visible)
         for day in days:
             try:
@@ -403,13 +420,18 @@ def discover(con,current):
     except Exception:errors.append({'note':'Сбер: проверка временно недоступна; повтор произойдёт автоматически'})
     result={'checked':count,'completed':True,'days':days,'successful_days':successful,'history_cursor':cursor,
         'accounts_count':account_count,'maintenance':maintenance(con,current),'unavailable':len(errors),'errors':errors,'empty':not count and not errors}
-    incomingcontrol.checked(con,'sber',current,'unavailable' if errors else 'ok',result)
+    if selected_only:
+        result['note']='Проверяются счета из настроек CRM. Общий список счетов Сбер не вернул.'
+    incomingcontrol.checked(con,'sber',current,'unavailable' if errors else 'partial' if selected_only else 'ok',result)
     return result
 
 
 def test_connection(con):
     if not configured(con):return transport_check(con)
-    visible=accounts(con)
-    day=(now().date()-timedelta(days=1)).isoformat()
+    visible,selected_only=statement_accounts(con)
+    current=now().date()
+    day=max((current-timedelta(days=1)).isoformat(),fiscal.control_from(con))
     count=sum(len(statement(con,account,day)) for account in visible)
-    return {'ok':True,'accounts_count':len(visible),'transactions_count':count,'note':'Счета и выписка Сбера читаются. Поступления проверяются в фоне каждые 10 минут'}
+    note=('Выписка по указанным счетам читается. Общий список счетов Сбер не вернул.'
+          if selected_only else 'Счета и выписка Сбера читаются. Поступления проверяются в фоне каждые 10 минут')
+    return {'ok':True,'accounts_count':len(visible),'transactions_count':count,'note':note}

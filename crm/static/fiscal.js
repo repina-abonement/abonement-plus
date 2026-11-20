@@ -107,7 +107,7 @@ async function fxSberSetup(box) {
     ${!d.connected&&!d.last_error&&d.last_connection_check?.ok?'<p class="small" role="status">Связь с сервером Сбера установлена. Нажмите «Разрешить чтение в Сбере».</p>':''}
     <ol class="small"><li>В карточке активированного сервиса Sber API откройте параметры подключения и перенесите client_id и client_secret в поля ниже.</li>
       <li>В разделе Сбера «Сертификаты шифрования» создайте сертификат, задайте пароль и скачайте файл .p12. Выберите его ниже.</li>
-      <li>CRM читает все счета, доступные вашему разрешению. При желании укажите ожидаемые номера — CRM проверит, что они доступны. Сохраните настройки и нажмите «Разрешить чтение в Сбере».</li></ol>
+      <li>Если Сбер не вернул список счетов, укажите номера расчётных счетов и нажмите «Сохранить». CRM проверит выписку по ним через уже выданное разрешение.</li></ol>
     <div class="field"><label for="sber-client-id">client_id из карточки сервиса</label><input id="sber-client-id" type="text" value="${esc(d.client_id || '')}" autocomplete="off" spellcheck="false"></div>
     <div class="field"><label for="sber-client-secret">client_secret</label><input id="sber-client-secret" type="password" value="" autocomplete="new-password" placeholder="${d.client_secret_set ? 'Уже сохранён · оставьте пустым, чтобы сохранить' : 'Вставьте из карточки сервиса'}"></div>
     <div class="field"><label for="sber-accounts">Ожидаемые расчётные счета (необязательно)</label><textarea id="sber-accounts" rows="2" autocomplete="off" placeholder="${d.accounts_set ? 'Оставьте пустым, если список счетов не меняется' : 'Каждый номер счёта с новой строки · пусто = доступные счета'}"></textarea>${masked ? `<span class="small muted">Сохранены счета, заканчивающиеся на: ${masked}</span>` : ''}</div>
@@ -144,7 +144,7 @@ async function fxSberSetup(box) {
     buttons().forEach(b => b.disabled = true); result.textContent = "Проверяем…";
     try {
       const body = await collect();
-      if (Object.keys(body).length) await api("PUT", "/api/sber/settings", body);
+      const saved = Object.keys(body).length ? await api("PUT", "/api/sber/settings", body) : d;
       // Secret fields are cleared even when the next step fails; the saved values stay on the server.
       el("sber-client-secret").value = ""; el("sber-certificate-password").value = ""; el("sber-certificate").value = "";
       if (action === "authorize") {
@@ -156,7 +156,9 @@ async function fxSberSetup(box) {
         result.textContent = r.note || (r.ok ? "Выписка прочитана" : "Выписка пока не получена");
       } else {
         await fxSberSetup(box); box.querySelector("details").open = true;
-        box.querySelector("#sber-result").textContent = "Настройки сохранены. Теперь разрешите чтение в Сбере";
+        box.querySelector("#sber-result").textContent = saved.connected
+          ? "Настройки сохранены. Сервер проверит выписку автоматически."
+          : "Настройки сохранены. Теперь разрешите чтение в Сбере";
       }
     } catch (e) { result.textContent = e.message || "Не удалось завершить подключение"; }
     finally { buttons().forEach(b => b.disabled = false); }

@@ -91,8 +91,11 @@ def discover_tochka(con,current):
         count=ingest_bank(con,'tochka',transactions,current)
         result={'checked':count,'completed':True,'from':start.isoformat(),'to':current.date().isoformat(),'empty':not count,'currency_scope':'all_accessible_accounts'}
         checked(con,'tochka',current,'ok',result);return result
-    except Exception:
+    except Exception as error:
         result={'checked':0,'unavailable':1,'note':'Не удалось получить полную выписку Точки для поиска новых поступлений'}
+        if type(error) is fiscal.FxError:
+            result['note']=str(error)
+            result['http_status']=error.http_status
         checked(con,'tochka',current,'unavailable',result);return result
 
 
@@ -204,7 +207,8 @@ def view(con,summary_only=False,current=None):
     complete=False
     result={'complete':complete,'coverage':coverage,'tracked_cases':len(rows),'attention':len(issues),
         'unrecorded':sum(c['unrecorded'] for c in rows),'receipt_unconfirmed':sum(c['receipt']['status']!='confirmed' for c in rows),
-        'scope_note':(f'Активная сверка с {datetime.fromisoformat(start):%d.%m.%Y}. Более ранние записи отложены. ' if start!='0001-01-01' else '')+'Поиск новых поступлений: PayKeeper — сегодня, вчера и поэтапная проверка предыдущих 31 дня; Точка — все доступные ключу счета, первоначально 31 день. Сбер — все счета, доступные разрешению, с поэтапной проверкой 31 дня. Более ранняя история и полнота доступа ко всем счетам пока не подтверждены.',
+        'scope_note':(f'Активная сверка с {datetime.fromisoformat(start):%d.%m.%Y}. Более ранние записи отложены. ' if start!='0001-01-01' else '')+
+            'Сервер проверяет доступные счета и оплаты PayKeeper за текущий период. Счётчики включают только полученные данные.',
         'truncated':truncated,'sber_connected':coverage['sber']['status']=='ok'}
     if not summary_only:result['rows']=issues
     return result

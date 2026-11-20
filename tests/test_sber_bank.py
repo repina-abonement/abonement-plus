@@ -207,6 +207,26 @@ class SberBank(unittest.TestCase):
         self.assertEqual(events[0]['amount_minor'], 135000)
         self.assertEqual(self.con.execute('SELECT count(*) FROM payments').fetchone()[0], 0)
 
+    def test_missing_discovery_uses_explicit_accounts_with_partial_coverage(self):
+        self.private['accounts'] = [self.account]
+        with patch.object(sberbank, 'accounts', side_effect=sberbank.AccountListMissing('missing')), \
+                patch.object(sberbank, 'statement', return_value=[]) as read_statement:
+            result = sberbank.discover(self.con, self.current)
+        self.assertEqual(result['unavailable'], 0)
+        self.assertTrue(read_statement.called)
+        self.assertTrue(all(call.args[1]==self.account for call in read_statement.call_args_list))
+        status = self.con.execute("SELECT status FROM incoming_source_checks WHERE source='sber'").fetchone()[0]
+        self.assertEqual(status, 'partial')
+        self.assertNotIn('discovered_accounts', self.private)
+
+    def test_explicit_accounts_do_not_bypass_provider_denial(self):
+        self.private['accounts'] = [self.account]
+        with patch.object(sberbank, 'accounts', side_effect=fiscal.FxError('denied',http_status=403)), \
+                patch.object(sberbank, 'statement') as read_statement:
+            result = sberbank.discover(self.con, self.current)
+        read_statement.assert_not_called()
+        self.assertEqual(result['errors'][0]['http_status'], 403)
+
     def test_source_error_is_visible_without_erasing_previous_events(self):
         incomingcontrol.save_event(self.con,'sber','synthetic-account','previous-id',self.day,135000,'RUB',{'purpose':'synthetic'},self.current)
         with patch.object(sberbank, 'accounts', side_effect=fiscal.FxError('scope missing', http_status=403)):

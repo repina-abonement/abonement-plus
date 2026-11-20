@@ -88,6 +88,8 @@ class SberCredentials(unittest.TestCase):
         credentials.update_private(self.con, {'access_token':'ACCESS','refresh_token':'REFRESH'})
         credentials.save(self.con, {'client_secret':'NEW-SECRET'})
         self.assertEqual(credentials.get(self.con,'refresh_token'),'REFRESH')
+        credentials.save(self.con, {'accounts':'40702810000000009876'})
+        self.assertEqual(credentials.get(self.con,'refresh_token'),'REFRESH')
         credentials.save(self.con, {'client_id':'another-client'})
         self.assertFalse(credentials.get(self.con,'refresh_token'))
         self.assertFalse(credentials.view(self.con)['certificate_configured'])
