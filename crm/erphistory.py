@@ -142,6 +142,10 @@ def apply(con, payload, period, token, user, student_ids=None):
     source_rows = {str(r.get("erp_student_id")): r for r in _records(payload)}
     for child in checked["children"]:
         sid = child["student"]["id"]; raw = source_rows[child["erp_id"]]; sub = child["subscription"]
+        if child["student"]["match"] == "manual_selection":
+            linked = con.execute("SELECT student_id FROM erp_full_identities WHERE namespace='student' AND source_id=?", (child["erp_id"],)).fetchone()
+            if linked and linked["student_id"] != sid: raise HistoryError("ERP ID уже связан с другой карточкой")
+            con.execute("INSERT OR IGNORE INTO erp_full_identities(namespace,source_id,student_id) VALUES ('student',?,?)", (child["erp_id"],sid))
         if sub["state"] == "add":
             con.execute("INSERT INTO erp_history_subscriptions(source_id,student_id,group_id,month,valid_from,valid_until,lessons,source_payload,imported_at,imported_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (sub["source_id"],sid,sub["group_id"],child["period"],sub["valid_from"],sub["valid_until"],int(sub["lessons"]),_json(raw["subscription"]),now,user.get("name", ""))); created_subs += 1

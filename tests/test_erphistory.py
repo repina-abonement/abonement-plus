@@ -50,6 +50,11 @@ def main():
                       (fid,'Другой Ребёнок','2015-01-01','2026-01-01','2026-01-01')).lastrowid
     wrong=erphistory.preview(con,payload,'2025-09',{'TEST-ERP':other})
     assert not wrong['can_apply'] and 'ФИО' in wrong['children'][0]['issues'][0]
+    old=erphistory.PILOT_KEYS;erphistory.PILOT_KEYS={erphistory._pilot_key('TEST-ERP','2025-09')}
+    try: erphistory.apply(con,payload,'2025-09',manual['token'],{'name':'Тест'},{'TEST-ERP':sid})
+    finally: erphistory.PILOT_KEYS=old
+    automatic=erphistory.preview(con,payload,'2025-09')
+    assert automatic['can_apply'] and automatic['children'][0]['student']['match']=='saved_erp_link'
     print('ok')
 
 if __name__=='__main__':main()
