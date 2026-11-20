@@ -67,9 +67,14 @@ def state(con,payment_id):
         current=con.execute('SELECT amount FROM payments WHERE id=? AND cancelled=0',(payment_id,)).fetchone()
         ids=con.execute("SELECT DISTINCT pk_payment_id FROM pay_links WHERE payment_id=? AND pk_payment_id!=''",(payment_id,)).fetchall()
         proof=result.get('settlement_proof',{})
+        from .payoutcheck import MATCHING_VERSION
+        if proof.get('method')=='payer_amount_day_unique' or (proof.get('method')=='daily_card_batch' and result.get('matching_version')!=MATCHING_VERSION):
+            return {'status':'unverified','label':'Нужна повторная проверка выписки','checked_at':row['checked_at']}
         if not current or len(ids)!=1 or proof.get('payment_gross_minor')!=fiscal.kop(current['amount']):
             return {'status':'unverified','label':'Связь оплаты изменилась, нужна повторная проверка','checked_at':row['checked_at']}
         return {'status':'confirmed','label':'Зачисление подтверждено выпиской','checked_at':row['checked_at'],'note':result['note'],'evidence':result.get('settlement_proof',{}),'match_diagnostics':result.get('match_diagnostics',{})}
+    if result.get('status')=='unavailable':
+        return {'status':'unavailable','label':'Выписка Точки недоступна','checked_at':row['checked_at'],'note':result['note']}
     note=result.get('note') or 'Зачисление на расчётный счёт пока не подтверждено'
     if result.get('registry_status')=='permission_denied':
         note='Предыдущая проверка реестра была недоступна. Новый маршрут использует список PayKeeper и банковскую выписку'

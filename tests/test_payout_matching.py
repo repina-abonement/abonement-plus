@@ -47,16 +47,16 @@ class PayoutMatching(unittest.TestCase):
         # Bank confirmation does not manufacture an OFD check.
         payment=self.con.execute('SELECT * FROM payments LIMIT 1').fetchone()
         self.assertEqual(paymentcontrol.state(self.con,payment)['status'],'attention')
-    def test_sbp_full_name_individual_credit_not_card_batch(self):
+    def test_sbp_full_name_is_only_a_candidate(self):
         self.snapshot([self.member(amount=1350,rail='sbp',system='94')])
         result=self.run_bank([self.credit(1350,'Иванов Пётр Сергеевич','Оплата СБП',day='2026-11-18')])
-        self.assertEqual(result['confirmed'],1)
-        self.assertEqual(self.states()[0]['evidence']['method'],'payer_amount_day_unique')
+        self.assertEqual(result['confirmed'],0)
+        self.assertEqual(self.states()[0]['match_diagnostics']['name_candidates'],1)
         self.assertEqual(payoutcheck.view(self.con,'2026-11-18','2026-11-18'),[])
     def test_sbp_initials_and_name_in_purpose(self):
         self.snapshot([self.member(rail='sbp')])
         self.run_bank([self.credit(1000,'Иванов П.С.','СБП',day='2026-11-18')])
-        self.assertEqual(self.states()[0]['status'],'confirmed')
+        self.assertEqual(self.states()[0]['status'],'unverified')
     def test_equal_family_payments_do_not_reuse_one_credit(self):
         self.snapshot([self.member('p1',rail='sbp'),self.member('p2',rail='sbp')])
         self.run_bank([self.credit(1000,'Иванов Петр','СБП',day='2026-11-18')])
@@ -70,6 +70,23 @@ class PayoutMatching(unittest.TestCase):
         self.snapshot([self.member(amount=6000)])
         for credit in [self.credit(name='Другой банк'),self.credit(purpose='Возмещение эквайринга за 17.11.2026. Комиссия 90 руб.'),self.credit(purpose='Обычный перевод')]:
             self.run_bank([credit]);self.assertEqual(self.states()[0]['status'],'unverified')
+    def test_contract_date_and_multiday_period_are_not_a_daily_payout(self):
+        self.snapshot([self.member(amount=6000)])
+        for purpose in ('Возмещение эквайринга по договору от 18.11.2026',
+                        'Возмещение расходов за 18.11.2026',
+                        'Возмещение эквайринга за период 18.11.2026 по 19.11.2026'):
+            self.run_bank([self.credit(6000,purpose=purpose)])
+            self.assertEqual(self.states()[0]['status'],'unverified')
+
+    def test_statement_error_is_distinct_and_next_read_recovers(self):
+        self.snapshot([self.member(amount=6000)])
+        fiscal.comms.put(self.con,'fx_tochka_token','synthetic')
+        with patch.object(fiscal,'fetch_tochka',side_effect=fiscal.FxError('offline')):
+            bankcheck.run_automatic(self.con,self.current,cached_only=True)
+        self.assertEqual(self.states()[0]['status'],'unavailable')
+        self.run_bank([self.credit()])
+        self.assertEqual(self.states()[0]['status'],'confirmed')
+
     def test_missing_fee_is_not_inferred_from_difference(self):
         self.snapshot([self.member(amount=6000)])
         self.run_bank([self.credit(purpose='Возмещение эквайринга за 18.11.2026')])
@@ -123,7 +140,8 @@ class PayoutMatching(unittest.TestCase):
         with patch.object(fiscal,'pk_call',side_effect=provider):result=payoutcheck.refresh_source(self.con,self.current,limit=2)
         self.assertEqual(result['days_checked'],1);self.assertEqual(result['days_unavailable'],0)
         self.assertTrue(all(path.startswith('/info/') for path in calls))
-        result=self.run_bank([self.credit(),self.credit(1350,'Иванов Петр','СБП',ident='bank-sbp',day='2026-11-18')])
+        self.seed_reference(sbp,'synthetic-sbp-reference')
+        result=self.run_bank([self.credit(),self.credit(1350,'Иванов Петр','QR код ID synthetic-sbp-reference',ident='bank-sbp',day='2026-11-18')])
         self.assertEqual(result['confirmed'],4)
         batches=payoutcheck.view(self.con,'2026-11-18','2026-11-19')
         self.assertEqual(len(batches),1);self.assertEqual(batches[0]['gross_minor'],600000)

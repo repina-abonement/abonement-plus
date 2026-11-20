@@ -152,7 +152,7 @@ class PaymentWorker(unittest.TestCase):
             from tests.test_payout_matching import PayoutMatching
             item={'id':'synthetic-11534','client_name':'Parent','amount_minor':135000,'refund_minor':0,'orderid':order,'status':'obtained','paid_at':'2026-11-18 12:05:19','system_id':'94','rail':'sbp','acquirer':'tochka'}
             PayoutMatching.snapshot(self,[item])
-            data.transaction.update(Amount={'amount':'1350','currency':'RUB'},DebtorParty={'name':'Parent'},documentProcessDate='2026-11-18')
+            data.transaction.update(Amount={'amount':'1350','currency':'RUB'},DebtorParty={'name':'Parent'},documentProcessDate='2026-11-18',endToEndId='9191886')
             for source in ('paykeeper','tochka','ofd'):paymentworker.cycle(self.con,source,self.current)
         payment=self.con.execute('SELECT * FROM payments WHERE id=?',(pid,)).fetchone()
         control=paymentcontrol.state(self.con,payment)

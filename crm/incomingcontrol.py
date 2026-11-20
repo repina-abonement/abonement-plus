@@ -118,11 +118,18 @@ def related(con,event,events):
     if allocation:
         target=allocation['target']
         if target.startswith('pk-sbp:'):
-            pid=target[len('pk-sbp:'):];return crm_for_provider(con,pid,event['amount_minor']),pid
+            from . import bankcheck
+            pid=target[len('pk-sbp:'):]
+            links=crm_for_provider(con,pid,event['amount_minor'])
+            if len(links)==1:
+                state=bankcheck.state(con,links[0]['id']) or {}
+                if state.get('status')=='confirmed' and state.get('evidence',{}).get('bank_operation_id')==event['source_id']:
+                    return links,pid
+            return [],None
         batch=con.execute('SELECT result FROM bank_payout_batches WHERE id=?',(target,)).fetchone()
         if batch:
             b=json.loads(batch['result']);snapshot=con.execute('SELECT digest FROM pk_daily_evidence WHERE day=?',(b['day'],)).fetchone()
-            if b.get('status')=='confirmed' and snapshot and snapshot['digest']==b['digest'] and b.get('bank',{}).get('received_minor')==event['amount_minor']:
+            if b.get('status')=='confirmed' and b.get('matching_version')==payoutcheck.MATCHING_VERSION and snapshot and snapshot['digest']==b['digest'] and b.get('bank',{}).get('received_minor')==event['amount_minor']:
                 links=[payoutcheck.linked(con,m) for m in b['members']]
                 if all(links):
                     return [dict(con.execute('SELECT * FROM payments WHERE id=?',(m['id'],)).fetchone()) for m in links],None

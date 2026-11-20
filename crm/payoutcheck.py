@@ -11,14 +11,19 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 from . import fiscal,paykeepercheck
 
+MATCHING_VERSION = 4
+
 
 def init(con):
     con.execute('CREATE TABLE IF NOT EXISTS payment_matching_versions(name TEXT PRIMARY KEY,version TEXT NOT NULL)')
     version=con.execute("SELECT version FROM payment_matching_versions WHERE name='sbp'").fetchone()
-    if not version or version['version']!='crm-first-qr-v2':
+    if not version or version['version']!='crm-first-exact-v4':
         if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='payment_control_jobs'").fetchone():
             con.execute("UPDATE payment_control_jobs SET next_at=NULL WHERE source IN ('paykeeper','tochka') AND lease_owner IS NULL")
-        con.execute("INSERT OR REPLACE INTO payment_matching_versions VALUES('sbp','crm-first-qr-v2')")
+        # Release derived claims so the new rules can recalculate allocations.
+        if con.execute("SELECT 1 FROM sqlite_master WHERE name='bank_credit_allocations'").fetchone():
+            con.execute('DELETE FROM bank_credit_allocations')
+        con.execute("INSERT OR REPLACE INTO payment_matching_versions VALUES('sbp','crm-first-exact-v4')")
     con.execute('''CREATE TABLE IF NOT EXISTS pk_daily_evidence(
         day TEXT PRIMARY KEY,checked_at TEXT NOT NULL,status TEXT NOT NULL,digest TEXT NOT NULL,result TEXT NOT NULL)''')
     con.execute('''CREATE TABLE IF NOT EXISTS pk_system_evidence(
@@ -250,13 +255,15 @@ def same_name(names,payer):
 def period_in(description,day):
     """Read a named sales period, ignoring e.g. the older contract date."""
     token=r'(\d{2}\.\d{2}\.(?:\d{4}|\d{2})|\d{4}-\d{2}-\d{2})'
-    selected=re.search(r'за\s+(?:период\s+)?'+token+r'(?:\s*(?:по|—|–|-)\s*'+token+r')?',description,re.I)
-    matches=[v for v in selected.groups() if v] if selected else re.findall(token,description)
-    parsed=set()
-    for value in matches:
-        try:parsed.add(datetime.strptime(value,('%d.%m.%Y' if len(value)==10 else '%d.%m.%y') if '.' in value else '%Y-%m-%d').date().isoformat())
-        except ValueError:pass
-    return parsed=={day}
+    selected=re.findall(r'\bза\s+(?:период\s+)?'+token+r'(?:\s*(?:по|—|–|-|/)\s*'+token+r')?',description,re.I)
+    if len(selected)!=1:
+        return False
+    try:
+        dates={datetime.strptime(value,('%d.%m.%Y' if len(value)==10 else '%d.%m.%y') if '.' in value else '%Y-%m-%d').date().isoformat()
+               for value in selected[0] if value}
+    except ValueError:
+        return False
+    return dates=={day}
 
 
 def fee_in(description):
@@ -267,7 +274,7 @@ def fee_in(description):
 def batch_candidate(batch,transaction):
     if not booked(transaction):return None
     description=str(transaction.get('description') or '')
-    if not re.search(r'эквайр|возмещен|paykeeper|пейкипер|операци\w*.*карт',description,re.I):return None
+    if not re.search(r'эквайр|операци\w*.*карт',description,re.I):return None
     if not period_in(description,batch['day']):return None
     payer=transaction.get('DebtorParty') or {}
     identity={'system_description':str(payer.get('name') or '')+' '+description}
@@ -307,7 +314,7 @@ def run_bank(con,current,limit=3):
         for system,members in groups.items():
             ident='pk-card:'+snapshot['day']+':'+system
             batches.append({'id':ident,'day':snapshot['day'],'group':system,'system_ids':sorted({i['system_id'] for i in members}),'acquirer':members[0]['acquirer'],
-                'digest':snapshot['digest'],'full_day':day_of(json.loads(snapshot['result']).get('verified_at') or snapshot['checked_at'])>snapshot['day'],'gross_minor':sum(i['amount_minor'] for i in members),
+                'digest':snapshot['digest'],'matching_version':MATCHING_VERSION,'full_day':day_of(json.loads(snapshot['result']).get('verified_at') or snapshot['checked_at'])>snapshot['day'],'gross_minor':sum(i['amount_minor'] for i in members),
                 'refund_minor':sum(i['refund_minor'] for i in members),'members':members,
                 'status':'waiting','note':'Ожидается общая выплата за день'})
     if not items:return {'checked':0}
@@ -316,7 +323,7 @@ def run_bank(con,current,limit=3):
         transactions=fiscal.fetch_tochka(con,start,current.date(),include_debits=True)
     except Exception:
         for item in items:
-            if item['link']:_save_payment(con,item['link']['id'],item['id'],stamp,{'status':'unverified','note':'Не удалось прочитать выписку Точки. Проверка повторится автоматически'})
+            if item['link']:_save_payment(con,item['link']['id'],item['id'],stamp,{'status':'unavailable','note':'Не удалось прочитать выписку Точки. Проверка повторится автоматически'})
         return {'checked':0,'unavailable':1}
     examples=[]
     for transaction in transactions:
@@ -371,14 +378,13 @@ def run_bank(con,current,limit=3):
             if not (same_name(names,(transaction.get('DebtorParty') or {}).get('name')) or same_name(names,transaction.get('description'))):continue
             candidates.append(transaction)
         diagnostics['name_candidates']=len(candidates)
-        item['match_method']='payer_amount_day_unique'
         if len(candidates)==1:
-            transaction=candidates[0];proposals.setdefault(bank_key(transaction),[]).append(('sbp',item,transaction))
+            item['bank_note']='Есть кандидат по плательщику и сумме; нужен точный QR или банковский ID PayKeeper'
         elif candidates:item['bank_note']='Несколько одинаковых поступлений по плательщику и сумме — нужна проверка'
         elif diagnostics['qr_conflicts']:item['bank_note']='В выписке есть QR ID, но он не совпал с проверенными идентификаторами PayKeeper'
     for key,options in proposals.items():
-        strongest=max(3 if kind=='sbp' and target.get('matched_reference') else 2 if kind=='batch' else 1 for kind,target,_ in options)
-        options=[option for option in options if (3 if option[0]=='sbp' and option[1].get('matched_reference') else 2 if option[0]=='batch' else 1)==strongest]
+        exact=[option for option in options if option[0]=='sbp']
+        options=exact or options
         if len(options)!=1:
             for kind,target,_ in options:
                 if kind=='sbp':target['bank_note']='Одна проводка соответствует нескольким оплатам — нужна проверка'
@@ -390,18 +396,18 @@ def run_bank(con,current,limit=3):
         con.execute('INSERT OR IGNORE INTO bank_credit_allocations VALUES(?,?,?)',(key,target_id,stamp))
         if con.execute('SELECT target FROM bank_credit_allocations WHERE bank_key=?',(key,)).fetchone()['target']!=target_id:continue
         if kind=='batch':target.update(status='confirmed',note='Общая выплата за день сопоставлена с составом оплат PayKeeper',bank=evidence)
-        else:target.update(bank_status='confirmed',bank_note='СБП сопоставлено по QR/банковскому ID PayKeeper и сумме' if target.get('matched_reference') else 'СБП сопоставлено по плательщику, сумме и дню',bank=evidence)
+        else:target.update(bank_status='confirmed',bank_note='СБП сопоставлено по QR/банковскому ID PayKeeper и сумме',bank=evidence)
     for batch in batches:
         con.execute('''INSERT INTO bank_payout_batches VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET
             checked_at=excluded.checked_at,result=excluded.result''',(batch['id'],batch['day'],stamp,json.dumps(batch,ensure_ascii=False)))
     for item in items:
         link=item['link']
         if not link:continue
-        result={'status':'unverified','note':'Способ оплаты пока не определён','source_day':item['day'],'source_digest':item['digest'],'statement_status':'read'}
+        result={'status':'unverified','note':'Способ оплаты пока не определён','source_day':item['day'],'source_digest':item['digest'],'statement_status':'read','matching_version':MATCHING_VERSION}
         if item['rail']=='sbp':
             result.update(status=item.get('bank_status','unverified'),note=item.get('bank_note','Нужна проверка корректировки СБП'))
             bank=item.get('bank',{});operation=str(bank.get('transactionId') or '')
-            result['settlement_proof']={'method':item.get('match_method','payer_amount_day_unique'),'bank_operation_id':operation,'payment_gross_minor':item['amount_minor'],
+            result['settlement_proof']={'method':item.get('match_method'),'bank_operation_id':operation,'payment_gross_minor':item['amount_minor'],
                 'matched_reference':item.get('matched_reference'),'booked_at':bank.get('documentProcessDate')}
             result['match_diagnostics']=item.get('match_diagnostics',{})
         elif item['rail']=='card':
@@ -420,7 +426,8 @@ def view(con,start,end):
         if row['day'] not in relevant:continue
         batch=json.loads(row['result'])
         snapshot=con.execute('SELECT status,digest FROM pk_daily_evidence WHERE day=?',(batch['day'],)).fetchone()
-        if not snapshot or not snapshot['digest'] or snapshot['digest']!=batch['digest']:
+        if batch.get('matching_version')!=MATCHING_VERSION or not snapshot or not snapshot['digest'] or snapshot['digest']!=batch['digest']:
+            batch.pop('bank',None)
             batch.update(status='waiting',note='Состав оплат обновился или источник недоступен; требуется повторная сверка')
         batch['checked_at']=row['checked_at']
         if batch.get('bank'):batch['bank'].pop('bank_key',None)
@@ -454,6 +461,6 @@ def diagnostics(con):
             'unknown_systems':sorted({i['system_id'] for i in items if i['rail']=='unknown'}),
             **{key:data[key] for key in ('note','error_code','error_stage','error_type','http_status','provider_message','response_shape') if key in data}})
     observation=con.execute('SELECT * FROM bank_statement_observations WHERE id=1').fetchone()
-    return {'strategy':'paykeeper_daily_batches_and_named_sbp','crm_first':True,'acquiring_permission_required':False,'matching_version':3,'sbp_reference_matching':True,
+    return {'strategy':'paykeeper_daily_batches_and_exact_sbp','crm_first':True,'acquiring_permission_required':False,'matching_version':MATCHING_VERSION,'sbp_reference_matching':True,
         'daily_sources':days,'statement':({'checked_at':observation['checked_at'],**json.loads(observation['result'])} if observation else None),
         'card_batches':view(con,(datetime.now(ZoneInfo('Europe/Moscow')).date()-timedelta(days=31)).isoformat(),datetime.now(ZoneInfo('Europe/Moscow')).date().isoformat())[:10]}
