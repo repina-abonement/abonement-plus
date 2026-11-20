@@ -5,6 +5,85 @@ from . import erpfull, erpimport as ei, services as sv
 from .db import normalize_phone
 
 
+PROFILE_FIELDS = (
+    ("child_name", "Имя и фамилия ребёнка"), ("birth", "Дата рождения ребёнка"),
+    ("phone", "Телефон родителя"), ("parent_name", "Имя родителя"),
+    ("relation", "Роль родителя"), ("email", "Электронная почта"),
+    ("source", "Рекламный источник"), ("comment", "Комментарий"),
+)
+
+
+def _clean(value):
+    return " ".join(str(value or "").split())
+
+
+def _profile_preview(con, sid, rec):
+    """Describe safe profile enrichment without changing an existing card."""
+    from .smart import guess_relation
+    source = {key: _clean(rec.get(key)) for key, _ in PROFILE_FIELDS}
+    source["child_name"] = _clean(ei._split_name(rec))
+    source["birth"] = (erpfull._date(rec.get("birth", "")) or "")[:10]
+    source["phone"] = _clean(rec.get("phone"))
+    source["relation"] = guess_relation(source["relation"] or source["parent_name"])
+    result = {"source": source, "fill": [], "conflicts": [], "missing": [label for key, label in PROFILE_FIELDS if not source[key]]}
+    if not sid:
+        result["fill"] = [label for key, label in PROFILE_FIELDS if source[key]]
+        return result
+    student = dict(con.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone())
+    parent_row = con.execute("SELECT * FROM parents WHERE family_id=? ORDER BY is_primary DESC,id LIMIT 1", (student["family_id"],)).fetchone()
+    parent = dict(parent_row) if parent_row else {}
+    current = {
+        "child_name": _clean(student.get("name")), "birth": _clean(student.get("birth")),
+        "phone": _clean(parent.get("phone")), "parent_name": _clean(parent.get("name")),
+        "relation": _clean(parent.get("relation")), "email": _clean(parent.get("email")),
+        "source": _clean(student.get("source")), "comment": "",
+    }
+    if source["comment"]:
+        current["comment"] = source["comment"] if con.execute(
+            "SELECT 1 FROM history WHERE student_id=? AND kind='note' AND trim(text)=? LIMIT 1", (sid, source["comment"])
+        ).fetchone() else ""
+    for key, label in PROFILE_FIELDS:
+        if not source[key] or current[key] == source[key]:
+            continue
+        if not current[key] or (key == "parent_name" and current[key] == "Родитель") or (key == "child_name" and current[key] == ei.NO_NAME):
+            result["fill"].append(label)
+        else:
+            result["conflicts"].append({"field": label, "crm": current[key], "erp": source[key]})
+    return result
+
+
+def _apply_profile(con, sid, rec, user):
+    """Fill only empty profile values; preserve conflicts for explicit review."""
+    preview = _profile_preview(con, sid, rec)
+    source = preview["source"]
+    student = dict(con.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone())
+    if source["child_name"] and student["name"] == ei.NO_NAME:
+        con.execute("UPDATE students SET name=? WHERE id=?", (source["child_name"], sid))
+    if source["birth"] and not student["birth"]:
+        con.execute("UPDATE students SET birth=? WHERE id=?", (source["birth"], sid))
+    if source["source"] and not student["source"]:
+        con.execute("UPDATE students SET source=? WHERE id=?", (source["source"], sid))
+    parent_row = con.execute("SELECT * FROM parents WHERE family_id=? ORDER BY is_primary DESC,id LIMIT 1", (student["family_id"],)).fetchone()
+    if not parent_row:
+        con.execute("""INSERT INTO parents(family_id,name,phone,phone_norm,email,relation,is_primary)
+                       VALUES (?,?,?,?,?,?,1)""", (student["family_id"], source["parent_name"] or "Родитель", source["phone"],
+                                                     normalize_phone(source["phone"]), source["email"], source["relation"]))
+    else:
+        parent = dict(parent_row); sets, args = [], []
+        for column, key in (("name", "parent_name"), ("phone", "phone"), ("email", "email"), ("relation", "relation")):
+            if source[key] and (not _clean(parent.get(column)) or (column == "name" and parent[column] == "Родитель")):
+                sets.append(column + "=?"); args.append(source[key])
+                if column == "phone":
+                    sets.append("phone_norm=?"); args.append(normalize_phone(source[key]))
+        if sets:
+            con.execute(f"UPDATE parents SET {', '.join(sets)} WHERE id=?", (*args, parent["id"]))
+    if source["comment"] and not con.execute(
+        "SELECT 1 FROM history WHERE student_id=? AND kind='note' AND trim(text)=? LIMIT 1", (sid, source["comment"])
+    ).fetchone():
+        sv.log(con, sid, source["comment"], {"name": "ERP"}, "note")
+    return preview
+
+
 def _plan(con, visitors, leads):
     if not visitors or not leads or set(visitors) & set(leads):
         raise ei.ImportError_("Выберите отдельно файлы посетителей и лидов")
@@ -68,7 +147,16 @@ def _plan(con, visitors, leads):
         counts["new" if sid is None else "same" if current == status else "updated"] += 1
         actions.append((namespace, eid, sid, current, status, rec))
     token = erpfull._hash([[(f["id"], f["digest"]) for f in files], actions, issues])
-    report = {"counts": dict(counts), "issues": issues, "token": token}
+    profile = {"source_present": Counter(), "source_missing": Counter(), "fill": Counter(), "conflicts": []}
+    for namespace, eid, sid, _current, _status, rec in actions:
+        preview = _profile_preview(con, sid, rec)
+        for key, label in PROFILE_FIELDS:
+            profile["source_present" if preview["source"][key] else "source_missing"][label] += 1
+        profile["fill"].update(preview["fill"])
+        profile["conflicts"].extend({"erp_id": eid, "namespace": namespace, **item} for item in preview["conflicts"])
+    report = {"counts": dict(counts), "issues": issues, "profile": {
+        "source_present": dict(profile["source_present"]), "source_missing": dict(profile["source_missing"]),
+        "fill": dict(profile["fill"]), "conflicts": profile["conflicts"]}, "token": token}
     return report, actions
 
 
@@ -102,6 +190,7 @@ def transfer(con, visitors, leads, user, token=None):
             comment = rec.get("comment", "").strip()
             if comment:
                 sv.log(con, sid, comment, user, "note")
+        _apply_profile(con, sid, rec, user)
         if current != status:
             con.execute("UPDATE students SET erp_status=? WHERE id=?", (status, sid))
         con.execute("INSERT OR IGNORE INTO erp_full_identities(namespace,source_id,student_id) VALUES (?,?,?)",

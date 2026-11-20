@@ -956,8 +956,8 @@ function erpPeopleSetup(box, data) {
   const options = data.uploads.map((file) => `<option value="${file.id}">${esc(file.filename)} (${file.count})</option>`).join("");
   box.insertAdjacentHTML("beforeend", `
     <div class="erp-step" id="erp-people">
-      <b>Статусы клиентов и перенос лидов</b>
-      <p class="small muted">Загрузите свежие выгрузки ERP. Для посетителей используется колонка «Статус», для лидов применяется «Новый лид». Можно выбрать несколько файлов.</p>
+      <b>Карточки клиентов, статусы и лиды</b>
+      <p class="small muted">Переносятся карточки без счетов и денежных операций. Обязательные поля проверки: имя и фамилия ребёнка, дата рождения, телефон, имя и роль родителя, почта, рекламный источник и комментарий. Уже созданные карточки, в том числе дети из сборной, сопоставляются без дублей: пустые поля дополняются, расхождения показываются для ручной сверки.</p>
       <div class="field"><label for="erp-people-visitors">Посетители, включая архив</label><select id="erp-people-visitors" multiple>${options}</select></div>
       <div class="field"><label for="erp-people-leads">Лиды</label><select id="erp-people-leads" multiple>${options}</select></div>
       <button class="btn" id="erp-people-plan" ${options ? "" : "disabled"}>Проверить</button>
@@ -971,8 +971,11 @@ function erpPeopleSetup(box, data) {
   const selected = (select) => Array.from(select.selectedOptions, (option) => +option.value);
   let approved = null;
   function show(report, applied) {
-    const n = report.counts;
+    const n = report.counts, p = report.profile || {}, missing = Object.entries(p.source_missing || {}).filter(([, count]) => count), fill = Object.entries(p.fill || {}).filter(([, count]) => count);
     out.innerHTML = `<p>${applied ? "Перенос выполнен. " : ""}Строк посетителей ${n.visitors || 0}, лидов ${n.leads || 0}. Совпадают ${n.same || 0}, обновление статуса ${n.updated || 0}, новые карточки ${n.new || 0}, повторные строки ${n.repeated_rows || 0}.</p>
+      ${fill.length ? `<div class="note"><b>${applied ? "Дополнены" : "Будут дополнены"} пустые поля</b><ul>${fill.map(([field, count]) => `<li>${esc(field)}: ${count}</li>`).join("")}</ul></div>` : ""}
+      ${missing.length ? `<details><summary>Нет значения в исходной ERP: ${missing.reduce((total, [, count]) => total + count, 0)}</summary><ul>${missing.map(([field, count]) => `<li>${esc(field)}: ${count}</li>`).join("")}</ul><p class="small muted">CRM не придумывает отсутствующие сведения. Такие поля нужно заполнить позднее по подтверждённому источнику.</p></details>` : ""}
+      ${(p.conflicts || []).length ? `<details open><summary>Расхождения карточки и ERP: ${p.conflicts.length}</summary><ul>${p.conflicts.map((item) => `<li>ERP ID ${esc(item.erp_id)} · ${esc(item.field)}: в CRM «${esc(item.crm)}», в ERP «${esc(item.erp)}». Значение CRM сохранится до ручной сверки.</li>`).join("")}</ul></details>` : ""}
       ${report.issues.length ? `<details><summary>Требуют сверки: ${report.issues.length}</summary><ul>${report.issues.map(([row, reason]) => `<li>${esc(row)}: ${esc(reason)}</li>`).join("")}</ul></details>` : ""}`;
   }
   visitors.onchange = leads.onchange = () => { approved = null; apply.disabled = true; out.replaceChildren(); };
