@@ -40,6 +40,9 @@ def main():
     assert sum(x['kind']=='makeup' and x['status']=='present' for x in events)==4
     detail=services.student_detail(con,sid);hist=[x for x in detail['subscriptions'] if x.get('history_import')];assert len(hist)==1 and hist[0]['price']==12345 and hist[0]['analytics_only']
     assert next(x for x in analytics.groups_report(con,'2025-09')['groups'] if x['id']==main_group)['revenue']==12345
+    dashboard=services.dashboard(con,'2025-09')
+    assert dashboard['kpi']['revenue']['value']==12345 and dashboard['kpi']['holders']['value']==1
+    assert dashboard['kpi']['fill']['subs_count']==1 and dashboard['kpi']['avg']['value']==12345
     after=(con.execute('SELECT count(*) FROM payments').fetchone()[0],money.balance(con,sid),dict(con.execute('SELECT * FROM students WHERE id=?',(sid,)).fetchone()))
     assert before==after
     con.execute("UPDATE students SET erp_id='' WHERE id=?",(sid,))

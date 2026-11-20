@@ -1553,10 +1553,26 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
                 + holder_sql,
                 (m, *holder_args)):
             out.setdefault(sid_, []).append(price)
+        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
+            history_scope = " AND h.group_id=?" if group_id else (" AND g.branch_id=?" if branch_id else "")
+            for sid_, price in con.execute(
+                    """SELECT h.student_id,h.revenue_amount
+                       FROM erp_history_subscriptions h JOIN groups g ON g.id=h.group_id
+                       WHERE h.month=? AND h.revenue_amount IS NOT NULL""" + history_scope + """
+                         AND NOT EXISTS (
+                           SELECT 1 FROM subscriptions x LEFT JOIN enrollments e ON e.id=x.enrollment_id
+                           WHERE x.student_id=h.student_id AND x.month=h.month AND x.status!='cancelled'
+                             AND COALESCE(e.group_id,(SELECT group_id FROM students WHERE id=x.student_id))=h.group_id
+                         )""", (m, *holder_args)):
+                out.setdefault(sid_, []).append(price)
         return out
 
     first_paid = {r[0]: r[1] for r in con.execute(
         "SELECT student_id, MIN(month) FROM subscriptions WHERE status='paid' GROUP BY student_id")}
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
+        for sid_, first_month in con.execute(
+                "SELECT student_id,MIN(month) FROM erp_history_subscriptions WHERE revenue_amount IS NOT NULL GROUP BY student_id"):
+            first_paid[sid_] = min(first_paid.get(sid_, first_month), first_month)
     cache = {}
 
     def month_stats(m):
