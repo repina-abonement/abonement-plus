@@ -4,7 +4,7 @@
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS merch_items (
@@ -41,11 +41,27 @@ CREATE TABLE IF NOT EXISTS shift_reports (
     at TEXT NOT NULL,
     UNIQUE(user_id, branch_id, date)
 );
+CREATE TABLE IF NOT EXISTS merch_stock_counts (
+    id INTEGER PRIMARY KEY,
+    counted_at TEXT NOT NULL,
+    counted_by_id INTEGER NOT NULL REFERENCES users(id),
+    counted_by_name TEXT NOT NULL,
+    item_count INTEGER NOT NULL
+);
 """
 
 PRICE = [("Форма", 3800), ("Рюкзак большой", 3000), ("Сумка-шоппер", 1650), ("Рюкзак для обуви", 1300), ("Вымпел", 1200),
          ("Шарф", 2000), ("Гетры", 1100), ("Кружка", 880), ("Носки", 450), ("Мяч", 3850), ("Бутылка", 990), ("Тату", 330)]
 METHODS = {"cash":"Наличные","paykeeper":"По ссылке PayKeeper","card_branch":"Картой на филиале","sber_qr_branch":"По QR Сбера на филиале","tochka_qr_link":"По QR/ссылке Точки от администратора","card":"Карта (канал не уточнён)","qr":"QR (банк не уточнён)"}
+STOCK_MINIMUMS = [
+    ("Дневник", 50, "шт."), ("Кубок", 5, "шт."), ("Наклейки круглые", 10, "листов"),
+    ("Медаль", 8, "шт."), ("Спортивная бутылка", 10, "шт."), ("Кружка", 8, "шт."),
+    ("Бандана", 5, "шт."), ("Сумка", 5, "шт."), ("Браслеты текущего сезона", 30, "шт."),
+    ("Деревянные значки", 15, "шт."), ("Мяч", 2, "шт."), ("Носки (16–18)", 5, "пар"),
+    ("Носки (18–20)", 5, "пар"), ("Гетры (16–18)", 3, "пар"), ("Гетры (18–20)", 3, "пар"),
+    ("Форма (размер S)", 6, "шт."), ("Форма (размер M)", 6, "шт."),
+    ("Форма (размер L)", 6, "шт."), ("Форма (размер XL)", 5, "шт."),
+]
 
 
 class MerchError(ValueError):
@@ -55,20 +71,51 @@ class MerchError(ValueError):
 def init(con):
     con.executescript(SCHEMA)
     cols = {r[1] for r in con.execute("PRAGMA table_info(merch_items)")}
-    for col in ("norm INTEGER NOT NULL DEFAULT 0", "stock INTEGER", "stock_at TEXT", "stock_by TEXT NOT NULL DEFAULT ''"):
+    for col in ("norm INTEGER NOT NULL DEFAULT 0", "stock INTEGER", "stock_at TEXT", "stock_by TEXT NOT NULL DEFAULT ''",
+                "stock_only INTEGER NOT NULL DEFAULT 0", "stock_unit TEXT NOT NULL DEFAULT 'шт.'"):
         if col.split()[0] not in cols:  # пересчёт склада: норма, сколько есть, когда и кто считал
             con.execute(f"ALTER TABLE merch_items ADD COLUMN {col}")
     if not con.execute("SELECT 1 FROM merch_items").fetchone():
         for i, (n, p) in enumerate(PRICE):
             con.execute("INSERT INTO merch_items(name, price, sort) VALUES (?,?,?)", (n, p, i))
+    if not con.execute("SELECT 1 FROM settings WHERE key='merch_stock_seeded_v1'").fetchone():
+        for name, norm, unit in STOCK_MINIMUMS:
+            row = con.execute("SELECT id, norm FROM merch_items WHERE name=?", (name,)).fetchone()
+            if row:
+                con.execute("UPDATE merch_items SET norm=CASE WHEN norm=0 THEN ? ELSE norm END, stock_unit=? WHERE id=?", (norm, unit, row["id"]))
+            else:
+                con.execute("""INSERT INTO merch_items(name,price,active,sort,norm,stock_only,stock_unit)
+                               VALUES (?,0,1,(SELECT COALESCE(MAX(sort),0)+1 FROM merch_items),?,1,?)""", (name, norm, unit))
+        con.execute("INSERT INTO settings(key,value) VALUES ('merch_stock_seeded_v1','1')")
 
 
 def _now():
     return datetime.now()
 
 
-def items(con, all_=False) -> list[dict]:
-    return [dict(r) for r in con.execute(f"SELECT * FROM merch_items {'' if all_ else 'WHERE active=1'} ORDER BY sort, name")]
+def items(con, all_=False, inventory=False) -> list[dict]:
+    clauses = []
+    if not all_:
+        clauses.append("active=1")
+    if inventory:
+        clauses.append("(stock_only=1 OR norm>0 OR stock IS NOT NULL)")
+    elif not all_:
+        clauses.append("stock_only=0 AND price>0")
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    return [dict(r) for r in con.execute(f"SELECT * FROM merch_items{where} ORDER BY sort, name")]
+
+
+def stock_status(con, today: date | None = None) -> dict:
+    today = today or _now().date()
+    monday = today - timedelta(days=today.weekday())
+    last = con.execute("SELECT * FROM merch_stock_counts ORDER BY id DESC LIMIT 1").fetchone()
+    shortages = [{"id": r["id"], "name": r["name"], "stock": r["stock"], "norm": r["norm"],
+                  "missing": r["norm"] - r["stock"], "unit": r["stock_unit"]}
+                 for r in con.execute("""SELECT * FROM merch_items WHERE active=1 AND norm>0 AND stock IS NOT NULL
+                                          AND stock<norm ORDER BY sort,name""")]
+    return {"week_start": monday.isoformat(), "week_end": (monday + timedelta(days=6)).isoformat(),
+            "weekly_due": not last or last["counted_at"][:10] < monday.isoformat(),
+            "last_count": dict(last) if last else None, "shortages": shortages}
 
 
 def stock_count(con, rows: list, user: dict, can_norm: bool) -> dict:
@@ -76,6 +123,11 @@ def stock_count(con, rows: list, user: dict, can_norm: bool) -> dict:
     Например, кружки 5 при норме 15: заказать 10. Норму меняют руководитель и старший администратор."""
     from . import planner
     now = _now().isoformat(timespec="minutes")
+    inventory = items(con, inventory=True)
+    submitted = {int(r.get("id") or 0): r for r in rows}
+    missing = [item["name"] for item in inventory if item["id"] not in submitted or submitted[item["id"]].get("stock") in (None, "")]
+    if missing:
+        raise MerchError("Заполните остаток по всем позициям: " + ", ".join(missing[:5]) + ("…" if len(missing) > 5 else ""))
     for r in rows:
         iid = int(r.get("id") or 0)
         if not con.execute("SELECT 1 FROM merch_items WHERE id=?", (iid,)).fetchone():
@@ -84,6 +136,8 @@ def stock_count(con, rows: list, user: dict, can_norm: bool) -> dict:
             con.execute("UPDATE merch_items SET norm=? WHERE id=?", (max(0, int(r["norm"])), iid))
         if r.get("stock") not in (None, ""):
             con.execute("UPDATE merch_items SET stock=?, stock_at=?, stock_by=? WHERE id=?", (max(0, int(r["stock"])), now, user.get("name", ""), iid))
+    con.execute("INSERT INTO merch_stock_counts(counted_at,counted_by_id,counted_by_name,item_count) VALUES (?,?,?,?)",
+                (now, user["id"], user.get("name", ""), len(inventory)))
     order = [{"name": i["name"], "qty": i["norm"] - i["stock"], "stock": i["stock"], "norm": i["norm"]}
              for i in con.execute("SELECT * FROM merch_items WHERE active=1 AND stock IS NOT NULL AND norm > stock ORDER BY sort, name")]
     task = None
@@ -94,7 +148,28 @@ def stock_count(con, rows: list, user: dict, can_norm: bool) -> dict:
             note = f"Пересчёт {now[8:10]}.{now[5:7]} ({user.get('name', '')}). " + "; ".join(f"{o['name']}: есть {o['stock']} из {o['norm']}" for o in order)
             # задачу руководителю ставит сама CRM, поэтому и администратор, который считал, может её создать
             task = planner.add(con, user | {"role": "admin"}, {"title": title[:300], "assignee_id": owner[0], "note": note})
-    return {"order": order, "task": task}
+    return {"order": order, "task": task, "stock_status": stock_status(con)}
+
+
+def add_stock_item(con, data: dict) -> int:
+    name = _clean_name(data.get("name"))
+    if not name:
+        raise MerchError("Укажите название позиции")
+    try:
+        norm = max(0, int(data.get("norm") or 0))
+    except (TypeError, ValueError):
+        raise MerchError("Минимум укажите числом")
+    unit = _clean_name(data.get("unit")) or "шт."
+    try:
+        return con.execute("""INSERT INTO merch_items(name,price,active,sort,norm,stock_only,stock_unit)
+                              VALUES (?,0,1,(SELECT COALESCE(MAX(sort),0)+1 FROM merch_items),?,1,?)""",
+                           (name, norm, unit)).lastrowid
+    except Exception:
+        raise MerchError("Такая позиция уже есть")
+
+
+def _clean_name(value) -> str:
+    return " ".join(str(value or "").split())[:120]
 
 
 def save_item(con, data: dict, iid: int | None = None) -> int:

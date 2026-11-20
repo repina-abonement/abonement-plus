@@ -1147,7 +1147,7 @@ def merch_alerts(con):
     t = _d.today()
     reg = merch.registry(con, (t - _td(days=30)).isoformat(), t.isoformat())
     return {"qr_no_receipt": reg["qr_no_receipt"], "missing_reports": merch.missing_reports(con, t - _td(days=1)),
-            "cash_not_handed": [x for x in reg["by_seller"] if x["cash_not_handed"]]}
+            "cash_not_handed": [x for x in reg["by_seller"] if x["cash_not_handed"]], "stock": merch.stock_status(con, t)}
 
 
 @route("GET", "/api/workdesk", role="operator")
@@ -1679,15 +1679,16 @@ def mex(fn, *a, **kw):
 
 @route("GET", "/api/merch/items")
 def merch_items(con, h, user, body, q):
-    return {"items": merch.items(con, all_=user["role"] == "admin" and q.get("all") == "1"), "methods": merch.METHODS,
-            "can_norm": perms.can(user, "schedule", "full")}
+    show_all = user["role"] == "admin" and q.get("all") == "1"
+    return {"items": merch.items(con, all_=show_all), "stock_items": merch.items(con, all_=show_all, inventory=True),
+            "methods": merch.METHODS, "can_norm": user["role"] == "admin", "stock_status": merch.stock_status(con)}
 
 
 @route("POST", "/api/merch/stock", role="merch:full")
 def merch_stock(con, h, user, body, q):
     """Пересчёт склада мерча: остатки, норма, список к заказу и задача руководителю в Планер."""
     try:
-        return merch.stock_count(con, body.get("items") or [], user, perms.can(user, "schedule", "full"))
+        return merch.stock_count(con, body.get("items") or [], user, user["role"] == "admin")
     except planner.PlanError as e:
         raise ApiError(str(e))
 
@@ -1695,6 +1696,11 @@ def merch_stock(con, h, user, body, q):
 @route("POST", "/api/merch/items", role="admin")
 def merch_item_add(con, h, user, body, q):
     return {"id": mex(merch.save_item, con, body)}
+
+
+@route("POST", "/api/merch/stock/items", role="merch:full")
+def merch_stock_item_add(con, h, user, body, q):
+    return {"id": mex(merch.add_stock_item, con, body)}
 
 
 @route("PUT", "/api/merch/items/{iid}", role="admin")

@@ -1310,7 +1310,7 @@ async function renderWorkdesk(page) {
     call: { html: callFocusBox(d.call_focus), icon: "📞", label: "Звонки" },
     spend: { html: spendDeskBox(d), icon: "💳", label: "Платежи", n: (d.bills_due || []).filter((x) => x.level).length, red: (d.bills_due || []).some((x) => x.level === "red") },
     checkins: { html: checkinReport(d.checkins), icon: "🧑‍🏫", label: "Приход тренеров", n: d.checkins ? d.checkins.rows.filter((x) => x.state === "late" || x.state === "absent").length : 0, red: true },
-    merch: { html: merchAlerts(d.merch_alerts), icon: "👕", label: "Мерч", n: d.merch_alerts ? d.merch_alerts.qr_no_receipt.length + d.merch_alerts.missing_reports.length + d.merch_alerts.cash_not_handed.length : 0 },
+    merch: { html: merchAlerts(d.merch_alerts), icon: "👕", label: "Мерч", n: d.merch_alerts ? d.merch_alerts.qr_no_receipt.length + d.merch_alerts.missing_reports.length + d.merch_alerts.cash_not_handed.length + ((d.merch_alerts.stock?.weekly_due) ? 1 : 0) + (S.user.role === "admin" ? (d.merch_alerts.stock?.shortages?.length || 0) : 0) : 0 },
     marks: { html: marksBox(d), icon: "📋", label: "Отметки в журнале", n: (d.missing_marks || []).length, red: true },
     subs: { html: needsSubsBox(d), icon: "🔁", label: "Замены", n: (d.needs_subs || []).length, red: true },
     wait: { html: waitlistBox(d.waitlist), icon: "⏳", label: "Лист ожидания" },

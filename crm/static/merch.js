@@ -78,12 +78,16 @@ function wireMerchShift(page, d) {
 /* ---------- на рабочем столе админа ---------- */
 function merchAlerts(a) {
   if (!a) return "";
-  const n = a.qr_no_receipt.length + a.missing_reports.length + a.cash_not_handed.length;
+  const stock = a.stock || {shortages:[],weekly_due:false};
+  const n = a.qr_no_receipt.length + a.missing_reports.length + a.cash_not_handed.length
+    + (S.user.role === "admin" ? stock.shortages.length : 0) + (stock.weekly_due ? 1 : 0);
   if (!n) return "";
   return `<section class="now" style="margin-bottom:14px"><div class="now-head"><h3>👕 Мерч: проверить</h3><button class="btn sm" style="margin-left:auto" data-go-merch>Открыть раздел</button></div>
     ${a.qr_no_receipt.length ? `<div class="small">📱 Оплачено по QR, чек не пробит: <b>${a.qr_no_receipt.length}</b> (${a.qr_no_receipt.map((x) => `${dShort(x.date)} ${esc(x.item_name)} ${rub(x.amount)}`).join(", ")})</div>` : ""}
     ${a.cash_not_handed.length ? `<div class="small">💵 Наличные у тренеров, не сданы: ${a.cash_not_handed.map((x) => `${esc(x.name)} ${rub(x.cash_not_handed)}`).join(", ")}</div>` : ""}
     ${a.missing_reports.length ? `<div class="small">❓ Вчера не отметили итог смены по мерчу: ${a.missing_reports.map((x) => `${esc(x.name)} (${esc(x.branch)})`).join(", ")}</div>` : ""}
+    ${stock.weekly_due ? `<div class="small">📦 На этой неделе ещё не внесены остатки мерча</div>` : ""}
+    ${S.user.role === "admin" && stock.shortages.length ? `<div class="small" style="color:var(--red)">⚠️ Ниже установленного минимума: ${stock.shortages.map((x) => `${esc(x.name)} — ${x.stock} из ${x.norm} ${esc(x.unit)}`).join(", ")}</div>` : ""}
   </section>`;
 }
 function wireMerchAlerts(page) { const b = page.querySelector("[data-go-merch]"); if (b) b.onclick = () => go("merch"); }
@@ -94,6 +98,7 @@ async function renderMerch(page) {
   const C = S.merch;
   if (!C.to) { C.to = S.meta.today; C.from = S.meta.today.slice(0, 8) + "01"; }
   const [r, it] = await Promise.all([api("GET", `/api/merch/sales?from=${C.from}&to=${C.to}`), api("GET", "/api/merch/items" + (S.user.role === "admin" ? "?all=1" : ""))]);
+  const saleItems = it.items.filter((i) => i.active && !i.stock_only && i.price > 0);
   const ok = r.rows.filter((x) => x.status === "ok");
   const tabs = [["sales", "Продажи"], ...(can("merch", "full") ? [["stock", "Склад и заказ"]] : []), ...(S.user.role === "admin" ? [["price", "Прайс"]] : [])];
   if (!tabs.some(([k]) => k === C.tab)) C.tab = "sales";
@@ -121,7 +126,7 @@ async function renderMerch(page) {
     </div>`).join("") : `<div class="list-row muted">За этот период продаж нет</div>`}</div>` : ""}
     ${C.tab === "stock" ? merchStockHtml(it) : ""}
     ${C.tab === "price" ? `<div class="small muted" style="margin-bottom:8px">Цена и название сохраняются сами, как только вы их поменяли</div>
-      <div class="list">${it.items.map((i) => `<div class="list-row"><input data-in="${i.id}" value="${esc(i.name)}" style="flex:1"><input data-ip="${i.id}" type="number" value="${i.price}" style="width:110px;flex:0 0 110px"><span class="muted" style="flex:0 0 auto">₽</span><label class="check" style="flex:0 0 auto"><input type="checkbox" data-ia="${i.id}" ${i.active ? "checked" : ""}> в продаже</label></div>`).join("")}
+      <div class="list">${it.items.filter((i) => !i.stock_only).map((i) => `<div class="list-row"><input data-in="${i.id}" value="${esc(i.name)}" style="flex:1"><input data-ip="${i.id}" type="number" value="${i.price}" style="width:110px;flex:0 0 110px"><span class="muted" style="flex:0 0 auto">₽</span><label class="check" style="flex:0 0 auto"><input type="checkbox" data-ia="${i.id}" ${i.active ? "checked" : ""}> в продаже</label></div>`).join("")}
       <div class="list-row"><input id="i-new-n" placeholder="Новый товар" style="flex:1"><input id="i-new-p" type="number" placeholder="Цена" style="width:110px;flex:0 0 110px"><button class="btn sm primary" id="i-add">Добавить</button></div></div>` : ""}`;
   page.querySelectorAll("[data-mtab]").forEach((b) => (b.onclick = () => { C.tab = b.dataset.mtab; render(); }));
   page.querySelectorAll("[data-mper]").forEach((b) => (b.onclick = () => { [C.from, C.to] = b.dataset.mper.split("|"); render(); }));
@@ -131,8 +136,8 @@ async function renderMerch(page) {
   $("#m-new").onclick = () => {
     const box = $("#m-form");
     if (box.innerHTML) { box.innerHTML = ""; return; }
-    box.innerHTML = `<div class="panel" style="padding:14px;margin-bottom:14px">${merchSaleForm(it.items.filter((i) => i.active), { branches: S.meta.branches })}</div>`;
-    wireSaleForm(box, it.items.filter((i) => i.active), render);
+    box.innerHTML = `<div class="panel" style="padding:14px;margin-bottom:14px">${merchSaleForm(saleItems, { branches: S.meta.branches })}</div>`;
+    wireSaleForm(box, saleItems, render);
   };
   page.querySelectorAll("[data-flag]").forEach((b) => (b.onclick = async () => {
     try { await api("POST", `/api/merch/sales/${b.dataset.flag}/flag`, { flag: b.dataset.f, value: true }); render(); } catch (e) { fail(e); }
@@ -153,21 +158,28 @@ async function renderMerch(page) {
 
 /* Пересчёт склада (общий): сколько есть, норма, сколько заказать. Сохранение ставит задачу руководителю в Планер */
 function merchStockHtml(it) {
-  const items = it.items.filter((i) => i.active);
+  const items = (it.stock_items || []).filter((i) => i.active);
   const last = items.filter((i) => i.stock_at).sort((a, b) => (a.stock_at < b.stock_at ? 1 : -1))[0];
-  return `<section class="panel" style="padding:14px;margin-top:14px"><h3 style="margin-top:0">Пересчёт и заказ</h3>
-    <div class="small muted" style="margin-bottom:8px">${last ? `Последний пересчёт ${dShort(last.stock_at)} ${esc(last.stock_by)}. ` : ""}Впишите, сколько есть на складе. Что заказать, CRM посчитает сама и поставит задачу руководителю</div>
+  const status = it.stock_status || {};
+  return `<section class="panel" style="padding:14px;margin-top:14px"><h3 style="margin-top:0">Еженедельный пересчёт и заказ</h3>
+    <div class="small ${status.weekly_due ? "" : "muted"}" style="margin-bottom:8px">${status.weekly_due ? "На этой неделе остатки ещё не внесены. " : "✅ Остатки за эту неделю внесены. "}${last ? `Последний пересчёт ${dShort(last.stock_at)} ${esc(last.stock_by)}. ` : ""}Заполните все позиции. Если остаток ниже минимума, руководитель увидит предупреждение на рабочем столе.</div>
     <table class="tbl"><thead><tr><th>Товар</th><th>Есть</th><th>Норма</th><th>Заказать</th></tr></thead><tbody>
     ${items.map((i) => `<tr><td>${esc(i.name)}</td><td><input type="number" min="0" inputmode="numeric" data-mst="${i.id}" value="${i.stock ?? ""}" style="width:80px"></td>
-      <td>${it.can_norm ? `<input type="number" min="0" inputmode="numeric" data-mno="${i.id}" value="${i.norm || ""}" style="width:80px">` : i.norm || "—"}</td>
+      <td>${it.can_norm ? `<input type="number" min="0" inputmode="numeric" data-mno="${i.id}" value="${i.norm || ""}" style="width:80px">` : i.norm || "—"} <span class="small muted">${esc(i.stock_unit || "шт.")}</span></td>
       <td><b data-mor="${i.id}"></b></td></tr>`).join("")}</tbody></table>
-    <button class="btn primary" id="mst-save" style="margin-top:10px">Сохранить пересчёт</button></section>`;
+    <button class="btn primary" id="mst-save" style="margin-top:10px">Сохранить недельный пересчёт</button>
+    <details style="margin-top:14px"><summary>Добавить ещё одну позицию</summary><div class="row" style="gap:8px;margin-top:8px;align-items:flex-end">
+      <div class="field grow"><label>Название</label><input id="mst-new-name" placeholder="Например: пакеты"></div>
+      <div class="field" style="max-width:130px"><label>Минимум</label><input id="mst-new-norm" type="number" min="0" placeholder="необязательно"></div>
+      <div class="field" style="max-width:120px"><label>Единица</label><input id="mst-new-unit" value="шт."></div>
+      <button class="btn" id="mst-new-add" style="flex:0">Добавить</button></div></details></section>`;
 }
 
 function wireMerchStock(page, it) {
   const btn = page.querySelector("#mst-save");
   if (!btn) return;
-  const calc = () => it.items.forEach((i) => {
+  const stockItems = it.stock_items || [];
+  const calc = () => stockItems.forEach((i) => {
     const st = page.querySelector(`[data-mst="${i.id}"]`), no = page.querySelector(`[data-mno="${i.id}"]`), out = page.querySelector(`[data-mor="${i.id}"]`);
     if (!st || !out) return;
     const norm = no ? +no.value || 0 : i.norm || 0, n = norm - (+st.value || 0);
@@ -176,12 +188,18 @@ function wireMerchStock(page, it) {
   page.querySelectorAll("[data-mst],[data-mno]").forEach((x) => (x.oninput = calc));
   calc();
   btn.onclick = async () => {
-    const items = it.items.filter((i) => i.active).map((i) => ({ id: i.id, stock: page.querySelector(`[data-mst="${i.id}"]`).value,
+    const items = stockItems.filter((i) => i.active).map((i) => ({ id: i.id, stock: page.querySelector(`[data-mst="${i.id}"]`).value,
       norm: page.querySelector(`[data-mno="${i.id}"]`) ? page.querySelector(`[data-mno="${i.id}"]`).value : undefined }));
     try {
       const r = await api("POST", "/api/merch/stock", { items });
       toast(r.order.length ? `Заказать: ${r.order.map((o) => `${o.name} ${o.qty}`).join(", ")}. Задача руководителю в Планере` : "Всего хватает, заказывать нечего 👍");
       render();
     } catch (e) { fail(e); }
+  };
+  const add = page.querySelector("#mst-new-add");
+  if (add) add.onclick = async () => {
+    try { await api("POST", "/api/merch/stock/items", { name: page.querySelector("#mst-new-name").value,
+      norm: page.querySelector("#mst-new-norm").value, unit: page.querySelector("#mst-new-unit").value }); toast("Позиция добавлена"); render(); }
+    catch (e) { fail(e); }
   };
 }
