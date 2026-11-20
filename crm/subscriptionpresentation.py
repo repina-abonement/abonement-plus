@@ -16,6 +16,16 @@ def rows_for_card(con, sid, covered=None):
     rows=[dict(r) for r in con.execute('''SELECT x.*,e.group_id,g.name AS group_name
         FROM subscriptions x LEFT JOIN enrollments e ON e.id=x.enrollment_id AND e.student_id=x.student_id
         LEFT JOIN groups g ON g.id=e.group_id WHERE x.student_id=? ORDER BY x.month DESC,x.id''',(sid,))]
+    carry_in=defaultdict(int);carry_out=defaultdict(int);carry_history_out=defaultdict(int);carry_pending=defaultdict(int)
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='revenue_carries'").fetchone():
+        for c in con.execute("SELECT * FROM revenue_carries WHERE student_id=? AND active=1",(sid,)):
+            carry_in[c['target_subscription_id']]+=c['amount']
+            if c['source_subscription_id']:
+                carry_out[c['source_subscription_id']]+=c['amount']
+            if c['source_erp_subscription_id'] and c['source_loaded']:
+                carry_history_out[c['source_erp_subscription_id']]+=c['amount']
+            if not c['source_loaded']:
+                carry_pending[c['target_subscription_id']]+=c['amount']
     visits=defaultdict(list)
     for row in con.execute('''SELECT v.* FROM single_visits v JOIN subscriptions x ON x.id=v.subscription_id
             WHERE x.student_id=? ORDER BY v.id''',(sid,)):
@@ -30,6 +40,8 @@ def rows_for_card(con, sid, covered=None):
             history_only=row['status']=='cancelled',include_in_totals=row['status']!='cancelled',
             paid_amount=min(row['price'],max(0,covered.get(row['id'],covered.get(str(row['id']),0)))),
             single_date=None,single_time='',single_date_status=None,date_needs_review=False)
+        row.update(revenue_carry_in=carry_in[row['id']],revenue_carry_out=carry_out[row['id']],
+                   revenue_carry_source_pending=carry_pending[row['id']])
         if row['kind']!='single':
             continue
         source=sources.get(row['id'],{})
@@ -69,7 +81,8 @@ def rows_for_card(con, sid, covered=None):
                 'tariff':'fixed','lessons':x['lessons'],'price':x.get('revenue_amount'),'status':'historical','kind':'month','valid_from':x['valid_from'],
                 'valid_until':x['valid_until'],'group_id':x['group_id'],'group_name':x['group_name'],'branch_name':x['branch_name'],
                 'history_import':True,'source_subscription_id':x['source_id'],'display_month':x['month'],'accounting_month':None,
-                'history_only':True,'include_in_totals':False,'paid_amount':None,'analytics_only':True,'issued_by_name':'Перенос истории ERP'})
+                'history_only':True,'include_in_totals':False,'paid_amount':None,'analytics_only':True,'issued_by_name':'Перенос истории ERP',
+                'revenue_carry_in':0,'revenue_carry_out':carry_history_out[x['source_id']],'revenue_carry_source_pending':0})
     return rows
 
 

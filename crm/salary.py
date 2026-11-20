@@ -38,6 +38,9 @@ def _revenue(con, ym: str) -> dict[int, int]:
                             WHERE x.month=? AND x.status='paid' GROUP BY gid""", (ym,)):
         if r["gid"]:
             rev[r["gid"]] = int(r["rub"] or 0)
+    from . import revenuecarry
+    for row in revenuecarry.adjustments(con,ym):
+        rev[row['group_id']] = rev.get(row['group_id'],0) + row['amount']
     return rev
 
 

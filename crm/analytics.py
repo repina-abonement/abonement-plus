@@ -35,6 +35,11 @@ def _holders(con, ym: str, branch_id: int | None = None) -> dict[int, dict]:
             if branch_id and r["branch_id"] != branch_id: continue
             h = out.setdefault(r["student_id"], {"group_id": r["gid"], "branch_id": r["branch_id"], "revenue": 0})
             h["revenue"] += r["price"]
+    from . import revenuecarry
+    for row in revenuecarry.adjustments(con,ym,branch_id=branch_id):
+        branch = con.execute("SELECT branch_id FROM groups WHERE id=?",(row['group_id'],)).fetchone()
+        h = out.setdefault(row['student_id'], {"group_id": row['group_id'], "branch_id": branch['branch_id'] if branch else None, "revenue": 0})
+        h['revenue'] += row['amount']
     return out
 
 

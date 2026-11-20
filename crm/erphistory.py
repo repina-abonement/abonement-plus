@@ -338,4 +338,6 @@ def apply(con, payload, period, token, user, student_ids=None, unassigned_visit_
                 if visit["state"] == "assign_group": con.execute("DELETE FROM erp_history_unassigned_visits WHERE source_id=?", (visit["source_id"],))
             if visit["state"] == "assign_group": updated_visits += 1
             else: created_visits += 1
-    return {"ok": True, "subscriptions_added": created_subs, "planned_lessons_added": created_plans, "visits_added": created_visits, "visits_updated": updated_visits, "preview": preview(con, payload, period, student_ids, unassigned_visit_ids, visit_group_ids)}
+    from . import revenuecarry
+    revenue_carries_activated = revenuecarry.refresh_historical_sources(con)
+    return {"ok": True, "subscriptions_added": created_subs, "planned_lessons_added": created_plans, "visits_added": created_visits, "visits_updated": updated_visits, "revenue_carries_activated": revenue_carries_activated, "preview": preview(con, payload, period, student_ids, unassigned_visit_ids, visit_group_ids)}

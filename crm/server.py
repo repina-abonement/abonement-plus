@@ -947,6 +947,29 @@ def erp_history_apply(con, h, user, body, q):
     except erphistory.HistoryError as exc: raise ApiError(str(exc))
 
 
+@route("POST", "/api/erp/revenue-carry/preview", role="admin")
+def erp_revenue_carry_preview(con,h,user,body,q):
+    from . import revenuecarry
+    try:return revenuecarry.historical_preview(con,int(body.get('student_id')),int(body.get('target_subscription_id')),
+        [int(x) for x in body.get('absence_ids',[])],body.get('source_erp_subscription_id'),body.get('basis'))
+    except (TypeError,ValueError) as exc:raise ApiError(str(exc))
+
+
+@route("GET", "/api/erp/revenue-carry/context", role="admin")
+def erp_revenue_carry_context(con,h,user,body,q):
+    from . import revenuecarry
+    try:return revenuecarry.historical_context(con,q.get('erp_id'))
+    except (TypeError,ValueError) as exc:raise ApiError(str(exc))
+
+
+@route("POST", "/api/erp/revenue-carry/apply", role="admin")
+def erp_revenue_carry_apply(con,h,user,body,q):
+    from . import revenuecarry
+    try:return revenuecarry.historical_apply(con,int(body.get('student_id')),int(body.get('target_subscription_id')),
+        [int(x) for x in body.get('absence_ids',[])],body.get('source_erp_subscription_id'),body.get('basis'),body.get('token'),user)
+    except (TypeError,ValueError) as exc:raise ApiError(str(exc))
+
+
 from . import erpsinglerecoveryweb as _erp_single_recovery_web
 _erp_single_recovery_web.register(route)
 

@@ -543,6 +543,8 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
         current=balancecredit.preview(con,sid,q['total'],True,sub_id)
         balancecredit.apply_to_invoice(con,sub_id,user,True,current['token'],str(request_id or ''))
     money.reconcile(con, sid)
+    from . import revenuecarry
+    revenuecarry.record_invoice(con,sub_id,q["credit_absence_ids"],q["per_lesson"],user)
     for aid in q["credit_absence_ids"]:
         con.execute("UPDATE attendance SET resolved='credit', resolved_month=? WHERE id=?", (ym, aid))
     extra = f", перерасчёт {q['credit_lessons']} пропуск(а) −{q['credit']} ₽" if q["credit_lessons"] else ""
@@ -623,6 +625,8 @@ def cancel_subscription(con, sub_id: int, user, refund: bool = False, comment: s
         raise ApiError("Возврат оформляется отдельно с согласованием Юлии и проверкой исходного способа оплаты")
     paid = money.balance(con, sub["student_id"])["covered"].get(sub_id, 0)
     con.execute("UPDATE subscriptions SET status='cancelled' WHERE id=?", (sub_id,))
+    from . import revenuecarry
+    revenuecarry.cancel_invoice(con,sub_id,user)
     con.execute("""UPDATE attendance SET resolved=NULL, resolved_month=NULL
                    WHERE student_id=? AND resolved='credit' AND resolved_month=?
                      AND (? IS NULL OR group_id = (SELECT group_id FROM enrollments WHERE id = ?))""",
@@ -1565,6 +1569,9 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
                              AND COALESCE(e.group_id,(SELECT group_id FROM students WHERE id=x.student_id))=h.group_id
                          )""", (m, *holder_args)):
                 out.setdefault(sid_, []).append(price)
+        from . import revenuecarry
+        for row in revenuecarry.adjustments(con,m,group_id=group_id,branch_id=branch_id):
+            out.setdefault(row['student_id'], []).append(row['amount'])
         return out
 
     first_paid = {r[0]: r[1] for r in con.execute(
