@@ -1293,7 +1293,7 @@ def student_create(con, h, user, body, q):
 @route("GET", "/api/students/{sid}", role="operator|search:view")
 def student_get(con, h, user, body, q, sid):
     from . import recents
-    recents.remember(con, user["id"], int(sid))
+    recents.remember_if_available(con, user["id"], int(sid))
     from . import subcancel
     return sv.student_detail(con, int(sid)) | {'can_delete_error':subcancel.can_cancel_error(con,user)}
 
@@ -2934,7 +2934,7 @@ def conv_get(con, h, user, body, q, cid):
     from . import recents
     if q.get("remember") == "1":
         for student in detail.get("conversation", {}).get("students", []):
-            recents.remember(con, user["id"], student["id"])
+            recents.remember_if_available(con, user["id"], student["id"])
     return detail
 
 

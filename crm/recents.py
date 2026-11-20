@@ -1,4 +1,5 @@
 """Per-user recently viewed client IDs; labels are read from current records."""
+import sqlite3
 import time
 
 
@@ -17,6 +18,23 @@ def remember(con, uid, sid):
         ON CONFLICT(user_id,student_id) DO UPDATE SET viewed_at=excluded.viewed_at''', (uid,time.time_ns(),sid))
     con.execute('''DELETE FROM recent_clients WHERE user_id=? AND student_id NOT IN
         (SELECT student_id FROM recent_clients WHERE user_id=? ORDER BY viewed_at DESC LIMIT 20)''',(uid,uid))
+
+
+def remember_if_available(con, uid, sid):
+    """Update optional recents without making the requested page unavailable.
+
+    A concurrent SQLite writer may temporarily prevent this cosmetic write.  Only
+    the two lock result codes are ignored; schema, data and programming errors
+    still surface normally.
+    """
+    try:
+        remember(con, uid, sid)
+        return True
+    except sqlite3.OperationalError as error:
+        code = getattr(error, "sqlite_errorcode", None)
+        if code not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+            raise
+        return False
 
 
 def listing(con, uid):
