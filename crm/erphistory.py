@@ -26,10 +26,23 @@ CREATE TABLE IF NOT EXISTS erp_history_unassigned_visits (
  visit_date TEXT NOT NULL, visit_time TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL,
  source_group TEXT NOT NULL, source_payload TEXT NOT NULL, imported_at TEXT NOT NULL, imported_by TEXT NOT NULL,
  UNIQUE(student_id,visit_date,visit_time,kind,source_id));
+CREATE TABLE IF NOT EXISTS erp_history_planned_lessons (
+ id INTEGER PRIMARY KEY, source_subscription_id TEXT NOT NULL,
+ student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+ group_id INTEGER NOT NULL REFERENCES groups(id), lesson_date TEXT NOT NULL, lesson_time TEXT NOT NULL,
+ source_payload TEXT NOT NULL, imported_at TEXT NOT NULL, imported_by TEXT NOT NULL,
+ UNIQUE(source_subscription_id,lesson_date,lesson_time));
 """
 PILOT_KEYS = {
     "5331a74804c2a561b997d253d29bbccb642f426cf4f8b8ae5c2a03b75fa3e5e1",
     "b05a6695f5f2fd90d48242b5ecc350fee14171df5e11e847d1264e44ff94eb99",
+    "e096e0e682db8cb70845d2d6fe84476b0ca8ba0cefe4e8beff3340bf6a3df7be",
+}
+PILOT_CONTRACTS = {
+    ("84894", "2026-11"): {
+        "827955": ("2026-11-01", "2026-11-29", 9, 13500),
+        "827957": ("2026-11-07", "2026-11-28", 4, 4800),
+    },
 }
 SKIP = {"группа", "сборная", "пуп", "журнал", "тц"}
 
@@ -48,6 +61,7 @@ def _json(value): return json.dumps(value, ensure_ascii=False, sort_keys=True, s
 def _token(value): return hashlib.sha256(_json(value).encode()).hexdigest()
 def _pilot_key(erp_id, period): return hashlib.sha256(f"{erp_id}|{period}".encode()).hexdigest()
 def _norm(value): return " ".join(re.sub(r"[^a-zа-я0-9]+", " ", str(value or "").lower().replace("ё", "е")).split())
+def _same_name(left, right): return sorted(_norm(left).split()) == sorted(_norm(right).split()) and bool(_norm(left))
 
 
 def _amount(value):
@@ -70,6 +84,52 @@ def _subscriptions(row):
         return [item for item in plural if isinstance(item, dict)]
     single = row.get("subscription")
     return [single] if isinstance(single, dict) else []
+
+
+def _planned_lessons(row, sub):
+    own = sub.get("schedule") or sub.get("planned_lessons") or []
+    shared = [x for x in (row.get("planned_lessons") or [])
+              if str(x.get("erp_subscription_id") or "") == str(sub.get("erp_id") or "")]
+    return [x for x in [*own, *shared] if isinstance(x, dict)]
+
+
+def _visit_source(item):
+    erp_id = str(item.get("erp_attendance_id") or "").strip()
+    if erp_id:
+        return erp_id, "erp", erp_id
+    message_id = str(item.get("source_message_id") or "").strip()
+    chat_id = str(item.get("source_chat_id") or "").strip()
+    message_url = str(item.get("source_message_url") or "").strip()
+    if message_id:
+        stable = f"{chat_id}:{message_id}" if chat_id else message_id
+        return "telegram:" + stable, "telegram", message_url or stable
+    if message_url:
+        return "telegram-url:" + hashlib.sha256(message_url.encode()).hexdigest(), "telegram", message_url
+    return "", "", ""
+
+
+def _pilot_contract_issue(row, erp_id, month):
+    expected = PILOT_CONTRACTS.get((erp_id, month))
+    if not expected:
+        return ""
+    actual = {}
+    for sub in _subscriptions(row):
+        source_id = str(sub.get("erp_id") or "")
+        actual[source_id] = (str(sub.get("valid_from") or ""), str(sub.get("valid_until") or ""),
+                             int(sub.get("lesson_count") or 0), _amount(sub.get("price")))
+    if actual != expected:
+        return "Параметры абонементов не совпадают с разрешённым точечным переносом"
+    if not row.get("partial_attendance"):
+        return "Для этого пилота требуется раздельный план и частично подтверждённая посещаемость"
+    for sub in _subscriptions(row):
+        planned = _planned_lessons(row, sub)
+        if len(planned) != int(sub.get("lesson_count") or 0):
+            return "Число занятий в плане не совпадает с абонементом"
+        if str(sub.get("erp_id")) == "827957" and any(
+                str(x.get("time") or "") != "17:00" or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(x.get("date") or ""))
+                or date.fromisoformat(str(x.get("date"))).weekday() != 5 for x in planned):
+            return "Субботняя ОФП должна быть запланирована в 17:00"
+    return ""
 
 
 def _confirmed_group(con, item, candidates):
@@ -105,14 +165,14 @@ def _student(con, row, selected_id=None):
         selected = con.execute("SELECT id,name,birth,erp_id,archived FROM students WHERE id=?", (selected_id,)).fetchone()
         source_name = _norm((row.get("child_profile") or {}).get("name") or row.get("child"))
         if not selected or selected["archived"]: return None, "Выбранная карточка CRM не найдена"
-        if not source_name or _norm(selected["name"]) != source_name:
+        if not source_name or not _same_name(selected["name"], source_name):
             return None, "ФИО в выбранной карточке не совпадает с ФИО в файле"
         return dict(selected), "manual_selection"
     child = row.get("child_profile") or {}
     name, birth, phone = _norm(child.get("name") or row.get("child")), str(child.get("birth") or "")[:10], normalize_phone(child.get("parent_phone") or "")
     if not (name and birth and phone): return None, "ERP ID не найден; для безопасной сверки нужны ФИО, дата рождения и телефон родителя"
     candidates = [dict(r) for r in con.execute("""SELECT DISTINCT s.id,s.name,s.birth,s.erp_id FROM students s JOIN parents p ON p.family_id=s.family_id
-        WHERE s.birth=? AND p.phone_norm=?""", (birth, phone)) if _norm(r["name"]) == name]
+        WHERE s.birth=? AND p.phone_norm=?""", (birth, phone)) if _same_name(r["name"], name)]
     return (candidates[0], "profile") if len(candidates) == 1 else (None, "Несколько подходящих карточек" if candidates else "Карточка CRM не найдена")
 
 
@@ -146,11 +206,13 @@ def preview(con, payload, period=None, student_ids=None, unassigned_visit_ids=No
     result = {"children": [], "added": 0, "updated": 0, "existing": 0, "review": 0, "can_apply": True}
     for row in _records(payload):
         erp_id, month = str(row.get("erp_student_id") or "").strip(), str(period or row.get("month") or "")
-        child = {"erp_id": erp_id, "period": month, "student": None, "subscription": None, "subscriptions": [], "visits": [], "issues": []}
+        child = {"erp_id": erp_id, "period": month, "student": None, "subscription": None, "subscriptions": [], "planned": [], "visits": [], "issues": []}
         student, identity = _student(con, row, (student_ids or {}).get(erp_id))
         if not student: child["issues"].append(identity)
         else: child["student"] = {"id": student["id"], "name": student["name"], "match": identity}
         if row.get("month") and str(row.get("month")) != month: child["issues"].append("Период файла не совпадает с выбранным периодом")
+        contract_issue = _pilot_contract_issue(row, erp_id, month)
+        if contract_issue: child["issues"].append(contract_issue)
         visits = row.get("attendance") or []
         incoming_signatures = {}
         for item in visits:
@@ -158,7 +220,7 @@ def preview(con, payload, period=None, student_ids=None, unassigned_visit_ids=No
             incoming_signatures[signature] = incoming_signatures.get(signature, 0) + 1
         mapped = []
         for item in visits:
-            source_id = str(item.get("erp_attendance_id") or "").strip()
+            source_id, source_type, source_ref = _visit_source(item)
             kind = "makeup" if _norm(item.get("type")) == "отработка" else "subscription" if _norm(item.get("type")) == "абонемент" else ""
             status = "present" if _norm(item.get("status")) in ("присутствовал", "был", "present") else "absent" if _norm(item.get("status")) in ("отсутствовал", "не был", "absent") else ""
             group, issue, group_candidates = _group(con, item.get("group"), str(item.get("date") or ""), str(item.get("time") or ""), student["id"] if student else None, kind) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(item.get("date") or "")) else (None, "Некорректная дата", [])
@@ -191,13 +253,28 @@ def preview(con, payload, period=None, student_ids=None, unassigned_visit_ids=No
                    "kind": kind, "status": status, "state": state, "reason": "" if state in ("add_unassigned", "assign_group") else reason,
                    "approvable_unassigned": approvable_unassigned, "group_unresolved": state in ("add_unassigned", "already_exists") and bool(existing_unassigned),
                    "group_candidates": group_candidates if existing_unassigned or ambiguous_group else [],
-                   "source_subscription_id": str(item.get("erp_subscription_id") or "")}
+                   "source_subscription_id": str(item.get("erp_subscription_id") or ""),
+                   "source_type": source_type, "source_ref": source_ref}
             if state == "add_unassigned": out["group_unresolved"] = True
             child["visits"].append(out); mapped.append((item, out)); result["existing" if state == "already_exists" else "added" if state in ("add", "add_unassigned") else "updated" if state == "assign_group" else "review"] += 1
         for sub in _subscriptions(row):
             subid = str(sub.get("erp_id") or "").strip(); revenue_amount = _amount(sub.get("price"))
             attached = [x[1] for x in mapped if x[1]["kind"] == "subscription" and x[1]["source_subscription_id"] == subid]
-            main_groups = {x["group_id"] for x in attached if x["group_id"]}
+            planned = []
+            for item in _planned_lessons(row, sub):
+                day, tm = str(item.get("date") or ""), str(item.get("time") or "")
+                group, issue, _ = _group(con, item.get("group") or sub.get("group"), day, tm, student["id"] if student else None, "subscription") if re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) else (None, "Некорректная дата", [])
+                existing_plan = con.execute("SELECT * FROM erp_history_planned_lessons WHERE source_subscription_id=? AND lesson_date=? AND lesson_time=?", (subid,day,tm)).fetchone() if subid else None
+                conflict = bool(existing_plan and student and group and (existing_plan["student_id"] != student["id"] or existing_plan["group_id"] != group[1]))
+                outside = not day.startswith(month + "-")
+                state = "review" if conflict or outside or not student or not subid or not group else "already_exists" if existing_plan else "add"
+                reason = "План занятия уже связан с другими данными" if conflict else "Дата занятия находится вне выбранного периода" if outside else issue
+                plan = {"source_subscription_id": subid, "date": day, "time": tm,
+                        "group_id": group[1] if group else None, "group": group[2] if group else None,
+                        "branch": group[3] if group else None, "state": state, "reason": reason}
+                planned.append((item, plan)); child["planned"].append(plan)
+                result["existing" if state == "already_exists" else "added" if state == "add" else "review"] += 1
+            main_groups = {x["group_id"] for x in attached if x["group_id"]} | {x[1]["group_id"] for x in planned if x[1]["group_id"]}
             existing_sub = con.execute("SELECT * FROM erp_history_subscriptions WHERE source_id=?", (subid,)).fetchone() if subid else None
             group_id = next(iter(main_groups)) if len(main_groups) == 1 else None
             lessons = int(sub.get("lesson_count") or 0)
@@ -205,7 +282,9 @@ def preview(con, payload, period=None, student_ids=None, unassigned_visit_ids=No
             native_sub = bool(student and group_id and con.execute('''SELECT 1 FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id
                 WHERE x.student_id=? AND e.group_id=? AND x.month=? AND x.lessons=? AND COALESCE(x.valid_from,'')=? AND COALESCE(x.valid_until,'')=? AND x.status!='cancelled' ''',
                 (student["id"],group_id,month,lessons,sub.get("valid_from") or '',sub.get("valid_until") or '')).fetchone())
-            marks_match = lessons == len(attached) and all(x["status"] in ("present", "absent") for x in attached)
+            partial = bool(row.get("partial_attendance") or sub.get("partial_attendance"))
+            plan_matches = len(planned) == lessons and all(x[1]["state"] != "review" for x in planned)
+            marks_match = (partial and plan_matches and len(attached) <= lessons or lessons == len(attached)) and all(x["status"] in ("present", "absent") for x in attached)
             sub_state = "review" if existing_conflict else "already_exists" if existing_sub or native_sub else "add" if student and subid and group_id and revenue_amount is not None and marks_match else "review"
             output = {"source_id": subid, "group_id": group_id, "valid_from": sub.get("valid_from"), "valid_until": sub.get("valid_until"),
                 "lessons": sub.get("lesson_count"), "revenue_amount": revenue_amount, "state": sub_state,
@@ -214,7 +293,7 @@ def preview(con, payload, period=None, student_ids=None, unassigned_visit_ids=No
             result["existing" if sub_state == "already_exists" else "added" if sub_state == "add" else "review"] += 1
         child["subscription"] = child["subscriptions"][0] if child["subscriptions"] else None
         if not child["subscriptions"]: child["issues"].append("В источнике нет абонементов")
-        if child["issues"] or any(x["state"] == "review" for x in child["subscriptions"]) or any(x["state"] == "review" for x in child["visits"]): result["can_apply"] = False
+        if child["issues"] or any(x["state"] == "review" for x in child["subscriptions"]) or any(x["state"] == "review" for x in child["planned"]) or any(x["state"] == "review" for x in child["visits"]): result["can_apply"] = False
         result["children"].append(child)
     result["unassigned_visit_ids"] = sorted(approved_unassigned)
     result["visit_group_ids"] = selected_groups
@@ -226,7 +305,7 @@ def apply(con, payload, period, token, user, student_ids=None, unassigned_visit_
     checked = preview(con, payload, period, student_ids, unassigned_visit_ids, visit_group_ids)
     if not checked["can_apply"] or checked["token"] != token: raise HistoryError("Предпросмотр изменился. Проверьте данные повторно")
     if any(_pilot_key(c["erp_id"], c["period"]) not in PILOT_KEYS for c in checked["children"]): raise HistoryError("Этот ребёнок и период ещё не разрешены для рабочего переноса")
-    now = datetime.now().isoformat(timespec="seconds"); created_subs = created_visits = updated_visits = 0
+    now = datetime.now().isoformat(timespec="seconds"); created_subs = created_plans = created_visits = updated_visits = 0
     source_rows = {str(r.get("erp_student_id")): r for r in _records(payload)}
     for child in checked["children"]:
         sid = child["student"]["id"]; raw = source_rows[child["erp_id"]]
@@ -239,7 +318,14 @@ def apply(con, payload, period, token, user, student_ids=None, unassigned_visit_
             if sub["state"] == "add":
                 con.execute("INSERT INTO erp_history_subscriptions(source_id,student_id,group_id,month,valid_from,valid_until,lessons,revenue_amount,source_payload,imported_at,imported_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                     (sub["source_id"],sid,sub["group_id"],child["period"],sub["valid_from"],sub["valid_until"],int(sub["lessons"]),sub["revenue_amount"],_json(raw_subscriptions[sub["source_id"]]),now,user.get("name", ""))); created_subs += 1
-        by_id = {str(x.get("erp_attendance_id")): x for x in raw.get("attendance", [])}
+        raw_plans = {(str(x.get("erp_subscription_id") or sub.get("erp_id") or ""), str(x.get("date") or ""), str(x.get("time") or "")): x
+                     for sub in _subscriptions(raw) for x in _planned_lessons(raw, sub)}
+        for plan in child["planned"]:
+            if plan["state"] != "add": continue
+            key = (plan["source_subscription_id"], plan["date"], plan["time"])
+            con.execute("INSERT INTO erp_history_planned_lessons(source_subscription_id,student_id,group_id,lesson_date,lesson_time,source_payload,imported_at,imported_by) VALUES (?,?,?,?,?,?,?,?)",
+                (plan["source_subscription_id"],sid,plan["group_id"],plan["date"],plan["time"],_json(raw_plans[key]),now,user.get("name", ""))); created_plans += 1
+        by_id = {_visit_source(x)[0]: x for x in raw.get("attendance", [])}
         for visit in child["visits"]:
             if visit["state"] not in ("add", "add_unassigned", "assign_group"): continue
             item = by_id[visit["source_id"]]
@@ -252,4 +338,4 @@ def apply(con, payload, period, token, user, student_ids=None, unassigned_visit_
                 if visit["state"] == "assign_group": con.execute("DELETE FROM erp_history_unassigned_visits WHERE source_id=?", (visit["source_id"],))
             if visit["state"] == "assign_group": updated_visits += 1
             else: created_visits += 1
-    return {"ok": True, "subscriptions_added": created_subs, "visits_added": created_visits, "visits_updated": updated_visits, "preview": preview(con, payload, period, student_ids, unassigned_visit_ids, visit_group_ids)}
+    return {"ok": True, "subscriptions_added": created_subs, "planned_lessons_added": created_plans, "visits_added": created_visits, "visits_updated": updated_visits, "preview": preview(con, payload, period, student_ids, unassigned_visit_ids, visit_group_ids)}

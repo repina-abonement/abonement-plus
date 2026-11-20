@@ -71,14 +71,25 @@ def calendar(con, sid, ym):
             events.pop((day, gid, 'subscription'), None)
         events[(day, gid, 'trial', trial['id'])] = {'date':day,'group_id':gid,'kind':'trial',
             'status':'present' if trial['came'] else 'absent','trial_time':trial['visit_at'][11:16], 'trial_visit_id':trial['id']}
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_planned_lessons'").fetchone():
+        for planned in con.execute('''SELECT * FROM erp_history_planned_lessons
+            WHERE student_id=? AND lesson_date BETWEEN ? AND ?''', (sid,start.isoformat(),end.isoformat())):
+            add(planned['lesson_date'],planned['group_id'],'subscription','planned',
+                trial_time=planned['lesson_time'],historical_erp=True,
+                source_subscription_id=planned['source_subscription_id'])
     if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_visits'").fetchone():
         for mark in con.execute('''SELECT * FROM erp_history_visits WHERE student_id=? AND visit_date BETWEEN ? AND ?''',
                                 (sid,start.isoformat(),end.isoformat())):
             events.pop((mark['visit_date'],mark['group_id'],'subscription'),None)
             events.pop((mark['visit_date'],mark['group_id'],'visit'),None)
             key=(mark['visit_date'],mark['group_id'],mark['kind'],'erp-history',mark['id'])
+            try: source_payload=json.loads(mark['source_payload'])
+            except (TypeError,ValueError): source_payload={}
             events[key]={'date':mark['visit_date'],'group_id':mark['group_id'],'kind':mark['kind'],'status':mark['status'],
-                'trial_time':mark['visit_time'],'historical_erp':True,'erp_attendance_id':mark['source_id']}
+                'trial_time':mark['visit_time'],'historical_erp':True,
+                'erp_attendance_id':source_payload.get('erp_attendance_id'),
+                'source_message_id':source_payload.get('source_message_id'),
+                'source_message_url':source_payload.get('source_message_url')}
     if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_unassigned_visits'").fetchone():
         for mark in con.execute('''SELECT * FROM erp_history_unassigned_visits WHERE student_id=? AND visit_date BETWEEN ? AND ?''',
                                 (sid,start.isoformat(),end.isoformat())):

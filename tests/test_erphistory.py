@@ -145,6 +145,66 @@ def main():
     assert {x['time'] for x in same_day}=={'16:00','17:00'}
     multi_again=erphistory.preview(con,multi,'2025-10')
     assert multi_again['added']==0 and multi_again['existing']==18 and multi_again['review']==0
+
+    # Partial attendance keeps the full subscription schedule separate from
+    # confirmed marks. A Telegram mark has its own source reference and no
+    # invented ERP attendance ID. Reversed first/last name is safe only with
+    # the same birth date and parent phone.
+    pfid=con.execute("INSERT INTO families(name) VALUES ('Семья частичного пилота')").lastrowid
+    psid=con.execute("INSERT INTO students(family_id,name,birth,stage_changed_at,created_at) VALUES (?,?,?,?,?)",
+      (pfid,'Ребёнок Тестовый','2014-02-03','2026-01-01','2026-01-01')).lastrowid
+    con.execute("INSERT INTO parents(family_id,name,phone,phone_norm) VALUES (?,?,?,?)",
+      (pfid,'Родитель','+7 999 123-45-67','79991234567'))
+    con.execute("INSERT INTO enrollments(student_id,group_id,created_at) VALUES (?,?,?)",(psid,main_group,'2026-01-01'))
+    main_plan=[{'date':d,'time':t,'group':'Север, сборная'} for d,t in [
+      ('2026-11-01','19:30'),('2026-11-03','18:30'),('2026-11-08','19:30'),
+      ('2026-11-10','18:30'),('2026-11-15','19:30'),('2026-11-17','18:30'),
+      ('2026-11-22','19:30'),('2026-11-24','18:30'),('2026-11-29','19:30')]]
+    ofp_plan=[{'date':d,'time':'17:00','group':'Юг, ОФП 6–8'} for d in
+      ('2026-11-07','2026-11-14','2026-11-21','2026-11-28')]
+    partial={'child_profile':{'name':'Тестовый Ребёнок','birth':'2014-02-03','parent_phone':'+7 999 123-45-67'},
+      'erp_student_id':'PARTIAL-ERP','month':'2026-11','partial_attendance':True,'subscriptions':[
+        {'erp_id':'NOV-MAIN','valid_from':'2026-11-01','valid_until':'2026-11-29','lesson_count':9,'price':13500,'schedule':main_plan},
+        {'erp_id':'NOV-OFP','valid_from':'2026-11-07','valid_until':'2026-11-28','lesson_count':4,'price':4800,'schedule':ofp_plan}],
+      'attendance':[
+        {'date':'2026-11-03','time':'18:30','group':'Север, сборная','type':'Абонемент','erp_subscription_id':'NOV-MAIN','source_message_id':'tg-101','source_message_url':'https://t.me/c/1/101','status':'присутствовал'},
+        {'date':'2026-11-07','time':'17:00','group':'Юг, ОФП 6–8','type':'Абонемент','erp_subscription_id':'NOV-OFP','erp_attendance_id':'ERP-MARK-1','status':'присутствовал'}]}
+    partial_before=(con.execute('SELECT count(*) FROM payments').fetchone()[0],money.balance(con,psid),dict(con.execute('SELECT * FROM students WHERE id=?',(psid,)).fetchone()))
+    partial_plan=erphistory.preview(con,partial,'2026-11')
+    assert partial_plan['can_apply'] and partial_plan['added']==17 and partial_plan['review']==0,partial_plan
+    assert partial_plan['children'][0]['student']['match']=='profile'
+    telegram=next(x for x in partial_plan['children'][0]['visits'] if x['source_type']=='telegram')
+    assert telegram['source_ref']=='https://t.me/c/1/101' and telegram['source_id']=='telegram:tg-101'
+    old=erphistory.PILOT_KEYS;erphistory.PILOT_KEYS={erphistory._pilot_key('PARTIAL-ERP','2026-11')}
+    try: partial_result=erphistory.apply(con,partial,'2026-11',partial_plan['token'],{'name':'Тест'})
+    finally: erphistory.PILOT_KEYS=old
+    assert (partial_result['subscriptions_added'],partial_result['planned_lessons_added'],partial_result['visits_added'])==(2,13,2)
+    partial_events=clientattendance.calendar(con,psid,'2026-11')['events']
+    assert sum(x['status']=='planned' for x in partial_events)==11
+    assert sum(x['status']=='present' for x in partial_events)==2
+    saved_tg=next(x for x in partial_events if x.get('source_message_id')=='tg-101')
+    assert saved_tg.get('erp_attendance_id') is None and saved_tg['source_message_url']=='https://t.me/c/1/101'
+    partial_again=erphistory.preview(con,partial,'2026-11')
+    assert partial_again['added']==0 and partial_again['existing']==17 and partial_again['review']==0
+    later={**partial,'attendance':partial['attendance']+[
+      {'date':'2026-11-08','time':'19:30','group':'Север, сборная','type':'Абонемент','erp_subscription_id':'NOV-MAIN','source_message_id':'tg-102','status':'присутствовал'}]}
+    later_plan=erphistory.preview(con,later,'2026-11')
+    assert later_plan['can_apply'] and later_plan['added']==1 and later_plan['existing']==17
+    old=erphistory.PILOT_KEYS;erphistory.PILOT_KEYS={erphistory._pilot_key('PARTIAL-ERP','2026-11')}
+    try: later_result=erphistory.apply(con,later,'2026-11',later_plan['token'],{'name':'Тест'})
+    finally: erphistory.PILOT_KEYS=old
+    assert (later_result['subscriptions_added'],later_result['planned_lessons_added'],later_result['visits_added'])==(0,0,1)
+    partial_after=(con.execute('SELECT count(*) FROM payments').fetchone()[0],money.balance(con,psid),dict(con.execute('SELECT * FROM students WHERE id=?',(psid,)).fetchone()))
+    assert partial_before==partial_after
+    wrong_phone={**partial,'erp_student_id':'WRONG-PHONE','child_profile':{**partial['child_profile'],'parent_phone':'+7 999 000-00-00'}}
+    assert not erphistory.preview(con,wrong_phone,'2026-11')['can_apply']
+    allowed_november={**partial,'erp_student_id':'84894','subscriptions':[
+      {**partial['subscriptions'][0],'erp_id':'827955'},
+      {**partial['subscriptions'][1],'erp_id':'827957'}]}
+    assert erphistory._pilot_contract_issue(allowed_november,'84894','2026-11')==''
+    wrong_ofp={**allowed_november,'subscriptions':[allowed_november['subscriptions'][0],
+      {**allowed_november['subscriptions'][1],'schedule':[{**x,'time':'16:00'} for x in ofp_plan]}]}
+    assert '17:00' in erphistory._pilot_contract_issue(wrong_ofp,'84894','2026-11')
     print('ok')
 
 if __name__=='__main__':main()
