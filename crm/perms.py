@@ -17,6 +17,7 @@ TITLES = {"owner": "Руководитель", "senior": "Старший адм�
 DESK = {"owner": "full", "senior": "full", "operator": "full"}
 SECTIONS: dict[str, dict[str, str]] = {
     "sales": DESK, "inbox": DESK, "skips": DESK, "merch": DESK, "search": DESK,
+    "client_sales": DESK,  # оформление покупок из карточки без общего управления клиентами
     "members": DESK | {"coach": "own"},  # тренер: дети своих групп без телефонов, только просмотр
     "today": {"owner": "full", "coach": "own"},
     "planner": {"owner": "full", "senior": "full", "operator": "own", "coach": "own", "promoter": "own", "lawyer": "own", "trainee": "own"},
@@ -76,7 +77,7 @@ def level(user: dict, section: str) -> int:
         import re
         if user.get('is_offline_admin') or {'варвара','батарева'}.issubset(set(re.findall(r'[а-яё]+',str(user.get('name','')).casefold()))):return LEVEL['own']
     if "offline" in roles_of(user):
-        return LEVEL["full"] if section == "inbox" else LEVEL["view"] if section == "search" else LEVEL["own"] if section == "planner" else 0
+        return LEVEL["full"] if section in ("inbox", "client_sales") else LEVEL["view"] if section == "search" else LEVEL["own"] if section == "planner" else 0
     rules = SECTIONS.get(section, {})
     return max((LEVEL[rules[r]] for r in roles_of(user) if r in rules), default=0)
 

@@ -57,7 +57,7 @@ def query_choice(q):
 
 
 def register(route):
-    @route('POST','/api/subscriptions/{sub}/balance-apply',role='operator')
+    @route('POST','/api/subscriptions/{sub}/balance-apply',role='operator|client_sales:full')
     def apply_balance(con,h,user,body,q,sub):
         from . import balancecredit, money, program, pricing
         from .services import ApiError, sale_payment_day

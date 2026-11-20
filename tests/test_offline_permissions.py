@@ -4,7 +4,8 @@ from crm import perms,server
 class OfflinePermissions(unittest.TestCase):
     def test_only_authorized_sections_even_with_extra_flags(self):
         user={'role':'operator','is_offline_admin':1,'is_senior':1,'is_journal':1,'is_promoter':1}
-        self.assertEqual(perms.view_of(user),{'inbox':'full','planner':'own','search':'view','staffexpenses':'own'})
+        self.assertEqual(perms.view_of(user),{'inbox':'full','planner':'own','search':'view','staffexpenses':'own','client_sales':'full'})
+        self.assertTrue(perms.allowed(user,'client_sales:full'))
         for spec in ('operator','admin','any','coach','sales','members','journal','schedule','payments','settings','export'):
             self.assertFalse(perms.allowed(user,spec),spec)
         self.assertTrue(perms.allowed(user,'inbox'))

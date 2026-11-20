@@ -364,13 +364,13 @@ def backup_status(con, h, user, body, q):
     return backup.status(con)
 
 
-@route("GET", "/api/students/{sid}/paylinks", role="members:full")
+@route("GET", "/api/students/{sid}/paylinks", role="members:full|client_sales:full")
 def paylinks_list(con, h, user, body, q, sid):
     from . import paylinks
     return {"ready": paylinks.ready(con), "links": paylinks.listing(con, int(sid))}
 
 
-@route("POST", "/api/students/{sid}/paylinks", role="members:full")
+@route("POST", "/api/students/{sid}/paylinks", role="members:full|client_sales:full")
 def paylinks_create(con, h, user, body, q, sid):
     from . import paylinks
     from . import smart
@@ -384,7 +384,7 @@ def paylinks_create(con, h, user, body, q, sid):
         raise ApiError(str(e))
 
 
-@route('GET','/api/paylinks/{lid}/validate',role='members:full',transactional=False)
+@route('GET','/api/paylinks/{lid}/validate',role='members:full|client_sales:full',transactional=False)
 def paylink_validate(con,h,user,body,q,lid):
     from . import paylinkguard,paylinks
     try:
@@ -426,7 +426,7 @@ def public_pay_checkout(con,h,user,body,q,token):
         return JsonResponse({"error":str(error)},400)
 
 
-@route("POST", "/api/paylinks/{lid}/cancel", role="members:full")
+@route("POST", "/api/paylinks/{lid}/cancel", role="members:full|client_sales:full")
 def paylinks_cancel(con, h, user, body, q, lid):
     from . import paylinks
     paylinks.cancel(con, int(lid))
@@ -570,6 +570,12 @@ def meta(con, h, user, body, q):
         m["settings"] = {}
         if user.get("coach_nebo_only"):
             m["comms"], m["ad"] = {}, []
+    elif perms.can(user, "client_sales", "full") and not perms.allowed(user, "any"):
+        # Sale-only access needs active groups and prices, without inheriting
+        # unrelated operator routes or arbitrary configuration values.
+        sale_settings = {'price_fixed', 'price_flex', 'price_single', 'late_fee_enabled',
+                         'late_fee_percent', 'renewal_deadline_day'}
+        m['settings'] = {k:v for k,v in m['settings'].items() if k in sale_settings}
     elif not perms.allowed(user, "any"):  # юрист: группы и цены ему не нужны
         m["groups"], m["settings"] = [], {}
     m["festive"] = (con.execute("SELECT value FROM settings WHERE key='festive'").fetchone() or ["1"])[0] != "0"
@@ -660,15 +666,18 @@ def views_delete(con, h, user, body, q, vid):
     return {"ok": True}
 
 
-@route("GET", "/api/students/{sid}/required", role="operator")
+@route("GET", "/api/students/{sid}/required", role="operator|client_sales:full")
 def required_get(con, h, user, body, q, sid):
     from . import smart
     return smart.required_info(con, int(sid), q.get("for", "trial"))
 
 
-@route("POST", "/api/students/{sid}/required", role="operator")
+@route("POST", "/api/students/{sid}/required", role="operator|client_sales:full")
 def required_post(con, h, user, body, q, sid):
     from . import smart
+    if not perms.allowed(user, 'operator') and (not isinstance(body, dict)
+            or set(body) - {'child_name', 'birth', 'parent_name', 'phone', 'email'}):
+        raise ApiError('При оформлении покупки можно заполнить только необходимые данные клиента', 403)
     smart.fill_required(con, int(sid), body, user)
     return {"ok": True}
 
@@ -1327,19 +1336,19 @@ def vacation_del(con, h, user, body, q, vid):
     return {"ok": True}
 
 
-@route("GET", "/api/students/{sid}/quote", role="operator")
+@route("GET", "/api/students/{sid}/quote", role="operator|client_sales:full")
 def quote(con, h, user, body, q, sid):
     from . import invoicebalanceweb
     return sv.quote_for(con, int(sid), q.get("month"), q.get("enrollment_id"), q.get("discount_id"), q.get("tariff"), (q.get("excluded_dates") or []) if q.get("dates_selected")=="1" else q.get("excluded_dates"), q.get("credit_requested"), q.get("group_id"), q.get("ofp_group_id"),q.get("paid_date"),user=user,use_balance=invoicebalanceweb.query_choice(q))
 
 
-@route("POST", "/api/students/{sid}/multi-month-preview", role="members:full")
+@route("POST", "/api/students/{sid}/multi-month-preview", role="members:full|client_sales:full")
 def multi_month_preview(con,h,user,body,q,sid):
     from . import multimonth
     return multimonth.preview(con,int(sid),body,user)
 
 
-@route("POST", "/api/students/{sid}/multi-month-sale", role="members:full")
+@route("POST", "/api/students/{sid}/multi-month-sale", role="members:full|client_sales:full")
 def multi_month_sale(con,h,user,body,q,sid):
     from . import multimonth
     from . import paylinks
@@ -1349,7 +1358,7 @@ def multi_month_sale(con,h,user,body,q,sid):
         raise ApiError(str(error))
 
 
-@route("POST", "/api/students/{sid}/invoice", role="operator")
+@route("POST", "/api/students/{sid}/invoice", role="operator|client_sales:full")
 def invoice(con, h, user, body, q, sid):
     return sv.create_invoice(con, int(sid), body.get("month"), user, body.get("enrollment_id"), body.get("discount_id"), body.get("tariff"), body.get("excluded_dates"), body.get("credit_requested", False), body.get("group_id"), body.get("ofp_group_id"), body.get("group_action", "transfer"),body.get("paid_date"),str(body.get("exclusion_reason") or "")[:1000],use_balance=body.get('use_balance',False),expected_balance_token=body.get('expected_balance_token',body.get('balance_token')),request_id=body.get('request_id'))
 
@@ -1382,7 +1391,7 @@ def enrollment_transfer(con, h, user, body, q, eid):
     return transfer.apply(con, int(eid), int(body.get("group_id") or 0), body.get("date") or "", user, body.get("weekdays"), body.get("tariff") or "fixed", body.get("expected"))
 
 
-@route("GET", "/api/subscriptions/{sub}/payment-quote", role="operator")
+@route("GET", "/api/subscriptions/{sub}/payment-quote", role="operator|client_sales:full")
 def subscription_payment_quote(con,h,user,body,q,sub):
     return sv.payment_quote(con,int(sub),q.get("paid_date"),_invoice_balance_web.query_choice(q))
 
@@ -1393,7 +1402,7 @@ def payment_fiscal_check(con,h,user,body,q,pid):
     return fiscalcheck.check(con,int(pid),user)
 
 
-@route("POST", "/api/subscriptions/{sub}/pay", role="operator")
+@route("POST", "/api/subscriptions/{sub}/pay", role="operator|client_sales:full")
 def pay(con, h, user, body, q, sub):
     sv.pay_subscription(con, int(sub), user, body.get("method") or "cash", body.get("amount"),body.get("paid_date"),body.get("request_id"))
     return {"ok": True}
@@ -1413,13 +1422,13 @@ def payment_add(con, h, user, body, q, sid):
                      comment=body.get("comment") or "")}
 
 
-@route("GET", "/api/students/{sid}/single-quote", role="operator")
+@route("GET", "/api/students/{sid}/single-quote", role="operator|client_sales:full")
 def single_quote(con, h, user, body, q, sid):
     from . import singles
     return singles.sale_quote(con,int(sid),int(q.get("group_id") or 0),q.get("month") or "",q.get("date"))
 
 
-@route("POST", "/api/students/{sid}/single", role="operator")
+@route("POST", "/api/students/{sid}/single", role="operator|client_sales:full")
 def single_sell(con, h, user, body, q, sid):
     sv.get_student_row(con, int(sid))
     if body.get("date"):
