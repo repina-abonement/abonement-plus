@@ -1339,8 +1339,8 @@ async function renderWorkdesk(page) {
   };
   const ORDER = {
     owner: ["spend", "reports", "answers", "marks", "subs", "checkins", "tasks", "call", "wait", "merch", "sched", "bday"],
-    control: ["reports", "answers", "marks", "checkins", "subs", "merch", "tasks", "wait", "sched", "bday", "call", "spend"],
-    operator: ["tasks", "answers", "call", "wait", "sched", "bday", "marks", "subs", "merch", "spend", "checkins", "reports"],
+    control: ["reports", "answers", "marks", "checkins", "subs", "tasks", "wait", "sched", "bday", "call"],
+    operator: ["tasks", "answers", "call", "wait", "sched", "bday", "marks", "subs", "checkins", "reports"],
   }[who];
   const widgets = ORDER.filter((k) => W[k].html);
   // на виду только то, где есть что делать, и задачи; остальное свёрнуто строкой внизу (раскрывается по нажатию)
