@@ -789,7 +789,9 @@ def erp_board(con, day: str = "today", user: dict | None = None) -> dict:
     tomorrow = (today + timedelta(days=1)).isoformat()
     t0 = today.isoformat()
     base = """SELECT t.* FROM tasks t LEFT JOIN users u ON u.id=t.assignee_id
-              WHERE t.status='open' AND t.kind != 'bday' AND (t.student_id IS NOT NULL OR t.family_id IS NOT NULL OR u.id IS NULL OR u.role != 'coach')"""
+              WHERE t.status='open' AND t.kind != 'bday'
+                AND NOT (t.kind='plan' AND t.student_id IS NULL AND t.family_id IS NULL AND u.role='offline_pool')
+                AND (t.student_id IS NOT NULL OR t.family_id IS NOT NULL OR u.id IS NULL OR u.role != 'coach')"""
     privacy, visible_ids = _planner_privacy(con, user, "t.") if user is not None else ("", [])
     base += privacy
     cond = {"overdue": ("substr(t.due_at,1,10) < ?", t0), "today": ("substr(t.due_at,1,10) = ?", t0),

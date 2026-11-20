@@ -2,7 +2,7 @@
 import os, sys, tempfile
 from datetime import date, datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from crm import db, schedule, services as sv, tasks
+from crm import db, offlineplanner, schedule, services as sv, tasks
 from crm import smart; smart.REQUIRE = False
 from tests.test_crm import check
 
@@ -24,6 +24,9 @@ def main():
                     (kind, title or tasks.KINDS[kind][0], sid, due, src, at(-2)))
     con.execute("INSERT INTO tasks(kind,title,student_id,assignee_id,due_at,source,created_at) VALUES ('manual','Тренеру',?,?,?,?,?)",
                 (sid, coach, at(0), "manual", at(-2)))
+    pool = offlineplanner.pool_id(con)
+    con.execute("INSERT INTO tasks(kind,title,assignee_id,due_at,source,created_at) VALUES ('plan','План офлайн-администраторов',?,?,?,?)",
+                (pool, at(0), "planner", at(-2)))
     con.commit()
 
     d = tasks.erp_board(con, "today")
@@ -32,6 +35,8 @@ def main():
           "Колонки ERP и согласованная проверка продления, неизвестный статус ERP отдельно, затем Ручные: " + str(titles))
     check(d["counts"] == {"overdue": 1, "today": 7, "tomorrow": 1}, "Просрочено, Сегодня, Завтра считаются отдельно: " + str(d["counts"]))
     check(any(t["title"] == "Тренеру" for c in d["columns"] for t in c["cards"]), "Клиентская задача видна всем администраторам независимо от старого исполнителя")
+    check(not any(t["title"] == "План офлайн-администраторов" for c in d["columns"] for t in c["cards"]),
+          "Общий Планер офлайн-администраторов не дублируется на рабочем столе руководителя")
     check([c["title"] for c in tasks.erp_board(con, "overdue")["columns"]] == ["Почему не купили"], "Просроченные отдельно")
     check([c["title"] for c in tasks.erp_board(con, "tomorrow")["columns"]] == ["Напоминание о сегодняшнем ПУ"], "Завтрашние отдельно")
     # «Приглашение на ПУ повторно» (04.11): дата обязательна, задача в этот день, старые задачи по пробному закрываются
