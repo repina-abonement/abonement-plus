@@ -541,14 +541,21 @@ function crmNavigationUrl(target) {
   }
   return "";
 }
-document.addEventListener("auxclick", (event) => {
+let crmMiddleOpened = null;
+function openCrmNavigationByMiddleClick(event) {
   if (event.button !== 1 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
   const target = event.target.closest("[data-view],[data-tile],[data-open],[data-aopen],[data-who],[data-nr],[data-wlopen],[data-open-st],[data-new-card],[data-conv],[data-oqchat]");
   const url = crmNavigationUrl(target);
   if (!url) return;
   event.preventDefault(); event.stopPropagation();
+  if (crmMiddleOpened && crmMiddleOpened.target === target && Date.now() - crmMiddleOpened.at < 1000) return;
+  crmMiddleOpened = { target, at: Date.now() };
   window.open(url, "_blank", "noopener");
-});
+}
+// Edge надёжнее передаёт среднюю кнопку через mousedown; auxclick оставлен
+// запасным вариантом для браузеров, где mousedown на кнопке не приходит.
+document.addEventListener("mousedown", openCrmNavigationByMiddleClick, true);
+document.addEventListener("auxclick", openCrmNavigationByMiddleClick, true);
 
 /* ---------- навигация «назад»: каждый переход пишется в историю браузера ---------- */
 const navSnap = () => JSON.parse(JSON.stringify({ meet: S.meet, journal: S.journal, sched: S.sched, planner: S.planner, spend: S.spend, fx: S.fx,

@@ -9,11 +9,11 @@ const navStart = source.indexOf('function crmNavigationUrl');
 const navEnd = source.indexOf('/* ---------- навигация', navStart);
 assert(helperStart >= 0 && helperEnd > helperStart && navStart >= 0 && navEnd > navStart);
 
-let auxclick;
+let auxclick, mousedown;
 const opened = [];
 const context = {
   location: { origin: 'https://ab-plus.ru', pathname: '/' },
-  document: { addEventListener: (name, callback) => { if (name === 'auxclick') auxclick = callback; } },
+  document: { addEventListener: (name, callback) => { if (name === 'auxclick') auxclick = callback; if (name === 'mousedown') mousedown = callback; } },
   window: { open: (...args) => opened.push(args) },
   URLSearchParams,
 };
@@ -29,10 +29,14 @@ assert.strictEqual(context.crmNavigationUrl({ dataset: { conv: '42' } }), 'https
 assert.strictEqual(context.crmNavigationUrl({ dataset: { tile: 'erp' } }), 'https://ab-plus.ru/#settings?settings_tab=erp');
 
 let prevented = false;
-auxclick({ button: 1, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
-  target: { closest: () => ({ dataset: { open: '1719' } }) },
+const studentTarget = { dataset: { open: '1719' } };
+mousedown({ button: 1, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
+  target: { closest: () => studentTarget },
   preventDefault: () => { prevented = true; }, stopPropagation: () => {} });
 assert(prevented);
 assert.deepStrictEqual(opened[0], ['https://ab-plus.ru/#members?student=1719', '_blank', 'noopener']);
+auxclick({ button: 1, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
+  target: { closest: () => studentTarget }, preventDefault: () => {}, stopPropagation: () => {} });
+assert.strictEqual(opened.length, 1, 'mousedown and auxclick must not open two tabs');
 
 console.log('PASS wrong-layout matching and middle-click routes for sections, cards, chats, and settings');
