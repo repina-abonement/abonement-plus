@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from .db import normalize_phone
-from .phonesearch import digits as phone_search_digits
+from .keyboardlayout import variants as keyboard_layout_variants
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS integrations (
@@ -1525,16 +1525,22 @@ def inbox(con, filt: str = "all", q: str = "", user=None) -> dict:
     elif filt == "open":
         where.append("c.open_q = 1")
     if q.strip():
-        like = f"%{q.strip().lower()}%"
-        where.append("""(ulower(c.title) LIKE ? OR ulower(c.username) LIKE ?
-            OR phone_match(c.phone_norm,?) OR phone_match(c.phone,?)
-            OR (c.channel='wazzup_max' AND c.external_id=?)
+        variants = keyboard_layout_variants(q)
+        search_messages = any(ch.isalpha() for ch in q)
+        text_clause = " OR ".join("""(ulower(c.title) LIKE ? OR ulower(c.username) LIKE ?
             OR c.family_id IN (SELECT id FROM families WHERE ulower(name) LIKE ?)
             OR EXISTS (SELECT 1 FROM parents p WHERE p.family_id=c.family_id AND ulower(p.name) LIKE ?)
             OR EXISTS (SELECT 1 FROM students st WHERE st.family_id=c.family_id AND (ulower(st.name) LIKE ? OR ulower(trim(substr(st.name,instr(st.name,' ')+1)||' '||substr(st.name,1,instr(st.name,' ')-1))) LIKE ?))
+            """ + ("OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND ulower(m.text) LIKE ?)" if search_messages else "") + ")" for _ in variants)
+        where.append("""((""" + text_clause + """)
+            OR phone_match(c.phone_norm,?) OR phone_match(c.phone,?)
+            OR (c.channel='wazzup_max' AND c.external_id=?)
             OR EXISTS (SELECT 1 FROM parents p WHERE p.family_id=c.family_id AND (phone_match(p.phone_norm,?) OR phone_match(p.phone,?)))
-            OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND ((?='' AND ulower(m.text) LIKE ?) OR message_phone_match(m.text,?))))""")
-        args += [like,like,q,q,q.strip(),like,like,like,like,q,q,phone_search_digits(q) if not any(ch.isalpha() for ch in q) else '',like,q]
+            OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND message_phone_match(m.text,?)))""")
+        for value in variants:
+            like = f"%{value.lower()}%"
+            args += [like] * (7 if search_messages else 6)
+        args += [q,q,q.strip(),q,q,q]
     sql = "SELECT c.*,CASE WHEN pins.conversation_id IS NULL THEN 0 ELSE 1 END AS pinned FROM conversations c LEFT JOIN conversation_pins pins ON pins.conversation_id=c.id AND pins.user_id=?" + (" WHERE " + " AND ".join(where) if where else "")
     sql += " ORDER BY pinned DESC,c.last_at IS NULL,c.last_at DESC,c.id DESC LIMIT 1000"
     identity_cache={}

@@ -16,6 +16,7 @@ import os
 from datetime import date, datetime, timedelta
 
 from . import logic
+from .keyboardlayout import variants as keyboard_layout_variants
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS coach_reports (
@@ -176,14 +177,14 @@ def envelopes(con) -> list[dict]:
 
 def search_clients(con, q: str) -> list[dict]:
     """Поиск для оплат в отчёте: только имя ребёнка и группа (или «лид»), без телефонов и родителей."""
-    q = " ".join((q or "").lower().replace("ё", "е").split())
-    if len(q) < 2:
+    queries = [" ".join(value.lower().replace("ё", "е").split()) for value in keyboard_layout_variants(q)]
+    if not queries or max(map(len, queries)) < 2:
         return []
     out = []
     for r in con.execute("""SELECT s.id, s.name, s.funnel, s.stage, g.name AS grp FROM students s LEFT JOIN groups g ON g.id=s.group_id
                             WHERE s.archived=0 ORDER BY s.name"""):
         n = (r["name"] or "").lower().replace("ё", "е")
-        if all(w in n for w in q.split()):
+        if any(all(w in n for w in query.split()) for query in queries):
             label = r["grp"] if r["funnel"] == "members" and r["grp"] else ("ушёл" if r["stage"] == "left" else "лид")
             out.append({"id": r["id"], "name": r["name"], "label": label or ""})
             if len(out) >= 8:

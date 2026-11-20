@@ -1273,7 +1273,7 @@ function wireEmojiPicker(panel,input) {
     const terms=normalize(root.querySelector('[data-emoji-search]').value).split(/\s+/).filter(Boolean);let found=0;
     root.querySelectorAll('[data-emoji-group]').forEach(section=>{
       let count=0;const included=(category==='all'||section.dataset.emojiGroup===category)&&!(terms.length&&section.dataset.emojiGroup==='popular');
-      section.querySelectorAll('[data-emoji]').forEach(button=>{button.hidden=!included||!terms.every(term=>normalize(button.dataset.emojiKeywords+' '+button.dataset.emoji).includes(term));if(!button.hidden)count++});
+      section.querySelectorAll('[data-emoji]').forEach(button=>{const haystack=normalize(button.dataset.emojiKeywords+' '+button.dataset.emoji),matches=(typeof keyboardLayoutVariants==='function'?keyboardLayoutVariants(query):[query]).some(value=>normalize(value).split(/\s+/).filter(Boolean).every(term=>haystack.includes(term)));button.hidden=!included||!matches;if(!button.hidden)count++});
       section.hidden=!count;found+=count;
     });
     root.querySelector('.emoji-empty').hidden=!!found;position();

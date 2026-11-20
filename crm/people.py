@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+from .keyboardlayout import variants as keyboard_layout_variants
+
 CLIENT_STATUSES = [("active", "Занимается"), ("single", "Разовые занятия"), ("unpaid", "Не оплачен месяц"),
                    ("left", "Ушёл, бывший клиент"), ("promo", "Ждут акцию")]
 ERP_MISSING = "__erp_missing__"
@@ -25,10 +27,11 @@ def listing(con, kind: str = "all", status: str = "", erp: str = "", q: str = ""
 
     where, args = "s.archived = ?", [1 if archived else 0]
     if q.strip():
-        like = f"%{q.strip().lower()}%"
-        where += """ AND (ulower(s.name) LIKE ? OR ulower(f.name) LIKE ? OR EXISTS (SELECT 1 FROM parents p WHERE p.family_id=f.id
-                     AND (ulower(p.name) LIKE ? OR (phone_match(p.phone_norm,?) OR phone_match(p.phone,?)))))"""
-        args += [like, like, like, q, q]
+        likes = [f"%{value.lower()}%" for value in keyboard_layout_variants(q)]
+        text_where = " OR ".join("""(ulower(s.name) LIKE ? OR ulower(f.name) LIKE ? OR EXISTS
+            (SELECT 1 FROM parents p WHERE p.family_id=f.id AND ulower(p.name) LIKE ?))""" for _ in likes)
+        where += " AND ((" + text_where + ") OR EXISTS (SELECT 1 FROM parents p WHERE p.family_id=f.id AND (phone_match(p.phone_norm,?) OR phone_match(p.phone,?))))"
+        args += [item for like in likes for item in (like, like, like)] + [q, q]
     rows = con.execute(f"""SELECT s.id, s.name, s.funnel, s.stage, s.erp_status, s.group_id, s.family_id
                            FROM students s JOIN families f ON f.id=s.family_id WHERE {where} ORDER BY s.name""", args).fetchall()
 

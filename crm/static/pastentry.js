@@ -108,8 +108,8 @@ function pastGroupSearch(select) {
   const choose=option=>{select.value=option.value;sync();select.dispatchEvent(new Event('change',{bubbles:true}))};
   const show=query=>{
     const normalize=value=>value.toLocaleLowerCase('ru').replace(/ё/g,'е').replace(/[·/–—-]+/g,' ').replace(/\s+/g,' ').trim();
-    const terms=normalize(query).split(/\s+/).filter(Boolean);
-    const options=[...select.options].filter(o=>!o.disabled&&terms.every(t=>normalize(o.textContent).includes(t)));
+    const alternatives=(typeof keyboardLayoutVariants==='function'?keyboardLayoutVariants(query):[query]).map(value=>normalize(value).split(/\s+/).filter(Boolean));
+    const options=[...select.options].filter(o=>!o.disabled&&alternatives.some(terms=>terms.every(t=>normalize(o.textContent).includes(t))));
     list.replaceChildren();current=-1;input.removeAttribute('aria-activedescendant');
     for(const [index,option] of options.entries()){
       const row=document.createElement('button');row.type='button';row.className='group-search-option';row.textContent=option.textContent;row.setAttribute('role','option');row.setAttribute('aria-selected',String(option.selected));row.id=list.id+'-'+index;row.tabIndex=-1;

@@ -23,6 +23,20 @@ const $ = (sel, el = document) => el.querySelector(sel);
 const app = $("#app");
 
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const KEYBOARD_EN = "`qwertyuiop[]asdfghjkl;'zxcvbnm,.";
+const KEYBOARD_RU = "ёйцукенгшщзхъфывапролджэячсмитьбю";
+function keyboardLayoutVariants(value) {
+  const source = String(value || "").trim(), swap = (from, to) => [...source].map((ch) => {
+    const lower = ch.toLowerCase(), index = from.indexOf(lower);
+    if (index < 0) return ch;
+    const result = to[index]; return ch === lower ? result : result.toUpperCase();
+  }).join("");
+  return [...new Set([source, swap(KEYBOARD_EN, KEYBOARD_RU), swap(KEYBOARD_RU, KEYBOARD_EN)].filter(Boolean))];
+}
+function searchTextMatches(text, query) {
+  const haystack = String(text || "").toLocaleLowerCase("ru").replace(/ё/g, "е");
+  return keyboardLayoutVariants(query).some((value) => haystack.includes(value.toLocaleLowerCase("ru").replace(/ё/g, "е")));
+}
 const rub = (n) => Number(n || 0).toLocaleString("ru-RU") + " ₽";
 const MONTHS = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"];
 const monthLabel = (ym) => { const [y, m] = ym.split("-").map(Number); return `${MONTHS[m - 1]} ${y}`; };
@@ -380,7 +394,7 @@ function wireNavSearch(nq) {
       : `<div class="small" style="padding:8px 10px;opacity:.7">${historyMode ? "Здесь появятся последние карточки клиентов" : "Никого не нашли"}</div>`);
     box.style.top = nq.offsetTop + nq.offsetHeight + 4 + "px";
     box.hidden = false;
-    box.querySelectorAll("[data-nr]").forEach((b) => (b.onmousedown = (e) => { e.preventDefault(); nq.value = ""; close(); openStudent(+b.dataset.nr); }));
+    box.querySelectorAll("[data-nr]").forEach((b) => (b.onmousedown = (e) => { if (e.button !== 0) return; e.preventDefault(); nq.value = ""; close(); openStudent(+b.dataset.nr); }));
     const clear = box.querySelector("[data-clear-recent]");
     if (clear) {
       clear.onmousedown = e => e.preventDefault();
@@ -389,7 +403,7 @@ function wireNavSearch(nq) {
         catch (err) { fail(err); }
       };
     }
-    const all = box.querySelector("[data-nall]"); if (all) all.onmousedown = (e) => { e.preventDefault(); goAll(); };
+    const all = box.querySelector("[data-nall]"); if (all) all.onmousedown = (e) => { if (e.button !== 0) return; e.preventDefault(); goAll(); };
   };
   const goAll = () => { S.search = nq.value.trim(); nq.value = ""; close(); go("search"); setTimeout(() => { const q = $("#q"); if (q) { q.focus(); q.dispatchEvent(new Event("input")); } }, 50); };
   const showHistory = async () => {
@@ -506,6 +520,35 @@ function shell() {
   $(".more-sheet").onclick = (e) => { if (e.target.classList.contains("more-sheet")) e.currentTarget.hidden = true; };
   if ($("#new-client")) $("#new-client").onclick = openNewClient;
 }
+
+/* Колесо мыши открывает переходы CRM в новой вкладке, как обычную ссылку.
+   Кнопки, которые сохраняют, удаляют или проводят деньги, сюда намеренно не входят. */
+function crmNavigationUrl(target) {
+  if (!target) return "";
+  const route = (view, params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return `${location.origin}${location.pathname}#${view}${query ? "?" + query : ""}`;
+  };
+  if (target.dataset.view) return route(target.dataset.view);
+  if (target.dataset.tile) return route("settings", { settings_tab: target.dataset.tile });
+  for (const key of ["open", "aopen", "who", "nr", "wlopen", "openSt", "newCard"]) {
+    const id = Number(target.dataset[key]);
+    if (id > 0) return route("members", { student: id });
+  }
+  for (const key of ["conv", "oqchat"]) {
+    const id = Number(target.dataset[key]);
+    if (id > 0) return route("inbox", { conversation: id });
+  }
+  return "";
+}
+document.addEventListener("auxclick", (event) => {
+  if (event.button !== 1 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+  const target = event.target.closest("[data-view],[data-tile],[data-open],[data-aopen],[data-who],[data-nr],[data-wlopen],[data-open-st],[data-new-card],[data-conv],[data-oqchat]");
+  const url = crmNavigationUrl(target);
+  if (!url) return;
+  event.preventDefault(); event.stopPropagation();
+  window.open(url, "_blank", "noopener");
+});
 
 /* ---------- навигация «назад»: каждый переход пишется в историю браузера ---------- */
 const navSnap = () => JSON.parse(JSON.stringify({ meet: S.meet, journal: S.journal, sched: S.sched, planner: S.planner, spend: S.spend, fx: S.fx,
@@ -820,8 +863,8 @@ function renderMembersList(page, data) {
     .sort((a, b) => (a.branch + a.name).localeCompare(b.branch + b.name));
   if (f.group && !groups.some((g) => String(g.id) === f.group)) f.group = "";
   const inPlace = (k) => (!f.branch || k.groups.some((g) => g.branch === f.branch)) && (!f.group || k.groups.some((g) => String(g.id) === f.group));
-  const q = (f.q || "").toLowerCase(), qd = q.replace(/\D/g, "");
-  const hit = (k) => !q || (k.name + " " + k.parent + " " + k.family).toLowerCase().includes(q) || (qd.length > 2 && (k.phone || "").replace(/\D/g, "").includes(qd));
+  const q = f.q || "", qd = q.replace(/\D/g, "");
+  const hit = (k) => !q || searchTextMatches(k.name + " " + k.parent + " " + k.family, q) || (qd.length > 2 && (k.phone || "").replace(/\D/g, "").includes(qd));
   const base = all.filter((k) => inPlace(k) && hit(k));
   const cnt = (s) => base.filter((k) => (s ? k.status === s : k.status !== "left")).length;
   const rows = base.filter((k) => (f.status ? k.status === f.status : k.status !== "left"));
@@ -1190,7 +1233,7 @@ async function membersArchive(page) {
   const label = () => { btn.textContent = `🗄 Архив (${list.length}) ${box.hidden ? "+" : "−"}`; };
   const draw = (q = "") => {
     const n = q.toLowerCase().replace(/\D/g, "") ? q.replace(/\D/g, "") : "";
-    const rows = list.filter((x) => !q || (x.name + " " + x.family).toLowerCase().includes(q.toLowerCase()) || (n && (x.phone || "").replace(/\D/g, "").includes(n)));
+    const rows = list.filter((x) => !q || searchTextMatches(x.name + " " + x.family, q) || (n && (x.phone || "").replace(/\D/g, "").includes(n)));
     $("#arch-rows").innerHTML = rows.length ? rows.map((x) => `<div class="arch-row"><button class="linkish grow" data-aopen="${x.id}"><b>${esc(displayChildName(x.name))}</b> <span class="muted small">${esc(x.family)}${x.funnel === "sales" ? " · лид" : ""}</span></button>
       <button class="btn sm" data-aback="${x.id}">Вернуть</button></div>`).join("") : `<div class="small muted">${list.length ? "Никого не нашли" : "В архиве пусто"}</div>`;
     box.querySelectorAll("[data-aopen]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.aopen)));
@@ -2984,23 +3027,31 @@ async function boot() {
     S.user = S.meta.user;
   } catch (e) { if (e.message !== "Нужно войти") renderLogin(); return; }
   S.view = visibleViews()[0][0];
-  const [requestedView,plannerQuery=''] = location.hash.slice(1).split('?');
+  const [requestedView,routeQuery=''] = location.hash.slice(1).split('?');
+  const routeParams = new URLSearchParams(routeQuery);
   if(requestedView==='planner'){
-    const q=new URLSearchParams(plannerQuery),day=q.get('event_day');
+    const q=routeParams,day=q.get('event_day');
     if(q.has('event_title')&&/^\d{4}-\d{2}-\d{2}$/.test(day||'')){
       S.pendingPlannerEvent={title:q.get('event_title').slice(0,200),day,start_time:q.get('event_start')||'',end_time:q.get('event_end')||'',participants:(q.get('event_participants')||'').slice(0,1000),branch_name:q.get('event_branch')||''};
       S.planner.start=day;S.planner.layout='day';
     }
   }
+  if (requestedView === "settings" && routeParams.get("settings_tab")) S.setTab = routeParams.get("settings_tab");
   if (visibleViews().some(([k]) => k === requestedView)) S.view = requestedView;
   else try { const v = localStorage.getItem("crm.view"); if (v && visibleViews().some(([k]) => k === v)) S.view = v; } catch (_) {}
   shell();
   applyFestive();
   const restoreCard = previousState?.drawer && mayRestoreStudent(previousState.studentCard) ? previousState.studentCard : null;
+  const routedStudent = Number(routeParams.get("student")) || 0;
+  const routedConversation = Number(routeParams.get("conversation")) || 0;
   try { history.replaceState({ view: S.view, sub: navSnap(), depth: previousState?.depth || 0,
-    ...(restoreCard ? { drawer: true, studentCard: restoreCard } : {}) }, "", "#" + S.view); } catch (_) {}
+    ...(restoreCard ? { drawer: true, studentCard: restoreCard } : {}) }, "", location.hash || "#" + S.view); } catch (_) {}
   await render();
-  if (restoreCard) {
+  if (routedStudent && ["members", "sales", "search", "inbox"].some((section) => can(section))) {
+    await openStudent(routedStudent, { tab: routeParams.get("student_tab") || "feed" });
+  } else if (routedConversation && S.view === "inbox" && can("inbox") && typeof openChat === "function") {
+    await openChat(routedConversation, true);
+  } else if (restoreCard) {
     drawerInHistory = true;
     await openStudent(restoreCard.id, { tab: restoreCard.tab, restoring: true });
   }

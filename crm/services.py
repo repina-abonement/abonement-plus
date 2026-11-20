@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 
 from . import logic
 from .db import normalize_phone, now_iso, settings
+from .keyboardlayout import variants as keyboard_layout_variants
 
 
 class ApiError(Exception):
@@ -1500,13 +1501,19 @@ def meta(con) -> dict:
 
 def search_students(con, q: str, archived: bool = False) -> list[dict]:
     st = settings(con)
-    like = f"%{q.strip().lower()}%"
+    text_variants = keyboard_layout_variants(q)
+    likes = [f"%{value.lower()}%" for value in text_variants]
+    text_where = " OR ".join(
+        "(ulower(s.name) LIKE ? OR ulower(f.name) LIKE ? OR ulower(p.name) LIKE ?)"
+        for _ in likes
+    ) or "0"
+    text_args = [item for like in likes for item in (like, like, like)]
     rows = _rows(con.execute(
         """SELECT DISTINCT s.* FROM students s JOIN families f ON f.id=s.family_id
            LEFT JOIN parents p ON p.family_id=f.id
-           WHERE (ulower(s.name) LIKE ? OR ulower(f.name) LIKE ? OR ulower(p.name) LIKE ?
-              OR (phone_match(p.phone_norm,?) OR phone_match(p.phone,?))) AND s.archived = ?
-           ORDER BY s.name LIMIT 100""", (like, like, like, q, q, 1 if archived else 0)))
+           WHERE ((""" + text_where + """) OR (phone_match(p.phone_norm,?) OR phone_match(p.phone,?)))
+             AND s.archived = ? ORDER BY s.name LIMIT 100""",
+        (*text_args, q, q, 1 if archived else 0)))
     return [card_summary(con, s, st) | {"funnel": s["funnel"], "archived": s.get("archived", 0)} for s in rows]
 
 
