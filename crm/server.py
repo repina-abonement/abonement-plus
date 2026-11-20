@@ -934,7 +934,7 @@ def erp_full_apply(con, h, user, body, q):
 @route("POST", "/api/erp/history/preview", role="admin")
 def erp_history_preview(con, h, user, body, q):
     from . import erphistory
-    try: return erphistory.preview(con, body.get("payload"), body.get("period"), body.get("student_ids"))
+    try: return erphistory.preview(con, body.get("payload"), body.get("period"), body.get("student_ids"), body.get("unassigned_visit_ids"))
     except erphistory.HistoryError as exc: raise ApiError(str(exc))
 
 
@@ -943,7 +943,7 @@ def erp_history_apply(con, h, user, body, q):
     from . import backup, erphistory
     try: backup.backup_once()
     except Exception: raise ApiError("Резервная копия не создана. Перенос не начат")
-    try: return erphistory.apply(con, body.get("payload"), body.get("period"), body.get("token"), user, body.get("student_ids"))
+    try: return erphistory.apply(con, body.get("payload"), body.get("period"), body.get("token"), user, body.get("student_ids"), body.get("unassigned_visit_ids"))
     except erphistory.HistoryError as exc: raise ApiError(str(exc))
 
 

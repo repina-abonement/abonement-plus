@@ -61,6 +61,26 @@ def main():
     without_price={**payload,'subscription':{**{k:v for k,v in payload['subscription'].items() if k!='price'},'erp_id':'SUB-NO-PRICE'},'erp_student_id':'OTHER-ERP'}
     missing=erphistory.preview(con,without_price,'2025-09',{'OTHER-ERP':sid})
     assert not missing['can_apply'] and missing['children'][0]['subscription']['reason']=='В источнике нет точной стоимости абонемента'
+    schedule.save_group(con,{'name':'ОФП без возраста','branch_id':nb,'weekdays':[5],'time':'17:00'})
+    ambiguous={**payload,'attendance':payload['attendance']+[{
+      'date':'2025-09-27','time':'17:00','group':'Юг, ОФП, журнал без возраста',
+      'type':'Отработка','erp_subscription_id':'OTHER5','erp_attendance_id':'X5','status':'присутствовал'}]}
+    unresolved=erphistory.preview(con,ambiguous,'2025-09')
+    mark=next(x for x in unresolved['children'][0]['visits'] if x['source_id']=='X5')
+    assert not unresolved['can_apply'] and mark['state']=='review' and mark['approvable_unassigned']
+    approved=erphistory.preview(con,ambiguous,'2025-09',unassigned_visit_ids=['X5'])
+    mark=next(x for x in approved['children'][0]['visits'] if x['source_id']=='X5')
+    assert approved['can_apply'] and mark['state']=='add_unassigned' and mark['group_unresolved']
+    old=erphistory.PILOT_KEYS;erphistory.PILOT_KEYS={erphistory._pilot_key('TEST-ERP','2025-09')}
+    try: imported=erphistory.apply(con,ambiguous,'2025-09',approved['token'],{'name':'Тест'},unassigned_visit_ids=['X5'])
+    finally: erphistory.PILOT_KEYS=old
+    assert imported['visits_added']==1
+    saved=con.execute("SELECT * FROM erp_history_unassigned_visits WHERE source_id='X5'").fetchone()
+    assert saved and saved['student_id']==sid and saved['source_group']=='Юг, ОФП, журнал без возраста'
+    event=next(x for x in clientattendance.calendar(con,sid,'2025-09')['events'] if x.get('erp_attendance_id')=='X5')
+    assert event['group_id'] is None and event['group']=='Группа не определена' and event['group_unresolved'] and event['time']=='17:00'
+    repeated=erphistory.preview(con,ambiguous,'2025-09',unassigned_visit_ids=['X5'])
+    assert repeated['added']==0 and repeated['review']==0 and repeated['existing']==14
     print('ok')
 
 if __name__=='__main__':main()

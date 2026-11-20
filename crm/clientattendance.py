@@ -79,11 +79,18 @@ def calendar(con, sid, ym):
             key=(mark['visit_date'],mark['group_id'],mark['kind'],'erp-history',mark['id'])
             events[key]={'date':mark['visit_date'],'group_id':mark['group_id'],'kind':mark['kind'],'status':mark['status'],
                 'trial_time':mark['visit_time'],'historical_erp':True,'erp_attendance_id':mark['source_id']}
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_unassigned_visits'").fetchone():
+        for mark in con.execute('''SELECT * FROM erp_history_unassigned_visits WHERE student_id=? AND visit_date BETWEEN ? AND ?''',
+                                (sid,start.isoformat(),end.isoformat())):
+            key=(mark['visit_date'],None,mark['kind'],'erp-history-unassigned',mark['id'])
+            events[key]={'date':mark['visit_date'],'group_id':None,'kind':mark['kind'],'status':mark['status'],
+                'trial_time':mark['visit_time'],'historical_erp':True,'erp_attendance_id':mark['source_id'],
+                'group_unresolved':True,'source_group':mark['source_group']}
     result=[]
     for event in events.values():
         g=groups.get(event['group_id'],{})
         day=date.fromisoformat(event['date'])
-        event.update(group=schedule.on(con,g,day).get('name','') if g else '',branch=g.get('branch',''),time=logic.group_time(schedule.on(con,g,day),day.weekday()) if g else '',future=event['date']>sv.today().isoformat())
+        event.update(group=schedule.on(con,g,day).get('name','') if g else ('Группа не определена' if event.get('group_unresolved') else ''),branch=g.get('branch',''),time=logic.group_time(schedule.on(con,g,day),day.weekday()) if g else '',future=event['date']>sv.today().isoformat())
         result.append(event)
     for event in result:
         if event['kind']=='trial':
