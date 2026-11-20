@@ -11,7 +11,7 @@ def main():
     nb=con.execute("INSERT INTO branches(name) VALUES ('Юг')").lastrowid
     main_group=schedule.save_group(con,{'name':'Сборная Север','branch_id':ar,'weekdays':[1,6],'time':'18:30','day_times':{'6':'19:30'}})
     makeup_groups=[]
-    for name,weekdays,tm in [('Доп. 6–8',[3],'19:45'),('ОФП 4–5',[5],'16:00'),('ОФП старшие',[5],'17:00')]:
+    for name,weekdays,tm in [('Доп. 6–8',[3],'19:45'),('ОФП 4–5',[5],'16:00'),('ОФП 6–8',[5],'17:00')]:
         makeup_groups.append(schedule.save_group(con,{'name':name,'branch_id':nb,'weekdays':weekdays,'time':tm}))
     schedule.save_group(con,{'name':'Доп. 9–11','branch_id':nb,'weekdays':[3],'time':'19:45'})
     schedule.save_group(con,{'name':'Доп. 6–8 другой день','branch_id':nb,'weekdays':[0],'time':'19:45'})
@@ -81,6 +81,20 @@ def main():
     assert event['group_id'] is None and event['group']=='Группа не определена' and event['group_unresolved'] and event['time']=='17:00'
     repeated=erphistory.preview(con,ambiguous,'2025-09',unassigned_visit_ids=['X5'])
     assert repeated['added']==0 and repeated['review']==0 and repeated['existing']==14
+    resolved=erphistory.preview(con,ambiguous,'2025-09',visit_group_ids={'X5':makeup_groups[2]})
+    resolved_mark=next(x for x in resolved['children'][0]['visits'] if x['source_id']=='X5')
+    assert resolved['can_apply'] and resolved['updated']==1 and resolved['existing']==13 and resolved_mark['state']=='assign_group'
+    old=erphistory.PILOT_KEYS;erphistory.PILOT_KEYS={erphistory._pilot_key('TEST-ERP','2025-09')}
+    try: corrected=erphistory.apply(con,ambiguous,'2025-09',resolved['token'],{'name':'Тест'},visit_group_ids={'X5':makeup_groups[2]})
+    finally: erphistory.PILOT_KEYS=old
+    assert corrected['visits_added']==0 and corrected['visits_updated']==1
+    assert con.execute("SELECT 1 FROM erp_history_unassigned_visits WHERE source_id='X5'").fetchone() is None
+    saved_group=con.execute("SELECT group_id FROM erp_history_visits WHERE source_id='X5'").fetchone()
+    assert saved_group and saved_group['group_id']==makeup_groups[2]
+    event=next(x for x in clientattendance.calendar(con,sid,'2025-09')['events'] if x.get('erp_attendance_id')=='X5')
+    assert event['group_id']==makeup_groups[2] and 'ОФП' in event['group'] and not event.get('group_unresolved')
+    final=erphistory.preview(con,ambiguous,'2025-09')
+    assert final['added']==0 and final['updated']==0 and final['review']==0 and final['existing']==14
     print('ok')
 
 if __name__=='__main__':main()
