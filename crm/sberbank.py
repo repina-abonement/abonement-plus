@@ -378,9 +378,11 @@ def discover(con,current):
         return result
     previous=con.execute("SELECT result FROM incoming_source_checks WHERE source='sber'").fetchone()
     old=json.loads(previous['result']) if previous else {}
-    floor=(current.date()-timedelta(days=31)).isoformat();cursor=old.get('history_cursor') or floor
+    floor=max((current.date()-timedelta(days=31)).isoformat(),fiscal.control_from(con))
+    cursor=old.get('history_cursor') or floor
     if not floor<=cursor<=current.date().isoformat():cursor=floor
-    days=list(dict.fromkeys([current.date().isoformat(),(current.date()-timedelta(days=1)).isoformat(),cursor]))
+    days=list(dict.fromkeys(day for day in (current.date().isoformat(),(current.date()-timedelta(days=1)).isoformat(),cursor)
+                            if floor<=day<=current.date().isoformat()))
     errors=[];successful=[];count=0;account_count=0
     try:
         visible=accounts(con);selected=credentials.get(con,'accounts') or visible

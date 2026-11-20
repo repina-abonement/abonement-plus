@@ -134,11 +134,13 @@ def fetch_day(con,day):
 def crm_payment_days(con,current=None):
     """CRM payment facts define the work queue; calendar days never create work."""
     days={}
+    start=fiscal.control_from(con)
     for row in con.execute("""SELECT p.id,p.paid_at FROM payments p
         WHERE p.cancelled=0 AND p.amount>0 AND (p.method IN ('paykeeper','paykeeper_manual','online')
         OR EXISTS(SELECT 1 FROM pay_links l WHERE l.payment_id=p.id AND l.pk_payment_id!=''))"""):
         try:day=date.fromisoformat(day_of(row['paid_at']))
         except (ValueError,TypeError):continue
+        if day.isoformat()<start:continue
         if current is not None and not current.date()-timedelta(days=31)<=day<=current.date():continue
         days[day.isoformat()]=days.get(day.isoformat(),0)+1
     return days
@@ -461,7 +463,7 @@ def view(con,start,end):
 
 def diagnostics(con):
     days=[];relevant=crm_payment_days(con)
-    snapshots={r['day']:r for r in con.execute('SELECT * FROM pk_daily_evidence')}
+    snapshots={r['day']:r for r in con.execute('SELECT * FROM pk_daily_evidence WHERE day>=?',(fiscal.control_from(con),))}
     for day in sorted(set(snapshots)|set(relevant),reverse=True)[:32]:
         row=snapshots.get(day)
         if day not in relevant:

@@ -201,6 +201,10 @@ def cfg(con, key: str) -> str:
     return comms.get(con, key) or DEFAULTS.get(key, "")
 
 
+def control_from(con) -> str:
+    return comms.get(con, 'payment_control_from') or '0001-01-01'
+
+
 def kop(v) -> int:
     """Рубли (строка или число) → копейки."""
     if v is None or v == "":

@@ -45,10 +45,10 @@ def discover_paykeeper(con,current):
     """Today/yesterday plus durable history cursor, regardless of CRM sales."""
     row=con.execute("SELECT * FROM incoming_source_checks WHERE source='paykeeper'").fetchone()
     old=json.loads(row['result']) if row else {}
-    today=current.date();floor=today-timedelta(days=31)
+    today=current.date();floor=max(today-timedelta(days=31),datetime.fromisoformat(fiscal.control_from(con)).date())
     cursor=old.get('history_cursor') or floor.isoformat()
     if cursor<floor.isoformat() or cursor>today.isoformat():cursor=floor.isoformat()
-    days=list(dict.fromkeys([today.isoformat(),(today-timedelta(days=1)).isoformat(),cursor]))
+    days=list(dict.fromkeys(day for day in (today.isoformat(),(today-timedelta(days=1)).isoformat(),cursor) if floor.isoformat()<=day<=today.isoformat()))
     errors=[];count=0;successful=[]
     for day in days:
         try:
@@ -84,7 +84,7 @@ def ingest_bank(con,source,transactions,current):
 
 def discover_tochka(con,current):
     previous=con.execute("SELECT * FROM incoming_source_checks WHERE source='tochka'").fetchone()
-    start=current.date()-timedelta(days=31)
+    start=max(current.date()-timedelta(days=31),datetime.fromisoformat(fiscal.control_from(con)).date())
     if previous and previous['status']=='ok':start=max(start,datetime.fromisoformat(previous['checked_at']).date()-timedelta(days=2))
     try:
         transactions=fiscal.fetch_tochka(con,start,current.date(),include_debits=True,all_currencies=True)
@@ -152,8 +152,8 @@ def check_receipts(con,current,limit=3):
     from . import primaryreceipt
     cutoff=(current-timedelta(minutes=10)).isoformat(timespec='seconds')
     rows=con.execute('''SELECT e.* FROM incoming_money_events e LEFT JOIN incoming_receipt_checks c ON c.event_id=e.id
-        WHERE e.source='paykeeper' AND (c.event_id IS NULL OR c.checked_at<=?)
-        ORDER BY c.checked_at IS NOT NULL,c.checked_at LIMIT ?''',(cutoff,limit)).fetchall()
+        WHERE e.source='paykeeper' AND e.event_day>=? AND (c.event_id IS NULL OR c.checked_at<=?)
+        ORDER BY c.checked_at IS NOT NULL,c.checked_at LIMIT ?''',(fiscal.control_from(con),cutoff,limit)).fetchall()
     result={'checked':0,'unavailable':0}
     for event in rows:
         try:
@@ -177,7 +177,8 @@ def check_receipts(con,current,limit=3):
 
 def view(con,summary_only=False,current=None):
     current=current or datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None)
-    events=list(con.execute('SELECT * FROM incoming_money_events ORDER BY event_day DESC,last_seen DESC LIMIT 2001'))
+    start=fiscal.control_from(con)
+    events=list(con.execute('SELECT * FROM incoming_money_events WHERE event_day>=? ORDER BY event_day DESC,last_seen DESC LIMIT 2001',(start,)))
     truncated=len(events)>2000;events=events[:2000];cases={}
     for event in events:
         data=json.loads(event['data']);payments,pid=related(con,event,events)
@@ -203,7 +204,7 @@ def view(con,summary_only=False,current=None):
     complete=False
     result={'complete':complete,'coverage':coverage,'tracked_cases':len(rows),'attention':len(issues),
         'unrecorded':sum(c['unrecorded'] for c in rows),'receipt_unconfirmed':sum(c['receipt']['status']!='confirmed' for c in rows),
-        'scope_note':'Поиск новых поступлений: PayKeeper — сегодня, вчера и поэтапная проверка предыдущих 31 дня; Точка — все доступные ключу счета, первоначально 31 день. Сбер — все счета, доступные разрешению, с поэтапной проверкой 31 дня. Более ранняя история и полнота доступа ко всем счетам пока не подтверждены.',
+        'scope_note':(f'Активная сверка с {datetime.fromisoformat(start):%d.%m.%Y}. Более ранние записи отложены. ' if start!='0001-01-01' else '')+'Поиск новых поступлений: PayKeeper — сегодня, вчера и поэтапная проверка предыдущих 31 дня; Точка — все доступные ключу счета, первоначально 31 день. Сбер — все счета, доступные разрешению, с поэтапной проверкой 31 дня. Более ранняя история и полнота доступа ко всем счетам пока не подтверждены.',
         'truncated':truncated,'sber_connected':coverage['sber']['status']=='ok'}
     if not summary_only:result['rows']=issues
     return result

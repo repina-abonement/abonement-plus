@@ -3794,6 +3794,9 @@ def main():
 def _startup():
     con = db.connect()
     db.init_db(con)
+    # Initial reconciliation phase requested by the owner. Retain historic evidence.
+    if con.execute("INSERT OR IGNORE INTO integrations(key,value) VALUES ('payment_control_from','2026-11-19')").rowcount:
+        con.execute("UPDATE payment_control_jobs SET next_at=NULL WHERE lease_owner IS NULL")
     if os.environ.get("CRM_DEMO", "1") == "1" and not perms.real_staff(con):  # при настоящей команде выдуманных не заводим
         db.seed_demo(con)
         coaches.seed_demo_coaches(con)

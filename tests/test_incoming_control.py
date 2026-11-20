@@ -51,6 +51,19 @@ class IncomingControl(unittest.TestCase):
         self.assertEqual(result['coverage']['paykeeper']['status'],'stale')
         self.assertEqual(result['tracked_cases'],1)
 
+    def test_control_start_limits_reads_and_overview_without_removing_history(self):
+        fiscal.comms.put(self.con,'payment_control_from','2026-11-19')
+        incoming.ingest_bank(self.con,'tochka',[self.bank()],self.current)
+        new=self.bank()|{'transactionId':'new','documentProcessDate':'2026-11-19'}
+        with patch.object(fiscal,'fetch_tochka',return_value=[new]) as bank:
+            incoming.discover_tochka(self.con,self.current)
+        self.assertEqual(bank.call_args.args[1].isoformat(),'2026-11-19')
+        with patch.object(payoutcheck,'fetch_day',return_value=[]) as gateway:
+            incoming.discover_paykeeper(self.con,self.current)
+        self.assertEqual([call.args[1] for call in gateway.call_args_list],['2026-11-19'])
+        self.assertEqual(incoming.view(self.con,current=self.current)['tracked_cases'],1)
+        self.assertEqual(self.con.execute('SELECT count(*) FROM incoming_money_events').fetchone()[0],2)
+
     def test_zero_gateway_day_is_success_and_independent_of_crm(self):
         with patch.object(payoutcheck,'fetch_day',return_value=[]) as read:
             result=incoming.discover_paykeeper(self.con,self.current)

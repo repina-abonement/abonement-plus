@@ -97,9 +97,9 @@ def run_automatic(con,now=None,limit=30,include_ofd=True):
     cutoff=(current-timedelta(minutes=10)).isoformat(timespec='seconds')
     rows=con.execute('''SELECT DISTINCT p.* FROM payments p JOIN pay_links l ON l.payment_id=p.id
         LEFT JOIN fiscal_payment_checks c ON c.payment_id=p.id
-        WHERE p.cancelled=0 AND p.amount>0 AND l.pk_payment_id!=''
+        WHERE p.cancelled=0 AND p.amount>0 AND l.pk_payment_id!='' AND p.paid_at>=?
           AND (c.payment_id IS NULL OR c.checked_at<=?)
-        ORDER BY c.checked_at IS NOT NULL,c.checked_at,p.id LIMIT ?''',(cutoff,max(0,min(int(limit),100)))).fetchall()
+        ORDER BY c.checked_at IS NOT NULL,c.checked_at,p.id LIMIT ?''',(fiscal.control_from(con),cutoff,max(0,min(int(limit),100)))).fetchall()
     result={'checked':0,'confirmed':0,'unavailable':0}
     for row in rows:
         item=_verify(con,row,current,include_ofd=include_ofd)

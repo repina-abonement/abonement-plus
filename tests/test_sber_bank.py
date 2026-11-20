@@ -24,6 +24,7 @@ class SberBank(unittest.TestCase):
         self.con.row_factory = sqlite3.Row
         sberbank.init(self.con)
         incomingcontrol.init(self.con)
+        self.con.execute('CREATE TABLE integrations(key TEXT PRIMARY KEY,value TEXT NOT NULL)')
         self.private = {'client_id': 'syntheticclient', 'client_secret': 'synthetic-secret',
                         'redirect_uri': 'https://ab-plus.ru/api/sber/oauth/callback',
                         'refresh_token': 'synthetic-refresh', 'accounts': []}

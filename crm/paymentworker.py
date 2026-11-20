@@ -102,10 +102,10 @@ def run_ofd(con,current,limit=3):
     rows=con.execute('''SELECT p.id,min(l.pk_payment_id) AS provider_id,c.result FROM payments p
         JOIN pay_links l ON l.payment_id=p.id JOIN fiscal_payment_checks c ON c.payment_id=p.id
         LEFT JOIN ofd_payment_checks o ON o.payment_id=p.id
-        WHERE p.cancelled=0 AND p.amount>0 AND l.pk_payment_id!=''
+        WHERE p.cancelled=0 AND p.amount>0 AND l.pk_payment_id!='' AND p.paid_at>=?
         AND (o.payment_id IS NULL OR o.checked_at<=? OR o.provider_payment_id!=l.pk_payment_id)
         GROUP BY p.id HAVING count(DISTINCT l.pk_payment_id)=1
-        ORDER BY o.checked_at IS NOT NULL,o.checked_at,p.id LIMIT ?''',(cutoff,limit)).fetchall()
+        ORDER BY o.checked_at IS NOT NULL,o.checked_at,p.id LIMIT ?''',(fiscal.control_from(con),cutoff,limit)).fetchall()
     result={'checked':0,'confirmed':0,'unavailable':0}
     for row in rows:
         cached=json.loads(row['result']);primary=cached.get('primary_receipt',{})
