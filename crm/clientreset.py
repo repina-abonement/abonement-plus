@@ -1,0 +1,208 @@
+"""Owner-confirmed archival reset of client data.
+
+The club structure and operational settings remain in the live database.  A
+verified local and encrypted remote archive is mandatory before the one-way
+live cleanup.  Restoring the archive is a maintenance operation, not an HTTP
+undo that could overwrite newly entered data.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+import hashlib
+import json
+from pathlib import Path
+import secrets
+import sqlite3
+import threading
+from zoneinfo import ZoneInfo
+
+from .services import ApiError
+
+
+CONFIRMATION = "ОЧИСТИТЬ КЛИЕНТСКИЕ ДАННЫЕ"
+ARCHIVE_SCHEMA = """CREATE TABLE IF NOT EXISTS client_data_archives(
+ id INTEGER PRIMARY KEY,created_at TEXT NOT NULL,created_by TEXT NOT NULL,
+ local_filename TEXT NOT NULL,remote_filename TEXT NOT NULL,sha256 TEXT NOT NULL,
+ before_counts TEXT NOT NULL,after_counts TEXT NOT NULL,source_commit TEXT NOT NULL)"""
+
+# Entire tables containing client cards, communication, attendance, sales,
+# money, fiscal evidence, or raw ERP imports.  Structural club tables are
+# deliberately absent from this list.
+CLEAR_TABLES = frozenset({
+    'alerts','attendance','audit','auto_messages','balance_account_snapshots','balance_credit_funds',
+    'bank_credit_allocations','bank_payment_checks','bank_payout_batches','bank_statement_observations',
+    'call_digests','calls','cancelled_service_charges','chain_runs','chat_attachments',
+    'conversation_pins','conversation_preferences','conversations','deleted_client_cards','erp_balance_recovery_runs',
+    'erp_batches','erp_full_files','erp_full_history_corrections','erp_full_identities',
+    'erp_full_operations','erp_full_rows','erp_full_runs','erp_full_subscription_corrections',
+    'erp_full_task_links','erp_group_map','erp_payment_allocations','erp_refund_allocations',
+    'erp_rows','erp_single_payments','erp_single_recovery_runs','erp_single_reschedules',
+    'erp_single_reviews','erp_single_sales','erp_task_review_audit','erp_task_transfer_runs','erp_trial_visits','erp_uploads',
+    'families','fiscal_ofd_days','fiscal_payment_checks','fx_payments','fx_receipts','fx_runs',
+    'historical_entries','historical_refund_exclusions','historical_refund_receipts',
+    'historical_refund_runs','history','hook_log','incoming_money_events','incoming_receipt_checks',
+    'incoming_source_checks','invoice_balance_uses','invoice_creation_requests',
+    'invoice_funding_policies','invoice_payment_targets','lead_imports','makeups',
+    'manual_payment_requests','merch_sales','message_deletions','messages','multi_month_orders','nodeadline',
+    'not_duplicates','ofd_payment_checks','owner_sent','parents','pay_link_subscriptions','pay_links',
+    'payments','pk_daily_evidence','pk_system_evidence','price_corrections','recent_clients',
+    'refund_requests','single_visits','students','subscription_cancellations',
+    'subscription_composition_reviews','subscription_lesson_adjustments','subscription_refunds','subscriptions','subscriptions_new','trial_holds',
+    'trial_misses','vacations','waitlist','wazzup_delivery_events','enrollments',
+})
+
+# These tables also contain useful club-wide rows, so only rows tied to a
+# client are removed.
+PARTIAL = {
+    'task_answers': 'student_id IS NOT NULL',
+    'tasks': 'student_id IS NOT NULL OR family_id IS NOT NULL',
+}
+
+PRESERVED_LABELS = ('Правила и тарифы','Филиалы и группы','Расписание','Команда и роли',
+                    'Настройки и подключения','Общие задачи и расходы')
+_plans: dict[str, dict] = {}
+_lock = threading.Lock()
+
+
+def init(con):
+    con.execute(ARCHIVE_SCHEMA)
+
+
+def _tables(con):
+    return {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
+
+def _quote(name):
+    if not name.replace('_','').isalnum() or name[:1].isdigit():
+        raise ValueError('unsafe table')
+    return '"' + name + '"'
+
+
+def counts(con):
+    available = _tables(con)
+    result = {}
+    for table in sorted(CLEAR_TABLES & available):
+        result[table] = con.execute('SELECT COUNT(*) FROM ' + _quote(table)).fetchone()[0]
+    for table, where in PARTIAL.items():
+        if table in available:
+            result[table + ':client'] = con.execute('SELECT COUNT(*) FROM ' + _quote(table) + ' WHERE ' + where).fetchone()[0]
+    return result
+
+
+def _value_hash(h, value):
+    if value is None:
+        h.update(b'N;'); return
+    if isinstance(value, bytes):
+        h.update(b'B'); h.update(len(value).to_bytes(8,'big')); h.update(value); return
+    data = str(value).encode('utf-8','surrogatepass')
+    h.update(b'T'); h.update(len(data).to_bytes(8,'big')); h.update(data)
+
+
+def fingerprint(con):
+    """Stream an exact digest without putting client rows in logs or JSON."""
+    h = hashlib.sha256(); available = _tables(con)
+    for table in sorted(CLEAR_TABLES & available):
+        h.update(('TABLE '+table+'\n').encode())
+        columns = [row['name'] for row in con.execute('PRAGMA table_info(' + _quote(table) + ')')]
+        order = ','.join(_quote(c) for c in columns)
+        for row in con.execute('SELECT * FROM ' + _quote(table) + (' ORDER BY ' + order if order else '')):
+            for value in row: _value_hash(h,value)
+    for table, where in sorted(PARTIAL.items()):
+        if table not in available: continue
+        h.update(('PARTIAL '+table+'\n').encode())
+        columns = [row['name'] for row in con.execute('PRAGMA table_info(' + _quote(table) + ')')]
+        order = ','.join(_quote(c) for c in columns)
+        for row in con.execute('SELECT * FROM ' + _quote(table) + ' WHERE ' + where + (' ORDER BY ' + order if order else '')):
+            for value in row: _value_hash(h,value)
+    return h.hexdigest()
+
+
+def _now():
+    return datetime.now(ZoneInfo('Europe/Moscow'))
+
+
+def _remote_ready(con):
+    return bool(con.execute("SELECT 1 FROM integrations WHERE key='backup_yadisk_token' AND value!=''").fetchone())
+
+
+def plan(con, user):
+    if not _remote_ready(con):
+        raise ApiError('Перед очисткой подключите внешнюю зашифрованную резервную копию в настройках резервирования')
+    before = counts(con); digest = fingerprint(con); token = secrets.token_urlsafe(32)
+    item = {'user_id':user['id'],'fingerprint':digest,'counts':before,'expires':_now()+timedelta(minutes=15)}
+    with _lock:
+        _plans.clear(); _plans[token] = item
+    return {'ready':True,'token':token,'expires_at':item['expires'].isoformat(timespec='minutes'),
+            'counts':before,'total_rows':sum(before.values()),'preserved':PRESERVED_LABELS,
+            'confirmation':CONFIRMATION,'remote_archive':True,'read_only':True}
+
+
+def _sha(path):
+    h=hashlib.sha256()
+    with open(path,'rb') as stream:
+        for chunk in iter(lambda:stream.read(1024*1024),b''): h.update(chunk)
+    return h.hexdigest()
+
+
+def _verify_archive(path, expected_counts):
+    uri=Path(path).resolve().as_uri()+'?mode=ro'; check=sqlite3.connect(uri,uri=True)
+    check.row_factory=sqlite3.Row
+    try:
+        if check.execute('PRAGMA quick_check').fetchone()[0] != 'ok' or counts(check) != expected_counts:
+            raise ApiError('Резервная копия не совпала с рабочими данными. Очистка отменена')
+    finally: check.close()
+
+
+def apply(con, user, body, source_commit=''):
+    token=str((body or {}).get('token') or ''); phrase=str((body or {}).get('confirmation') or '')
+    if phrase != CONFIRMATION: raise ApiError('Введите фразу подтверждения без изменений')
+    with _lock: item=_plans.pop(token,None)
+    if not item or item['user_id'] != user['id'] or item['expires'] < _now():
+        raise ApiError('Проверка устарела. Сначала снова проверьте архив и очистку')
+    if fingerprint(con) != item['fingerprint'] or counts(con) != item['counts']:
+        raise ApiError('Данные изменились после проверки. Сначала сформируйте новый план')
+    from .erpsinglerecoveryweb import _backup_current
+    from . import backup
+    archive=_backup_current(con,prefix='client-data-archive')
+    _verify_archive(archive,item['counts']); checksum=_sha(archive)
+    try:
+        remote=backup.upload(con,archive)
+    except Exception as exc:
+        raise ApiError('Внешняя зашифрованная копия не подтверждена. Очистка отменена') from exc
+    con.execute('BEGIN IMMEDIATE')
+    try:
+        if fingerprint(con) != item['fingerprint'] or counts(con) != item['counts']:
+            raise ApiError('Во время архивации данные изменились. Очистка отменена; повторите проверку')
+        con.execute('PRAGMA defer_foreign_keys=ON')
+        available=_tables(con)
+        for table,where in PARTIAL.items():
+            if table in available: con.execute('DELETE FROM '+_quote(table)+' WHERE '+where)
+        # Foreign keys are deferred, so every dependent table is empty before commit.
+        for table in sorted(CLEAR_TABLES & available): con.execute('DELETE FROM '+_quote(table))
+        failures=list(con.execute('PRAGMA foreign_key_check'))
+        if failures: raise ApiError('Проверка связей после очистки не прошла. Изменения отменены')
+        after=counts(con)
+        con.execute('''INSERT INTO client_data_archives(created_at,created_by,local_filename,remote_filename,
+            sha256,before_counts,after_counts,source_commit) VALUES(?,?,?,?,?,?,?,?)''',
+            (_now().isoformat(timespec='seconds'),user.get('name') or '',Path(archive).name,remote,checksum,
+             json.dumps(item['counts'],sort_keys=True),json.dumps(after,sort_keys=True),source_commit))
+        con.execute("UPDATE payment_control_jobs SET started_at=NULL,finished_at=NULL,next_at=NULL,lease_until=NULL,lease_owner=NULL,status='waiting',result='{}'")
+        con.execute('COMMIT')
+    except BaseException:
+        if con.in_transaction: con.execute('ROLLBACK')
+        raise
+    return {'applied':True,'archive':{'local_filename':Path(archive).name,'remote_filename':remote,
+            'sha256':checksum},'before_counts':item['counts'],'after_counts':after,
+            'preserved':PRESERVED_LABELS,'client_rows_remaining':sum(after.values()),
+            'restoration':'Архив сохранён целиком; восстановление выполняется только как отдельная операция обслуживания'}
+
+
+def register(route):
+    @route('POST','/api/maintenance/client-reset/plan',role='admin',transactional=False)
+    def reset_plan(con,h,user,body,q):
+        return plan(con,user)
+
+    @route('POST','/api/maintenance/client-reset/apply',role='admin',transactional=False)
+    def reset_apply(con,h,user,body,q):
+        from .erpbalancerecoveryweb import provenance
+        return apply(con,user,body,provenance().get('running_commit') or '')
