@@ -93,11 +93,13 @@ function merchAlerts(a) {
 function wireMerchAlerts(page) { const b = page.querySelector("[data-go-merch]"); if (b) b.onclick = () => go("merch"); }
 
 /* ---------- раздел «Мерч» ---------- */
-S.merch = { from: null, to: null };
+S.merch = { from: null, to: null, stock_date: null };
 async function renderMerch(page) {
   const C = S.merch;
   if (!C.to) { C.to = S.meta.today; C.from = S.meta.today.slice(0, 8) + "01"; }
-  const [r, it] = await Promise.all([api("GET", `/api/merch/sales?from=${C.from}&to=${C.to}`), api("GET", "/api/merch/items" + (S.user.role === "admin" ? "?all=1" : ""))]);
+  C.stock_date ||= S.meta.today;
+  const itemQuery=`?counted_on=${encodeURIComponent(C.stock_date)}${S.user.role === "admin" ? "&all=1" : ""}`;
+  const [r, it] = await Promise.all([api("GET", `/api/merch/sales?from=${C.from}&to=${C.to}`), api("GET", "/api/merch/items" + itemQuery)]);
   const saleItems = it.items.filter((i) => i.active && !i.stock_only && i.price > 0);
   const ok = r.rows.filter((x) => x.status === "ok");
   const tabs = [["sales", "Продажи"], ...(can("merch", "full") ? [["stock", "Склад и заказ"]] : []), ...(S.user.role === "admin" ? [["price", "Прайс"]] : [])];
@@ -159,14 +161,15 @@ async function renderMerch(page) {
 /* Пересчёт склада (общий): сколько есть, норма, сколько заказать. Сохранение ставит задачу руководителю в Планер */
 function merchStockHtml(it) {
   const items = (it.stock_items || []).filter((i) => i.active);
-  const last = items.filter((i) => i.stock_at).sort((a, b) => (a.stock_at < b.stock_at ? 1 : -1))[0];
+  const saved = it.stock_values || {};
   const status = it.stock_status || {};
+  const last = status.last_count;
   return `<section class="panel" style="padding:14px;margin-top:14px"><h3 style="margin-top:0">Еженедельный пересчёт и заказ</h3>
-    <div class="small ${status.weekly_due ? "" : "muted"}" style="margin-bottom:8px">${status.weekly_due ? "На этой неделе остатки ещё не внесены. " : "✅ Остатки за эту неделю внесены. "}${last ? `Последний пересчёт ${dShort(last.stock_at)} ${esc(last.stock_by)}. ` : ""}Заполните все позиции. Если остаток ниже минимума, руководитель увидит предупреждение на рабочем столе.</div>
-    <label style="max-width:220px">Дата пересчёта<input type="date" data-mst-date value="${S.meta.today}" max="${S.meta.today}"></label>
+    <div class="small ${status.weekly_due ? "" : "muted"}" style="margin-bottom:8px">${status.weekly_due ? `На этой неделе пересчитано ${status.counted_items||0} из ${status.total_items||items.length} позиций. ` : "✅ Остатки за эту неделю внесены. "}${last ? `Последнее сохранение ${dShort(last.counted_at)} ${esc(last.counted_by_name)}. ` : ""}Можно сохранить часть списка: пустые строки не меняют остаток.</div>
+    <label style="max-width:220px">Дата пересчёта<input type="date" data-mst-date value="${esc(S.merch.stock_date || it.selected_stock_date || S.meta.today)}" max="${S.meta.today}"></label>
     <table class="tbl"><thead><tr><th>Товар</th><th>Есть</th><th>Норма</th><th>Заказать</th></tr></thead><tbody>
-    ${items.map((i) => `<tr><td>${esc(i.name)}</td><td><input type="number" min="0" inputmode="numeric" data-mst="${i.id}" value="${i.stock ?? ""}" style="width:80px"></td>
-      <td>${it.can_norm ? `<input type="number" min="0" inputmode="numeric" data-mno="${i.id}" value="${i.norm || ""}" style="width:80px">` : i.norm || "—"} <span class="small muted">${esc(i.stock_unit || "шт.")}</span></td>
+    ${items.map((i) => `<tr><td>${esc(i.name)}</td><td><input type="number" min="0" inputmode="numeric" data-mst="${i.id}" value="${saved[i.id]?.stock ?? ""}" placeholder="не считали" style="width:100px"></td>
+      <td>${it.can_norm ? `<input type="number" min="0" inputmode="numeric" data-mno="${i.id}" value="${saved[i.id]?.norm ?? i.norm ?? ""}" style="width:80px">` : i.norm || "—"} <span class="small muted">${esc(i.stock_unit || "шт.")}</span></td>
       <td><b data-mor="${i.id}"></b></td></tr>`).join("")}</tbody></table>
     <button class="btn primary" id="mst-save" style="margin-top:10px">Сохранить недельный пересчёт</button>
     <details style="margin-top:14px"><summary>Добавить ещё одну позицию</summary><div class="row" style="gap:8px;margin-top:8px;align-items:flex-end">
@@ -187,12 +190,17 @@ function wireMerchStock(page, it, afterSave=render) {
     out.textContent = st.value !== "" && n > 0 ? `${n} шт.` : st.value !== "" ? "хватает" : "";
   });
   page.querySelectorAll("[data-mst],[data-mno]").forEach((x) => (x.oninput = calc));
+  const dateInput=page.querySelector('[data-mst-date]');
+  const loadDate=async value=>{try{S.merch.stock_date=value;const d=await api('GET',`/api/merch/items?counted_on=${encodeURIComponent(value)}`);stockItems.forEach(i=>{const line=d.stock_values?.[i.id];page.querySelector(`[data-mst="${i.id}"]`).value=line?.stock??'';const no=page.querySelector(`[data-mno="${i.id}"]`);if(no)no.value=line?.norm??i.norm??''});calc()}catch(error){fail(error)}};
+  dateInput.onchange=()=>loadDate(dateInput.value);
+  if(S.merch.stock_date&&S.merch.stock_date!==it.selected_stock_date)loadDate(S.merch.stock_date);
   calc();
   btn.onclick = async () => {
     const items = stockItems.filter((i) => i.active).map((i) => ({ id: i.id, stock: page.querySelector(`[data-mst="${i.id}"]`).value,
       norm: page.querySelector(`[data-mno="${i.id}"]`) ? page.querySelector(`[data-mno="${i.id}"]`).value : undefined }));
     try {
       const counted_on=page.querySelector('[data-mst-date]').value;
+      S.merch.stock_date=counted_on;
       const r = await api("POST", "/api/merch/stock", { items, counted_on });
       toast(r.historical ? `Пересчёт за ${dShort(r.counted_on)} сохранён. Более свежие остатки не изменены` : r.order.length ? `Заказать: ${r.order.map((o) => `${o.name} ${o.qty}`).join(", ")}. Задача руководителю в Планере` : "Всего хватает, заказывать нечего 👍");
       afterSave();

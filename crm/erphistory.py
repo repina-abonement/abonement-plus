@@ -90,6 +90,7 @@ def _group(con, source, day, tm, student_id=None, kind=""):
     enrolled = {r[0] for r in con.execute("SELECT group_id FROM enrollments WHERE student_id=?", (student_id,))} if student_id else set()
     for raw in con.execute("SELECT g.*,b.name branch_name FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.active=1 AND b.active=1"):
         g = dict(raw); version = schedule.on(con, g, date.fromisoformat(day))
+        if date.fromisoformat(day).weekday() not in logic.parse_weekdays(version.get("weekdays", "")): continue
         if logic.group_time(version, date.fromisoformat(day).weekday()) != tm: continue
         whole = set(_norm(version.get("name", "") + " " + g.get("source_name", "") + " " + g["branch_name"]).split())
         overlap = source_tokens & whole

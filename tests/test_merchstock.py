@@ -30,6 +30,12 @@ def main():
     check(merch.planner_task_section(con, {"title": "Другая задача", "note": "", "recur_id": 8},
                                      {"weekdays": [4]}, VARYA) is None,
           "В прочих карточках Планера раздел мерча не появляется")
+    partial = merch.stock_count(con, [{"id": a, "stock": 5, "norm": 15}, {"id": b, "stock": "", "norm": 6}], VARYA, True)
+    snapshot = merch.stock_count_values(con, date.today().isoformat())["values"]
+    check(str(a) in snapshot and str(b) not in snapshot and snapshot[str(a)]["stock"] == 5,
+          "Частичный пересчёт сохраняет заполненную строку, пустую оставляет непересчитанной")
+    check(partial["stock_status"]["weekly_due"] and partial["stock_status"]["counted_items"] == 1,
+          "Частичный пересчёт не закрывает недельную проверку всего склада")
     first = [{"id": x["id"], "stock": x["norm"], "norm": x["norm"]} for x in inventory]
     next(x for x in first if x["id"] == a).update(stock=5, norm=15)
     next(x for x in first if x["id"] == b).update(stock=8, norm=6)

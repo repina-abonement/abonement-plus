@@ -116,13 +116,29 @@ def stock_status(con, today: date | None = None) -> dict:
     today = today or _now().date()
     monday = today - timedelta(days=today.weekday())
     last = con.execute("SELECT * FROM merch_stock_counts ORDER BY counted_at DESC,id DESC LIMIT 1").fetchone()
+    inventory_ids = {r[0] for r in con.execute("""SELECT id FROM merch_items WHERE active=1
+        AND (stock_only=1 OR norm>0 OR stock IS NOT NULL)""")}
+    counted_ids = {r[0] for r in con.execute("""SELECT DISTINCT l.item_id FROM merch_stock_count_lines l
+        JOIN merch_stock_counts c ON c.id=l.count_id WHERE substr(c.counted_at,1,10) BETWEEN ? AND ?""",
+        (monday.isoformat(), (monday + timedelta(days=6)).isoformat()))}
     shortages = [{"id": r["id"], "name": r["name"], "stock": r["stock"], "norm": r["norm"],
                   "missing": r["norm"] - r["stock"], "unit": r["stock_unit"]}
                  for r in con.execute("""SELECT * FROM merch_items WHERE active=1 AND norm>0 AND stock IS NOT NULL
                                           AND stock<norm ORDER BY sort,name""")]
     return {"week_start": monday.isoformat(), "week_end": (monday + timedelta(days=6)).isoformat(),
-            "weekly_due": not last or last["counted_at"][:10] < monday.isoformat(),
-            "last_count": dict(last) if last else None, "shortages": shortages}
+            "weekly_due": not inventory_ids.issubset(counted_ids), "counted_items": len(inventory_ids & counted_ids),
+            "total_items": len(inventory_ids), "last_count": dict(last) if last else None, "shortages": shortages}
+
+
+def stock_count_values(con, counted_on: str | None = None) -> dict:
+    """Последнее сохранённое значение каждой позиции за выбранную дату; пропуски остаются пустыми."""
+    try: day = date.fromisoformat(counted_on) if counted_on else _now().date()
+    except (TypeError, ValueError): raise MerchError("Выберите корректную дату пересчёта")
+    values = {}
+    for row in con.execute("""SELECT l.*,c.counted_at,c.counted_by_name FROM merch_stock_count_lines l
+        JOIN merch_stock_counts c ON c.id=l.count_id WHERE substr(c.counted_at,1,10)=? ORDER BY c.id""", (day.isoformat(),)):
+        values[str(row["item_id"])] = dict(row)
+    return {"counted_on": day.isoformat(), "values": values}
 
 
 def planner_task_section(con, task: dict, repeat: dict | None, user: dict) -> dict | None:
@@ -132,7 +148,9 @@ def planner_task_section(con, task: dict, repeat: dict | None, user: dict) -> di
         return None
     weekdays = [int(x) for x in (repeat or {}).get("weekdays", [])]
     labels = [WEEKDAY_NAMES[x] for x in weekdays if 0 <= x < len(WEEKDAY_NAMES)]
+    snapshot = stock_count_values(con)
     return {"stock_items": items(con, inventory=True), "stock_status": stock_status(con),
+            "stock_values": snapshot["values"], "selected_stock_date": snapshot["counted_on"],
             "can_norm": user.get("role") == "admin" or bool(user.get("is_senior")),
             "schedule": ", ".join(labels) or task.get("due_at", "")[:10]}
 
@@ -147,24 +165,24 @@ def stock_count(con, rows: list, user: dict, can_norm: bool, counted_on: str | N
     if count_day > today: raise MerchError("Нельзя внести пересчёт будущей датой")
     now = count_day.isoformat() + "T" + _now().strftime("%H:%M")
     inventory = items(con, inventory=True)
-    submitted = {int(r.get("id") or 0): r for r in rows}
-    missing = [item["name"] for item in inventory if item["id"] not in submitted or submitted[item["id"]].get("stock") in (None, "")]
-    if missing:
-        raise MerchError("Заполните остаток по всем позициям: " + ", ".join(missing[:5]) + ("…" if len(missing) > 5 else ""))
-    for r in rows:
+    filled = [r for r in rows if r.get("stock") not in (None, "")]
+    if not filled: raise MerchError("Заполните хотя бы одну позицию")
+    for r in filled:
         iid = int(r.get("id") or 0)
         if not con.execute("SELECT 1 FROM merch_items WHERE id=?", (iid,)).fetchone():
             continue
+        try: stock = max(0, int(r["stock"]))
+        except (TypeError, ValueError): raise MerchError("Остаток укажите целым числом")
         if can_norm and count_day == today and r.get("norm") not in (None, ""):
             con.execute("UPDATE merch_items SET norm=? WHERE id=?", (max(0, int(r["norm"])), iid))
         current = con.execute("SELECT stock_at FROM merch_items WHERE id=?", (iid,)).fetchone()
-        if r.get("stock") not in (None, "") and (not current[0] or current[0][:10] <= count_day.isoformat()):
-            con.execute("UPDATE merch_items SET stock=?, stock_at=?, stock_by=? WHERE id=?", (max(0, int(r["stock"])), now, user.get("name", ""), iid))
+        if not current[0] or current[0][:10] <= count_day.isoformat():
+            con.execute("UPDATE merch_items SET stock=?, stock_at=?, stock_by=? WHERE id=?", (stock, now, user.get("name", ""), iid))
     count_id = con.execute("INSERT INTO merch_stock_counts(counted_at,counted_by_id,counted_by_name,item_count) VALUES (?,?,?,?)",
-                (now, user["id"], user.get("name", ""), len(inventory))).lastrowid
+                (now, user["id"], user.get("name", ""), len(filled))).lastrowid
     current_items = {i["id"]: i for i in items(con, inventory=True)}
     order = []
-    for r in rows:
+    for r in filled:
         item = current_items.get(int(r.get("id") or 0))
         if not item: continue
         stock = max(0, int(r["stock"])); norm = max(0, int(r.get("norm") or item["norm"])) if can_norm else item["norm"]

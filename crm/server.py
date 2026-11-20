@@ -1696,8 +1696,10 @@ def mex(fn, *a, **kw):
 @route("GET", "/api/merch/items")
 def merch_items(con, h, user, body, q):
     show_all = user["role"] == "admin" and q.get("all") == "1"
+    snapshot = merch.stock_count_values(con, q.get("counted_on"))
     return {"items": merch.items(con, all_=show_all), "stock_items": merch.items(con, all_=show_all, inventory=True),
-            "methods": merch.METHODS, "can_norm": user["role"] == "admin", "stock_status": merch.stock_status(con)}
+            "methods": merch.METHODS, "can_norm": user["role"] == "admin", "stock_status": merch.stock_status(con),
+            "stock_values": snapshot["values"], "selected_stock_date": snapshot["counted_on"]}
 
 
 @route("POST", "/api/merch/stock", role="merch:full")
