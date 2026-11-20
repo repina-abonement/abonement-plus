@@ -71,6 +71,14 @@ def calendar(con, sid, ym):
             events.pop((day, gid, 'subscription'), None)
         events[(day, gid, 'trial', trial['id'])] = {'date':day,'group_id':gid,'kind':'trial',
             'status':'present' if trial['came'] else 'absent','trial_time':trial['visit_at'][11:16], 'trial_visit_id':trial['id']}
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_visits'").fetchone():
+        for mark in con.execute('''SELECT * FROM erp_history_visits WHERE student_id=? AND visit_date BETWEEN ? AND ?''',
+                                (sid,start.isoformat(),end.isoformat())):
+            events.pop((mark['visit_date'],mark['group_id'],'subscription'),None)
+            events.pop((mark['visit_date'],mark['group_id'],'visit'),None)
+            key=(mark['visit_date'],mark['group_id'],mark['kind'],'erp-history',mark['id'])
+            events[key]={'date':mark['visit_date'],'group_id':mark['group_id'],'kind':mark['kind'],'status':mark['status'],
+                'trial_time':mark['visit_time'],'historical_erp':True,'erp_attendance_id':mark['source_id']}
     result=[]
     for event in events.values():
         g=groups.get(event['group_id'],{})

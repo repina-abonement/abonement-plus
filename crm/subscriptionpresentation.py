@@ -62,6 +62,14 @@ def rows_for_card(con, sid, covered=None):
             group=groups.get(source.get('group_id') or row.get('group_id'))
             if group:
                 row.update(group_id=group['id'],group_name=group['name'],branch_name=group['branch_name'])
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
+        for h in con.execute('''SELECT h.*,g.name group_name,b.name branch_name FROM erp_history_subscriptions h
+                JOIN groups g ON g.id=h.group_id JOIN branches b ON b.id=g.branch_id WHERE h.student_id=? ORDER BY h.month DESC,h.id''',(sid,)):
+            x=dict(h);rows.append({'id':'erp-history-'+str(x['id']),'student_id':sid,'enrollment_id':None,'month':x['month'],
+                'tariff':'fixed','lessons':x['lessons'],'price':None,'status':'historical','kind':'month','valid_from':x['valid_from'],
+                'valid_until':x['valid_until'],'group_id':x['group_id'],'group_name':x['group_name'],'branch_name':x['branch_name'],
+                'history_import':True,'source_subscription_id':x['source_id'],'display_month':x['month'],'accounting_month':None,
+                'history_only':True,'include_in_totals':False,'paid_amount':None,'issued_by_name':'Перенос истории ERP'})
     return rows
 
 
@@ -76,6 +84,8 @@ def unpaid_group_names(con, sid, ym, enrollments):
     rows=rows_for_card(con,sid)
     owed={};covered=set()
     for row in rows:
+        if row.get('history_import'):
+            continue
         if row['history_only'] or row['display_month']!=ym or not row['group_id']:
             continue
         gid=row['group_id']

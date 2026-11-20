@@ -297,6 +297,8 @@ def init_db(con: sqlite3.Connection):
     clientprofile.init(con)
     chains.init(con)
     erpimport.init(con)
+    from . import erphistory
+    erphistory.init(con)
     memos.init(con)
     staff.init(con)
     merch.init(con)
