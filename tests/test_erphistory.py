@@ -98,6 +98,53 @@ def main():
     assert event['group_id']==makeup_groups[2] and 'ОФП' in event['group'] and not event.get('group_unresolved')
     final=erphistory.preview(con,ambiguous,'2025-09')
     assert final['added']==0 and final['updated']==0 and final['review']==0 and final['existing']==14
+
+    # Second pilot shape: two subscriptions, explicit absences, makeups, and
+    # two distinct timed marks on the same day. The original singular format
+    # above remains covered unchanged.
+    second_group=schedule.save_group(con,{'name':'Вторая сборная','branch_id':ar,'weekdays':[3],'time':'20:00'})
+    con.execute("INSERT INTO enrollments(student_id,group_id,created_at) VALUES (?,?,?)",(sid,second_group,'2025-01-01'))
+    first_marks=[]
+    for i,(d,t,status) in enumerate([
+      ('2025-10-02','20:00','присутствовал'),('2025-10-09','20:00','присутствовал'),
+      ('2025-10-16','20:00','присутствовал'),('2025-10-23','20:00','отсутствовал'),
+      ('2025-10-30','20:00','отсутствовал')]):
+        first_marks.append({'date':d,'time':t,'group':'Север, Вторая сборная','type':'Абонемент','erp_subscription_id':'SUB-A','erp_attendance_id':f'A{i}','status':status})
+    second_marks=[]
+    for i,(d,t,status) in enumerate([
+      ('2025-10-05','19:30','присутствовал'),('2025-10-07','18:30','присутствовал'),
+      ('2025-10-12','19:30','присутствовал'),('2025-10-14','18:30','присутствовал'),
+      ('2025-10-19','19:30','присутствовал'),('2025-10-21','18:30','отсутствовал'),
+      ('2025-10-26','19:30','отсутствовал'),('2025-10-28','18:30','отсутствовал')]):
+        second_marks.append({'date':d,'time':t,'group':'Север, сборная','type':'Абонемент','erp_subscription_id':'SUB-B','erp_attendance_id':f'B{i}','status':status})
+    # A prior child's confirmed group for this exact lesson is reusable.
+    prior_student=con.execute("INSERT INTO students(family_id,name,birth,stage_changed_at,created_at) VALUES (?,?,?,?,?)",
+      (fid,'Предыдущий пилот','2014-01-01','2026-01-01','2026-01-01')).lastrowid
+    con.execute("""INSERT INTO erp_history_visits(source_id,source_subscription_id,student_id,group_id,visit_date,visit_time,kind,status,absence_source_id,source_payload,imported_at,imported_by)
+      VALUES ('PRIOR-MU',NULL,?,?,?,'17:00','makeup','present',NULL,?,'2026-01-01','Тест')""",
+      (prior_student,makeup_groups[2],'2025-10-18',erphistory._json({'group':'Юг, ОФП, журнал без возраста'})))
+    makeups=[
+      {'date':'2025-10-04','time':'16:00','group':'Юг, ОФП 4–5','type':'Отработка','erp_subscription_id':'OLD','erp_attendance_id':'MU1','status':'присутствовал'},
+      {'date':'2025-10-04','time':'17:00','group':'Юг, ОФП 6–8','type':'Отработка','erp_subscription_id':'OLD','erp_attendance_id':'MU2','status':'присутствовал'},
+      {'date':'2025-10-18','time':'17:00','group':'Юг, ОФП, журнал без возраста','type':'Отработка','erp_subscription_id':'OLD','erp_attendance_id':'MU3','status':'присутствовал'}]
+    multi={'child':'Тестовый Ребёнок','erp_student_id':'TEST-ERP','month':'2025-10','subscriptions':[
+      {'erp_id':'SUB-A','valid_from':'2025-10-02','valid_until':'2025-10-30','lesson_count':5,'price':7000},
+      {'erp_id':'SUB-B','valid_from':'2025-10-05','valid_until':'2025-10-28','lesson_count':8,'price':9000}],
+      'attendance':first_marks+second_marks+makeups}
+    multi_plan=erphistory.preview(con,multi,'2025-10')
+    assert multi_plan['can_apply'] and multi_plan['added']==18 and multi_plan['review']==0,multi_plan
+    old=erphistory.PILOT_KEYS;erphistory.PILOT_KEYS={erphistory._pilot_key('TEST-ERP','2025-10')}
+    try: multi_result=erphistory.apply(con,multi,'2025-10',multi_plan['token'],{'name':'Тест'})
+    finally: erphistory.PILOT_KEYS=old
+    assert (multi_result['subscriptions_added'],multi_result['visits_added'])==(2,16)
+    multi_events=clientattendance.calendar(con,sid,'2025-10')['events']
+    assert sum(x['status']=='present' for x in multi_events)==11
+    assert sum(x['kind']=='makeup' and x['status']=='present' for x in multi_events)==3
+    assert sum(x['status']=='absent' for x in multi_events)==5
+    same_day=[x for x in multi_events if x['date']=='2025-10-04']
+    assert {x['time'] for x in same_day}=={'16:00','17:00'}
+    multi_again=erphistory.preview(con,multi,'2025-10')
+    assert multi_again['added']==0 and multi_again['existing']==18 and multi_again['review']==0
     print('ok')
 
 if __name__=='__main__':main()
