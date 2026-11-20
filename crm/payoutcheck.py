@@ -271,16 +271,37 @@ def fee_in(description):
     return minor(match.group(1).replace(' ','').replace(',','.')) if match else None
 
 
+# The VTB statement names the sales day immediately after "эквайринга".
+VTB_SETTLEMENT = re.compile(
+    r'возмещение\s+ср-?в\s+по\s+операциям\s+эквайринга\s+'
+    r'(?P<day>\d{2}\.\d{2}\.\d{2}(?:\d{2})?)\s*,\s*'
+    r'согласно\s+договору\s+[^,]+?\s+от\s+\d{2}\.\d{2}\.\d{4}\s+'
+    r'комиссия\s+по\s+операциям\s+(?P<fee>\d[\d ]*[.,]\d{2})\s+руб\.',
+    re.IGNORECASE,
+)
+
+
 def batch_candidate(batch,transaction):
     if not booked(transaction):return None
     description=str(transaction.get('description') or '')
     if not re.search(r'эквайр|операци\w*.*карт',description,re.I):return None
-    if not period_in(description,batch['day']):return None
     payer=transaction.get('DebtorParty') or {}
-    identity={'system_description':str(payer.get('name') or '')+' '+description}
-    if not batch['acquirer'] or acquirer(identity)!=batch['acquirer']:return None
-    amount=minor(transaction['Amount']['amount']);fee=fee_in(description)
-    if amount==batch['gross_minor']:
+    vtb=VTB_SETTLEMENT.match(description.strip())
+    if vtb:
+        if batch['acquirer']!='vtb' or acquirer({'system_description':payer.get('name')})!='vtb':
+            return None
+        if not period_in('за '+vtb['day'],batch['day']):
+            return None
+        fee=minor(vtb['fee'].replace(' ','').replace(',','.'))
+    else:
+        if not period_in(description,batch['day']):
+            return None
+        identity={'system_description':str(payer.get('name') or '')+' '+description}
+        if not batch['acquirer'] or acquirer(identity)!=batch['acquirer']:
+            return None
+        fee=fee_in(description)
+    amount=minor(transaction['Amount']['amount'])
+    if not vtb and amount==batch['gross_minor']:
         return {'bank_key':bank_key(transaction),'bank_operation_id':str(transaction['transactionId']),
             'received_minor':amount,'fee_minor':fee,'commission_basis':'bank_purpose' if fee is not None else 'not_observed_separately',
             'balanced':True,'basis':'sales_day_acquirer_gross'}

@@ -78,6 +78,22 @@ class PayoutMatching(unittest.TestCase):
             self.run_bank([self.credit(6000,purpose=purpose)])
             self.assertEqual(self.states()[0]['status'],'unverified')
 
+    def test_vtb_statement_uses_sales_day_and_fee_excluding_separate_vat_field(self):
+        self.snapshot([self.member(amount=3000),self.member('p2',amount=1000)])
+        purpose=('ВОЗМЕЩЕНИЕ СР-В ПО ОПЕРАЦИЯМ ЭКВАЙРИНГА 18.11.26, '
+                 'СОГЛАСНО ДОГОВОРУ ПК -0000 ОТ 03.03.2023 '
+                 'КОМИССИЯ ПО ОПЕРАЦИЯМ 100.00 РУБ. В Т.Ч. НДС 18.03 РУБ.')
+        credit=self.credit(3900,'ФИЛИАЛ № 0000 БАНКА ВТБ (ПАО)',purpose,day='2026-11-19')
+        for unmatched in (credit|{'DebtorParty':{'name':'Другой банк'}},
+                          credit|{'description':purpose.replace('18.11.26','17.11.26')},
+                          credit|{'description':purpose.replace('18.11.26','17.11.26–18.11.26')},
+                          credit|{'Amount':{'amount':'4000','currency':'RUB'}}):
+            self.run_bank([unmatched])
+            self.assertTrue(all(s['status']=='unverified' for s in self.states()))
+        self.assertEqual(self.run_bank([credit])['confirmed'],2)
+        batch=payoutcheck.view(self.con,'2026-11-18','2026-11-18')[0]
+        self.assertEqual(batch['bank']['fee_minor'],10000)
+
     def test_statement_error_is_distinct_and_next_read_recovers(self):
         self.snapshot([self.member(amount=6000)])
         fiscal.comms.put(self.con,'fx_tochka_token','synthetic')
