@@ -989,6 +989,9 @@ async function renderErp(box) {
     <div class="erp-step"><b>4. Перенос</b><div class="small muted">Перед переносом CRM сделает резервную копию и удалит всех выдуманных клиентов. Команда, группы, настройки и переписки останутся. Перенос можно отменить целиком</div>
       <label class="check" style="margin-top:8px"><input type="checkbox" id="erp-rkn"> Изменения в Роскомнадзор поданы, политика обработки данных опубликована</label>
       <button class="btn primary" id="erp-run" style="margin-top:8px" disabled>Перенести</button></div>`}`;
+  // The clean-start archive is independent of whether an earlier ERP import
+  // has completed, so the owner must always see it in this section.
+  if (typeof erpClientResetSetup === "function") erpClientResetSetup(box);
   erpPeopleSetup(box, d);
   erpTaskTransferSetup(box,d);
   if (done) {
