@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 
 from . import logic, schedule
 from .db import normalize_phone
@@ -13,7 +14,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS erp_history_subscriptions (
  id INTEGER PRIMARY KEY, source_id TEXT NOT NULL UNIQUE, student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
  group_id INTEGER NOT NULL REFERENCES groups(id), month TEXT NOT NULL, valid_from TEXT NOT NULL, valid_until TEXT NOT NULL,
- lessons INTEGER NOT NULL, source_payload TEXT NOT NULL, imported_at TEXT NOT NULL, imported_by TEXT NOT NULL);
+ lessons INTEGER NOT NULL, revenue_amount INTEGER, source_payload TEXT NOT NULL, imported_at TEXT NOT NULL, imported_by TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS erp_history_visits (
  id INTEGER PRIMARY KEY, source_id TEXT NOT NULL UNIQUE, source_subscription_id TEXT, student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
  group_id INTEGER NOT NULL REFERENCES groups(id), visit_date TEXT NOT NULL, visit_time TEXT NOT NULL, kind TEXT NOT NULL,
@@ -27,13 +28,24 @@ SKIP = {"группа", "сборная", "пуп", "журнал", "тц"}
 class HistoryError(ValueError): pass
 
 
-def init(con): con.executescript(SCHEMA)
+def init(con):
+    con.executescript(SCHEMA)
+    columns = {row[1] for row in con.execute("PRAGMA table_info(erp_history_subscriptions)")}
+    if "revenue_amount" not in columns:
+        con.execute("ALTER TABLE erp_history_subscriptions ADD COLUMN revenue_amount INTEGER")
 
 
 def _json(value): return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 def _token(value): return hashlib.sha256(_json(value).encode()).hexdigest()
 def _pilot_key(erp_id, period): return hashlib.sha256(f"{erp_id}|{period}".encode()).hexdigest()
 def _norm(value): return " ".join(re.sub(r"[^a-zа-я0-9]+", " ", str(value or "").lower().replace("ё", "е")).split())
+
+
+def _amount(value):
+    if value in (None, ""): return None
+    try: amount = Decimal(str(value).replace(" ", "").replace(",", "."))
+    except InvalidOperation: return None
+    return int(amount) if amount == amount.to_integral_value() and amount >= 0 else None
 
 
 def _records(payload):
@@ -115,18 +127,18 @@ def preview(con, payload, period=None, student_ids=None):
                    "group_id": group[1] if group else None, "group": group[2] if group else None, "branch": group[3] if group else None,
                    "kind": kind, "status": status, "state": state, "reason": reason, "source_subscription_id": str(item.get("erp_subscription_id") or "")}
             child["visits"].append(out); mapped.append((item, out)); result["existing" if state == "already_exists" else "added" if state == "add" else "review"] += 1
-        sub = row.get("subscription") or {}; subid = str(sub.get("erp_id") or "").strip()
+        sub = row.get("subscription") or {}; subid = str(sub.get("erp_id") or "").strip(); revenue_amount = _amount(sub.get("price"))
         main_groups = {x[1]["group_id"] for x in mapped if x[1]["kind"] == "subscription" and x[1]["group_id"] and x[1]["source_subscription_id"] == subid}
         existing_sub = con.execute("SELECT * FROM erp_history_subscriptions WHERE source_id=?", (subid,)).fetchone() if subid else None
         group_id = next(iter(main_groups)) if len(main_groups) == 1 else None
-        existing_conflict = bool(existing_sub and student and group_id and (existing_sub["student_id"] != student["id"] or existing_sub["group_id"] != group_id or existing_sub["month"] != month or existing_sub["valid_from"] != sub.get("valid_from") or existing_sub["valid_until"] != sub.get("valid_until") or existing_sub["lessons"] != int(sub.get("lesson_count") or 0)))
+        existing_conflict = bool(existing_sub and student and group_id and (existing_sub["student_id"] != student["id"] or existing_sub["group_id"] != group_id or existing_sub["month"] != month or existing_sub["valid_from"] != sub.get("valid_from") or existing_sub["valid_until"] != sub.get("valid_until") or existing_sub["lessons"] != int(sub.get("lesson_count") or 0) or existing_sub["revenue_amount"] != revenue_amount))
         native_sub = bool(student and group_id and con.execute('''SELECT 1 FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id
             WHERE x.student_id=? AND e.group_id=? AND x.month=? AND x.lessons=? AND COALESCE(x.valid_from,'')=? AND COALESCE(x.valid_until,'')=? AND x.status!='cancelled' ''',
             (student["id"],group_id,month,int(sub.get("lesson_count") or 0),sub.get("valid_from") or '',sub.get("valid_until") or '')).fetchone())
-        sub_state = "review" if existing_conflict else "already_exists" if existing_sub or native_sub else "add" if student and subid and group_id and int(sub.get("lesson_count") or 0) == sum(x[1]["kind"] == "subscription" and x[1]["status"] == "present" for x in mapped) else "review"
+        sub_state = "review" if existing_conflict else "already_exists" if existing_sub or native_sub else "add" if student and subid and group_id and revenue_amount is not None and int(sub.get("lesson_count") or 0) == sum(x[1]["kind"] == "subscription" and x[1]["status"] == "present" for x in mapped) else "review"
         child["subscription"] = {"source_id": subid, "group_id": next(iter(main_groups)) if len(main_groups) == 1 else None,
-            "valid_from": sub.get("valid_from"), "valid_until": sub.get("valid_until"), "lessons": sub.get("lesson_count"), "state": sub_state,
-            "reason": "" if sub_state != "review" else "ID абонемента уже связан с другими данными" if existing_conflict else "Абонемент, группа или число подтверждённых посещений не сопоставлены однозначно"}
+            "valid_from": sub.get("valid_from"), "valid_until": sub.get("valid_until"), "lessons": sub.get("lesson_count"), "revenue_amount": revenue_amount, "state": sub_state,
+            "reason": "" if sub_state != "review" else "ID абонемента уже связан с другими данными" if existing_conflict else "В источнике нет точной стоимости абонемента" if revenue_amount is None else "Абонемент, группа или число подтверждённых посещений не сопоставлены однозначно"}
         result["existing" if sub_state == "already_exists" else "added" if sub_state == "add" else "review"] += 1
         if child["issues"] or sub_state == "review" or any(x["state"] == "review" for x in child["visits"]): result["can_apply"] = False
         result["children"].append(child)
@@ -147,8 +159,8 @@ def apply(con, payload, period, token, user, student_ids=None):
             if linked and linked["student_id"] != sid: raise HistoryError("ERP ID уже связан с другой карточкой")
             con.execute("INSERT OR IGNORE INTO erp_full_identities(namespace,source_id,student_id) VALUES ('student',?,?)", (child["erp_id"],sid))
         if sub["state"] == "add":
-            con.execute("INSERT INTO erp_history_subscriptions(source_id,student_id,group_id,month,valid_from,valid_until,lessons,source_payload,imported_at,imported_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (sub["source_id"],sid,sub["group_id"],child["period"],sub["valid_from"],sub["valid_until"],int(sub["lessons"]),_json(raw["subscription"]),now,user.get("name", ""))); created_subs += 1
+            con.execute("INSERT INTO erp_history_subscriptions(source_id,student_id,group_id,month,valid_from,valid_until,lessons,revenue_amount,source_payload,imported_at,imported_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (sub["source_id"],sid,sub["group_id"],child["period"],sub["valid_from"],sub["valid_until"],int(sub["lessons"]),sub["revenue_amount"],_json(raw["subscription"]),now,user.get("name", ""))); created_subs += 1
         by_id = {str(x.get("erp_attendance_id")): x for x in raw.get("attendance", [])}
         for visit in child["visits"]:
             if visit["state"] != "add": continue

@@ -2,7 +2,7 @@
 import os, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from crm import db, erphistory, schedule, services, clientattendance, money
+from crm import analytics, db, erphistory, schedule, services, clientattendance, money
 
 
 def main():
@@ -26,7 +26,7 @@ def main():
       {'date':'2025-09-18','time':'19:45','group':'Юг, Доп. 6–8','type':'Отработка','erp_subscription_id':'OTHER2','erp_attendance_id':'X2','status':'присутствовал'},
       {'date':'2025-09-06','time':'16:00','group':'Юг, ОФП 4–5','type':'Отработка','erp_subscription_id':'OTHER3','erp_attendance_id':'X3','status':'присутствовал'},
       {'date':'2025-09-20','time':'17:00','group':'Юг, ОФП, журнал Доп. 18:45','type':'Отработка','erp_subscription_id':'OTHER4','erp_attendance_id':'X4','status':'присутствовал'}]
-    payload={'child':'Тестовый Ребёнок','erp_student_id':'TEST-ERP','month':'2025-09','subscription':{'erp_id':'SUB-X','group':'Север, сборная','valid_from':'2025-09-02','valid_until':'2025-09-28','lesson_count':8},'attendance':visits}
+    payload={'child':'Тестовый Ребёнок','erp_student_id':'TEST-ERP','month':'2025-09','subscription':{'erp_id':'SUB-X','group':'Север, сборная','valid_from':'2025-09-02','valid_until':'2025-09-28','lesson_count':8,'price':12345},'attendance':visits}
     before=(con.execute('SELECT count(*) FROM payments').fetchone()[0],money.balance(con,sid),dict(con.execute('SELECT * FROM students WHERE id=?',(sid,)).fetchone()))
     plan=erphistory.preview(con,payload,'2025-09');assert plan['can_apply'] and plan['added']==13 and plan['review']==0,plan
     old=erphistory.PILOT_KEYS;erphistory.PILOT_KEYS={erphistory._pilot_key('TEST-ERP','2025-09')}
@@ -36,7 +36,8 @@ def main():
     again=erphistory.preview(con,payload,'2025-09');assert again['added']==0 and again['existing']==13 and again['review']==0
     events=clientattendance.calendar(con,sid,'2025-09')['events'];assert sum(x['kind']=='subscription' and x['status']=='present' for x in events)==8
     assert sum(x['kind']=='makeup' and x['status']=='present' for x in events)==4
-    detail=services.student_detail(con,sid);hist=[x for x in detail['subscriptions'] if x.get('history_import')];assert len(hist)==1 and hist[0]['price'] is None
+    detail=services.student_detail(con,sid);hist=[x for x in detail['subscriptions'] if x.get('history_import')];assert len(hist)==1 and hist[0]['price']==12345 and hist[0]['analytics_only']
+    assert next(x for x in analytics.groups_report(con,'2025-09')['groups'] if x['id']==main_group)['revenue']==12345
     after=(con.execute('SELECT count(*) FROM payments').fetchone()[0],money.balance(con,sid),dict(con.execute('SELECT * FROM students WHERE id=?',(sid,)).fetchone()))
     assert before==after
     con.execute("UPDATE students SET erp_id='' WHERE id=?",(sid,))
@@ -55,6 +56,9 @@ def main():
     finally: erphistory.PILOT_KEYS=old
     automatic=erphistory.preview(con,payload,'2025-09')
     assert automatic['can_apply'] and automatic['children'][0]['student']['match']=='saved_erp_link'
+    without_price={**payload,'subscription':{**{k:v for k,v in payload['subscription'].items() if k!='price'},'erp_id':'SUB-NO-PRICE'},'erp_student_id':'OTHER-ERP'}
+    missing=erphistory.preview(con,without_price,'2025-09',{'OTHER-ERP':sid})
+    assert not missing['can_apply'] and missing['children'][0]['subscription']['reason']=='В источнике нет точной стоимости абонемента'
     print('ok')
 
 if __name__=='__main__':main()

@@ -25,6 +25,16 @@ def _holders(con, ym: str, branch_id: int | None = None) -> dict[int, dict]:
             continue
         h = out.setdefault(r["student_id"], {"group_id": r["gid"], "branch_id": r["branch_id"], "revenue": 0})
         h["revenue"] += r["price"]
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
+        for r in con.execute("""SELECT h.student_id,h.group_id AS gid,g.branch_id,h.revenue_amount AS price
+                                FROM erp_history_subscriptions h JOIN groups g ON g.id=h.group_id
+                                WHERE h.month=? AND h.revenue_amount IS NOT NULL
+                                  AND NOT EXISTS (SELECT 1 FROM subscriptions x LEFT JOIN enrollments e ON e.id=x.enrollment_id
+                                    WHERE x.student_id=h.student_id AND x.month=h.month AND x.status!='cancelled'
+                                      AND COALESCE(e.group_id,(SELECT group_id FROM students WHERE id=x.student_id))=h.group_id)""", (ym,)):
+            if branch_id and r["branch_id"] != branch_id: continue
+            h = out.setdefault(r["student_id"], {"group_id": r["gid"], "branch_id": r["branch_id"], "revenue": 0})
+            h["revenue"] += r["price"]
     return out
 
 
