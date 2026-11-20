@@ -928,6 +928,9 @@ _erp_single_recovery_web.register(route)
 from . import historicalrefundweb as _historical_refund_web
 _historical_refund_web.register(route)
 
+from . import erpbalancerecoveryweb as _erp_balance_recovery_web
+_erp_balance_recovery_web.register(route)
+
 
 @route("POST", "/api/erp/tasks/transfer-plan", role="admin")
 def task_transfer_plan(con,h,user,body,q):

@@ -8,6 +8,7 @@ function erpHistoricalRefundsSetup(box) {
     <div class="row" style="gap:8px;align-items:end;flex-wrap:wrap"><div class="field"><label for="ehr-erp">ID клиента ERP</label><input id="ehr-erp" value="120486" autocomplete="off"></div><button type="button" class="btn" data-ehr-load>Прочитать покупки и оплаты</button></div><div data-ehr-context></div><div data-ehr-form></div><div data-ehr-result></div><p class="small" role="status" aria-live="polite" data-ehr-status></p>`;
   const previous=box.querySelector("#erp-single-recovery")||box.querySelector("#erp-full");if(previous)previous.after(panel);else box.append(panel);
   erpFinancialAuditSetup(box,panel);
+  erpMamedovBalanceSetup(box,box.querySelector('#erp-financial-audit')||panel);
   const contextBox=panel.querySelector('[data-ehr-context]'),formBox=panel.querySelector('[data-ehr-form]'),output=panel.querySelector('[data-ehr-result]'),status=panel.querySelector('[data-ehr-status]'),erpInput=panel.querySelector('#ehr-erp');
   const text=value=>esc(String(value??'')),amount=value=>value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value))?rub(Number(value)):'не подтверждено',date=value=>value?text(String(value).slice(0,10).split('-').reverse().join('.')):'не указана';
   let context=null,checked=null,busy=false;
@@ -83,6 +84,66 @@ function erpHistoricalRefundsSetup(box) {
     try{context=await api('GET','/api/erp/historical-refunds/context?erp_id='+encodeURIComponent(erp));drawContext(context);status.textContent='Данные прочитаны. Сверьте источник до применения.';}catch(error){context=null;status.textContent=error.message||'Не удалось прочитать карточку';}finally{setBusy(false);}
   };
   erpInput.oninput=()=>{context=null;checked=null;contextBox.innerHTML='';formBox.innerHTML='';output.innerHTML='';status.textContent='Загрузите данные для указанного ID клиента.';};
+}
+
+function erpMamedovBalanceSetup(box,previous) {
+  if(!box||S.user?.role!=='admin')return;
+  const panel=document.createElement('details');panel.className='erp-step';panel.id='erp-mamedov-balance';
+  panel.innerHTML='<summary><b>Исправить баланс Мамедова</b></summary><p class="small">Только карточка ERP 88202. Сначала проверяем исправление на полной копии базы. Применение выполняется отдельной кнопкой.</p><div class="row" style="gap:8px;flex-wrap:wrap"><button type="button" class="btn" data-emb-plan>Проверить исправление на копии</button><button type="button" class="linkish" data-emb-open disabled>Открыть карточку</button></div><div data-emb-run></div><div data-emb-result></div><p class="small" data-emb-status role="status" aria-live="polite"></p>';
+  if(previous)previous.after(panel);else box.append(panel);
+  const result=panel.querySelector('[data-emb-result]'),history=panel.querySelector('[data-emb-run]'),status=panel.querySelector('[data-emb-status]'),load=panel.querySelector('[data-emb-plan]');
+  const text=value=>esc(String(value??'')),money=value=>value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value))?rub(Number(value)):'не подтверждено';
+  let checked=null,lastRun=null,busy=false,generation=0,requestId='',studentId=null;
+  const active=version=>panel.isConnected&&version===generation;
+  const issues=rows=>Array.isArray(rows)&&rows.length?`<ul class="small">${rows.map(row=>`<li>${text(typeof row==='string'?row:row.reason||row.message||'Нужна сверка')}</li>`).join('')}</ul>`:'';
+  const comparison=(before,after)=>{
+    const fields=[['Занятий в декабре',s=>s?.invoice?.lessons,false],['Стоимость декабря',s=>s?.invoice?.price,true],['Зачтено в декабрь',s=>s?.invoice?.covered,true],['К оплате за декабрь',s=>s?.invoice?.payable,true],['Свободный баланс',s=>s?.balance?.free_deposit??s?.balance?.deposit,true],['Оплат в истории',s=>s?.payments_count,false],['Покупок в истории',s=>s?.purchases_count,false]];
+    return `<div style="overflow:auto"><table class="tbl" data-emb-comparison><thead><tr><th>Показатель</th><th>До</th><th>После</th></tr></thead><tbody>${fields.map(([label,get,financial])=>`<tr><td>${label}</td><td>${financial?money(get(before)):text(get(before)??'не подтверждено')}</td><td>${financial?money(get(after)):text(get(after)??'не подтверждено')}</td></tr>`).join('')}</tbody></table></div>`;
+  };
+  const update=()=>{
+    panel.querySelector('[data-emb-open]').disabled=busy||!studentId;
+    const apply=result.querySelector('[data-emb-apply]');if(apply)apply.disabled=busy||!checked||!result.querySelector('[data-emb-confirm]')?.checked;
+    const rollback=history.querySelector('[data-emb-rollback]');if(rollback)rollback.disabled=busy||lastRun?.state!=='applied'||lastRun?.can_rollback!==true||!lastRun?.rollback_token||!history.querySelector('[data-emb-rollback-confirm]')?.checked;
+  };
+  const setBusy=value=>{busy=value;panel.querySelectorAll('button,input').forEach(el=>el.disabled=value);if(!value)update();};
+  const showRun=run=>{
+    lastRun=run||null;history.innerHTML='';if(!run)return;
+    const applied=run.state==='applied',canRollback=applied&&run.can_rollback===true&&typeof run.rollback_token==='string'&&!!run.rollback_token,hasBackup=run.backup_created===true||typeof run.backup_filename==='string'&&!!run.backup_filename;
+    const link=run.payment_link,linkUrl=link?.url;let publicUrl='';try{if(applied&&!run.state_changed_since_apply&&linkUrl&&['http:','https:'].includes(new URL(linkUrl,location.href).protocol))publicUrl=new URL(linkUrl,location.href).href}catch(_){}
+    history.innerHTML=`<section class="panel"><h4>${run.state==='rolled_back'?'Исправление отменено':applied?'Исправление применено':'Состояние исправления требует проверки'}</h4><p class="small">Операция №${text(run.run_id)}${run.created_at?' · '+text(run.created_at):''}${hasBackup?' · резервная копия создана':''}</p>${hasBackup&&run.backup_filename?`<details><summary>Резервная копия</summary><p class="small">${text(run.backup_filename)}</p></details>`:''}${run.before_summary&&run.after_summary?`<details data-emb-saved-result><summary>Сохранённые итоги операции</summary>${comparison(run.before_summary,run.after_summary)}</details>`:''}${run.summary_note?`<p class="small" data-emb-summary-note>${text(run.summary_note)}</p>`:''}<section data-emb-current><h4>Текущее состояние карточки</h4>${run.current_summary?`<div class="finance-numbers"><div><small>Зачтено в декабрь</small><b data-emb-current-paid>${money(run.current_summary.invoice?.covered)}</b></div><div><small>К оплате за декабрь</small><b data-emb-current-due>${money(run.current_summary.invoice?.payable)}</b></div><div><small>Свободный баланс</small><b data-emb-current-balance>${money(run.current_summary.balance?.free_deposit??run.current_summary.balance?.deposit)}</b></div></div><p class="small">Оплат в истории: ${text(run.current_summary.payments_count??'не подтверждено')} · покупок: ${text(run.current_summary.purchases_count??'не подтверждено')}</p>`:'<p class="small">Текущее состояние не подтверждено. Перечитайте данные.</p>'}</section>${publicUrl?`<p><a class="linkish" data-emb-public href="${text(publicUrl)}" target="_blank" rel="noopener noreferrer">Открыть страницу оплаты${Number.isInteger(link.amount)?' · '+money(link.amount):''}</a></p>`:''}${canRollback?'<details><summary>Отменить только это исправление</summary><p class="small">Перед отменой CRM проверит, что записи после этой операции не изменились.</p><label class="check"><input type="checkbox" data-emb-rollback-confirm> Вернуть состояние до этой операции</label><button type="button" class="btn" data-emb-rollback disabled>Отменить это исправление</button></details>':applied?'<p class="small">Отмена сейчас недоступна. Перечитайте состояние: записи могли измениться после исправления.</p>':''}</section>`;
+    history.querySelector('[data-emb-rollback-confirm]')?.addEventListener('change',update);
+    const rollback=history.querySelector('[data-emb-rollback]');if(rollback)rollback.onclick=rollbackRun;
+  };
+  const showPlan=plan=>{
+    checked=null;
+    const ready=plan.erp_id==='88202'&&plan.can_apply===true&&plan.plan_ready===true&&plan.production_apply_available===true&&plan.preview_on_copy===true&&typeof plan.token==='string'&&!!plan.token&&plan.before&&plan.without_balance;
+    result.innerHTML=`<h4>${plan.already_applied===true?'Баланс уже исправлен':ready?'Исправление проверено на копии':'Исправление пока недоступно'}</h4>${plan.already_applied!==true&&(plan.before||plan.without_balance)?comparison(plan.before,plan.without_balance):''}<p class="small">Ноябрьское покрытие 8 100 ₽ сохраняется по текущему учёту CRM. Точные счета ERP не установлены. Новая оплата не создаётся.</p>${issues(plan.issues||plan.blockers)}${ready?'<label class="check"><input type="checkbox" data-emb-confirm> Проверила суммы и сохранность истории; применить это исправление</label><button type="button" class="btn primary" data-emb-apply disabled>Применить проверенное исправление</button>':'<p class="small">Рабочие записи этим просмотром не изменены. Для новой проверки перечитайте данные.</p>'}`;
+    if(ready){checked={token:plan.token};requestId=window.crypto?.randomUUID?.()||Date.now()+'-'+Math.random().toString(36).slice(2);result.querySelector('[data-emb-confirm]').onchange=update;result.querySelector('[data-emb-apply]').onclick=apply;}
+  };
+  const runFrom=reply=>reply.last_run?{...reply,...reply.last_run}:reply.run_id?reply:null;
+  const apply=async()=>{
+    if(busy||!checked||!result.querySelector('[data-emb-confirm]')?.checked)return;
+    const version=++generation,token=checked.token;setBusy(true);status.textContent='Создаём резервную копию и применяем проверенное исправление…';
+    try{
+      const reply=await api('POST','/api/erp/balance-recovery/apply',{erp_id:'88202',token,request_id:requestId});if(!active(version))return;
+      checked=null;result.innerHTML='';const run=runFrom(reply);if(!run||run.state!=='applied')throw Error('Сервер не подтвердил применение. Перечитайте состояние');showRun(run);status.textContent='Исправление применено. Проверьте карточку клиента.';
+    }catch(error){if(active(version)){checked=null;result.innerHTML='';status.textContent=(error.message||'Результат применения не подтверждён')+'. Нажмите «Проверить исправление на копии», чтобы перечитать состояние.'}}finally{if(active(version))setBusy(false)}
+  };
+  const rollbackRun=async()=>{
+    if(busy||lastRun?.can_rollback!==true||!lastRun.rollback_token||!history.querySelector('[data-emb-rollback-confirm]')?.checked)return;
+    const version=++generation,run=lastRun;setBusy(true);status.textContent='Проверяем возможность отмены этой операции…';
+    try{const reply=await api('POST',`/api/erp/balance-recovery/${encodeURIComponent(run.run_id)}/rollback`,{token:run.rollback_token});if(!active(version))return;checked=null;result.innerHTML='';const restored=runFrom(reply);if(!restored||restored.state!=='rolled_back')throw Error('Сервер не подтвердил отмену');showRun(restored);status.textContent='Это исправление отменено. Исходное состояние восстановлено.'}
+    catch(error){if(active(version)){if(lastRun)lastRun={...lastRun,can_rollback:false,rollback_token:null,current_summary:null,state_changed_since_apply:true,summary_note:'Не удалось подтвердить текущее состояние. Перечитайте данные.'};showRun(lastRun);status.textContent=(error.message||'Результат отмены не подтверждён')+'. Перечитайте состояние перед дальнейшими действиями.'}}finally{if(active(version))setBusy(false)}
+  };
+  load.onclick=async()=>{
+    if(busy)return;const version=++generation;checked=null;studentId=null;showRun(null);result.innerHTML='';setBusy(true);status.textContent='Читаем рабочее состояние и проверяем исправление на полной копии…';
+    try{
+      const context=await api('GET','/api/erp/balance-recovery/context?erp_id=88202');if(!active(version))return;
+      if(context.erp_id==='88202'&&Number.isInteger(context.student_id||context.student?.id)&&(context.student_id||context.student.id)>0)studentId=context.student_id||context.student.id;showRun(context.last_run||null);
+      const plan=await api('POST','/api/erp/balance-recovery/plan',{erp_id:'88202'});if(!active(version))return;if(Object.prototype.hasOwnProperty.call(plan,'last_run'))showRun(plan.last_run);if(plan.erp_id==='88202'&&Number.isInteger(plan.student_id)&&plan.student_id>0)studentId=plan.student_id;showPlan(plan);status.textContent='Проверка завершена. Рабочие записи не изменены.';
+    }catch(error){if(active(version)){checked=null;if(lastRun)showRun({...lastRun,can_rollback:false,rollback_token:null,current_summary:null});result.innerHTML='';status.textContent=error.message||'Не удалось проверить исправление'}}finally{if(active(version))setBusy(false)}
+  };
+  panel.querySelector('[data-emb-open]').onclick=()=>{if(studentId&&typeof openStudent==='function')openStudent(studentId,{tab:'abon'});};
 }
 
 
