@@ -1014,8 +1014,8 @@ function erpPeopleSetup(box, data) {
 async function renderErp(box) {
   const d = await api("GET", "/api/erp");
   const done = d.last && !d.last.undone_at;
-  box.innerHTML = `<h3>Перенос из ERP</h3>
-    <div class="small muted" style="margin-bottom:10px">Выгрузите из ERP клиентов, абонементы, оплаты, посещения и задачи в Excel (.xlsx) или CSV и загрузите сюда. Файлы разбираются на нашем сервере, никуда больше не уходят. Можно загружать по одному или все сразу</div>
+  box.innerHTML = `<header class="erp-page-head"><span class="erp-eyebrow">Настройки</span><h2>Перенос данных из ERP</h2>
+    <p>Переносите данные поэтапно: сначала проверьте результат, затем подтвердите запись. Финансы не меняются без отдельного явного действия.</p></header>
     ${done ? `<div class="alert" style="background:var(--accent-soft,#e7f6ee);color:inherit">✅ Перенос сделан ${esc(d.last.started_at.replace("T", " "))}. Ниже сверка с файлами</div><div id="erp-verify" class="small muted">Сверяю…</div>
       <div class="erp-step" style="margin-top:14px"><b>🔄 Обновить из ERP (каждый день, пока клиентов ведут в ERP)</b>
         <div class="small muted">Выгрузите из ERP свежие файлы клиентов, абонементов и оплат и загрузите сюда, потом нажмите «Обновить». Новые клиенты добавятся, у старых обновятся этапы, пробные, группы и оплаты. Ничего не удаляется: отметки тренеров, отчёты и задачи в CRM остаются${d.last_update ? `. Последнее обновление: ${esc(d.last_update.at.replace("T", " "))}` : ""}</div>
@@ -1053,6 +1053,7 @@ async function renderErp(box) {
   try { erpTaskTransferSetup(box,d); } catch (error) { fail(error); }
   if (done) {
     try { erpFullSetup(box, d); } catch (error) { fail(error); }
+    erpOrganizeTools(box);
     erpWireFiles(box, d);
     api("GET", "/api/erp/reinvite-old").then((r) => {
       if (!r.n) return;
@@ -1103,6 +1104,7 @@ async function renderErp(box) {
       <div style="margin-top:10px"><b>Занимаются по группам</b>${v.groups.map((g) => `<div>${esc(g.branch)} · ${esc(g.name)}: ${g.kids}</div>`).join("")}</div>`;
     return;
   }
+  erpOrganizeTools(box);
   erpWireFiles(box, d);
   if (d.uploads.length) {
     const g = await api("GET", "/api/erp/groups");
@@ -1141,6 +1143,17 @@ async function renderErp(box) {
     try { const r = await api("POST", "/api/erp/run", { rkn: true }); toast(`Перенесено: ${r.stats.children} детей, ${r.stats.payments} оплат`); S.erpPlanned = false; renderErp(box); }
     catch (e) { fail(e); $("#erp-run").disabled = false; $("#erp-run").textContent = "Перенести"; }
   };
+}
+
+function erpOrganizeTools(box) {
+  if (box.querySelector('[data-erp-advanced]')) return;
+  const head=box.querySelector('.erp-page-head'),primary=box.querySelector('#erp-history-transfer');
+  if(!head||!primary)return;
+  const advanced=document.createElement('details');advanced.className='erp-advanced';advanced.dataset.erpAdvanced='1';
+  advanced.innerHTML='<summary><span><b>Другие инструменты переноса</b><small>Карточки, задачи, сверки, восстановление и технические операции</small></span><span aria-hidden="true">⌄</span></summary><div data-erp-advanced-body></div>';
+  const body=advanced.querySelector('[data-erp-advanced-body]');
+  [...box.children].filter(node=>node!==head&&node!==primary).forEach(node=>body.append(node));
+  primary.after(advanced);
 }
 function erpUploadHtml(u, kinds) {
   return `<div class="erp-up" data-up="${u.id}"><div class="row" style="align-items:center;gap:8px"><b style="flex:1">${esc(u.filename)} <span class="muted small">· ${u.count} строк</span></b>
