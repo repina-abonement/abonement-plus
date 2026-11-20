@@ -1707,6 +1707,24 @@ textarea.nav-q { height:40px; min-height:40px; max-height:40px; resize:none; ove
 .et-board-navigation:not([hidden]) { display:flex; justify-content:flex-end; align-items:center; flex-wrap:wrap; gap:10px; margin:8px 0; }
 .et-board-navigation .btn { min-height:40px; }.et-board-navigation button:disabled { opacity:.35; cursor:default; }
 .et-board:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }.et-priority { color:#b94516; }.task-priority-control { padding:10px 0; line-height:1.5; }
+
+/* Рабочий стол: задачи — рабочий список, а не узкая ERP-канбан-доска. */
+.et-box{padding:18px 20px;border-radius:20px}.et-box .now-head{align-items:center}.et-box .now-head h3{font-size:20px;margin-right:4px}
+.et-summary{display:flex;flex-wrap:wrap;gap:7px;margin:14px 0 10px;padding-top:12px;border-top:1px solid var(--line)}
+.et-summary-kind{display:inline-flex;align-items:center;gap:7px;padding:5px 9px;border-radius:999px;background:var(--surface-2);color:var(--ink-2);font-size:12px;line-height:1}
+.et-summary-kind b{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 5px;border-radius:999px;background:var(--surface);color:var(--ink)}
+.et-summary-kind.danger{background:var(--red-soft);color:var(--red)}
+.et-task-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;align-items:stretch}
+.et-task-grid .et-card{display:grid;grid-template-rows:auto auto 1fr auto auto;min-width:0;min-height:174px;padding:13px 14px;border-radius:14px;box-shadow:0 2px 9px rgba(20,52,39,.04)}
+.et-task-grid .et-card:hover{box-shadow:0 5px 18px rgba(20,52,39,.09);transform:translateY(-1px)}
+.et-card-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.et-kind{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.035em}
+.et-task-grid .et-what{font-size:15px;line-height:1.35;margin:0 0 7px;-webkit-line-clamp:2}
+.et-card-context{align-self:start;display:flex;align-items:baseline;flex-wrap:wrap;gap:3px 9px;min-width:0}
+.et-task-grid .et-name{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.et-task-grid .et-meta{white-space:nowrap}
+.et-task-grid .et-act{align-self:end;margin-top:12px}.et-task-grid .et-act .btn:first-child{flex:1}
+@media(max-width:700px){.et-box{padding:14px}.et-box .now-head{align-items:stretch}.et-box .now-head h3{width:100%}.et-tabs{order:2;width:100%}.et-tabs button{flex:1}.et-box #et-add{margin-left:0!important}.et-task-grid{grid-template-columns:1fr}.et-task-grid .et-card{min-height:0}.et-summary{margin-top:10px}}
 .client-task-form { max-width:680px; }.client-task-choice { display:block; width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); text-align:left; font:inherit; cursor:pointer; margin-top:4px; }.client-task-choice:hover { background:var(--surface-2); }
 
 /* Текст задач можно выделять и копировать, в том числе администраторам. */

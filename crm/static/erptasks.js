@@ -15,12 +15,13 @@ async function erpTasksSection() {
     const tm = hm === "23:59" ? "в течение дня" : hm;
     return d.day === "overdue" ? `⏰ было на ${dShort(t.due_at)}${tm ? ", " + tm : ""}` : `⏰ ${tm}`;
   };
-  const card = (t, col) => {
+  const card = (t, col, colTitle) => {
     const s = t.student || {};
     return `<article class="et-card ${d.day === "overdue" ? "late" : ""}" data-et="${t.id}" ${s.id ? `data-etopen="${s.id}" role="button" tabindex="0" aria-label="Открыть карточку ${esc(displayChildName(s.name))}"` : ""}>
-      ${t.priority || ["other", "manual"].includes(col) || col.startsWith("erp:") ? `<div class="et-what">${t.priority?'<span class="et-priority" title="Приоритет">🔥</span>':t.icon || "✅"} ${esc(t.title)}</div>` : ""}
-      ${s.name ? `<div class="et-name">${esc(displayChildName(s.name))}</div>` : ""}
-      <div class="et-meta ${d.day === "overdue" ? "et-late" : ""}">${when(t)}</div>
+      <div class="et-card-top"><span class="et-kind">${esc(colTitle)}</span>${t.priority ? '<span class="et-priority" title="Приоритет">🔥</span>' : ""}</div>
+      <div class="et-what">${t.icon || "✅"} ${esc(t.title)}</div>
+      <div class="et-card-context">${s.name ? `<div class="et-name">${esc(displayChildName(s.name))}</div>` : ""}
+        <div class="et-meta ${d.day === "overdue" ? "et-late" : ""}">${when(t)}</div></div>
       <div class="et-act">
         <button class="btn sm primary" data-etdone="${t.id}">✓ Готово</button>
         <button class="btn sm" data-etmove="${t.id}" title="Перенести, передать, поправить">Перенести</button></div>
@@ -33,9 +34,8 @@ async function erpTasksSection() {
       <div class="seg et-tabs">${tabs.map(([k, l]) => `<button data-etday="${k}" class="${d.day === k ? "active" : ""} ${k === "overdue" && d.counts.overdue ? "et-red" : ""}">${l} <b>${d.counts[k]}</b></button>`).join("")}</div>
       <button class="btn sm" id="et-add" style="margin-left:auto">+ Ручная задача</button></div>
     <div id="et-addbox"></div>
-    ${d.columns.length ? `<div class="et-board-navigation" aria-label="Прокрутка колонок задач"><button type="button" class="btn sm" data-etleft aria-label="Предыдущие колонки">← Влево</button><span class="small muted" data-etrange></span><button type="button" class="btn sm" data-etright aria-label="Следующие колонки">Вправо →</button></div><div class="et-board" tabindex="0" role="region" aria-label="Колонки задач, прокручиваются вправо и влево">${d.columns.map((c) => `<section class="et-col ${c.key === "other" ? "et-other" : ""} ${c.key === "unpaid_visit" ? "et-unpaid" : ""}">
-        <div class="et-head"><span>${esc(c.title)}</span><span class="cnt">${c.cards.length}</span></div>
-        <div class="et-cards">${c.cards.map((t) => card(t, c.key)).join("")}</div></section>`).join("")}</div>`
+    ${d.columns.length ? `<div class="et-summary">${d.columns.map((c) => `<span class="et-summary-kind ${c.key === "unpaid_visit" ? "danger" : ""}">${esc(c.title)} <b>${c.cards.length}</b></span>`).join("")}</div>
+      <div class="et-task-grid" role="list" aria-label="Задачи на выбранный день">${d.columns.flatMap((c) => c.cards.map((t) => card(t, c.key, c.title))).join("")}</div>`
       : `<div class="muted small" style="padding:6px 2px">${empty}</div>`}
   </section>`;
 }
