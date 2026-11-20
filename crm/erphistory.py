@@ -83,7 +83,9 @@ def _student(con, row, selected_id=None):
 
 def _group(con, source, day, tm, student_id=None, kind=""):
     before_journal = _norm(str(source).split("журнал", 1)[0])
-    source_tokens = {x for x in before_journal.split() if x not in SKIP and not x.isdigit()}
+    # Age bands are meaningful: dropping 6/8 made «ПУП 6–8» indistinguishable
+    # from other programmes at the same branch and time.
+    source_tokens = {x for x in before_journal.split() if x not in SKIP}
     candidates = []
     enrolled = {r[0] for r in con.execute("SELECT group_id FROM enrollments WHERE student_id=?", (student_id,))} if student_id else set()
     for raw in con.execute("SELECT g.*,b.name branch_name FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.active=1 AND b.active=1"):
@@ -96,7 +98,9 @@ def _group(con, source, day, tm, student_id=None, kind=""):
         if branch_ok and overlap: candidates.append((len(overlap) + membership, g["id"], version.get("name") or g["name"], g["branch_name"]))
     if not candidates: return None, "Группа не найдена по дате, времени и названию"
     best = max(x[0] for x in candidates); rows = [x for x in candidates if x[0] == best]
-    return (rows[0], "") if len(rows) == 1 else (None, "Несколько групп подходят одинаково")
+    if len(rows) == 1: return rows[0], ""
+    labels = ", ".join(sorted({f"{x[3]} · {x[2]} (№{x[1]})" for x in rows}))
+    return None, "Несколько групп подходят одинаково: " + labels
 
 
 def preview(con, payload, period=None, student_ids=None):

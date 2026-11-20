@@ -13,6 +13,7 @@ def main():
     makeup_groups=[]
     for name,weekdays,tm in [('Доп. 6–8',[3],'19:45'),('ОФП 4–5',[5],'16:00'),('ОФП старшие',[5],'17:00')]:
         makeup_groups.append(schedule.save_group(con,{'name':name,'branch_id':nb,'weekdays':weekdays,'time':tm}))
+    schedule.save_group(con,{'name':'Доп. 9–11','branch_id':nb,'weekdays':[3],'time':'19:45'})
     fid=con.execute("INSERT INTO families(name) VALUES ('Тестовая семья')").lastrowid
     sid=con.execute("INSERT INTO students(family_id,name,birth,erp_id,stage_changed_at,created_at) VALUES (?,?,?,?,?,?)",
                     (fid,'Тестовый Ребёнок','2015-01-01','TEST-ERP','2026-01-01','2026-01-01')).lastrowid
