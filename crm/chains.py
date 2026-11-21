@@ -112,12 +112,14 @@ def _slot(base: datetime, days: int, now: datetime) -> datetime:
 def _candidates(con, chain: str, now: datetime):
     if chain == "after_trial":
         for s in con.execute("""SELECT * FROM students WHERE funnel='sales' AND archived=0 AND trial_came=1
+                                AND COALESCE(erp_id,'')=''
                                 AND stage NOT IN ('bought','refused') AND trial_at >= ?""",
                              (_iso(now - timedelta(days=14)),)):
             yield dict(s), s["trial_at"]
     elif chain == "renewal" and now.day >= 20:
         nxt = logic.shift_month(logic.month_of(now.date()), 1)
-        for s in con.execute("SELECT * FROM students WHERE funnel='members' AND archived=0 AND stage != 'left'"):
+        for s in con.execute("""SELECT * FROM students WHERE funnel='members' AND archived=0 AND stage != 'left'
+                                AND COALESCE(erp_id,'')=''"""):
             if not con.execute("SELECT 1 FROM enrollments WHERE student_id=? AND active=1", (s["id"],)).fetchone():
                 continue
             if _paid(con, s["id"], nxt):

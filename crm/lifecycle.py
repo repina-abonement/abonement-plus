@@ -107,7 +107,8 @@ def _done_count(con, sid: int, kind: str, since: str) -> tuple[int, str | None]:
 def _people(con, where: str, args=()):
     fake = " AND COALESCE(f.fake,0)=0" if "fake" in {r[1] for r in con.execute("PRAGMA table_info(families)")} else ""
     return con.execute(f"""SELECT s.* FROM students s JOIN families f ON f.id=s.family_id
-                           WHERE s.archived=0 AND COALESCE(s.dnd,0)=0{fake} AND {where}""", args).fetchall()
+                           WHERE s.archived=0 AND COALESCE(s.dnd,0)=0
+                             AND COALESCE(s.erp_id,'')=''{fake} AND {where}""", args).fetchall()
 
 
 def tick(con, now: datetime | None = None) -> int:

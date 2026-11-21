@@ -244,28 +244,6 @@ def schedule_renewal(con, student_id: int) -> int | None:
     return tid
 
 
-def reconcile_subscription_clients(con, on: date | None = None) -> int:
-    """Repair stale lead state/tasks for children who already have service.
-
-    The check is per student, never per family: siblings may be at different
-    stages.  No payment, receipt or subscription amount is changed.
-    """
-    from . import logic
-    on=on or _now().date();month=logic.month_of(on);changed=0
-    students=con.execute('''SELECT DISTINCT s.id FROM students s JOIN subscriptions x ON x.student_id=s.id
-        WHERE s.archived=0 AND COALESCE(s.erp_id,'')!='132389' AND x.status!='cancelled'
-          AND COALESCE(x.kind,'month')='month' AND x.month>=?''',(month,)).fetchall()
-    for row in students:
-        sid=row['id']
-        current=con.execute('SELECT funnel,stage FROM students WHERE id=?',(sid,)).fetchone()
-        if current and (current['funnel']!='members' or current['stage']!='active'):
-            con.execute("UPDATE students SET funnel='members',stage='active',priority=0 WHERE id=?",(sid,));changed+=1
-        before=con.total_changes
-        schedule_renewal(con,sid)
-        changed+=int(con.total_changes>before)
-    return changed
-
-
 def import_erp_task(con, erp_status: str, student_id: int, due: str, note: str = "") -> int | None:
     """Для переноса из ERP: задача со статусом ERP встаёт на ответственного за пробные."""
     kind = ERP_STATUSES.get(erp_status.strip(), "manual")
@@ -524,7 +502,6 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     request_missing_data(con, now.date())
     planner.generate(con, now.date())
     program.apply_pending(con, now.date())
-    reconcile_subscription_clients(con,now.date())
     refresh_subscription_renewals(con)
     from . import pu, waitlist, ownerbot, lifecycle
     pu.tick(con, now)
@@ -566,6 +543,7 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     made = sent = 0
     rows = [dict(r) for r in con.execute(
         """SELECT * FROM students WHERE funnel='sales' AND trial_at IS NOT NULL AND archived=0 AND historical_trial=0
+           AND COALESCE(erp_id,'')=''
            AND stage NOT IN ('bought','refused') AND trial_at >= ?""", (_iso(now - timedelta(days=3)),))]
     for s in rows:
         t = datetime.fromisoformat(s["trial_at"])

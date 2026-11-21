@@ -1218,8 +1218,8 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
                 con.execute("UPDATE tasks SET assignee_id=? WHERE id=?", (olga[0], tid))
             _track(con, batch, "tasks", tid)
             st["tasks"] += 1
-    # текущий месяц: у учеников с активной группой без абонемента ничего не придумываем, это покажет сверка
-    _tasks.reconcile_subscription_clients(con,now.date())
+    # Статус и задачи перенесённого ребёнка берём из ERP. Наличие абонемента
+    # само по себе не разрешает CRM придумывать другой этап или новую цепочку.
     st["removed_before"] = removed
     st["single_review"] = len(issues)
     con.execute("UPDATE erp_batches SET stats=? WHERE id=?", (json.dumps(st, ensure_ascii=False), batch))
@@ -1397,8 +1397,6 @@ def update(con, user: dict, now: datetime | None = None) -> dict:
     con.execute("DELETE FROM erp_uploads")  # файлы дня использованы: завтра загружаем свежие
     con.execute("INSERT INTO audit(ts, user_id, action, detail) VALUES (?,?,?,?)", (nowi, user.get("id"), "erp.update", json.dumps(st)))
     con.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('erp_last_update', ?)", (json.dumps({"at": nowi, "stats": st}, ensure_ascii=False),))
-    from . import tasks as _tasks
-    _tasks.reconcile_subscription_clients(con,now.date())
     return {"stats": st, "at": nowi, "issues": issues}
 
 

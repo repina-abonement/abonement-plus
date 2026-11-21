@@ -484,13 +484,15 @@ def tick(con, now: datetime | None = None) -> dict:
                                      "Пробные без отметки ушли на этап «Не дошёл до ПУ»: сначала уточните у тренера, был ли ребёнок, потом звоните родителям")
         for sid in m["trials"]:
             s = sv.get_student_row(con, sid)
+            if (s.get("erp_id") or "").strip():
+                continue
             if s["stage"] in ("trial_booked", "trial_reminder", "on_trial", "trial_done") and s["funnel"] == "sales":
                 _to_stage(con, s, "no_mark", "", None, now)
                 _close_trial_tasks(con, sid)
                 moved += 1
     # защита от потерь: у каждого на этапе есть открытая задача
     for s in con.execute("""SELECT id, name, family_id FROM students WHERE stage IN ('missed_trial','later') AND archived=0
-                            AND funnel='sales' AND dnd=0""").fetchall():
+                            AND funnel='sales' AND dnd=0 AND COALESCE(erp_id,'')=''""").fetchall():
         if not open_task(con, s["family_id"]):
             ensure_task(con, s["id"], now, now)
             add_alert(con, "lost", f"lost:{s['id']}:{_iso(now)[:13]}", f"У {s['name']} на этапе «Не дошёл до ПУ» не было задачи: CRM создала её сама",

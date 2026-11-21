@@ -79,6 +79,15 @@ def main():
     check(set(tasks.ERP_STATUSES) == {"Напоминание о пробном занятии", "Как прошло пробное", "Не пришли на ПУ",
                                       "Почему не купили", "Напоминание о сегодняшнем ПУ", "Клиент не отмечен на ПУ"},
           "Все шесть статусов ERP учтены")
+    erp_sid = sv.create_student(con, {"name": "Ребёнок ERP", "parent_name": "Мама", "phone": "+7 900 111-22-33",
+                                      "group_id": g}, {"name": "Перенос"})
+    con.execute("""UPDATE students SET erp_id='ERP-202',erp_status='Записан на пробное',
+                   trial_at='2026-11-09T17:00',stage='trial_booked' WHERE id=?""", (erp_sid,))
+    exact = tasks.import_erp_task(con, "Напоминание о пробном занятии", erp_sid, "2026-11-08T10:00")
+    tasks.run(con, datetime(2026, 11, 8, 9, 0), send=False)
+    imported = con.execute("SELECT id,title,due_at,source FROM tasks WHERE student_id=? AND status='open'", (erp_sid,)).fetchall()
+    check([tuple(x) for x in imported] == [(exact, "Напомнить о пробном и подтвердить", "2026-11-08T10:00", "erp")],
+          "У перенесённого ребёнка остаётся только точная задача ERP; CRM не добавляет свою")
     tasks.complete(con, tid, {"name": "Ольга"}, "Дорого, перезвонить в декабре")
     check("Дорого" in con.execute("SELECT text FROM history WHERE student_id=? ORDER BY id DESC", (sid,)).fetchone()[0],
           "Итог задачи записан в историю клиента")

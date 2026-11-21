@@ -98,6 +98,11 @@ check("win_back" in open_kinds(m), "Старый уход без срока: ч�
 print("7. Этап «Напоминание о пробном» убран")
 check("trial_reminder" not in dict(sv.SALES_STAGES), "Лишнего этапа нет в воронке")
 
+print("8. Перенесённый ребёнок следует точной цепочке ERP")
+erp = kid(stage="no_answer", ago_days=2, erp_id="ERP-101", erp_status="Недозвон")
+lifecycle.tick(con, now)
+check(not open_kinds(erp), "CRM не создаёт собственную лестницу задач поверх перенесённого статуса ERP")
+
 print("8. Отработка")
 m2 = kid("members")
 sv.move_card(con, m2, "skips", "offered", U)
