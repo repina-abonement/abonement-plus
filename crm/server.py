@@ -1995,7 +1995,9 @@ def fiscal_run(con, h, user, body, q):
 
 @route("POST", "/api/fiscal/{pid}/resolve", role="fiscal")
 def fiscal_resolve(con, h, user, body, q, pid):
-    fx(fiscal.resolve, con, int(pid), body.get("action") or "", user, (body.get("note") or "").strip())
+    fx(fiscal.resolve, con, int(pid), body.get("action") or "", user, (body.get("note") or "").strip(),
+       fiscal_fn=body.get("fiscal_fn") or "", fiscal_fd=body.get("fiscal_fd") or "",
+       fiscal_fp=body.get("fiscal_fp") or "")
     sv.audit(con, user, "fiscal.resolve", f"{pid}:{body.get('action')}")
     return {"ok": True}
 

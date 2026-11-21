@@ -42,15 +42,25 @@ function fxList(box, d) {
       <div class="small">${dShort(r.seen_at)} ${r.seen_at.slice(11, 16)} · ${esc(r.kind_label)} · ${r.source === "tochka" ? "Точка" : "PayKeeper"} №${esc(r.ext_id.slice(-8))}</div>
       ${r.note ? `<div class="small">${esc(r.note)}${r.resolved_by ? ` (${esc(r.resolved_by)})` : ""}</div>` : ""}
       ${["wait", "missing"].includes(r.status) ? `<div class="fx-act">
-        ${r.need !== -1 ? `<button class="btn sm primary" data-fxa="done" data-id="${r.id}">Чек пробит</button>` : `<button class="btn sm primary" data-fxa="need" data-id="${r.id}">Чек нужен</button>`}
+        ${r.need !== -1 ? `<button class="btn sm primary" data-fxa="done" data-id="${r.id}">Привязать чек ОФД</button>` : `<button class="btn sm primary" data-fxa="need" data-id="${r.id}">Чек нужен</button>`}
         ${S.user.role === "admin" ? `<button class="btn sm" data-fxa="skip" data-id="${r.id}">Чек не нужен</button>` : ""}</div>` : ""}
     </div>`).join("")}</div>` : `<p class="small">${C.filter === "problems" ? empty : "Поступлений пока нет"}</p>`}`;
   box.querySelectorAll("[data-ff]").forEach((b) => (b.onclick = () => step(() => { C.filter = b.dataset.ff; })));
   box.querySelectorAll("[data-fxa]").forEach((b) => (b.onclick = async () => {
     const a = b.dataset.fxa;
-    const note = a === "done" ? prompt("Комментарий (например: пробили 04.11 на Эвоторе)", "") : a === "skip" ? prompt("Почему чек не нужен?", "") : "";
+    const payload = { action: a, note: "" };
+    if (a === "done") {
+      payload.fiscal_fn = prompt("ФН с чека Эвотора", "");
+      if (payload.fiscal_fn === null) return;
+      payload.fiscal_fd = prompt("ФД с чека Эвотора", "");
+      if (payload.fiscal_fd === null) return;
+      payload.fiscal_fp = prompt("ФПД с чека Эвотора", "");
+      if (payload.fiscal_fp === null) return;
+      payload.note = prompt("Комментарий (необязательно)", "");
+    } else if (a === "skip") payload.note = prompt("Почему чек не нужен?", "");
+    const note = payload.note;
     if (note === null) return;
-    try { await api("POST", `/api/fiscal/${b.dataset.id}/resolve`, { action: a, note }); toast("Записано"); render(); } catch (e) { fail(e); }
+    try { await api("POST", `/api/fiscal/${b.dataset.id}/resolve`, payload); toast(a === "done" ? "Чек подтверждён в ОФД" : "Записано"); render(); } catch (e) { fail(e); }
   }));
 }
 

@@ -766,15 +766,43 @@ def save_settings(con, data: dict):
         comms.put(con, "fx_start", _now().date().isoformat())
 
 
-def resolve(con, pid: int, action: str, user: dict, note: str = ""):
-    """Ручное решение: чек пробит вручную / чек не нужен / чек нужен (для непонятных)."""
+def _link_exact_ofd_receipt(con, payment, fiscal_fn: str, fiscal_fd: str, fiscal_fp: str):
+    """Link only a real, uniquely identified OFD sale receipt of the same amount.
+
+    Amount/date-only matching is deliberately forbidden: several payments can have
+    the same amount on the same day.  The three fiscal identifiers are printed on
+    the Evotor receipt and form its stable identity.
+    """
+    fn, fd, fp = (str(v or "").strip() for v in (fiscal_fn, fiscal_fd, fiscal_fp))
+    if not all((fn, fd, fp)):
+        raise FxError("Укажите ФН, ФД и ФПД с чека Эвотора")
+    rows = con.execute("""SELECT * FROM fx_receipts
+                          WHERE source='ofd' AND fiscal_fn=? AND fiscal_fd=? AND fiscal_fp=?
+                            AND op=1 AND amount=?""",
+                       (fn, fd, fp, payment["amount"])).fetchall()
+    if not rows:
+        raise FxError("Такой чек с этой суммой пока не найден в Платформе ОФД. Нажмите «Проверить сейчас» и повторите")
+    if len(rows) != 1:
+        raise FxError("Платформа ОФД вернула несколько чеков с одинаковыми реквизитами")
+    receipt = rows[0]
+    used = con.execute("SELECT id FROM fx_payments WHERE receipt_id=? AND id<>?", (receipt["id"], payment["id"])).fetchone()
+    if used:
+        raise FxError("Этот чек уже привязан к другому платежу")
+    return receipt["id"]
+
+
+def resolve(con, pid: int, action: str, user: dict, note: str = "", *,
+            fiscal_fn: str = "", fiscal_fd: str = "", fiscal_fp: str = ""):
+    """Ручное решение: точная привязка чека ОФД / чек не нужен / чек нужен."""
     p = con.execute("SELECT * FROM fx_payments WHERE id=?", (pid,)).fetchone()
     if not p:
         raise FxError("Платёж не найден")
     who, ts = user.get("name", ""), _iso(_now())
     if action == "done":
-        con.execute("UPDATE fx_payments SET status='ok', note=?, resolved_by=?, resolved_at=? WHERE id=?",
-                    (note or "Чек пробит вручную", who, ts, pid))
+        receipt_id = _link_exact_ofd_receipt(con, p, fiscal_fn, fiscal_fd, fiscal_fp)
+        con.execute("""UPDATE fx_payments SET status='ok', receipt_id=?, note=?, resolved_by=?, resolved_at=?
+                       WHERE id=?""",
+                    (receipt_id, note or "Чек Эвотора подтверждён в Платформе ОФД", who, ts, pid))
     elif action == "skip":
         if user.get("role") != "admin":
             raise FxError("Отметить «чек не нужен» может только администратор")

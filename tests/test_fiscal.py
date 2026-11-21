@@ -77,8 +77,17 @@ def main():
     seen = datetime.fromisoformat(con.execute("SELECT seen_at FROM fx_payments WHERE id=?", (pid,)).fetchone()[0])
     fiscal.run(con, datetime.combine(seen.date() + timedelta(days=1), datetime.min.time()) + timedelta(hours=12, minutes=1))
     check(any("так и не пробит" in s for s in SAID), "На следующий день в 12:00 - владельцу")
-    fiscal.resolve(con, pid, "done", {"name": "Варя", "role": "operator"}, "Пробили 04.11")
-    check(con.execute("SELECT status FROM fx_payments WHERE id=?", (pid,)).fetchone()[0] == "ok", "Отметка «пробит вручную» закрывает")
+    try:
+        fiscal.resolve(con, pid, "done", {"name": "Варя", "role": "operator"}, "Пробили 04.11")
+        check(False, "Комментарий без реквизитов ОФД не подтверждает чек")
+    except fiscal.FxError:
+        check(True, "Комментарий без реквизитов ОФД не подтверждает чек")
+    con.execute("""INSERT INTO fx_receipts(source,ext_id,ts,amount,ecash,op,fiscal_fn,fiscal_fd,fiscal_fp)
+                   VALUES('ofd','FN-EVO:22','2026-11-04T10:00:00',650000,650000,1,'FN-EVO','22','999')""")
+    fiscal.resolve(con, pid, "done", {"name": "Варя", "role": "operator"}, "Пробили 04.11",
+                   fiscal_fn="FN-EVO", fiscal_fd="22", fiscal_fp="999")
+    linked = con.execute("SELECT status,receipt_id FROM fx_payments WHERE id=?", (pid,)).fetchone()
+    check(linked["status"] == "ok" and linked["receipt_id"], "Точный чек ОФД закрывает платёж")
     tid = con.execute("SELECT id FROM fx_payments WHERE ext_id='T4'").fetchone()[0]
     try:
         fiscal.resolve(con, tid, "skip", {"name": "Варя", "role": "operator"})
