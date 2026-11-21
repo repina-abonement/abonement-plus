@@ -3,7 +3,7 @@
    ручные в «Ручных». «Выполнено» ставит следующую задачу по цепочке */
 S.etDay = S.etDay || "today";
 
-async function erpTasksSection(asUser=null) {
+async function erpTasksSection(asUser=null, layout="grid") {
   let d;
   try { d = await api("GET", "/api/tasks/erp-board?day=" + S.etDay + (asUser ? "&as_user=" + encodeURIComponent(asUser.id) : "")); } catch (_) { return ""; }
   S.taskById = S.taskById || {};
@@ -29,12 +29,17 @@ async function erpTasksSection(asUser=null) {
     </article>`;
   };
   const empty = { overdue: "Просроченных задач нет 👍", today: "На сегодня задач нет", tomorrow: "На завтра задач пока нет" }[d.day];
-  return `<section class="et-box" id="dw-erptasks">
+  const funnel = layout === "funnel";
+  return `<section class="et-box ${funnel ? "et-funnel-layout" : "et-grid-layout"}" id="dw-erptasks">
     <div class="now-head"><h3>📋 Задачи</h3>
       <div class="seg et-tabs">${tabs.map(([k, l]) => `<button data-etday="${k}" class="${d.day === k ? "active" : ""} ${k === "overdue" && d.counts.overdue ? "et-red" : ""}">${l} <b>${d.counts[k]}</b></button>`).join("")}</div>
       <button class="btn sm" id="et-add" style="margin-left:auto">+ Ручная задача</button></div>
     <div id="et-addbox"></div>
-    ${d.columns.length ? `<div class="et-summary">${d.columns.map((c) => `<span class="et-summary-kind ${c.key === "unpaid_visit" ? "danger" : ""}">${esc(c.title)} <b>${c.cards.length}</b></span>`).join("")}</div>
+    ${d.columns.length ? funnel ? `<div class="et-board-navigation" aria-label="Прокрутка воронки задач"><button type="button" class="btn sm" data-etleft aria-label="Предыдущие статусы">← Влево</button><span class="small muted" data-etrange></span><button type="button" class="btn sm" data-etright aria-label="Следующие статусы">Вправо →</button></div>
+      <div class="et-board" tabindex="0" role="region" aria-label="Воронка задач по статусам за выбранный день">${d.columns.map((c) => `<section class="et-col ${c.key === "other" ? "et-other" : ""} ${c.key === "unpaid_visit" ? "et-unpaid" : ""}">
+        <div class="et-head"><span>${esc(c.title)}</span><span class="cnt">${c.cards.length}</span></div>
+        <div class="et-cards">${c.cards.map((t) => card(t, c.key, c.title)).join("")}</div></section>`).join("")}</div>`
+      : `<div class="et-summary">${d.columns.map((c) => `<span class="et-summary-kind ${c.key === "unpaid_visit" ? "danger" : ""}">${esc(c.title)} <b>${c.cards.length}</b></span>`).join("")}</div>
       <div class="et-task-grid" role="list" aria-label="Задачи на выбранный день">${d.columns.flatMap((c) => c.cards.map((t) => card(t, c.key, c.title))).join("")}</div>`
       : `<div class="muted small" style="padding:6px 2px">${empty}</div>`}
   </section>`;

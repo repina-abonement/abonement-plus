@@ -1317,8 +1317,10 @@ async function renderWorkdesk(page) {
   if (S.user.role !== "admin") S.viewAs = null;
   const bar = await viewAsBar().catch(() => "");
   if (S.viewAs && S.viewAs.role === "coach") { await renderCoachToday(page, S.viewAs.id, bar); return wireViewAs(page); }
+  const taskDeskUser = S.viewAs || S.user;
+  const taskLayout = taskDeskUser.role === "operator" && !taskDeskUser.is_senior && !taskDeskUser.is_offline_admin ? "funnel" : "grid";
   const [d, tasksHtml, schedHtml, erpHtml, skips, members] = await Promise.all([api("GET", "/api/workdesk" + (S.viewAs ? "?as_user=" + S.viewAs.id : "")), tasksSection(), scheduleWidget().catch(() => ""),
-    (can("sales") || S.viewAs || S.user.is_offline_admin) ? erpTasksSection(S.viewAs) : Promise.resolve(""), can("skips") ? api("GET", "/api/board/skips").catch(() => null) : Promise.resolve(null),
+    (can("sales") || S.viewAs || S.user.is_offline_admin) ? erpTasksSection(S.viewAs, taskLayout) : Promise.resolve(""), can("skips") ? api("GET", "/api/board/skips").catch(() => null) : Promise.resolve(null),
     can("members", "full") ? api("GET", "/api/board/members").catch(() => null) : Promise.resolve(null)]);
   // воронка «Продления» (Юлия, 04.11): разовые, не оплачен, продлить (с 20 числа), счёт выставлен, ушёл. Оплатившие не попадают
   const since30 = addDays(S.meta.today, -30);

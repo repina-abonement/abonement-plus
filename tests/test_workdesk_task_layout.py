@@ -4,14 +4,20 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1]
 
 
-def test_workdesk_tasks_use_responsive_grid_instead_of_erp_columns():
+def test_workdesk_supports_status_funnel_for_regular_admin_and_grid_for_other_roles():
     script = (ROOT / "crm/static/erptasks.js").read_text(encoding="utf-8")
+    app = (ROOT / "crm/static/app.js").read_text(encoding="utf-8")
     styles = (ROOT / "crm/static/style.css").read_text(encoding="utf-8")
 
     assert 'class="et-task-grid"' in script
     assert 'class="et-summary"' in script
-    assert 'class="et-board"' not in script
+    assert 'class="et-board"' in script
+    assert 'class="et-col ' in script
+    assert 'layout="grid"' in script
+    assert '? "funnel" : "grid"' in app
+    assert 'erpTasksSection(S.viewAs, taskLayout)' in app
     assert "grid-template-columns:repeat(auto-fill,minmax(270px,1fr))" in styles
+    assert ".et-funnel-layout .et-col" in styles
 
 
 def test_workdesk_task_cards_keep_primary_actions_and_context():

@@ -1727,6 +1727,13 @@ textarea.nav-q { height:40px; min-height:40px; max-height:40px; resize:none; ove
 .et-task-grid .et-meta{white-space:nowrap}
 .et-task-grid .et-act{align-self:end;margin-top:12px}.et-task-grid .et-act .btn:first-child{flex:1}
 @media(max-width:700px){.et-box{padding:14px}.et-box .now-head{align-items:stretch}.et-box .now-head h3{width:100%}.et-tabs{order:2;width:100%}.et-tabs button{flex:1}.et-box #et-add{margin-left:0!important}.et-task-grid{grid-template-columns:1fr}.et-task-grid .et-card{min-height:0}.et-summary{margin-top:10px}}
+.et-funnel-layout .et-board{margin-top:8px;padding-bottom:10px}
+.et-funnel-layout .et-col{flex-basis:280px;padding:10px}
+.et-funnel-layout .et-card-top .et-kind{display:none}
+.et-funnel-layout .et-card-top{min-height:18px;margin-bottom:4px}
+.et-funnel-layout .et-card-context{display:block}.et-funnel-layout .et-name{margin-top:4px}
+.et-funnel-layout .et-act .btn:first-child{flex:1}
+@media(max-width:700px){.et-funnel-layout .et-col{flex-basis:84vw}}
 .client-task-form { max-width:680px; }.client-task-choice { display:block; width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); text-align:left; font:inherit; cursor:pointer; margin-top:4px; }.client-task-choice:hover { background:var(--surface-2); }
 
 /* Текст задач можно выделять и копировать, в том числе администраторам. */
