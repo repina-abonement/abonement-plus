@@ -98,6 +98,17 @@ class InlineBookingTest(unittest.TestCase):
         self.con.execute('UPDATE groups SET trial_ok=1,age=\'8–10\' WHERE id=?',(self.gid,))
         self.assertEqual(trialoffer.booking_options(self.con,self.sid,self.birth,self.day.isoformat())['slots'],[])
 
+    def test_admin_calendar_can_choose_another_age_group_and_still_checks_real_slot(self):
+        other=self.con.execute("INSERT INTO groups(branch_id,name,weekdays,time,age,capacity,trial_ok) VALUES (?,'Другая возрастная группа',?,'18:15','8–10',10,1)",(self.bid,str(self.day.weekday()))).lastrowid
+        smart.fill_required(self.con,self.sid,{'child_name':'Даниил Примеров','birth':self.birth,
+            'parent_name':'Екатерина','phone':'+79000000001'},self.user)
+        result=trialoffer.calendar_slots(self.con,self.sid,other,self.day.isoformat()[:7],future_only=True)
+        slot=next(x for x in result['slots'] if x['date']==self.day.isoformat())
+        with patch('crm.tasks.send_booked'):
+            trialoffer.book_calendar(self.con,self.sid,{**slot,'future_only':True,'request_id':'manual-other-group'},self.user)
+        row=sv.get_student_row(self.con,self.sid)
+        self.assertEqual((row['trial_group_id'],row['trial_at']),(other,self.day.isoformat()+'T18:15'))
+
     def test_two_year_old_books_youngest_group_and_rebooking_keeps_first_visit(self):
         self.con.execute("UPDATE groups SET age='3–4' WHERE id=?",(self.gid,))
         birth=(self.day.replace(year=self.day.year-3)+timedelta(days=1)).isoformat()

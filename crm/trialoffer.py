@@ -144,21 +144,22 @@ def offer(con, age: int | None, child: str = "", branch_id: int | None = None, n
             "diagnostics":diagnostics if not sl else [],"unavailable":unavailable}
 
 
-def booking_options(con, sid: int, birth: str = '', day: str = '', branch_id: int | None = None) -> dict:
+def booking_options(con, sid: int, birth: str = '', day: str = '', branch_id: int | None = None,
+                    allow_any_group: bool = False) -> dict:
     """Scheduled, age-appropriate trial slots for the inline booking form."""
     from . import smart, schedule, closures, capacity
     from .services import ApiError
     info = smart.required_info(con, sid, 'trial')
     birth = birth or info['values']['birth']
-    if not birth:
+    if not birth and not allow_any_group:
         return {'slots': [], 'error': 'Укажите дату рождения ребёнка, чтобы выбрать подходящие группы'}
     try:
-        born = date.fromisoformat(birth)
+        born = date.fromisoformat(birth) if birth else None
         start = date.fromisoformat(day) if day else date.today()
     except (ValueError,TypeError):
         raise ApiError('Проверьте дату рождения и дату занятия')
     now = datetime.now()
-    if born >= now.date() or born <= date(2000,1,1):
+    if born and (born >= now.date() or born <= date(2000,1,1)):
         raise ApiError('Проверьте дату рождения ребёнка')
     if start < now.date():
         raise ApiError('Для пробного выберите сегодня или будущую дату')
@@ -172,9 +173,9 @@ def booking_options(con, sid: int, birth: str = '', day: str = '', branch_id: in
             continue
         for offset in range(1 if day else 28):
             d = start + timedelta(days=offset)
-            age = years(birth,d)
+            age = years(birth,d) if birth else None
             actual = schedule.on(con,group,d)
-            if not age_fits_trial_group(age,ages) or d.weekday() not in logic.parse_weekdays(actual['weekdays']):
+            if (not allow_any_group and not age_fits_trial_group(age,ages)) or d.weekday() not in logic.parse_weekdays(actual['weekdays']):
                 continue
             if closures.is_closed(con,group['id'],d):
                 continue
@@ -211,7 +212,8 @@ def book_inline(con,sid: int,data: dict,user: dict) -> dict:
     time = str(data.get('time') or '')
     if not day or not time or not gid:
         raise sv.ApiError('Выберите дату, группу и время занятия')
-    options = booking_options(con,sid,str(data.get('birth') or ''),day)
+    options = booking_options(con,sid,str(data.get('birth') or ''),day,
+                              allow_any_group=bool(data.get('manual_group')))
     chosen = next((x for x in options['slots'] if x['group_id']==gid and x['time']==time),None)
     if not chosen:
         raise sv.ApiError('Выбранное время недоступно. Обновите варианты и выберите свободное занятие')
@@ -258,7 +260,7 @@ def calendar_slots(con, sid, gid, ym, future_only=False):
         raise sv.ApiError('Выберите группу и месяц')
     group=con.execute('''SELECT g.* FROM groups g JOIN branches b ON b.id=g.branch_id
         WHERE g.id=? AND g.active=1 AND b.active=1 AND g.is_makeup=0
-        AND g.program_id IS NULL AND g.lesson_kind!='ofp' ''',(gid,)).fetchone()
+        AND g.program_id IS NULL AND COALESCE(g.lesson_kind,'')!='ofp' ''',(gid,)).fetchone()
     if not group:
         return {'slots':[]}
     now=datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None)
@@ -272,7 +274,7 @@ def calendar_slots(con, sid, gid, ym, future_only=False):
             if at<now and not future_only:
                 slots.append({'group_id':gid,'date':day.isoformat(),'time':time,'past':True})
             elif at>=now:
-                for slot in booking_options(con,sid,day=day.isoformat(),branch_id=group['branch_id'])['slots']:
+                for slot in booking_options(con,sid,day=day.isoformat(),branch_id=group['branch_id'],allow_any_group=True)['slots']:
                     if slot['group_id']==gid:
                         slots.append({**slot,'past':False})
         day+=timedelta(days=1)
@@ -289,4 +291,13 @@ def book_calendar(con,sid,data,user):
     if chosen['past']:
         return historyentry.record(con,sid,{'request_id':data.get('request_id'),'record_trial':True,'sold':False,
             'trial_date':day,'trial_time':chosen['time'],'trial_group_id':chosen['group_id']},user)
-    return book_inline(con,sid,{'date':day,'time':chosen['time'],'group_id':chosen['group_id']},user)
+    # Ручной календарь из чата предназначен для осознанного выбора администратора,
+    # в том числе когда родитель сообщил только возраст. Сохраняем тем же штатным
+    # путём, что и быстрая кнопка: schedule/cancellation/capacity уже повторно
+    # проверены calendar_slots, а update_student ещё раз проверит слот.
+    student=sv.get_student_row(con,sid)
+    changes={'trial_at':day+'T'+chosen['time']}
+    if student['funnel']=='sales':changes['group_id']=chosen['group_id']
+    sv.update_student(con,sid,changes,user)
+    con.execute('UPDATE students SET trial_group_id=? WHERE id=?',(chosen['group_id'],sid))
+    return {'ok':True,'slot':chosen}

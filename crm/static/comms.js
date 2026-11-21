@@ -1141,13 +1141,16 @@ function wireTrialOffer(c, textSel = "#chat-text") {
       const kidId = $("#to-kid") ? +$("#to-kid").value : (kid ? kid.id : null);
       try {
         const r = await api("GET", `/api/trial-offer?age=${age}${$("#to-br").value ? "&branch_id=" + $("#to-br").value : ""}`);
-        if (!r.slots.length) { $("#to-res").innerHTML = `<div class="small muted" style="margin-top:8px">${esc(r.error).replace(/\n/g,'<br>')}</div>`; return; }
+        const manual=`<button class="btn sm" type="button" id="to-manual" style="margin-top:8px">Выбрать другую группу или дату</button><div id="to-manual-box" hidden></div>`;
+        const wireManual=()=>{const b=$("#to-manual");if(!b||!kidId)return;b.onclick=async()=>{b.disabled=true;try{const d=await api("GET",`/api/students/${kidId}`),host=$("#to-manual-box");host.hidden=false;await openTrialBookingHub(d,host,()=>{panel.hidden=true;if(c.onBooked)c.onBooked();else loadWarnBox(c.family_id,$("#warn-box"))},{futureOnly:true})}catch(e){fail(e)}finally{b.disabled=false}}};
+        if (!r.slots.length) { $("#to-res").innerHTML = `<div class="small muted" style="margin-top:8px">${esc(r.error).replace(/\n/g,'<br>')}</div>${manual}`;wireManual();return; }
         const ta = $(textSel);
         if (ta) ta.value = r.text;
         $("#to-res").innerHTML = `<div class="small muted" style="margin:8px 0 4px">${ta ? "Текст с вариантами уже в поле сообщения: проверьте и нажмите «Отправить». " : ""}Когда родитель выберет, запишите одним нажатием:</div>
           ${r.slots.map((x, i) => `<div class="to-slot"><span class="grow">${esc(x.label)} · ${esc(x.group)} · ${esc(x.branch)} <span class="small muted">мест ${x.free}</span></span>
             ${kidId ? `<button class="btn sm" data-to-book="${i}">Записать</button>` : ""}</div>`).join("")}
-          ${(r.unavailable||[]).length ? `<details class="small" style="margin-top:8px"><summary>Подходящие по возрасту, но сейчас недоступны (${r.unavailable.length})</summary>${r.unavailable.map(x=>`<div class="muted" style="margin-top:4px">${esc(x.group)} · ${esc(x.age)}: ${esc(x.reason)}</div>`).join("")}</details>` : ""}`;
+          ${(r.unavailable||[]).length ? `<details class="small" style="margin-top:8px"><summary>Подходящие по возрасту, но сейчас недоступны (${r.unavailable.length})</summary>${r.unavailable.map(x=>`<div class="muted" style="margin-top:4px">${esc(x.group)} · ${esc(x.age)}: ${esc(x.reason)}</div>`).join("")}</details>` : ""}${manual}`;
+        wireManual();
         $("#to-res").querySelectorAll("[data-to-book]").forEach((b) => (b.onclick = async () => {
           const x = r.slots[+b.dataset.toBook];
           // шаг 3: если данных не хватает, запрос родителю будет уже с выбранным временем
