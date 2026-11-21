@@ -114,8 +114,9 @@ class ClientSalesAccessTest(unittest.TestCase):
             self.assertIn(self.gid, [g['id'] for g in meta['groups']])
             self.assertNotIn(self.closed, [g['id'] for g in meta['groups']])
             if actor == 'offline':
-                self.assertNotIn('members', result['perms'])
-                self.assertNotIn('sales', result['perms'])
+                self.assertEqual(result['perms']['members'], 'full')
+                self.assertEqual(result['perms']['sales'], 'full')
+                self.assertEqual(result['perms']['client_ops'], 'full')
                 self.assertFalse(perms.allowed(result, 'operator'))
                 self.assertNotIn('private_general_setting', meta['settings'])
                 self.assertIn('price_single', meta['settings'])
@@ -201,13 +202,19 @@ class ClientSalesAccessTest(unittest.TestCase):
             ('GET', '/api/erp/financial-audit?erp_id=synthetic-no-external', None),
             ('POST', f'/api/students/{sid}/refund', {'amount': 1, 'comment': 'Forbidden'}),
             ('POST', '/api/payments/1/cancel', {}), ('DELETE', f'/api/students/{sid}/error', {}),
-            ('POST', f'/api/subscriptions/{subid}/cancel', {}),
-            ('PATCH', f'/api/students/{sid}', {'name': 'Forbidden'}),
-            ('PATCH', f'/api/students/{sid}/profile', {'name': 'Forbidden'}),
-            ('POST', '/api/students', {'name': 'Forbidden'})]
+            ('POST', f'/api/subscriptions/{subid}/cancel', {})]
         for method, path, body in forbidden:
             with self.subTest(method=method, path=path):
                 self.assertEqual(self.call('offline', method, path, body)[0], 403)
+        self.assertEqual(self.con.serialize(), before)
+        self.assertEqual(self.call('offline', 'PATCH', f'/api/students/{sid}', {'birth': '2022-11-21'})[0], 200)
+        code, card = self.call('offline', 'GET', f'/api/students/{sid}')
+        self.assertEqual(code, 200)
+        profile = {'expected': card['profile_token'], 'name': card['student']['name'],
+            'birth': card['student']['birth'], 'note': card['family'].get('note') or '',
+            'parents': [dict(p, is_primary=(i == 0)) for i, p in enumerate(card['parents'])]}
+        self.assertEqual(self.call('offline', 'PATCH', f'/api/students/{sid}/profile', profile)[0], 200)
+        self.assertEqual(self.call('offline', 'POST', '/api/students', {'name': 'Allowed child', 'parent_name': 'Allowed parent', 'phone': '+79000000999'})[0], 200)
         for actor, status in ((None, 401), ('coach', 403), ('lawyer', 403), ('trainee', 403)):
             for method, path, body in [('GET', f'/api/students/{sid}/quote?month=2026-12&group_id={self.gid}', None),
                 ('POST', f'/api/students/{sid}/invoice', {'month': '2026-12', 'group_id': self.gid}),
@@ -216,7 +223,6 @@ class ClientSalesAccessTest(unittest.TestCase):
                 ('POST', f'/api/subscriptions/{subid}/balance-apply', {'use_balance': True})]:
                 with self.subTest(actor=actor, path=path):
                     self.assertEqual(self.call(actor, method, path, body)[0], status)
-        self.assertEqual(self.con.serialize(), before)
 
 
 if __name__ == '__main__':

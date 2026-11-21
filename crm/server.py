@@ -607,7 +607,7 @@ def staff_docs_accept(con, h, user, body, q):
     return {"ok": True, "accepted": n}
 
 
-@route("GET", "/api/stage-tips", role="operator")
+@route("GET", "/api/stage-tips", role="operator|client_ops:full")
 def stage_tips_get(con, h, user, body, q):
     from . import smart
     # этапа «Напоминание о пробном» больше нет (01.11): показываем подсказки только для существующих этапов
@@ -1129,12 +1129,12 @@ def group_patch(con, h, user, body, q, gid):
     return {"ok": True}
 
 
-@route("GET", "/api/board/sales", role="operator")
+@route("GET", "/api/board/sales", role="operator|client_ops:full")
 def board_sales(con, h, user, body, q):
     return sv.board(con, "sales")
 
 
-@route("GET", "/api/tasks", role="operator")
+@route("GET", "/api/tasks", role="operator|client_ops:full")
 def tasks_list(con, h, user, body, q):
     if q.get("as_user") and user["role"] == "admin":  # «Смотреть как»: стол глазами участника команды
         u = con.execute("SELECT id, name, role FROM users WHERE id=?", (int(q["as_user"]),)).fetchone()
@@ -1155,7 +1155,7 @@ def task_done(con, h, user, body, q, tid):
     return {"ok": True}
 
 
-@route("POST", "/api/students/{sid}/tasks", role="operator")
+@route("POST", "/api/students/{sid}/tasks", role="operator|client_ops:full")
 def task_add(con, h, user, body, q, sid):
     sv.get_student_row(con, int(sid))
     return {"id": cx(tasks.add_client_task, con, int(sid), body, user)}
@@ -1189,7 +1189,7 @@ def merch_alerts(con):
             "cash_not_handed": [x for x in reg["by_seller"] if x["cash_not_handed"]], "stock": merch.stock_status(con, t)}
 
 
-@route("GET", "/api/workdesk", role="operator")
+@route("GET", "/api/workdesk", role="operator|client_ops:full")
 def workdesk(con, h, user, body, q):
     board = sv.board(con, "sales")
     trials = [dict(k, kind="trial", level=k["color"], text=k.get("badge") or "Пробное закончилось, связаться")
@@ -1225,30 +1225,30 @@ def workdesk(con, h, user, body, q):
             **comms.counts(con)}
 
 
-@route("GET", "/api/board/members", role="operator")
+@route("GET", "/api/board/members", role="operator|client_ops:full")
 def board_members(con, h, user, body, q):
     return sv.board(con, "members")
 
 
-@route("GET", "/api/board/skips", role="operator")
+@route("GET", "/api/board/skips", role="operator|client_ops:full")
 def board_skips(con, h, user, body, q):
     return sv.board(con, "skips")
 
 
-@route("POST", "/api/students/{sid}/singles", role="operator")
+@route("POST", "/api/students/{sid}/singles", role="operator|client_ops:full")
 def singles_book(con, h, user, body, q, sid):
     from . import singles
     return {"id": singles.book(con, int(sid), int(body.get("group_id") or 0), body.get("date") or "", user, body.get("note") or "")}
 
 
-@route("POST", "/api/singles/{vid}/cancel", role="operator")
+@route("POST", "/api/singles/{vid}/cancel", role="operator|client_ops:full")
 def singles_cancel(con, h, user, body, q, vid):
     from . import singles
     singles.cancel(con, int(vid), user)
     return {"ok": True}
 
 
-@route("POST", "/api/students/{sid}/singles/next", role="operator")
+@route("POST", "/api/students/{sid}/singles/next", role="operator|client_ops:full")
 def singles_next(con, h, user, body, q, sid):
     """После задачи «Разовое завтра»: что дальше. Закрывает саму задачу, если передан task_id."""
     from . import singles, tasks
@@ -1286,7 +1286,7 @@ def nodeadline_tasks(con, h, user, body, q):
                                           body.get("note") or "", user)}
 
 
-@route("POST", "/api/students/{sid}/move", role="operator")
+@route("POST", "/api/students/{sid}/move", role="operator|client_ops:full")
 def move(con, h, user, body, q, sid):
     r = sv.move_card(con, int(sid), body.get("funnel"), body.get("stage"), user, body.get("reason") or "", body.get("comment") or "",
                      body.get("due") or "")
@@ -1360,13 +1360,13 @@ def client_profile_patch(con,h,user,body,q,sid):
     return clientprofile.save(con,int(sid),body,user)
 
 
-@route("PATCH", "/api/students/{sid}", role="operator")
+@route("PATCH", "/api/students/{sid}", role="operator|client_ops:full")
 def student_patch(con, h, user, body, q, sid):
     sv.update_student(con, int(sid), body, user)
     return {"ok": True}
 
 
-@route("POST", "/api/students/{sid}/note", role="operator")
+@route("POST", "/api/students/{sid}/note", role="operator|client_ops:full")
 def student_note(con, h, user, body, q, sid):
     text = (body.get("text") or "").strip()
     if not text:
@@ -1377,13 +1377,13 @@ def student_note(con, h, user, body, q, sid):
     return {"ok": True}
 
 
-@route("POST", "/api/students/{sid}/vacations", role="operator")
+@route("POST", "/api/students/{sid}/vacations", role="operator|client_ops:full")
 def vacation_add(con, h, user, body, q, sid):
     sv.add_vacation(con, int(sid), body.get("start"), body.get("end"), body.get("note"), user)
     return {"ok": True}
 
 
-@route("DELETE", "/api/vacations/{vid}", role="operator")
+@route("DELETE", "/api/vacations/{vid}", role="operator|client_ops:full")
 def vacation_del(con, h, user, body, q, vid):
     v = con.execute("SELECT * FROM vacations WHERE id=?", (int(vid),)).fetchone()
     if not v:
@@ -1424,25 +1424,25 @@ from . import invoicebalanceweb as _invoice_balance_web
 _invoice_balance_web.register(route)
 
 
-@route("POST", "/api/students/{sid}/enrollments", role="operator")
+@route("POST", "/api/students/{sid}/enrollments", role="operator|client_ops:full")
 def enrollment_add(con, h, user, body, q, sid):
     return {"id": sv.add_enrollment(con, int(sid), int(body.get("group_id") or 0), body.get("weekdays"),
                                     body.get("tariff") or "fixed", user)}
 
 
-@route("PATCH", "/api/enrollments/{eid}", role="operator")
+@route("PATCH", "/api/enrollments/{eid}", role="operator|client_ops:full")
 def enrollment_patch(con, h, user, body, q, eid):
     sv.update_enrollment(con, int(eid), body, user)
     return {"ok": True}
 
 
-@route("GET", "/api/enrollments/{eid}/transfer", role="operator")
+@route("GET", "/api/enrollments/{eid}/transfer", role="operator|client_ops:full")
 def enrollment_transfer_plan(con, h, user, body, q, eid):
     from . import transfer
     return transfer.plan(con, int(eid), int(q.get("group_id") or 0), q.get("date") or "", [int(x) for x in (q.get("weekdays") or "").split(",") if x], q.get("tariff") or "fixed")
 
 
-@route("POST", "/api/enrollments/{eid}/transfer", role="operator")
+@route("POST", "/api/enrollments/{eid}/transfer", role="operator|client_ops:full")
 def enrollment_transfer(con, h, user, body, q, eid):
     from . import transfer
     return transfer.apply(con, int(eid), int(body.get("group_id") or 0), body.get("date") or "", user, body.get("weekdays"), body.get("tariff") or "fixed", body.get("expected"))
@@ -2192,7 +2192,7 @@ def schedule_week(con, h, user, body, q):
     return schedule.week(con)
 
 
-@route("POST", "/api/students/{sid}/archive", role="operator")
+@route("POST", "/api/students/{sid}/archive", role="operator|client_ops:full")
 def student_archive(con, h, user, body, q, sid):
     sv.get_student_row(con, int(sid))
     schedule.set_student_archived(con, int(sid), bool(body.get("archived")), user)
@@ -2209,7 +2209,7 @@ def archive(con, h, user, body, q):
     return schedule.archive_list(con)
 
 
-@route("GET", "/api/sources", role="operator")
+@route("GET", "/api/sources", role="operator|client_ops:full")
 def sources_list(con, h, user, body, q):
     return sources.listing(con, active_only=q.get("all") != "1")
 
@@ -2271,7 +2271,7 @@ def sources_report(con, h, user, body, q):
     return sources.report(con, start, q.get("to") or _d.today().isoformat()) | {"from": start}
 
 
-@route("GET", "/api/discounts", role="operator")
+@route("GET", "/api/discounts", role="operator|client_ops:full")
 def discounts_list(con, h, user, body, q):
     return money.discounts(con, active_only=q.get("all") != "1")
 
@@ -2428,19 +2428,19 @@ def refund(con, h, user, body, q, sid):
     return {"ok": True}
 
 
-@route("GET", "/api/students/{sid}/attendance-calendar", role="operator")
+@route("GET", "/api/students/{sid}/attendance-calendar", role="operator|client_ops:full")
 def client_calendar(con,h,user,body,q,sid):
     from . import clientattendance
     return clientattendance.calendar(con,int(sid),q.get("month") or sv.today().isoformat()[:7])
 
 
-@route("GET", "/api/students/{sid}/makeup-suggestions", role="operator")
+@route("GET", "/api/students/{sid}/makeup-suggestions", role="operator|client_ops:full")
 def client_makeup_suggestions(con,h,user,body,q,sid):
     from . import clientattendance
     return clientattendance.suggestions(con,int(sid))
 
 
-@route("GET", "/api/students/{sid}/makeup-offer", role="operator")
+@route("GET", "/api/students/{sid}/makeup-offer", role="operator|client_ops:full")
 def client_makeup_offer(con,h,user,body,q,sid):
     from . import clientattendance
     if q.get('summary')=='1':
@@ -2448,7 +2448,7 @@ def client_makeup_offer(con,h,user,body,q,sid):
     return clientattendance.makeup_offer(con,int(sid))
 
 
-@route("POST", "/api/students/{sid}/makeups", role="operator")
+@route("POST", "/api/students/{sid}/makeups", role="operator|client_ops:full")
 def makeup_book(con, h, user, body, q, sid):
     return sv.book_makeup(con, int(sid), int(body.get("group_id") or 0), body.get("date") or "",
                           body.get("absence_id"), user)
@@ -2878,7 +2878,7 @@ def trial_mark(con, h, user, body, q, sid):
     return {"ok": True}
 
 
-@route("POST", "/api/students/{sid}/trial-visit", role="operator")
+@route("POST", "/api/students/{sid}/trial-visit", role="operator|client_ops:full")
 def historical_trial_mark(con, h, user, body, q, sid):
     row = con.execute("SELECT * FROM erp_trial_visits WHERE id=? AND student_id=?",
                       (int(body.get("visit_id") or 0), int(sid))).fetchone()
@@ -2962,7 +2962,7 @@ def inbox_counts(con, h, user, body, q):
     return comms.counts(con,user)
 
 
-@route("POST", "/api/trial-hold", role="operator")
+@route("POST", "/api/trial-hold", role="operator|client_ops:full")
 def trial_hold(con, h, user, body, q):
     """Держать место на пробном 10 минут, пока родитель присылает недостающие данные."""
     from . import capacity
@@ -3083,63 +3083,63 @@ def program_patch(con, h, user, body, q, pid):
     return {"ok": True}
 
 
-@route("POST", "/api/students/{sid}/waitlist", role="operator")
+@route("POST", "/api/students/{sid}/waitlist", role="operator|client_ops:full")
 def waitlist_add(con, h, user, body, q, sid):
     from . import waitlist
     return {"id": waitlist.add(con, int(sid), int(body.get("group_id") or 0), body.get("month"), body, user)}
 
 
-@route("POST", "/api/waitlist/{wid}/status", role="operator")
+@route("POST", "/api/waitlist/{wid}/status", role="operator|client_ops:full")
 def waitlist_status(con, h, user, body, q, wid):
     from . import waitlist
     waitlist.set_status(con, int(wid), body.get("status") or "", user)
     return {"ok": True}
 
 
-@route("GET", "/api/waitlist/funnel", role="operator")
+@route("GET", "/api/waitlist/funnel", role="operator|client_ops:full")
 def waitlist_funnel(con, h, user, body, q):
     from . import waitlist
     return waitlist.funnel(con, force=bool(q.get("force"))) or {}
 
 
-@route("GET", "/api/students/{sid}/past-entry-options", role="operator")
+@route("GET", "/api/students/{sid}/past-entry-options", role="operator|client_ops:full")
 def past_entry_options(con,h,user,body,q,sid):
     from . import historyentry
     return historyentry.options(con,int(sid),q.get('group_id'),q.get('month'),q.get('tariff') or 'fixed',q.get('ofp_group_id'),q.get('start_date'),q.get('paid_date'),q.get('trial_date'),q.get('discount_id'),user=user)
 
 
-@route("POST", "/api/students/{sid}/past-entry", role="operator")
+@route("POST", "/api/students/{sid}/past-entry", role="operator|client_ops:full")
 def past_entry_record(con,h,user,body,q,sid):
     from . import historyentry
     return historyentry.record(con,int(sid),body,user)
 
 
-@route("GET", "/api/students/{sid}/trial-calendar", role="operator")
+@route("GET", "/api/students/{sid}/trial-calendar", role="operator|client_ops:full")
 def trial_calendar(con,h,user,body,q,sid):
     from . import trialoffer
     return trialoffer.calendar_slots(con,int(sid),q.get('group_id'),q.get('month'),q.get('future_only')=='1')
 
 
-@route("POST", "/api/students/{sid}/trial-calendar", role="operator")
+@route("POST", "/api/students/{sid}/trial-calendar", role="operator|client_ops:full")
 def trial_calendar_book(con,h,user,body,q,sid):
     from . import trialoffer
     return trialoffer.book_calendar(con,int(sid),body,user)
 
 
-@route("GET", "/api/students/{sid}/trial-options", role="operator")
+@route("GET", "/api/students/{sid}/trial-options", role="operator|client_ops:full")
 def inline_trial_options(con,h,user,body,q,sid):
     from . import trialoffer
     bid=int(q['branch_id']) if str(q.get('branch_id') or '').isdigit() else None
     return trialoffer.booking_options(con,int(sid),q.get('birth') or '',q.get('date') or '',bid)
 
 
-@route("POST", "/api/students/{sid}/trial-booking", role="operator")
+@route("POST", "/api/students/{sid}/trial-booking", role="operator|client_ops:full")
 def inline_trial_book(con,h,user,body,q,sid):
     from . import trialoffer
     return trialoffer.book_inline(con,int(sid),body,user)
 
 
-@route("GET", "/api/trial-offer", role="operator")
+@route("GET", "/api/trial-offer", role="operator|client_ops:full")
 def trial_offer(con, h, user, body, q):
     from . import trialoffer
     age = int(q["age"]) if str(q.get("age") or "").isdigit() else None
@@ -3156,14 +3156,14 @@ def trial_offer(con, h, user, body, q):
     return trialoffer.offer(con, age, child, bid)
 
 
-@route("POST", "/api/students/{sid}/cancel-trial", role="operator")
+@route("POST", "/api/students/{sid}/cancel-trial", role="operator|client_ops:full")
 def cancel_trial(con, h, user, body, q, sid):
     from . import pu
     pu.cancel_trial(con, int(sid), body.get("reason") or "", user)
     return {"ok": True}
 
 
-@route("POST", "/api/tasks/{tid}/rebook", role="operator")
+@route("POST", "/api/tasks/{tid}/rebook", role="operator|client_ops:full")
 def task_rebook(con, h, user, body, q, tid):
     from . import pu
     return pu.complete(con, int(tid), body.get("result") or "", body, user)
@@ -3186,7 +3186,7 @@ def tasks_manual(con, h, user, body, q):
     return tasks.manual_board(con, user, q.get("scope", "mine"))
 
 
-@route("PATCH", "/api/tasks/{tid}", role="operator")
+@route("PATCH", "/api/tasks/{tid}", role="operator|client_ops:full")
 def task_edit(con, h, user, body, q, tid):
     """Правка задачи: что сделать, срок, заметка, исполнитель. Тренерам нельзя (role=operator)."""
     return cx(tasks.edit, con, int(tid), body, user)
@@ -3252,7 +3252,7 @@ def owner_tg_unlink(con, h, user, body, q):
     return {"ok": True}
 
 
-@route("PATCH", "/api/parents/{pid}/relation", role="operator")
+@route("PATCH", "/api/parents/{pid}/relation", role="operator|client_ops:full")
 def parent_relation(con, h, user, body, q, pid):
     from . import smart
     smart.set_relation(con, int(pid), body.get("relation") or "")
@@ -3296,7 +3296,7 @@ def responsibles_set(con, h, user, body, q):
     return {"ok": True}
 
 
-@route("GET", "/api/closures", role="operator")
+@route("GET", "/api/closures", role="operator|client_ops:full")
 def closures_list(con, h, user, body, q):
     from . import closures
     return {"items": closures.listing(con)}
@@ -3318,13 +3318,13 @@ def closures_del(con, h, user, body, q, cid):
     return {"ok": True}
 
 
-@route("GET", "/api/families/{fid}/lessons", role="operator")
+@route("GET", "/api/families/{fid}/lessons", role="operator|client_ops:full")
 def family_lessons(con, h, user, body, q, fid):
     from . import capacity
     return {"kids": capacity.family_lessons(con, int(fid))}
 
 
-@route("POST", "/api/students/{sid}/warn", role="operator")
+@route("POST", "/api/students/{sid}/warn", role="operator|client_ops:full")
 def student_warn(con, h, user, body, q, sid):
     from . import capacity
     gid = int(body["group_id"]) if body.get("group_id") else None
@@ -3334,13 +3334,13 @@ def student_warn(con, h, user, body, q, sid):
     return capacity.warn(con, int(sid), body.get("date") or "", gid, body.get("note") or "", user)
 
 
-@route("GET", "/api/free-slots", role="operator")
+@route("GET", "/api/free-slots", role="operator|client_ops:full")
 def free_slots(con, h, user, body, q):
     from . import capacity
     return {"slots": capacity.free_slots(con, int(q.get("days") or 14), int(q["branch_id"]) if q.get("branch_id") else None)}
 
 
-@route("GET", "/api/occupancy", role="operator")
+@route("GET", "/api/occupancy", role="operator|client_ops:full")
 def occupancy(con, h, user, body, q):
     from . import capacity
     return capacity.occupancy(con, int(q.get("group_id") or 0), q.get("date") or "")

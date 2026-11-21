@@ -36,12 +36,14 @@ class OfflineChatAccess(unittest.TestCase):
                 for token,user in users:
                     self.assertTrue(user['is_offline_admin']);self.assertEqual(perms.title(user),'Офлайн-администратор')
                     code,meta=call(token,'GET','/api/meta');self.assertEqual(code,200);self.assertEqual(meta['user']['perms']['inbox'],'full')
-                    self.assertEqual(set(meta['user']['perms']),{'inbox','planner','search','staffexpenses','client_sales','client_create','merch_stock'})
-                    for forbidden in ['/api/board/sales','/api/payments','/api/users']:
+                    self.assertEqual(set(meta['user']['perms']),{'sales','members','skips','schedule','inbox','planner','search','staffexpenses','client_sales','client_create','client_ops','merch_stock'})
+                    self.assertEqual(call(token,'GET','/api/board/sales')[0],200)
+                    for forbidden in ['/api/payments','/api/users']:
                         self.assertEqual(call(token,'GET',forbidden)[0],403,forbidden)
                     for endpoint in ['/api/students','/api/people',f'/api/students/{sid}','/api/students/recent']:
                         self.assertEqual(call(token,'GET',endpoint)[0],200,endpoint)
-                    self.assertEqual(call(token,'PATCH',f'/api/students/{sid}',{'name':'Not allowed'})[0],403)
+                    self.assertEqual(call(token,'PATCH',f'/api/students/{sid}',{'birth':'2022-11-21'})[0],200)
+                    self.assertEqual(call(token,'GET','/api/trial-offer?age=4')[0],200)
                     created=call(token,'POST','/api/students',{'name':f'Synthetic New Child {user["id"]}',
                         'parent_name':'Synthetic Parent','phone':f'+7900000{user["id"]:04d}'})
                     self.assertEqual(created[0],200);self.assertTrue(created[1]['id'])
