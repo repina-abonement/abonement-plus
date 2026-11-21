@@ -1581,8 +1581,8 @@ function askLeftReason(sid, done) {
   };
 }
 
-function openDrawer(html, size) {
-  S.studentCardRequest=(S.studentCardRequest||0)+1;
+function openDrawer(html, size, options = {}) {
+  if (!options.keepStudentRequest) S.studentCardRequest=(S.studentCardRequest||0)+1;
   $("#drawer-body").innerHTML = html; $("#drawer").hidden = false; document.body.style.overflow = "hidden";
   const panel = $("#drawer .drawer-panel"); if (panel) panel.classList.toggle("wide", size === "wide");
   const state = { ...(history.state || {}), drawer: true }; delete state.studentCard;
@@ -2094,10 +2094,25 @@ async function openStudent(id, options = {}) {
   const request=S.studentCardRequest=(S.studentCardRequest||0)+1;
   const previous = history.state?.studentCard;
   const tab = options.tab || (previous?.id === +id && previous.userId === S.user?.id ? previous.tab : "feed") || "feed";
+  // Do not leave the previous child's name and subscriptions visible while the
+  // newly selected card is loading.  The request number also makes a late
+  // response from the previous card harmless.
+  openDrawer(`<div class="section"><p class="muted">Загружаю карточку клиента…</p></div>`, "wide", { keepStudentRequest: true });
   let d;
   try { d = await api("GET", `/api/students/${id}`); }
-  catch (e) { if(request!==S.studentCardRequest)return; if (options.restoring) closeDrawer(); return fail(e); }
+  catch (e) {
+    if(request!==S.studentCardRequest)return;
+    const body=$("#drawer-body");
+    if(body)body.innerHTML=`<div class="section"><h3>Карточка не открылась</h3><p class="error">${esc(e.message)}</p><button class="btn" data-student-retry>Повторить</button></div>`;
+    body?.querySelector('[data-student-retry]')?.addEventListener('click',()=>openStudent(id,options));
+    return;
+  }
   if(request!==S.studentCardRequest)return;
+  if(Number(d?.student?.id)!==Number(id)){
+    const body=$("#drawer-body");
+    if(body)body.innerHTML='<div class="section"><h3>Карточка не открылась</h3><p class="error">Сервер вернул данные другого клиента. Обновите страницу и повторите.</p></div>';
+    return;
+  }
   const s = d.student, g = d.group, c = d.counters;
   const groups = S.meta.groups.filter((x) => !x.is_makeup && !x.program_id);
   const makeupGroups = S.meta.groups.filter((x) => x.is_makeup);
@@ -2204,9 +2219,10 @@ async function openStudent(id, options = {}) {
     <ul class="history">${d.history.map((h) => `<li><div class="when">${dtShort(h.ts)} · ${esc(h.display_author||h.user_name)}</div><div style="white-space:pre-wrap">${esc(h.display_text||h.text)}</div>${h.technical_text?`<details class="small muted"><summary>Подробности ERP</summary><div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(h.technical_text)}</div></details>`:''}</li>`).join("")}</ul>
   </div>
   <div style="margin-top:14px" data-sc="arch"><button class="btn sm ${s.archived ? "" : "danger"}" id="s-arch">${s.archived ? "Вернуть из архива" : "Перенести в архив"}</button></div>`;
-  openDrawer(html, "wide");
+  openDrawer(html, "wide", { keepStudentRequest: true });
   try { history.replaceState({ ...history.state, studentCard: { ...(previous?.id === +id ? previous : {}), id: +id, userId: S.user.id, tab } }, ""); } catch (_) {}
   const body = $("#drawer-body");
+  body.dataset.studentId = String(id);
   erpFullClient(body, id);
   layoutStudentCard(body, isMember);
   scTab(tab);
