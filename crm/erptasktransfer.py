@@ -4,6 +4,7 @@ Does not infer task workflow from event history or touch payments/attendance.
 """
 import hashlib
 import json
+import re
 from collections import Counter, defaultdict
 from datetime import datetime
 from . import erpfull, erpimport, tasks
@@ -27,23 +28,28 @@ def _parse(file,row):
         return next((hs[k] for k in keys if k in hs),'')
     if 'событие' in hs:
         raise ApiError('Это история событий задач. Нужен актуальный реестр задач, а не журнал событий')
-    source=val('id задачи','№ задачи','номер задачи','id')
-    client=val('id посетителя','id клиента','id заявки','erp id клиента')
+    source=val('id задачи','id задачи erp','№ задачи','номер задачи','id')
+    client=val('id посетителя','id клиента','id заявки','erp id клиента','erp id ребёнка или лида')
     namespace='lead' if val('id заявки') else 'student'
-    if not source or not client:
-        raise ApiError('Нужны отдельные ID задачи и ID клиента ERP; совпадение имён не используется')
-    title=val('задача','название задачи','тип задачи')
+    note=val('комментарий','описание','комментарий в событии')
+    trial_refs=re.findall(r'(?:п[оу]|пробн\w*|посетител\w* записан\w* на п[оу])[^#\n]*#(\d+)',note.lower())
+    trial_source_id=trial_refs[-1] if len(set(trial_refs))==1 else ''
+    if not source or not client and not trial_source_id:
+        raise ApiError('Нужны ID задачи и ID клиента ERP либо однозначный ID пробного занятия; совпадение имён не используется')
+    title=val('задача','название задачи','тип задачи','название в последнем событии выборки')
     due=erpfull._date(val('дедлайн','срок','дата выполнения','дата задачи'))
-    raw_state=val('состояние задачи','статус выполнения','статус задачи')
+    raw_state=val('состояние задачи','статус выполнения','статус задачи','подтверждение состояния')
     state=erpimport._norm(raw_state)
     states={'open':'open','открыта':'open','новая':'open','не выполнено':'open','не выполнена':'open',
             'done':'done','выполнена':'done','выполнено':'done',
-            'cancelled':'cancelled','архив':'cancelled','в архиве':'cancelled','удалена':'cancelled'}
+            'cancelled':'cancelled','архив':'cancelled','в архиве':'cancelled','удалена':'cancelled',
+            'открыта по превью 21.11.2026':'open','выполнена на момент события':'done',
+            'архивирована на момент события':'cancelled'}
     if not title or not due or state not in states:
         raise ApiError('Нужны название, корректная дата и явное состояние: открыта / выполнена / архив. Неизвестный статус не подменяется')
     completed=erpfull._date(val('выполнено','дата фактического выполнения','дата завершения')) or ''
-    return {'erp_task_id':source,'client_erp_id':client,'namespace':namespace,'title':title,'due_at':due[:10]+'T23:59',
-            'status':states[state],'note':val('комментарий','описание'),'done_at':completed if states[state]=='done' else None,
+    return {'erp_task_id':source,'client_erp_id':client,'trial_source_id':trial_source_id,'namespace':namespace,'title':title,'due_at':due[:10]+'T23:59',
+            'status':states[state],'note':note,'done_at':completed if states[state]=='done' else None,
             'assignee':val('ответственный','исполнитель'),'author':val('создатель','автор'),'source_status':raw_state}
 
 
@@ -67,14 +73,23 @@ def prepare(con,ids):
             issues.extend({**w,'erp_task_id':erpid,'reason':'В выбранных файлах разные версии одной задачи ERP'} for _,w in entries)
             continue
         duplicates+=len(entries)-1
-        sid_rows=con.execute('SELECT student_id FROM erp_full_identities WHERE namespace=? AND source_id=?',
-                             (rec['namespace'],rec['client_erp_id'])).fetchall()
-        if not sid_rows and rec['namespace']=='student':
-            sid_rows=con.execute('SELECT id FROM students WHERE erp_id=?',(rec['client_erp_id'],)).fetchall()
+        sid_rows=[]
+        if rec['client_erp_id']:
+            sid_rows=con.execute('SELECT student_id FROM erp_full_identities WHERE namespace=? AND source_id=?',
+                                 (rec['namespace'],rec['client_erp_id'])).fetchall()
+            if not sid_rows and rec['namespace']=='student':
+                sid_rows=con.execute('SELECT id FROM students WHERE erp_id=?',(rec['client_erp_id'],)).fetchall()
+        elif rec['trial_source_id']:
+            sid_rows=con.execute('SELECT DISTINCT student_id FROM erp_trial_visits WHERE source_id=?',
+                                 (rec['trial_source_id'],)).fetchall()
         if len(sid_rows)!=1:
-            issues.append({**where,'erp_task_id':erpid,'reason':'Не найдена однозначная связь клиента по ID ERP; сначала свяжите клиента'})
+            issues.append({**where,'erp_task_id':erpid,'reason':'Не найдена однозначная связь клиента по ID ERP или ID пробного занятия; сначала загрузите идентифицированную историю клиента'})
             continue
         sid=sid_rows[0][0]
+        resolved_client=rec['client_erp_id']
+        if not resolved_client:
+            student=con.execute('SELECT erp_id FROM students WHERE id=?',(sid,)).fetchone()
+            resolved_client=str(student['erp_id'] or '') if student else ''
         kind=tasks.ERP_STATUSES.get(rec['title'],'manual')
         translated=tasks.KINDS.get(kind,('',))[0] if kind!='manual' else rec['title']
         old=con.execute('SELECT t.* FROM tasks t JOIN erp_full_task_links l ON l.task_id=t.id WHERE l.source_id=?',(erpid,)).fetchone()
@@ -102,7 +117,7 @@ def prepare(con,ids):
                'done_at':rec['done_at'],'done_by':old['done_by'] if old and rec['status']!='open' else '', 'result':old['result'] if old else ''}
         before=dict(old) if old else None
         changed=not before or any(before[k]!=v for k,v in after.items())
-        actions.append({'erp_task_id':erpid,'client_erp_id':rec['client_erp_id'],'namespace':rec['namespace'],
+        actions.append({'erp_task_id':erpid,'client_erp_id':resolved_client,'trial_source_id':rec['trial_source_id'],'namespace':rec['namespace'],
                         'action':'add' if not old else 'update' if changed else 'same','before':before,'after':after,
                         'source_fields':rec,'locations':[w for _,w in entries]})
         by_date[rec['due_at'][:10]]+=1;by_state[rec['status']]+=1
