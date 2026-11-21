@@ -48,8 +48,7 @@ def age_fits_trial_group(age: int, ages: tuple[int, int]) -> bool:
     return ages[0] <= age <= ages[1] or (age == 2 and ages == (3, 4))
 
 
-def slots(con, age: int, branch_id: int | None = None, limit: int = 4, days: int = 14, diagnostics=None,
-          cover_all_groups: bool = False) -> list[dict]:
+def slots(con, age: int, branch_id: int | None = None, limit: int | None = 4, days: int = 14, diagnostics=None) -> list[dict]:
     from . import capacity, closures, schedule
     now = datetime.now()
     out, fill = [], {}
@@ -91,29 +90,19 @@ def slots(con, age: int, branch_id: int | None = None, limit: int = 4, days: int
                         "label": f"{WD[d.weekday()]} {d.strftime('%d.%m')} в {t}"})
     # сначала группы, где детей меньше (Юлия, 01.11: чтобы дети распределялись по группам равномерно), потом ближайшие даты
     out.sort(key=lambda x: (x["fill"], x["date"], x["time"]))
-    # Для кнопки подбора сначала обязательно показываем ближайший вариант КАЖДОЙ
-    # подходящей группы. Иначе несколько менее заполненных групп 3–4 могли занять
-    # общий лимит, а подходящая четырёхлетнему группа 4–5 вообще исчезала.
+    # Обычные вызовы ограничивают короткий список; кнопка в переписке передаёт
+    # limit=None и получает все доступные занятия в своём пятидневном окне.
+    if limit is None:
+        return out
     res, per_day, per_group = [], {}, {}
-    if cover_all_groups:
-        for s in out:
-            if s["group_id"] in per_group:
-                continue
-            res.append(s)
-            per_day[s["date"]] = per_day.get(s["date"], 0) + 1
-            per_group[s["group_id"]] = 1
-    target = max(limit, len(per_group)) if cover_all_groups else limit
     for s in out:
-        if s in res:
-            continue
         if per_day.get(s["date"], 0) >= 2 or per_group.get(s["group_id"], 0) >= 2:
             continue
         per_day[s["date"]] = per_day.get(s["date"], 0) + 1
         per_group[s["group_id"]] = per_group.get(s["group_id"], 0) + 1
         res.append(s)
-        if len(res) >= target:
+        if len(res) >= limit:
             break
-    res.sort(key=lambda x: (x["fill"], x["date"], x["time"], x["group_id"]))
     return res
 
 
@@ -128,7 +117,9 @@ def offer(con, age: int | None, child: str = "", branch_id: int | None = None, n
     if age is None:
         return {"slots": [], "text": "", "error": "Укажите возраст ребёнка"}
     diagnostics=[]
-    sl = slots(con, age, branch_id, n, diagnostics=diagnostics, cover_all_groups=True)
+    # Пользовательский сценарий: все ближайшие варианты ровно на пять дней,
+    # а не искусственная квота по возрастным диапазонам или группам.
+    sl = slots(con, age, branch_id, limit=None, days=5, diagnostics=diagnostics)
     many_branches = len({s["branch_id"] for s in sl}) > 1
     lines = []
     for s in sl:

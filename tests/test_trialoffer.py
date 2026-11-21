@@ -19,18 +19,15 @@ assert r["slots"][0]["group_id"] == g34, "группы пустые одинак
 assert "📅" in r["text"] and "3 этаж" in r["text"]
 print("✓ 4 года → группы 3–4 и 4–5, ближайшие даты первыми, без ОФП")
 print(r["text"])
-# Общий лимит вариантов не должен скрывать целую подходящую группу: для 4 лет
-# показываются все группы 3–4 и 4–5, даже если первых больше четырёх.
-extra=[]
-for i in range(4):
-    extra.append(schedule.save_group(con, {"name": f"Дополнительная 3–4 №{i+1}", "branch_id": b,
-        "weekdays": [wd], "time": f"{12+i}:00", "age": "3–4"}))
+# Кнопка предлагает все доступные занятия в ближайшие пять календарных дней.
+g_late = schedule.save_group(con, {"name": "Поздняя 4–5", "branch_id": b,
+    "weekdays": [(date.today() + timedelta(days=5)).weekday()], "time": "12:00", "age": "4–5"})
 r = trialoffer.offer(con, 4)
-ids = {s["group_id"] for s in r["slots"]}
-assert {g34, g45, *extra} <= ids, r["slots"]
-assert g56 not in ids, r["slots"]
-print("✓ лимит не скрывает подходящую группу 4–5: показаны все варианты 3–4 и 4–5")
-con.execute("DELETE FROM groups WHERE id IN (%s)" % ','.join('?'*len(extra)),extra)
+assert {g34, g45} <= {s["group_id"] for s in r["slots"]}, r["slots"]
+assert g_late not in {s["group_id"] for s in r["slots"]}, r["slots"]
+assert all(date.fromisoformat(s['date']) <= date.today()+timedelta(days=4) for s in r['slots'])
+print("✓ показаны все ближайшие варианты в окне пяти календарных дней")
+con.execute("DELETE FROM groups WHERE id=?",(g_late,))
 # группа 3–4 заполнена сильнее: первой предлагаем 4–5, где детей меньше (Юлия, 01.11)
 fam = con.execute("INSERT INTO families(name) VALUES ('Ф')").lastrowid
 for i in range(5):
