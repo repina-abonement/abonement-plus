@@ -20,6 +20,7 @@ class OfflineChatAccess(unittest.TestCase):
         con.execute('INSERT INTO sessions(token,user_id,created_at) VALUES (?,?,?)',('synthetic-coach',uid,datetime.now().isoformat()))
         comms.put(con,'wazzup_key','FAKE_KEY');comms.put(con,'wazzup_tg_channel','synthetic-tg')
         fid=con.execute("INSERT INTO families(name) VALUES ('Synthetic Family')").lastrowid
+        pid=con.execute("INSERT INTO parents(family_id,name,phone,phone_norm,is_primary) VALUES (?,'Synthetic Parent','+79000000111','79000000111',1)",(fid,)).lastrowid
         cid=comms.upsert_conversation(con,'wazzup_telegram','phone:79000000111',phone='79000000111',meta={'channelId':'synthetic-tg','chatType':'telegram'})
         comms.link(con,cid,fid)
         sid=con.execute("INSERT INTO students(family_id,name,stage_changed_at,created_at) VALUES (?,'Synthetic Child','2026-11-19','2026-11-19')",(fid,)).lastrowid
@@ -32,7 +33,7 @@ class OfflineChatAccess(unittest.TestCase):
                 with urllib.request.urlopen(req,timeout=5) as r:return r.status,json.load(r)
             except urllib.error.HTTPError as e:return e.code,json.load(e)
         try:
-            with patch.object(comms,'wz_call',side_effect=[{'messageId':'synthetic-1'},{'messageId':'synthetic-2'}]) as provider:
+            with patch.object(comms,'start_wazzup_telegram',return_value=cid), patch.object(comms,'wz_call',side_effect=[{'messageId':f'synthetic-{i}'} for i in range(4)]) as provider:
                 for token,user in users:
                     self.assertTrue(user['is_offline_admin']);self.assertEqual(perms.title(user),'Офлайн-администратор')
                     code,meta=call(token,'GET','/api/meta');self.assertEqual(code,200);self.assertEqual(meta['user']['perms']['inbox'],'full')
@@ -51,6 +52,8 @@ class OfflineChatAccess(unittest.TestCase):
                     for endpoint in ['/api/inbox',f'/api/conversations/{cid}',f'/api/families/{fid}/comms']:
                         self.assertEqual(call(token,'GET',endpoint)[0],200)
                     self.assertEqual(call(token,'POST',f'/api/conversations/{cid}/send',{'text':'Synthetic access test'})[0],200)
+                    self.assertEqual(call(token,'POST',f'/api/families/{fid}/whatsapp',{'parent_id':pid,'channel':'telegram','text':'Synthetic new-channel test'})[0],200)
+                    self.assertEqual(call(token,'POST',f'/api/families/{fid}/attachment-target',{'parent_id':pid,'channel':'telegram'})[0],200)
                     self.assertEqual(call(token,'POST',f'/api/conversations/{cid}/unread',{})[0],200)
                     self.assertEqual(call(token,'GET',f'/api/conversations/{cid}?read=0')[1]['conversation']['unread'],1)
                     self.assertEqual(call(token,'GET',f'/api/families/{fid}/comms?read=0')[0],200)
@@ -65,7 +68,7 @@ class OfflineChatAccess(unittest.TestCase):
                 self.assertEqual(call('synthetic-coach','POST',f'/api/conversations/{cid}/send',{'text':'Must not send'})[0],403)
                 for action in ['unread','read','preferences']:
                     self.assertEqual(call('synthetic-coach','POST',f'/api/conversations/{cid}/{action}',{'muted':True})[0],403)
-                self.assertEqual(provider.call_count,2)
+                self.assertEqual(provider.call_count,4)
             with patch.object(comms,'wz_call',side_effect=comms.CommsError('Wazzup: POST_MESSAGE_ERROR · requestId=abc123456789')) as provider:
                 for token,user in users:
                     code,response=call(token,'POST',f'/api/conversations/{cid}/send',{'text':'Synthetic failed delivery'})

@@ -3013,7 +3013,7 @@ def attachment_public(con,h,user,body,q,ticket,filename):
     return Raw(data,mime,name)
 
 
-@route("POST", "/api/families/{fid}/attachment-target", role="operator")
+@route("POST", "/api/families/{fid}/attachment-target", role="inbox:full")
 def family_attachment_target(con,h,user,body,q,fid):
     parent=con.execute('SELECT * FROM parents WHERE id=? AND family_id=?',(body.get('parent_id'),int(fid))).fetchone()
     if not parent or not parent['phone']:raise ApiError('Выберите контакт этой семьи')
@@ -3359,7 +3359,7 @@ def family_comms(con, h, user, body, q, fid):
     return comms.family_comms(con, int(fid),q.get("read")!="0")
 
 
-@route("POST", "/api/families/{fid}/whatsapp", role="operator")
+@route("POST", "/api/families/{fid}/whatsapp", role="inbox:full")
 def family_whatsapp(con, h, user, body, q, fid):
     p = con.execute("SELECT phone FROM parents WHERE family_id=? AND id=?", (int(fid), int(body.get("parent_id") or 0))).fetchone()
     if not p:
