@@ -13,6 +13,7 @@ def main():
     makeup_groups=[]
     for name,weekdays,tm in [('Доп. 6–8',[3],'19:45'),('ОФП 4–5',[5],'16:00'),('ОФП 6–8',[5],'17:00')]:
         makeup_groups.append(schedule.save_group(con,{'name':name,'branch_id':nb,'weekdays':weekdays,'time':tm}))
+    schedule.save_group(con,{'name':'Сборная ОФП Чт 20:30','branch_id':nb,'weekdays':[3],'time':'20:30'})
     schedule.save_group(con,{'name':'Доп. 9–11','branch_id':nb,'weekdays':[3],'time':'19:45'})
     schedule.save_group(con,{'name':'Доп. 6–8 другой день','branch_id':nb,'weekdays':[0],'time':'19:45'})
     fid=con.execute("INSERT INTO families(name) VALUES ('Тестовая семья')").lastrowid
@@ -232,8 +233,27 @@ def main():
     assert not erphistory.preview(con,wrong_phone,'2026-11')['can_apply']
     allowed_november={**partial,'erp_student_id':'84894','subscriptions':[
       {**partial['subscriptions'][0],'erp_id':'827955'},
-      {**partial['subscriptions'][1],'erp_id':'827957'}]}
+      {**partial['subscriptions'][1],'erp_id':'827957'}], 'attendance':[
+        {**partial['attendance'][0],'date':day,'time':tm,
+         'group':'Юг, сборная ОФП' if kind == 'Отработка' else 'Север, сборная',
+         'type':kind,'erp_subscription_id':sub_id,
+         'source_chat_id':'-1001602433070','source_message_id':message_id,
+         'source_message_url':f'https://t.me/c/1602433070/{message_id}'}
+        for message_id,sub_id,day,tm,kind in (
+          ('26745','827955','2026-11-01','19:30','Абонемент'),
+          ('26789','827955','2026-11-03','18:30','Абонемент'),
+          ('26810','827955','2026-11-08','19:30','Абонемент'),
+          ('26908','827955','2026-11-10','18:30','Абонемент'),
+          ('27065','827957','2026-11-12','20:30','Отработка'))]}
     assert erphistory._pilot_contract_issue(allowed_november,'84894','2026-11')==''
+    shulezhko_preview=erphistory.preview(con,allowed_november,'2026-11')
+    assert shulezhko_preview['can_apply'] and shulezhko_preview['added']==20 and shulezhko_preview['review']==0,shulezhko_preview
+    assert len(shulezhko_preview['children'][0]['subscriptions'])==2
+    assert len(shulezhko_preview['children'][0]['planned'])==13
+    assert len(shulezhko_preview['children'][0]['visits'])==5
+    assert next(x for x in shulezhko_preview['children'][0]['visits'] if x['date']=='2026-11-12')['kind']=='makeup'
+    assert 'пять посещений' in erphistory._pilot_contract_issue(
+      {**allowed_november,'attendance':allowed_november['attendance'][:-1]},'84894','2026-11').lower()
     wrong_ofp={**allowed_november,'subscriptions':[allowed_november['subscriptions'][0],
       {**allowed_november['subscriptions'][1],'schedule':[{**x,'time':'16:00'} for x in ofp_plan]}]}
     assert '17:00' in erphistory._pilot_contract_issue(wrong_ofp,'84894','2026-11')

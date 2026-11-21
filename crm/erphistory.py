@@ -46,6 +46,13 @@ PILOT_CONTRACTS = {
     },
 }
 SHARIPOV_NOVEMBER_MESSAGES = {"26745", "26789", "26810", "26908", "27065"}
+SHULEZHKO_NOVEMBER_VISITS = {
+    ("26745", "827955", "2026-11-01", "19:30", "subscription"),
+    ("26789", "827955", "2026-11-03", "18:30", "subscription"),
+    ("26810", "827955", "2026-11-08", "19:30", "subscription"),
+    ("26908", "827955", "2026-11-10", "18:30", "subscription"),
+    ("27065", "827957", "2026-11-12", "20:30", "makeup"),
+}
 SKIP = {"группа", "сборная", "пуп", "журнал", "тц"}
 
 
@@ -181,6 +188,15 @@ def _pilot_contract_issue(row, erp_id, month):
                 str(x.get("time") or "") != "17:00" or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(x.get("date") or ""))
                 or date.fromisoformat(str(x.get("date"))).weekday() != 5 for x in planned):
             return "Субботняя ОФП должна быть запланирована в 17:00"
+    if (erp_id, month) == ("84894", "2026-11"):
+        visits = row.get("attendance") or []
+        actual = {(str(x.get("source_message_id") or ""), str(x.get("erp_subscription_id") or ""),
+                   str(x.get("date") or ""), str(x.get("time") or ""),
+                   "makeup" if _norm(x.get("type")) == "отработка" else "subscription") for x in visits}
+        if not SHULEZHKO_NOVEMBER_VISITS.issubset(actual) or any(
+                str(x.get("source_chat_id") or "") != "-1001602433070" or
+                _norm(x.get("status")) not in ("присутствовал", "был", "present") for x in visits):
+            return "Пять посещений Шулежко должны точно совпадать с подтверждёнными групповыми отчётами"
     return ""
 
 
