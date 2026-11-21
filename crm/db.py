@@ -219,6 +219,22 @@ def normalize_phone(phone: str) -> str:
     return digits
 
 
+def fill_parent_email(con, family_id, phone_norm, email):
+    """Дополнить пустую почту только у однозначного контакта семьи."""
+    email = (email or "").strip()
+    if not email or len(phone_norm) < 11:
+        return False
+    matches = con.execute(
+        "SELECT id FROM parents WHERE family_id=? AND phone_norm=?", (family_id, phone_norm)
+    ).fetchall()
+    if len(matches) != 1:
+        return False
+    return bool(con.execute(
+        "UPDATE parents SET email=? WHERE id=? AND TRIM(COALESCE(email, ''))=''",
+        (email, matches[0][0]),
+    ).rowcount)
+
+
 def hash_password(pw: str, salt: str | None = None) -> str:
     salt = salt or secrets.token_hex(16)
     h = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt.encode(), 200_000).hex()
