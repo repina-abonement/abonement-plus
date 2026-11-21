@@ -97,6 +97,13 @@ def init(con):
     # absence of money. Bootstrap only completely income-free legacy accounts.
     # Materialize before inserting, so all eligible legacy invoices of one
     # account are seeded together rather than the first row hiding the rest.
+    # An ERP account can already have paid invoices before the payment register
+    # or the per-invoice import markers arrive. A paid status is not a receipt.
+    student_cols = {row[1] for row in con.execute("PRAGMA table_info(students)")}
+    if "erp_id" in student_cols:
+        erp_guard += """ AND NOT EXISTS (
+            SELECT 1 FROM students st WHERE st.id=s.student_id
+              AND NULLIF(TRIM(st.erp_id), '') IS NOT NULL)"""
     legacy = list(con.execute(f"""SELECT s.student_id, s.price,
                           COALESCE(s.paid_at, s.created_at) AS received_at, s.id FROM subscriptions s
                    WHERE s.status='paid' AND s.price > 0 AND s.ledger_managed=0
