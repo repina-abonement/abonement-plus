@@ -19,6 +19,18 @@ assert r["slots"][0]["group_id"] == g34, "группы пустые одинак
 assert "📅" in r["text"] and "3 этаж" in r["text"]
 print("✓ 4 года → группы 3–4 и 4–5, ближайшие даты первыми, без ОФП")
 print(r["text"])
+# Общий лимит вариантов не должен скрывать целую подходящую группу: для 4 лет
+# показываются все группы 3–4 и 4–5, даже если первых больше четырёх.
+extra=[]
+for i in range(4):
+    extra.append(schedule.save_group(con, {"name": f"Дополнительная 3–4 №{i+1}", "branch_id": b,
+        "weekdays": [wd], "time": f"{12+i}:00", "age": "3–4"}))
+r = trialoffer.offer(con, 4)
+ids = {s["group_id"] for s in r["slots"]}
+assert {g34, g45, *extra} <= ids, r["slots"]
+assert g56 not in ids, r["slots"]
+print("✓ лимит не скрывает подходящую группу 4–5: показаны все варианты 3–4 и 4–5")
+con.execute("DELETE FROM groups WHERE id IN (%s)" % ','.join('?'*len(extra)),extra)
 # группа 3–4 заполнена сильнее: первой предлагаем 4–5, где детей меньше (Юлия, 01.11)
 fam = con.execute("INSERT INTO families(name) VALUES ('Ф')").lastrowid
 for i in range(5):
@@ -32,6 +44,7 @@ print("✓ первой строкой группа, где детей мень�
 con.execute("UPDATE groups SET trial_ok=0 WHERE id=?", (g45,))
 r = trialoffer.offer(con, 4)
 assert {x["group_id"] for x in r["slots"]} == {g34}, r["slots"]
+assert any(x['age']=='4–5' and 'выключена' in x['reason'] for x in r['unavailable']),r
 from crm import services as sv, capacity
 fid = con.execute("INSERT INTO families(name) VALUES ('Т')").lastrowid
 sid = con.execute("INSERT INTO students(family_id, name, stage_changed_at, created_at) VALUES (?, 'Лид', '2026-01-01', '2026-01-01')", (fid,)).lastrowid

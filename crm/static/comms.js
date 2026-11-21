@@ -1146,7 +1146,8 @@ function wireTrialOffer(c, textSel = "#chat-text") {
         if (ta) ta.value = r.text;
         $("#to-res").innerHTML = `<div class="small muted" style="margin:8px 0 4px">${ta ? "Текст с вариантами уже в поле сообщения: проверьте и нажмите «Отправить». " : ""}Когда родитель выберет, запишите одним нажатием:</div>
           ${r.slots.map((x, i) => `<div class="to-slot"><span class="grow">${esc(x.label)} · ${esc(x.group)} · ${esc(x.branch)} <span class="small muted">мест ${x.free}</span></span>
-            ${kidId ? `<button class="btn sm" data-to-book="${i}">Записать</button>` : ""}</div>`).join("")}`;
+            ${kidId ? `<button class="btn sm" data-to-book="${i}">Записать</button>` : ""}</div>`).join("")}
+          ${(r.unavailable||[]).length ? `<details class="small" style="margin-top:8px"><summary>Подходящие по возрасту, но сейчас недоступны (${r.unavailable.length})</summary>${r.unavailable.map(x=>`<div class="muted" style="margin-top:4px">${esc(x.group)} · ${esc(x.age)}: ${esc(x.reason)}</div>`).join("")}</details>` : ""}`;
         $("#to-res").querySelectorAll("[data-to-book]").forEach((b) => (b.onclick = async () => {
           const x = r.slots[+b.dataset.toBook];
           // шаг 3: если данных не хватает, запрос родителю будет уже с выбранным временем
