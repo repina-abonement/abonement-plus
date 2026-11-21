@@ -36,7 +36,7 @@ def main():
     print("Задачи и автосообщения по пробному")
     r = tasks.run(con, datetime(2026, 11, 3, 15, 0))
     t = con.execute("SELECT * FROM tasks WHERE kind='trial_confirm'").fetchone()
-    check(t and t["assignee_id"] == olga and t["due_at"] == "2026-11-04T11:00", "Задача «напомнить о пробном» на Олю, на 11:00 накануне")
+    check(t and t["assignee_id"] == olga and t["due_at"] == "2026-11-04T17:01", "Задача звонка по ПУ на Олю, за 23:59 до занятия")
     check(r["sent"] == 0, "За два дня сообщения ещё не уходят")
     r = tasks.run(con, datetime(2026, 11, 4, 11, 0))
     check(r["sent"] == 1 and "завтра в 17:00" in SENT[-1]["text"] and "Авиаторов, 3А" in SENT[-1]["text"] and "footbolika_deti" in SENT[-1]["text"] and SENT[-1]["chatId"] == "4242",
@@ -50,7 +50,7 @@ def main():
     check(r["sent"] == 0, "Через 5 минут после пробного ещё рано")
     r = tasks.run(con, datetime(2026, 11, 5, 18, 10))
     check(r["sent"] == 1 and "Подскажите как всё прошло?" in SENT[-1]["text"], "Через 10 минут после пробного ушло «Как прошло?»")
-    check(con.execute("SELECT 1 FROM tasks WHERE kind='how_was' AND status='open'").fetchone(), "Появилась задача «Как прошло пробное»")
+    check(con.execute("SELECT 1 FROM tasks WHERE kind='why_not_bought' AND status='open'").fetchone(), "После отметки «пришёл» появилась задача ERP «Почему не купили»")
     check(not con.execute("SELECT 1 FROM tasks WHERE kind='not_marked'").fetchone(), "Тренер отметил, задачи «не отмечен» нет")
 
     print("Не пришёл и перенос")

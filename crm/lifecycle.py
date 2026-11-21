@@ -116,12 +116,23 @@ def tick(con, now: datetime | None = None) -> int:
     now = (now or datetime.now()).replace(second=0, microsecond=0)
     cleanup(con, now)  # сначала снимаем задачи прошлых этапов, иначе новая не встанет
     made = 0
-    # 1. новый лид и недозвон
+    # Переходный режим 21.11.2026: источник истины — подтверждённые цепочки ERP.
+    # Собственные лестницы CRM сохранены ниже как будущая логика, но не запускаются.
+    unsupported = ("no_answer", "close_sale", "first_pay", "reinvite", "win_back", "makeup_check", "revive")
+    marks = ",".join("?" * len(unsupported))
+    con.execute(f"""UPDATE tasks SET status='cancelled',done_at=?,result='Отключена неподтверждённая цепочка CRM'
+                    WHERE status='open' AND source='life' AND kind IN ({marks})""", (_iso(now), *unsupported))
+
+    # Подтверждённое событие ERP: новая карточка → задача «Новый лид», дедлайн 0.
     fresh = lambda days: _iso(now - timedelta(days=days))  # только свежие: старые лиды из ERP задачами не заваливаем
     for s in _people(con, "s.funnel='sales' AND s.stage='lead' AND COALESCE(s.stage_changed_at, s.created_at) >= ?", (fresh(7),)):
         if not _has_open(con, s["id"], s["family_id"]):
             start = max(_dt(s["stage_changed_at"]) or _dt(s["created_at"]) or now, now - timedelta(days=30))
-            made += bool(_add(con, "call_lead", s["id"], pu.add_work(con, start, 15), f"call_lead:{s['id']}", group_id=s["group_id"]))
+            made += bool(_add(con, "call_lead", s["id"], start, f"call_lead:{s['id']}", group_id=s["group_id"]))
+    cleanup(con, now)
+    return made
+
+    # Неисполняемая сохранённая будущая логика CRM. Вернуть её можно только отдельным решением владельца.
     for s in _people(con, "s.funnel='sales' AND s.stage='no_answer' AND s.stage_changed_at >= ?", (fresh(60),)):  # лесенка до 41 дня
         if _has_open(con, s["id"], s["family_id"]):
             continue

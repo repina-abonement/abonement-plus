@@ -165,7 +165,7 @@ def set_responsible(con, branch_id: int, user_id: int | None):
 # ---------------- попадание на этап ----------------
 
 def _to_stage(con, s, kind: str, reason: str, user: dict | None, now: datetime):
-    from . import services as sv
+    from . import services as sv, tasks
     con.execute("""INSERT INTO trial_misses(student_id, trial_at, group_id, kind, reason, created_by, created_at)
                    VALUES (?,?,?,?,?,?,?)""", (s["id"], s["trial_at"] or _iso(now), s["group_id"], kind, reason.strip()[:300],
                                               (user or {}).get("name", "CRM"), _iso(now)))
@@ -173,9 +173,16 @@ def _to_stage(con, s, kind: str, reason: str, user: dict | None, now: datetime):
     n = misses_count(con, s["id"])
     sv.log(con, s["id"], f"Не дошёл до ПУ ({KINDS[kind]}{', ' + reason.strip() if reason.strip() else ''}). Всего не доходил: {n}",
            user, "stage")
-    due = end_of_workday(con, now) if kind == "cancel" else add_work(con, now, 120)
-    # нет отметки: ребёнок мог прийти, а тренер забыть журнал. Сначала спрашиваем тренера, родителям не пишем «вы не пришли»
-    ensure_task(con, s["id"], due, now, title="Нет отметки тренера: уточнить у тренера, был ли ребёнок" if kind == "no_mark" else "")
+    if kind in ("no_mark", "no_show"):
+        _close_trial_tasks(con, s["id"])
+        task_kind = "not_marked" if kind == "no_mark" else "no_show"
+        title = "Нет отметки о ПУ" if kind == "no_mark" else "Не пришли на ПУ"
+        due = now if kind == "no_mark" else now + timedelta(hours=14, minutes=59)
+        tasks.add_task(con, task_kind, s["id"], due, title=title, source="erp_rule",
+                       auto_key=f"erp-event:{task_kind}:{s['id']}:{s['trial_at']}")
+    else:
+        # Отмена заранее отсутствует в подтверждённой матрице ERP и остаётся в прежнем ручном маршруте.
+        ensure_task(con, s["id"], end_of_workday(con, now), now)
 
 
 def cancel_trial(con, sid: int, reason: str, user: dict, now: datetime | None = None):
@@ -199,13 +206,13 @@ def on_trial_mark(con, sid: int, came: bool, user: dict, now: datetime | None = 
     con.execute("UPDATE students SET trial_marked_at=? WHERE id=?", (_iso(now), sid))
     if not came and s["stage"] != "missed_trial":
         _to_stage(con, s, "no_show", "", user, now)
-        _close_trial_tasks(con, sid)
     elif came and s["stage"] == "missed_trial":
         last = con.execute("SELECT id, kind FROM trial_misses WHERE student_id=? AND undone=0 ORDER BY id DESC LIMIT 1", (sid,)).fetchone()
         if last and last["kind"] in ("no_mark", "no_show"):
             con.execute("UPDATE trial_misses SET undone=1 WHERE id=?", (last["id"],))
             con.execute("UPDATE students SET stage='how_was', stage_changed_at=? WHERE id=?", (_iso(now), sid))
             sv.log(con, sid, "Тренер отметил «пришёл»: возвращён в «Как прошло пробное»", user, "stage")
+            _close_trial_tasks(con, sid)
             _close_family_task_if_empty(con, s["family_id"], "Ребёнок был на пробном")
     record_lesson_mark(con, s["group_id"], (s["trial_at"] or "")[:10], now)
 
@@ -462,7 +469,7 @@ def notify_chat(con, which: str, text: str) -> bool:
 
 
 def tick(con, now: datetime | None = None) -> dict:
-    """Каждые 5 минут: пробные без отметки 2 часа → на этап; уведомления; у каждого на этапе есть задача."""
+    """Каждые 5 минут: пробные без отметки >15 часов → на этап; уведомления; контроль задач."""
     from . import services as sv
     now = now or _now()
     moved = alerts = created = 0
@@ -473,13 +480,13 @@ def tick(con, now: datetime | None = None) -> dict:
             who = " ".join(x for x in (_mention(con, m["coach_id"]), _mention(con, _controller(con))) if x)
             notify_chat(con, "coaches", f"⚠️ {who} Срочно отметьте детей в журнале CRM: {m['group']}, {m['branch']}, "
                                         f"{m['date'][8:]}.{m['date'][5:7]} {m['time']}. Без отметки: {m['missing']}")
-    for m in missing_marks(con, now, 120):
+    for m in missing_marks(con, now, 900):
         k = f"nomark:{m['group_id']}:{m['date']}"
-        if add_alert(con, "no_marks", k, f"Нет отметок 2 часа: {m['group']} ({m['branch']}) {m['date'][8:]}.{m['date'][5:7]} {m['time']}, "
+        if add_alert(con, "no_marks", k, f"Нет отметок более 15 часов: {m['group']} ({m['branch']}) {m['date'][8:]}.{m['date'][5:7]} {m['time']}, "
                                            f"тренер {m['coach'] or '—'}, без отметки {m['missing']}", group_id=m["group_id"]):
             alerts += 1
             who = " ".join(x for x in (_mention(con, _controller(con)), _mention(con, _owner_admin(con))) if x)
-            notify_chat(con, "care", f"🔴 {who} Прошло 2 часа, тренер {m['coach'] or '—'} не отметил детей: {m['group']}, {m['branch']}, "
+            notify_chat(con, "care", f"🔴 {who} Прошло более 15 часов, тренер {m['coach'] or '—'} не отметил детей: {m['group']}, {m['branch']}, "
                                      f"{m['date'][8:]}.{m['date'][5:7]} {m['time']}. Без отметки: {m['missing']}. "
                                      "Пробные без отметки ушли на этап «Не дошёл до ПУ»: сначала уточните у тренера, был ли ребёнок, потом звоните родителям")
         for sid in m["trials"]:
@@ -488,12 +495,12 @@ def tick(con, now: datetime | None = None) -> dict:
                 continue
             if s["stage"] in ("trial_booked", "trial_reminder", "on_trial", "trial_done") and s["funnel"] == "sales":
                 _to_stage(con, s, "no_mark", "", None, now)
-                _close_trial_tasks(con, sid)
                 moved += 1
     # защита от потерь: у каждого на этапе есть открытая задача
     for s in con.execute("""SELECT id, name, family_id FROM students WHERE stage IN ('missed_trial','later') AND archived=0
                             AND funnel='sales' AND dnd=0 AND COALESCE(erp_id,'')=''""").fetchall():
-        if not open_task(con, s["family_id"]):
+        exact = con.execute("SELECT 1 FROM tasks WHERE student_id=? AND status='open' AND kind IN ('no_show','not_marked')", (s["id"],)).fetchone()
+        if not exact and not open_task(con, s["family_id"]):
             ensure_task(con, s["id"], now, now)
             add_alert(con, "lost", f"lost:{s['id']}:{_iso(now)[:13]}", f"У {s['name']} на этапе «Не дошёл до ПУ» не было задачи: CRM создала её сама",
                       student_id=s["id"])

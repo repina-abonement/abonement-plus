@@ -12,11 +12,11 @@ from datetime import date, datetime, timedelta
 from . import comms, trialscripts
 
 KINDS = {
-    "trial_confirm": ("Напомнить о пробном и подтвердить", "📅"),
-    "trial_today": ("Напоминание о сегодняшнем пробном", "⏰"),
+    "trial_confirm": ("Напоминание о ПУ (звонок)", "📅"),
+    "trial_today": ("Напоминание о сегодняшнем ПУ (звонок и смс)", "⏰"),
     "how_was": ("Как прошло пробное", "💬"),
-    "no_show": ("Не пришли на пробное", "🚫"),
-    "not_marked": ("Тренер не отметил клиента на пробном", "📝"),
+    "no_show": ("Не пришли на ПУ", "🚫"),
+    "not_marked": ("Нет отметки о ПУ", "📝"),
     "erp_how_was_sms": ("Как прошло ПУ?", "💬"),
     "erp_how_was_today": ("Как прошло ПУ?", "💬"),
     "why_not_bought": ("Почему не купили", "🤔"),
@@ -553,18 +553,15 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
         key = f"{s['id']}:{s['trial_at']}"
         day_before = datetime.combine(t.date() - timedelta(days=1), datetime.min.time()) + timedelta(hours=int(st["day_before_hour"]))
         # задачи
-        if t.date() > now.date():
-            made += bool(add_task(con, "trial_confirm", s["id"], min(day_before, t - timedelta(hours=3)),
+        if t > now:
+            # ERP: задача звонка возникает при записи на ПУ, срок — за 23:59 до занятия.
+            made += bool(add_task(con, "trial_confirm", s["id"], max(now, t - timedelta(hours=23, minutes=59)),
                                   auto_key=f"trial_confirm:{key}"))
-        elif t.date() == now.date() and now < t:
-            # как в ERP (Юлия, 03.11): в день пробного утром «Напоминание о сегодняшнем ПУ»; записали сегодня: сразу
-            morning = datetime.combine(t.date(), datetime.min.time()) + timedelta(hours=9)
-            made += bool(add_task(con, "trial_today", s["id"], morning if s["created_at"][:10] < now.date().isoformat() else now,
-                                  auto_key=f"trial_today:{key}"))
         # «не пришёл» и «нет отметки 2 часа» ведёт этап «Не дошёл до ПУ» (crm/pu.py)
-        if s["trial_came"] == 1:  # Юлия, 03.11: «Как прошло пробное» сразу после отметки тренера «пришёл»
+        if s["trial_came"] == 1:  # ERP: событие «Пришли на ПУ» создаёт «Почему не купили» без задержки.
             marked = s.get("trial_marked_at") or _iso(now)
-            made += bool(add_task(con, "how_was", s["id"], marked[:16], auto_key=f"how_was:{key}"))
+            made += bool(add_task(con, "why_not_bought", s["id"], marked[:16], title="Почему не купили",
+                                  auto_key=f"why_not_bought:{key}"))
         # сообщения
         if send and st["auto_day_before"] == "1" and now >= day_before and now < t - timedelta(hours=3) and t.date() > now.date():
             sent += bool(send_auto(con, s, "day_before", "msg_day_before").get("ok"))
@@ -580,7 +577,7 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
         stale = (not s or s["trial_at"] is None or not rest.endswith(":" + s["trial_at"])
                  or s["funnel"] != "sales" or s["stage"] in ("bought", "refused")
                  or (kind == "not_marked" and s["trial_came"] is not None)
-                 or (kind == "how_was" and s["trial_came"] == 0))
+                 or (kind in ("how_was", "why_not_bought") and s["trial_came"] == 0))
         if stale:
             con.execute("UPDATE tasks SET status='cancelled', done_at=? WHERE id=?", (_iso(now), tid))
     return {"tasks": made, "sent": sent}
@@ -749,10 +746,12 @@ def manual_board(con, user: dict, scope: str = "mine") -> dict:
 ERP_COLUMNS = [
     ("unpaid_visit", "Был на занятии без оплаты"),  # красная, первая (Юлия, 04.11)
     ("new_lead", "Новый лид"),
-    ("trial_confirm", "Напоминание о пробном занятии"),
-    ("trial_today", "Напоминание о сегодняшнем ПУ"),
-    ("not_marked", "Клиент не отмечен на ПУ"),
-    ("how_was", "Как прошло пробное"),
+    ("trial_confirm", "Напоминание о ПУ (звонок)"),
+    ("trial_today", "Напоминание о сегодняшнем ПУ (звонок и смс)"),
+    ("not_marked", "Нет отметки о ПУ"),
+    ("how_was", "Как прошло ПУ?"),
+    ("erp_how_was_sms", "Как прошло ПУ?"),
+    ("erp_how_was_today", "Как прошло ПУ?"),
     ("no_show", "Не пришли на ПУ"),
     ("why_not_bought", "Почему не купили"),
     ("think", "Думает"),
