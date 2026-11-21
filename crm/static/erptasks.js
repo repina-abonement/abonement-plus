@@ -66,10 +66,17 @@ function wireErpTasks(page) {
     if (t && t.kind === "rebook" && typeof openRebook === "function") return openRebook(t.id);
     if (t && t.kind === "reinvite_pu") return reinviteDone(t);
     if (t && ["single_remind", "single_next"].includes(t.kind)) return singleTaskDialog(t, render);
+    if(t.erp_outcomes?.length)return erpOutcomeDialog(t,render);
     const result = window.prompt("Итог (необязательно): дозвонилась, подтвердили…", "");
     if (result === null) return;
     try { await api("POST", `/api/tasks/${t.id}/done`, { result }); toast("Задача выполнена"); render(); } catch (e) { fail(e); }
   }));
+}
+
+function erpOutcomeDialog(t,done){
+  openDrawer(`<h2>${esc(t.title||"Задача")}</h2><div class="small muted">Выберите результат — CRM поставит следующую задачу точно по цепочке ERP.</div>
+    <div class="section" id="erp-outcomes" style="display:grid;gap:8px">${t.erp_outcomes.map((x,i)=>`<button class="btn ${x==="Закрыть задачу"?"":"primary"}" data-out="${i}">${esc(x)}</button>`).join("")}</div>`);
+  document.querySelectorAll("#erp-outcomes [data-out]").forEach(b=>b.onclick=async()=>{b.disabled=true;try{await api("POST",`/api/tasks/${t.id}/done`,{result:t.erp_outcomes[+b.dataset.out]});closeDrawer();toast("Задача выполнена");done()}catch(e){b.disabled=false;fail(e)}});
 }
 
 /* «Пригласить на ПУ повторно» выполнено: что получилось */

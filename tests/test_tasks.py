@@ -88,9 +88,9 @@ def main():
     imported = con.execute("SELECT id,title,due_at,source FROM tasks WHERE student_id=? AND status='open'", (erp_sid,)).fetchall()
     check([tuple(x) for x in imported] == [(exact, "Напоминание о пробном занятии", "2026-11-08T10:00", "erp")],
           "У перенесённого ребёнка остаётся только точная задача ERP; CRM не добавляет свою")
-    tasks.complete(con, tid, {"name": "Ольга"}, "Дорого, перезвонить в декабре")
-    check("Дорого" in con.execute("SELECT text FROM history WHERE student_id=? ORDER BY id DESC", (sid,)).fetchone()[0],
-          "Итог задачи записан в историю клиента")
+    tasks.complete(con, tid, {"name": "Ольга"}, "Думают")
+    check("Думают" in con.execute("SELECT text FROM history WHERE student_id=? ORDER BY id DESC", (sid,)).fetchone()[0],
+          "Точный исход ERP записан в историю клиента")
 
     print("Смена исполнителя и правка задачи")
     artem = con.execute("INSERT INTO users(login,name,role,pw_hash) VALUES ('artem','Артём Орёл','coach','x$y')").lastrowid

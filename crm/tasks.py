@@ -17,6 +17,8 @@ KINDS = {
     "how_was": ("Как прошло пробное", "💬"),
     "no_show": ("Не пришли на пробное", "🚫"),
     "not_marked": ("Тренер не отметил клиента на пробном", "📝"),
+    "erp_how_was_sms": ("Как прошло ПУ?", "💬"),
+    "erp_how_was_today": ("Как прошло ПУ?", "💬"),
     "why_not_bought": ("Почему не купили", "🤔"),
     "rebook": ("Перезаписать на ПУ", "🔁"),
     "reinvite_pu": ("Пригласить на ПУ повторно", "🔄"),
@@ -603,6 +605,8 @@ def _task_out(con, r) -> dict:
                 (s["id"], s["trial_at"]))]
     a = con.execute("SELECT name FROM users WHERE id=?", (d["assignee_id"],)).fetchone() if d["assignee_id"] else None
     d["assignee"] = a[0] if a else ""
+    from . import erpworkflow
+    d["erp_outcomes"] = erpworkflow.options(d)
     return d
 
 
@@ -834,6 +838,8 @@ def complete(con, tid: int, user: dict, result: str = "") -> None:
     t = con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
     if not t:
         raise comms.CommsError("Задача не найдена")
+    if t["status"] != "open":
+        raise comms.CommsError("Задача уже закрыта")
     if t['source']=='refund' and str(t['auto_key'] or '').startswith('refund-control:'):
         request=con.execute('SELECT state FROM refund_requests WHERE control_task_id=?',(tid,)).fetchone()
         if request and request['state']!='received':raise comms.CommsError('Сначала подтвердите получение денег клиентом в заявке на возврат')
@@ -849,6 +855,16 @@ def complete(con, tid: int, user: dict, result: str = "") -> None:
             raise comms.CommsError('Задача остаётся открытой. Заполните: ' + ', '.join(info['labels'][k] for k in info['missing']))
     if t["kind"] == "rebook":
         raise comms.CommsError("Эту задачу закрывают результатом: перезаписан, не дозвонились, перезвонить позже или отказ")
+    from . import erpworkflow
+    choices=erpworkflow.options(t)
+    outcome=result.strip()
+    if choices:
+        if outcome not in choices:raise comms.CommsError('Выберите результат задачи из списка ERP')
+        if outcome!='Закрыть задачу':
+            kind=erpworkflow.next_kind(outcome,t)
+            add_task(con,kind,t['student_id'],erpworkflow.due_at(con,outcome,t['student_id']),
+                     title=outcome,source='erp_rule',assignee=t['assignee_id'],
+                     auto_key=f"erp-rule:{tid}:{outcome}",note=t['note'] or '')
     con.execute("UPDATE tasks SET status='done', done_at=?, done_by=?, result=? WHERE id=?",
                 (_iso(_now()), user.get("name", ""), result.strip(), tid))
     if t["student_id"]:
