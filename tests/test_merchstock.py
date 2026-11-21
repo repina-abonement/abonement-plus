@@ -62,6 +62,17 @@ def main():
     extra = merch.add_stock_item(con, {"name": "Пакеты", "unit": "шт."})
     check(tuple(con.execute("SELECT norm,stock_only FROM merch_items WHERE id=?", (extra,)).fetchone()) == (0, 1),
           "Администратор может добавить дополнительную складскую позицию без минимума и цены")
+    pennant_before = con.execute("SELECT id,price FROM merch_items WHERE name='Вымпел'").fetchone()
+    pennant = merch.add_stock_item(con, {"name": "Вымпел", "unit": "шт."})
+    pennant_after = con.execute("SELECT id,price,active,stock_only FROM merch_items WHERE id=?", (pennant,)).fetchone()
+    check(tuple(pennant_after) == (pennant_before["id"], 1200, 1, 1),
+          "Товар из каталога подключается к складу без дубля и без потери цены")
+    try:
+        merch.add_stock_item(con, {"name": "  вымпел  ", "unit": "шт."})
+        duplicate = False
+    except merch.MerchError as exc:
+        duplicate = "складском списке" in str(exc)
+    check(duplicate, "Повтор с другим регистром не создаёт вторую складскую позицию")
     print("ok")
 
 

@@ -210,6 +210,16 @@ def add_stock_item(con, data: dict) -> int:
     except (TypeError, ValueError):
         raise MerchError("Минимум укажите числом")
     unit = _clean_name(data.get("unit")) or "шт."
+    existing = next((dict(row) for row in con.execute("SELECT * FROM merch_items")
+                     if _clean_name(row["name"]).casefold().replace("ё", "е") == name.casefold().replace("ё", "е")), None)
+    if existing:
+        if existing.get("stock_only") or existing.get("norm") or existing.get("stock") is not None:
+            raise MerchError("Такая позиция уже есть в складском списке")
+        # A sale item may already exist in the merch catalogue. Attach that
+        # exact row to inventory, preserving its price and sales history.
+        con.execute("UPDATE merch_items SET active=1,stock_only=1,norm=?,stock_unit=? WHERE id=?",
+                    (norm, unit, existing["id"]))
+        return existing["id"]
     try:
         return con.execute("""INSERT INTO merch_items(name,price,active,sort,norm,stock_only,stock_unit)
                               VALUES (?,0,1,(SELECT COALESCE(MAX(sort),0)+1 FROM merch_items),?,1,?)""",
