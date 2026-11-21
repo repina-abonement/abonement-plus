@@ -46,9 +46,14 @@ def main():
     t = con.execute("SELECT title, assignee_id FROM tasks WHERE id=?", (r["task"],)).fetchone()
     check(t["assignee_id"] == owner and f"{name[a]} 10" in t["title"], "Задача руководителю в Планере: что заказать")
     second = [{"id": x["id"], "stock": 15 if x["id"] == a else x["norm"], "norm": 1 if x["id"] == a else x["norm"]} for x in merch.items(con, inventory=True)]
-    r = merch.stock_count(con, second, {"id": olga, "name": "Ольга", "role": "operator"}, False)
-    check(not r["order"] and con.execute("SELECT norm FROM merch_items WHERE id=?", (a,)).fetchone()[0] == 15,
-          "Администратор вписывает остатки, но норму не меняет; всего хватает - задачи нет")
+    r = merch.stock_count(con, second, {"id": olga, "name": "Ольга", "role": "operator"}, True)
+    check(not r["order"] and con.execute("SELECT norm FROM merch_items WHERE id=?", (a,)).fetchone()[0] == 1,
+          "Администратор меняет норму; при достаточном остатке задача не создаётся")
+    OFFLINE = {"id": olga, "name": "Виктория", "role": "operator", "is_offline_admin": 1}
+    offline_section = merch.planner_task_section(
+        con, {"title": "Учёт мерча", "note": "", "recur_id": 7, "due_at": "2026-11-20T12:00"},
+        {"weekdays": [4]}, OFFLINE)
+    check(offline_section["can_norm"], "Офлайн-администратор видит редактируемую норму в карточке задачи")
     before = tuple(con.execute("SELECT stock,norm,stock_at FROM merch_items WHERE id=?", (a,)).fetchone())
     old_day = (date.today() - timedelta(days=34)).isoformat()
     historical = [{"id": x["id"], "stock": 2, "norm": 99} for x in merch.items(con, inventory=True)]

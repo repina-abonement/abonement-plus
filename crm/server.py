@@ -1721,7 +1721,7 @@ def merch_items(con, h, user, body, q):
     show_all = user["role"] == "admin" and q.get("all") == "1"
     snapshot = merch.stock_count_values(con, q.get("counted_on"))
     return {"items": merch.items(con, all_=show_all), "stock_items": merch.items(con, all_=show_all, inventory=True),
-            "methods": merch.METHODS, "can_norm": user["role"] == "admin", "stock_status": merch.stock_status(con),
+            "methods": merch.METHODS, "can_norm": perms.can(user, "merch_stock", "full"), "stock_status": merch.stock_status(con),
             "stock_values": snapshot["values"], "selected_stock_date": snapshot["counted_on"]}
 
 
@@ -1729,7 +1729,7 @@ def merch_items(con, h, user, body, q):
 def merch_stock(con, h, user, body, q):
     """Пересчёт склада мерча: остатки, норма, список к заказу и задача руководителю в Планер."""
     try:
-        return merch.stock_count(con, body.get("items") or [], user, user["role"] == "admin", body.get("counted_on"))
+        return merch.stock_count(con, body.get("items") or [], user, True, body.get("counted_on"))
     except planner.PlanError as e:
         raise ApiError(str(e))
 

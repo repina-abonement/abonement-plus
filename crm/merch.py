@@ -149,15 +149,16 @@ def planner_task_section(con, task: dict, repeat: dict | None, user: dict) -> di
     weekdays = [int(x) for x in (repeat or {}).get("weekdays", [])]
     labels = [WEEKDAY_NAMES[x] for x in weekdays if 0 <= x < len(WEEKDAY_NAMES)]
     snapshot = stock_count_values(con)
+    from . import perms
     return {"stock_items": items(con, inventory=True), "stock_status": stock_status(con),
             "stock_values": snapshot["values"], "selected_stock_date": snapshot["counted_on"],
-            "can_norm": user.get("role") == "admin" or bool(user.get("is_senior")),
+            "can_norm": perms.can(user, "merch_stock", "full"),
             "schedule": ", ".join(labels) or task.get("due_at", "")[:10]}
 
 
 def stock_count(con, rows: list, user: dict, can_norm: bool, counted_on: str | None = None) -> dict:
     """Пересчёт мерча (общий склад): вписали, сколько есть, CRM считает, что заказать, и ставит задачу руководителю.
-    Например, кружки 5 при норме 15: заказать 10. Норму меняют руководитель и старший администратор."""
+    Например, кружки 5 при норме 15: заказать 10. Норму меняют администраторы с правом складского учёта."""
     from . import planner
     today = _now().date()
     try: count_day = date.fromisoformat(counted_on) if counted_on else today
