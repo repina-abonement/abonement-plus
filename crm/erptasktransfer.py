@@ -29,7 +29,7 @@ def _parse(file,row):
     if 'событие' in hs:
         raise ApiError('Это история событий задач. Нужен актуальный реестр задач, а не журнал событий')
     source=val('id задачи','id задачи erp','№ задачи','номер задачи','id')
-    client=val('id посетителя','id клиента','id заявки','erp id клиента','erp id ребёнка или лида')
+    client=val('id посетителя','id клиента','id заявки','erp id клиента','erp id ребенка или лида')
     namespace='lead' if val('id заявки') else 'student'
     note=val('комментарий','описание','комментарий в событии')
     trial_refs=re.findall(r'(?:п[оу]|пробн\w*|посетител\w* записан\w* на п[оу])[^#\n]*#(\d+)',note.lower())

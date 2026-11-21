@@ -63,18 +63,22 @@ class TaskTransferTest(unittest.TestCase):
         self.con.execute("INSERT INTO erp_trial_visits(source_id,student_id,group_id,visit_at,came) VALUES ('834972',?,?,?,0)",
                          (self.sid,group,'2026-11-22T17:45'))
         headers='ID задачи ERP;ERP ID ребёнка или лида;Название в последнем событии выборки;Дедлайн;Подтверждение состояния;Комментарий в событии;Исполнитель\n'
-        rows=('195134;;Напоминание о ПУ (смс);22.11.2026 00:00;Открыта по превью 21.11.2026;Посетитель записан на ПУ #834972;Оператор Ольга\n'
+        rows=('195133;101;Новый лид;21.11.2026 00:00;Открыта по превью 21.11.2026;Первичный контакт;Оператор Ольга\n'
+              '195134;;Напоминание о ПУ (смс);22.11.2026 00:00;Открыта по превью 21.11.2026;Посетитель записан на ПУ #834972;Оператор Ольга\n'
               '195135;;Почему не купили;23.11.2026 00:00;Текущее состояние не проверено;Посетитель записан на ПУ #834972;Оператор Ольга\n')
         uid=erpimport.upload(self.con,'ERP_tasks_partial.csv',(headers+rows).encode(),'tasks')['id']
         plan=transfer.prepare(self.con,[uid])
-        self.assertEqual(plan['unique_tasks'],1)
-        self.assertEqual(plan['actions'][0]['trial_source_id'],'834972')
-        self.assertEqual(plan['actions'][0]['after']['student_id'],self.sid)
-        self.assertEqual(plan['actions'][0]['after']['status'],'open')
+        self.assertEqual(plan['unique_tasks'],2)
+        trial=next(x for x in plan['actions'] if x['erp_task_id']=='195134')
+        direct=next(x for x in plan['actions'] if x['erp_task_id']=='195133')
+        self.assertEqual(trial['trial_source_id'],'834972')
+        self.assertEqual(trial['after']['student_id'],self.sid)
+        self.assertEqual(direct['client_erp_id'],'101')
+        self.assertEqual(direct['after']['status'],'open')
         self.assertEqual(len(plan['issues']),1)
         self.assertIn('явное состояние',plan['issues'][0]['reason'])
         result=transfer.apply(self.con,[uid],plan['token'],self.user,'test-backup')
-        self.assertEqual(result['verified_tasks'],1)
+        self.assertEqual(result['verified_tasks'],2)
         saved=self.con.execute("SELECT title,student_id,status FROM tasks WHERE auto_key='erp-full-task:195134'").fetchone()
         self.assertEqual(tuple(saved),('Напоминание о ПУ (смс)',self.sid,'open'))
 
