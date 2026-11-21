@@ -50,7 +50,7 @@ finally:f.doCleanups()
  const configure=async()=>page.evaluate(meta=>{S.meta=meta;S.user=meta.user;S.view='inbox';S.subscriptionCalendars={};window.copied=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>window.copied.push(text)}})},fixture.roles[role].meta);
  const open=()=>page.evaluate(id=>openStudent(id,{tab:'abon'}),sid);
  for(const key of ['ordinary_operator_model','offline']){
-  role=key;stage='new';await configure();await open();eq(await page.locator('#act-sell').count(),1);eq(await page.locator('#act-sell').isVisible(),true);eq(fixture.roles[role].meta.user.perms.client_sales,'full');
+  role=key;stage='new';await configure();await page.evaluate(()=>shell());eq(await page.locator('#new-client').count(),1);eq(await page.locator('#new-client').isVisible(),true);await open();eq(await page.locator('#act-sell').count(),1);eq(await page.locator('#act-sell').isVisible(),true);eq(fixture.roles[role].meta.user.perms.client_sales,'full');eq(fixture.roles[role].meta.user.perms.client_create,'full');
   const views=await page.evaluate(()=>visibleViews().map(([key])=>key));ok(!views.includes('client_sales'),'Capability must not become a menu section');
   if(key==='offline'){
    for(const forbidden of ['sales','settings','dashboard','payments','fiscal','team'])ok(!views.includes(forbidden),forbidden);

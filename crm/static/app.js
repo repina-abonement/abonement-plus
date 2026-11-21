@@ -493,7 +493,7 @@ function shell() {
   app.innerHTML = `
   <header class="topbar">
     <div class="brand"><i aria-hidden="true">⚽</i><div>Абонемент <span>Плюс</span></div></div>
-    ${can("members", "full") ? `<button class="btn" id="new-client">+ Клиент</button>` : ""}
+    ${can("client_create", "full") ? `<button class="btn" id="new-client">+ Клиент</button>` : ""}
     <nav class="nav">${sideNav(views)}</nav>
     <div class="sidebar-account">
       <div class="sidebar-account-text"><b>${esc(S.user.name)}</b><small>${esc(S.user.title || "")}</small></div>

@@ -1318,12 +1318,12 @@ def people_list(con, h, user, body, q):
     return people.listing(con, q.get("kind") or "all", q.get("status") or "", q.get("erp") or "", q.get("q") or "", q.get("archived") == "1")
 
 
-@route("GET", "/api/check-phone", role="operator")
+@route("GET", "/api/check-phone", role="operator|client_create:full")
 def check_phone(con, h, user, body, q):
     return sv.find_families_by_phone(con, q.get("phone", ""))
 
 
-@route("POST", "/api/students", role="operator")
+@route("POST", "/api/students", role="operator|client_create:full")
 def student_create(con, h, user, body, q):
     sid = sv.create_new_lead(con, body, user)
     if body.get("phone"):
