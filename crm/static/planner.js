@@ -233,12 +233,13 @@ async function renderWeek(box) {
       reload();
     } catch (e) { fail(e); cb.checked = !cb.checked; }
   }));
-  // быстрое добавление в колонку дня
+  // Быстрое добавление открывает одну широкую форму над неделей. Внутри
+  // узкой колонки поля становились почти непригодными для заполнения.
   box.querySelectorAll("[data-pq]").forEach((button) => (button.onclick = () => {
     document.querySelectorAll('.planner-day-form').forEach(el=>el.remove());
-    const globalForm=$('#pl-form');if(globalForm)globalForm.innerHTML='';
-    const form=document.createElement('div');form.className='planner-day-form';
-    button.after(form);
+    const form=$('#pl-form');
+    if(!form)return;
+    form.innerHTML='';
     openTaskForm(form, () => {
       if (C.status === "done") C.status = "all";
       reload();

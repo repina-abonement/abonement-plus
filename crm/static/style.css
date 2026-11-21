@@ -2053,7 +2053,7 @@ html.theme-soft #comms-box .family-chat-feed{background:#182624}html.theme-soft 
 
 .planner-shift.drop{outline:2px solid var(--accent,#168c53);outline-offset:2px}.planner-shift{min-height:80px}
 
-.planner-day-form{min-width:0;margin:8px 0 12px}.planner-day-form .task-form{padding:10px;min-width:0;background:var(--surface,#fff)}.planner-day-form .row{flex-direction:column;align-items:stretch!important}.planner-day-form .row>.field,.planner-day-form .row>.btn{flex:auto!important;min-width:0;width:100%}.planner-day-form input,.planner-day-form select,.planner-day-form textarea{min-width:0;max-width:100%}.planner-form-target{font-size:13px;overflow-wrap:anywhere;margin-bottom:10px}.planner-form-target>div{margin-top:4px;color:var(--muted)}
+.planner-form-target{font-size:13px;overflow-wrap:anywhere;margin-bottom:10px}.planner-form-target>div{margin-top:4px;color:var(--muted)}
 
 .payment-control-summary{margin-top:12px;padding:14px}.payment-control-summary>.chips{margin-top:10px;align-items:center}.payment-control-details{min-width:170px;max-width:340px}.payment-control-details>summary{cursor:pointer;list-style:none}.payment-control-details>div{margin-top:5px}.payment-control-details ul{padding-left:18px;margin:8px 0}.payment-control-details li{margin:4px 0}
 
