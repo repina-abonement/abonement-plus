@@ -1725,7 +1725,7 @@ def merch_items(con, h, user, body, q):
             "stock_values": snapshot["values"], "selected_stock_date": snapshot["counted_on"]}
 
 
-@route("POST", "/api/merch/stock", role="merch:full")
+@route("POST", "/api/merch/stock", role="merch_stock:full")
 def merch_stock(con, h, user, body, q):
     """Пересчёт склада мерча: остатки, норма, список к заказу и задача руководителю в Планер."""
     try:
@@ -1739,7 +1739,7 @@ def merch_item_add(con, h, user, body, q):
     return {"id": mex(merch.save_item, con, body)}
 
 
-@route("POST", "/api/merch/stock/items", role="merch:full")
+@route("POST", "/api/merch/stock/items", role="merch_stock:full")
 def merch_stock_item_add(con, h, user, body, q):
     return {"id": mex(merch.add_stock_item, con, body)}
 
