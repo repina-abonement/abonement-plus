@@ -169,16 +169,22 @@ def main():
       'attendance':[
         {'date':'2026-11-03','time':'18:30','group':'Север, сборная','type':'Абонемент','erp_subscription_id':'NOV-MAIN','source_message_id':'tg-101','source_message_url':'https://t.me/c/1/101','status':'присутствовал'},
         {'date':'2026-11-07','time':'17:00','group':'Юг, ОФП 6–8','type':'Абонемент','erp_subscription_id':'NOV-OFP','erp_attendance_id':'ERP-MARK-1','status':'присутствовал'}]}
+    # Compatibility with the old schema: the message itself used to be the
+    # unique visit id.  It must still be recognised for this exact child.
+    legacy_item=partial['attendance'][0]
+    con.execute('''INSERT INTO erp_history_visits(source_id,source_subscription_id,student_id,group_id,visit_date,visit_time,kind,status,source_payload,imported_at,imported_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)''',('telegram:tg-101','NOV-MAIN',psid,main_group,'2026-11-03','18:30','subscription','present',
+      erphistory._json(legacy_item),'2026-11-01T00:00:00','Старый перенос'))
     partial_before=(con.execute('SELECT count(*) FROM payments').fetchone()[0],money.balance(con,psid),dict(con.execute('SELECT * FROM students WHERE id=?',(psid,)).fetchone()))
     partial_plan=erphistory.preview(con,partial,'2026-11')
-    assert partial_plan['can_apply'] and partial_plan['added']==17 and partial_plan['review']==0,partial_plan
+    assert partial_plan['can_apply'] and partial_plan['added']==16 and partial_plan['existing']==1 and partial_plan['review']==0,partial_plan
     assert partial_plan['children'][0]['student']['match']=='profile'
     telegram=next(x for x in partial_plan['children'][0]['visits'] if x['source_type']=='telegram')
-    assert telegram['source_ref']=='https://t.me/c/1/101' and telegram['source_id']=='telegram:tg-101'
+    assert telegram['source_ref']=='https://t.me/c/1/101' and telegram['source_id'].startswith('telegram:tg-101:visit:')
     old=erphistory.PILOT_KEYS;erphistory.PILOT_KEYS={erphistory._pilot_key('PARTIAL-ERP','2026-11')}
     try: partial_result=erphistory.apply(con,partial,'2026-11',partial_plan['token'],{'name':'Тест'})
     finally: erphistory.PILOT_KEYS=old
-    assert (partial_result['subscriptions_added'],partial_result['planned_lessons_added'],partial_result['visits_added'])==(2,13,2)
+    assert (partial_result['subscriptions_added'],partial_result['planned_lessons_added'],partial_result['visits_added'])==(2,13,1)
     partial_events=clientattendance.calendar(con,psid,'2026-11')['events']
     assert sum(x['status']=='planned' for x in partial_events)==11
     assert sum(x['status']=='present' for x in partial_events)==2
@@ -194,6 +200,32 @@ def main():
     try: later_result=erphistory.apply(con,later,'2026-11',later_plan['token'],{'name':'Тест'})
     finally: erphistory.PILOT_KEYS=old
     assert (later_result['subscriptions_added'],later_result['planned_lessons_added'],later_result['visits_added'])==(0,0,1)
+
+    # The same Telegram group report may confirm another child's visit.  Its
+    # visit id must differ, while the real chat/message reference stays equal.
+    sfid=con.execute("INSERT INTO families(name) VALUES ('Семья второго ребёнка')").lastrowid
+    ssid=con.execute("INSERT INTO students(family_id,name,birth,erp_id,stage_changed_at,created_at) VALUES (?,?,?,?,?,?)",
+      (sfid,'Второй Ребёнок','2015-03-04','SECOND-ERP','2026-01-01','2026-01-01')).lastrowid
+    con.execute("INSERT INTO enrollments(student_id,group_id,created_at) VALUES (?,?,?)",(ssid,main_group,'2026-01-01'))
+    shared_mark={'date':'2026-11-10','time':'18:30','group':'Север, сборная','type':'Абонемент',
+      'erp_subscription_id':'SECOND-SUB','source_chat_id':'-1001602433070','source_message_id':'26745',
+      'source_message_url':'https://t.me/c/1602433070/26745','status':'присутствовал'}
+    second={'child':'Второй Ребёнок','erp_student_id':'SECOND-ERP','month':'2026-11','partial_attendance':True,
+      'subscriptions':[{'erp_id':'SECOND-SUB','valid_from':'2026-11-10','valid_until':'2026-11-10','lesson_count':1,
+        'price':1000,'schedule':[{'date':'2026-11-10','time':'18:30','group':'Север, сборная'}]}],
+      'attendance':[shared_mark]}
+    first_shared={**second,'child':'Ребёнок Тестовый','child_profile':partial['child_profile'],'erp_student_id':'PARTIAL-ERP','subscriptions':[
+      {**second['subscriptions'][0],'erp_id':'FIRST-SHARED'}], 'attendance':[{**shared_mark,'erp_subscription_id':'FIRST-SHARED'}]}
+    for payload,key in ((first_shared,('PARTIAL-ERP','2026-11')),(second,('SECOND-ERP','2026-11'))):
+      p=erphistory.preview(con,payload,'2026-11'); assert p['can_apply'] and p['review']==0 and p['added']==3,p
+      old=erphistory.PILOT_KEYS;erphistory.PILOT_KEYS={erphistory._pilot_key(*key)}
+      try: erphistory.apply(con,payload,'2026-11',p['token'],{'name':'Тест'})
+      finally: erphistory.PILOT_KEYS=old
+      again=erphistory.preview(con,payload,'2026-11')
+      assert again['added']==0 and again['existing']==3 and again['review']==0,again
+    shared_rows=list(con.execute("SELECT source_id,source_payload FROM erp_history_visits WHERE source_payload LIKE '%26745%'"))
+    assert len(shared_rows)==2 and len({x['source_id'] for x in shared_rows})==2
+    assert all('26745' in x['source_payload'] and '-1001602433070' in x['source_payload'] for x in shared_rows)
     partial_after=(con.execute('SELECT count(*) FROM payments').fetchone()[0],money.balance(con,psid),dict(con.execute('SELECT * FROM students WHERE id=?',(psid,)).fetchone()))
     assert partial_before==partial_after
     wrong_phone={**partial,'erp_student_id':'WRONG-PHONE','child_profile':{**partial['child_profile'],'parent_phone':'+7 999 000-00-00'}}
@@ -205,6 +237,22 @@ def main():
     wrong_ofp={**allowed_november,'subscriptions':[allowed_november['subscriptions'][0],
       {**allowed_november['subscriptions'][1],'schedule':[{**x,'time':'16:00'} for x in ofp_plan]}]}
     assert '17:00' in erphistory._pilot_contract_issue(wrong_ofp,'84894','2026-11')
+    sharipov_dates=(('2026-11-01','19:30'),('2026-11-03','18:30'),('2026-11-08','19:30'),
+                    ('2026-11-10','18:30'),('2026-11-15','19:30'))
+    sharipov={**partial,'erp_student_id':'85160','subscriptions':[
+      {**partial['subscriptions'][0],'erp_id':'828113'},
+      {**partial['subscriptions'][1],'erp_id':'828114'}], 'attendance':[
+        {**partial['attendance'][0],'date':day,'time':tm,'erp_subscription_id':'828113','source_chat_id':'-1001602433070',
+         'source_message_id':message_id,'source_message_url':f'https://t.me/c/1602433070/{message_id}'}
+        for message_id,(day,tm) in zip(('26745','26789','26810','26908','27065'),sharipov_dates)]}
+    assert erphistory._pilot_contract_issue(sharipov,'85160','2026-11')==''
+    sharipov_preview=erphistory.preview(con,sharipov,'2026-11')
+    assert sharipov_preview['can_apply'] and sharipov_preview['review']==0
+    assert len(sharipov_preview['children'][0]['subscriptions'])==2
+    assert len(sharipov_preview['children'][0]['planned'])==13
+    assert len(sharipov_preview['children'][0]['visits'])==5
+    assert 'подтверждённые сообщения' in erphistory._pilot_contract_issue(
+      {**sharipov,'attendance':sharipov['attendance'][:-1]},'85160','2026-11')
     print('ok')
 
 if __name__=='__main__':main()

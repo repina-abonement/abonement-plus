@@ -37,6 +37,7 @@ PILOT_KEYS = {
     "5331a74804c2a561b997d253d29bbccb642f426cf4f8b8ae5c2a03b75fa3e5e1",
     "b05a6695f5f2fd90d48242b5ecc350fee14171df5e11e847d1264e44ff94eb99",
     "e096e0e682db8cb70845d2d6fe84476b0ca8ba0cefe4e8beff3340bf6a3df7be",
+    "f866bad935d3d87f73f94421f1d2412a3d1417bedf450cf4c52210385ff82c25",
 }
 PILOT_CONTRACTS = {
     ("84894", "2026-11"): {
@@ -44,6 +45,7 @@ PILOT_CONTRACTS = {
         "827957": ("2026-11-07", "2026-11-28", 4, 4800),
     },
 }
+SHARIPOV_NOVEMBER_MESSAGES = {"26745", "26789", "26810", "26908", "27065"}
 SKIP = {"группа", "сборная", "пуп", "журнал", "тц"}
 
 
@@ -93,22 +95,72 @@ def _planned_lessons(row, sub):
     return [x for x in [*own, *shared] if isinstance(x, dict)]
 
 
-def _visit_source(item):
-    erp_id = str(item.get("erp_attendance_id") or "").strip()
-    if erp_id:
-        return erp_id, "erp", erp_id
+def _telegram_source(item):
+    """Return the real Telegram message identity separately from a visit identity."""
     message_id = str(item.get("source_message_id") or "").strip()
     chat_id = str(item.get("source_chat_id") or "").strip()
     message_url = str(item.get("source_message_url") or "").strip()
     if message_id:
         stable = f"{chat_id}:{message_id}" if chat_id else message_id
-        return "telegram:" + stable, "telegram", message_url or stable
+        return stable, message_url or stable
     if message_url:
-        return "telegram-url:" + hashlib.sha256(message_url.encode()).hexdigest(), "telegram", message_url
+        return "url:" + hashlib.sha256(message_url.encode()).hexdigest(), message_url
+    return "", ""
+
+
+def _visit_source(item, erp_student_id=""):
+    erp_id = str(item.get("erp_attendance_id") or "").strip()
+    if erp_id:
+        return erp_id, "erp", erp_id
+    message, source_ref = _telegram_source(item)
+    if message:
+        # One group report can prove several children's visits and even several
+        # lessons.  The message is evidence, not the visit's unique key.
+        identity = [str(erp_student_id), str(item.get("erp_subscription_id") or ""),
+                    str(item.get("date") or ""), str(item.get("time") or ""), _norm(item.get("type"))]
+        visit_id = hashlib.sha256(_json(identity).encode()).hexdigest()
+        return f"telegram:{message}:visit:{visit_id}", "telegram", source_ref
     return "", "", ""
 
 
+def _legacy_visit_source(item):
+    """Source id written before Telegram message and visit ids were separated."""
+    message, _ = _telegram_source(item)
+    if not message:
+        return ""
+    if message.startswith("url:"):
+        return "telegram-url:" + message.removeprefix("url:")
+    return "telegram:" + message
+
+
+def _legacy_visit(con, table, item, student_id, group_id, kind, status):
+    legacy_id = _legacy_visit_source(item)
+    if not legacy_id or not student_id:
+        return None
+    row = con.execute(f"SELECT * FROM {table} WHERE source_id=?", (legacy_id,)).fetchone()
+    if not row or row["student_id"] != student_id or row["visit_date"] != item.get("date") or row["visit_time"] != item.get("time") or row["kind"] != kind or row["status"] != status:
+        return None
+    if table == "erp_history_visits" and group_id and row["group_id"] != group_id:
+        return None
+    if table == "erp_history_unassigned_visits" and row["source_group"] != str(item.get("group") or ""):
+        return None
+    return row
+
+
 def _pilot_contract_issue(row, erp_id, month):
+    if (erp_id, month) == ("85160", "2026-11"):
+        subs = _subscriptions(row)
+        if {str(x.get("erp_id") or "") for x in subs} != {"828113", "828114"}:
+            return "Абонементы не совпадают с разрешённым точечным предпросмотром Шарипова"
+        if not row.get("partial_attendance"):
+            return "Для этого пилота требуется раздельный план и частично подтверждённая посещаемость"
+        if sum(len(_planned_lessons(row, sub)) for sub in subs) != 13:
+            return "В точечном плане Шарипова должно быть 13 занятий"
+        visits = row.get("attendance") or []
+        if len(visits) != 5 or {str(x.get("source_message_id") or "") for x in visits} != SHARIPOV_NOVEMBER_MESSAGES or any(
+                str(x.get("source_chat_id") or "") != "-1001602433070" for x in visits):
+            return "Пять посещений Шарипова должны ссылаться на подтверждённые сообщения групповых отчётов"
+        return ""
     expected = PILOT_CONTRACTS.get((erp_id, month))
     if not expected:
         return ""
@@ -220,7 +272,7 @@ def preview(con, payload, period=None, student_ids=None, unassigned_visit_ids=No
             incoming_signatures[signature] = incoming_signatures.get(signature, 0) + 1
         mapped = []
         for item in visits:
-            source_id, source_type, source_ref = _visit_source(item)
+            source_id, source_type, source_ref = _visit_source(item, erp_id)
             kind = "makeup" if _norm(item.get("type")) == "отработка" else "subscription" if _norm(item.get("type")) == "абонемент" else ""
             status = "present" if _norm(item.get("status")) in ("присутствовал", "был", "present") else "absent" if _norm(item.get("status")) in ("отсутствовал", "не был", "absent") else ""
             group, issue, group_candidates = _group(con, item.get("group"), str(item.get("date") or ""), str(item.get("time") or ""), student["id"] if student else None, kind) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(item.get("date") or "")) else (None, "Некорректная дата", [])
@@ -235,6 +287,13 @@ def preview(con, payload, period=None, student_ids=None, unassigned_visit_ids=No
                 else: issue = "Выбранная группа не входит в проверенные варианты этой отметки"
             existing = con.execute("SELECT * FROM erp_history_visits WHERE source_id=?", (source_id,)).fetchone() if source_id else None
             existing_unassigned = con.execute("SELECT * FROM erp_history_unassigned_visits WHERE source_id=?", (source_id,)).fetchone() if source_id else None
+            # Old rows used the Telegram message itself as the unique visit id.
+            # Reuse such a row only when all visit fields identify this child;
+            # the same message belonging to another child is not a conflict.
+            existing = existing or _legacy_visit(con, "erp_history_visits", item, student["id"] if student else None,
+                                                   group[1] if group else None, kind, status)
+            existing_unassigned = existing_unassigned or _legacy_visit(con, "erp_history_unassigned_visits", item,
+                student["id"] if student else None, None, kind, status)
             source_conflict = bool(existing and student and group and (existing["student_id"] != student["id"] or existing["group_id"] != group[1] or existing["visit_date"] != item.get("date") or existing["visit_time"] != item.get("time") or existing["kind"] != kind or existing["status"] != status))
             unassigned_conflict = bool(existing_unassigned and student and (existing_unassigned["student_id"] != student["id"] or existing_unassigned["visit_date"] != item.get("date") or existing_unassigned["visit_time"] != item.get("time") or existing_unassigned["kind"] != kind or existing_unassigned["status"] != status or existing_unassigned["source_group"] != str(item.get("group") or "")))
             signature = (str(item.get("date") or ""), _norm(item.get("group")), _norm(item.get("status")))
@@ -325,7 +384,7 @@ def apply(con, payload, period, token, user, student_ids=None, unassigned_visit_
             key = (plan["source_subscription_id"], plan["date"], plan["time"])
             con.execute("INSERT INTO erp_history_planned_lessons(source_subscription_id,student_id,group_id,lesson_date,lesson_time,source_payload,imported_at,imported_by) VALUES (?,?,?,?,?,?,?,?)",
                 (plan["source_subscription_id"],sid,plan["group_id"],plan["date"],plan["time"],_json(raw_plans[key]),now,user.get("name", ""))); created_plans += 1
-        by_id = {_visit_source(x)[0]: x for x in raw.get("attendance", [])}
+        by_id = {_visit_source(x, child["erp_id"])[0]: x for x in raw.get("attendance", [])}
         for visit in child["visits"]:
             if visit["state"] not in ("add", "add_unassigned", "assign_group"): continue
             item = by_id[visit["source_id"]]
