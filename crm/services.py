@@ -680,6 +680,8 @@ def new_cards_today(con, ref=None):
             continue
         card=card_summary(con,dict(row),settings(con))
         card['created_at']=row['created_at']
+        card['needs_processing']=bool(con.execute("""SELECT 1 FROM tasks
+            WHERE student_id=? AND kind='call_lead' AND status='open' LIMIT 1""", (row['id'],)).fetchone())
         cards.append(card)
     return {'date':day.isoformat(),'cards':cards}
 

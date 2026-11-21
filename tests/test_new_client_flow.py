@@ -45,7 +45,11 @@ class NewClientTest(unittest.TestCase):
         self.assertIsNone(task['assignee_id'])
         lifecycle.tick(self.con)
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM tasks WHERE auto_key=?",(f'life:call_lead:{sid}',)).fetchone()[0],1)
-        self.assertIn(sid,[x['id'] for x in sv.new_cards_today(self.con)['cards']])
+        card=next(x for x in sv.new_cards_today(self.con)['cards'] if x['id']==sid)
+        self.assertTrue(card['needs_processing'])
+        self.con.execute("UPDATE tasks SET status='done' WHERE student_id=? AND kind='call_lead'",(sid,))
+        card=next(x for x in sv.new_cards_today(self.con)['cards'] if x['id']==sid)
+        self.assertFalse(card['needs_processing'])
 
     def test_today_list_uses_creation_not_stage_change_and_moscow(self):
         sid=sv.create_student(self.con,self.data,self.user)

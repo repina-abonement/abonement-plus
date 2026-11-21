@@ -1363,6 +1363,11 @@ async function renderWorkdesk(page) {
   const hello = hr < 5 ? "Доброй ночи" : hr < 12 ? "Доброе утро" : hr < 18 ? "Добрый день" : "Добрый вечер";
   const firstName = (S.user.name || "").split(" ")[0];
   const dateTxt = new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" }).replace(/^./, (c) => c.toUpperCase());
+  const freshLeads = (d.new_cards_today?.cards || []).filter((x) => x.needs_processing);
+  const processedNewCards = (d.new_cards_today?.cards || []).filter((x) => !x.needs_processing);
+  const freshLeadAlert = who === "offline" || !freshLeads.length ? "" : `<section class="fresh-leads-alert" aria-label="Свежие новые лиды">
+    <div class="fresh-leads-head"><span class="fresh-leads-icon">🔥</span><div class="grow"><h3>Свежий новый лид — обработать сейчас</h3><p>${freshLeads.length === 1 ? "Только что появилась новая заявка" : `Новых заявок: ${freshLeads.length}`}. Откройте карточку и свяжитесь с родителем.</p></div><span class="count">${freshLeads.length}</span></div>
+    <div class="fresh-leads-list">${freshLeads.map((lead) => `<button type="button" class="fresh-lead-card" data-fresh-lead="${lead.id}"><b>${esc(lead.name)}</b><span>${esc(lead.parent || "Родитель не указан")}${lead.phone ? ` · ${esc(lead.phone)}` : ""}</span><strong>Открыть и обработать →</strong></button>`).join("")}</div></section>`;
   const hot = `<section class="now ${u.length ? "" : "calm"}" id="dw-hot">
       <div class="now-head"><h3>${u.length ? (reds ? `🔥 Горит прямо сейчас: ${reds}` : "Ждут ответа") : "Всё обработано"}</h3>
         ${u.length ? `<span class="muted small">Красное сначала, потом сообщения и пробные</span>` : ""}</div>
@@ -1390,16 +1395,17 @@ async function renderWorkdesk(page) {
       <div class="grow"><b>Новый отзыв на ${esc(r.label)}</b><div class="small">${esc(r.subject)} · пришёл ${esc(dtShort(r.created_at))}</div></div>
       <a class="btn sm" href="${esc(r.link)}" target="_blank" rel="noopener">Открыть отзывы</a>
       <button class="btn sm primary" data-rvclose="${r.id}">Ответили ✓</button></div>`).join("")}
+    ${freshLeadAlert}
     ${erpHtml}
     <div class="desk">
       <div class="desk-main">
         ${who === "offline" ? "" : refundRequestsHtml(d.refund_requests||[],true)}
         ${who === "offline" ? `<section class="section"><h3>Сегодня на смене</h3><p class="muted small">Здесь только ваши дела. Общие клиентские воронки и контроль старшего администратора не показываются.</p></section>` : `
-        <section class="section new-cards-today" id="dw-new-cards">
+        ${processedNewCards.length ? `<section class="section new-cards-today" id="dw-new-cards">
           <div class="now-head"><h3>✨ Новые карточки сегодня</h3><span class="count">${d.new_cards_today?.cards.length||0}</span></div>
           <p class="small muted">Приоритетная обработка · ${esc(dShort(d.new_cards_today?.date||S.meta.today))}</p>
-          <div class="new-cards-list">${(d.new_cards_today?.cards||[]).map(k=>`<button type="button" class="btn" data-new-card="${k.id}"><b>${esc(k.name)}</b><span class="small muted">${esc(k.stage==='lead'?'Новый лид':k.trial_at?'Записан на ПУ':'В работе')}</span></button>`).join('')||'<p class="muted small">Сегодня новых карточек пока нет</p>'}</div>
-        </section>
+          <div class="new-cards-list">${processedNewCards.map(k=>`<button type="button" class="btn" data-new-card="${k.id}"><b>${esc(k.name)}</b><span class="small muted">${esc(k.stage==='lead'?'Новый лид':k.trial_at?'Записан на ПУ':'В работе')}</span></button>`).join('')}</div>
+        </section>` : ""}
         ${hot}
         <section class="desk-funnel">
           <div class="now-head"><h3>Воронка продаж</h3></div>
@@ -1418,6 +1424,7 @@ async function renderWorkdesk(page) {
     </div>`;
   page.querySelectorAll("[data-rvclose]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/reviews/${b.dataset.rvclose}/close`, {}); render(); } catch (e) { fail(e); } }));
   page.querySelectorAll("[data-new-card]").forEach(b=>b.onclick=()=>openStudent(+b.dataset.newCard));
+  page.querySelectorAll("[data-fresh-lead]").forEach(b=>b.onclick=()=>openStudent(+b.dataset.freshLead));
   wireRefundRequests(page,render);
   const hm = $("#hot-more"); if (hm) hm.onclick = () => { S.hotAll = !S.hotAll; render(); };
   page.querySelectorAll(".dwf").forEach((x) => x.addEventListener("toggle", () => { S.dwOpen[x.dataset.dwk] = x.open; }));
