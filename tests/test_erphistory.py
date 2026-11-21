@@ -235,16 +235,16 @@ def main():
       {**partial['subscriptions'][0],'erp_id':'827955'},
       {**partial['subscriptions'][1],'erp_id':'827957'}], 'attendance':[
         {**partial['attendance'][0],'date':day,'time':tm,
-         'group':'Юг, сборная ОФП' if kind == 'Отработка' else 'Север, сборная',
+         'group':{'17:00':'Юг, ОФП 6–8','20:30':'Юг, сборная ОФП'}.get(tm,'Север, сборная'),
          'type':kind,'erp_subscription_id':sub_id,
          'source_chat_id':'-1001602433070','source_message_id':message_id,
          'source_message_url':f'https://t.me/c/1602433070/{message_id}'}
         for message_id,sub_id,day,tm,kind in (
-          ('26745','827955','2026-11-01','19:30','Абонемент'),
-          ('26789','827955','2026-11-03','18:30','Абонемент'),
-          ('26810','827955','2026-11-08','19:30','Абонемент'),
-          ('26908','827955','2026-11-10','18:30','Абонемент'),
-          ('27065','827957','2026-11-12','20:30','Отработка'))]}
+          ('26745','827957','2026-11-07','17:00','Абонемент'),
+          ('26789','827955','2026-11-08','19:30','Абонемент'),
+          ('26810','827955','2026-11-10','18:30','Абонемент'),
+          ('26908','827957','2026-11-12','20:30','Отработка'),
+          ('27065','827955','2026-11-15','19:30','Абонемент'))]}
     assert erphistory._pilot_contract_issue(allowed_november,'84894','2026-11')==''
     shulezhko_preview=erphistory.preview(con,allowed_november,'2026-11')
     assert shulezhko_preview['can_apply'] and shulezhko_preview['added']==20 and shulezhko_preview['review']==0,shulezhko_preview
