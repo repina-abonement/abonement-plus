@@ -62,6 +62,8 @@ class TaskTransferTest(unittest.TestCase):
         group=self.con.execute("INSERT INTO groups(branch_id,name,weekdays,time) VALUES (?,?,?,?)",(branch,'НУП','2','17:45')).lastrowid
         self.con.execute("INSERT INTO erp_trial_visits(source_id,student_id,group_id,visit_at,came) VALUES ('834972',?,?,?,0)",
                          (self.sid,group,'2026-11-22T17:45'))
+        self.con.execute("UPDATE students SET erp_id='' WHERE id=?",(self.sid,))
+        self.con.execute("INSERT INTO erp_full_identities(namespace,source_id,student_id) VALUES ('lead','101',?)",(self.sid,))
         headers='ID задачи ERP;ERP ID ребёнка или лида;Название в последнем событии выборки;Дедлайн;Подтверждение состояния;Комментарий в событии;Исполнитель\n'
         rows=('195133;101;Новый лид;21.11.2026 00:00;Открыта по превью 21.11.2026;Первичный контакт;Оператор Ольга\n'
               '195134;;Напоминание о ПУ (смс);22.11.2026 00:00;Открыта по превью 21.11.2026;Посетитель записан на ПУ #834972;Оператор Ольга\n'
@@ -74,6 +76,7 @@ class TaskTransferTest(unittest.TestCase):
         self.assertEqual(trial['trial_source_id'],'834972')
         self.assertEqual(trial['after']['student_id'],self.sid)
         self.assertEqual(direct['client_erp_id'],'101')
+        self.assertEqual(direct['namespace'],'lead')
         self.assertEqual(direct['after']['status'],'open')
         self.assertEqual(len(plan['issues']),1)
         self.assertIn('явное состояние',plan['issues'][0]['reason'])

@@ -30,7 +30,7 @@ def _parse(file,row):
         raise ApiError('Это история событий задач. Нужен актуальный реестр задач, а не журнал событий')
     source=val('id задачи','id задачи erp','№ задачи','номер задачи','id')
     client=val('id посетителя','id клиента','id заявки','erp id клиента','erp id ребенка или лида')
-    namespace='lead' if val('id заявки') else 'student'
+    namespace='lead' if val('id заявки') else 'auto' if val('erp id ребенка или лида') else 'student'
     note=val('комментарий','описание','комментарий в событии')
     trial_refs=re.findall(r'(?:п[оу]|пробн\w*|посетител\w* записан\w* на п[оу])[^#\n]*#(\d+)',note.lower())
     trial_source_id=trial_refs[-1] if len(set(trial_refs))==1 else ''
@@ -74,11 +74,19 @@ def prepare(con,ids):
             continue
         duplicates+=len(entries)-1
         sid_rows=[]
+        resolved_namespace=rec['namespace']
         if rec['client_erp_id']:
-            sid_rows=con.execute('SELECT student_id FROM erp_full_identities WHERE namespace=? AND source_id=?',
-                                 (rec['namespace'],rec['client_erp_id'])).fetchall()
-            if not sid_rows and rec['namespace']=='student':
-                sid_rows=con.execute('SELECT id FROM students WHERE erp_id=?',(rec['client_erp_id'],)).fetchall()
+            namespaces=('student','lead') if rec['namespace']=='auto' else (rec['namespace'],)
+            candidates={int(r[0]) for namespace in namespaces for r in con.execute(
+                'SELECT student_id FROM erp_full_identities WHERE namespace=? AND source_id=?',
+                (namespace,rec['client_erp_id'])).fetchall()}
+            if 'student' in namespaces:
+                candidates.update(int(r[0]) for r in con.execute('SELECT id FROM students WHERE erp_id=?',(rec['client_erp_id'],)).fetchall())
+            sid_rows=[(sid,) for sid in sorted(candidates)]
+            if len(sid_rows)==1 and rec['namespace']=='auto':
+                saved=con.execute('SELECT namespace FROM erp_full_identities WHERE source_id=? AND student_id=? ORDER BY namespace',
+                                  (rec['client_erp_id'],sid_rows[0][0])).fetchall()
+                resolved_namespace=saved[0][0] if len({x[0] for x in saved})==1 else 'student'
         elif rec['trial_source_id']:
             sid_rows=con.execute('SELECT DISTINCT student_id FROM erp_trial_visits WHERE source_id=?',
                                  (rec['trial_source_id'],)).fetchall()
@@ -117,7 +125,7 @@ def prepare(con,ids):
                'done_at':rec['done_at'],'done_by':old['done_by'] if old and rec['status']!='open' else '', 'result':old['result'] if old else ''}
         before=dict(old) if old else None
         changed=not before or any(before[k]!=v for k,v in after.items())
-        actions.append({'erp_task_id':erpid,'client_erp_id':resolved_client,'trial_source_id':rec['trial_source_id'],'namespace':rec['namespace'],
+        actions.append({'erp_task_id':erpid,'client_erp_id':resolved_client,'trial_source_id':rec['trial_source_id'],'namespace':resolved_namespace,
                         'action':'add' if not old else 'update' if changed else 'same','before':before,'after':after,
                         'source_fields':rec,'locations':[w for _,w in entries]})
         by_date[rec['due_at'][:10]]+=1;by_state[rec['status']]+=1
