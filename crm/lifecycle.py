@@ -176,6 +176,10 @@ def tick(con, now: datetime | None = None) -> int:
     for s in _people(con, "s.funnel='members' AND s.stage!='left'"):
         if s["family_id"] in seen or singles.is_single(con, s["id"], cur):
             continue  # разовики не должники (Юлия, 03.11)
+        if con.execute("""SELECT 1 FROM tasks t JOIN students k ON k.id=t.student_id
+                WHERE k.family_id=? AND t.status='open' AND t.auto_key LIKE 'subscription-renew:%'""",
+                (s['family_id'],)).fetchone():
+            seen.add(s['family_id']);continue
         if now.day >= 20 and sv.unpaid_groups(con, s["id"], nxt) and not con.execute(
                 "SELECT 1 FROM tasks WHERE student_id=? AND auto_key=? AND status='open'",
                 (s["id"], f"subscription-renew:{s['id']}")).fetchone():

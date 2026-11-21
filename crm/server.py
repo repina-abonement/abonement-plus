@@ -3918,6 +3918,9 @@ def main():
 def _startup():
     con = db.connect()
     db.init_db(con)
+    # Repair stale first-contact tasks/statuses for already sold subscriptions
+    # before the first workdesk is opened.  This does not touch money or sales.
+    tasks.reconcile_subscription_clients(con)
     # Initial reconciliation phase requested by the owner. Retain historic evidence.
     if con.execute("INSERT OR IGNORE INTO integrations(key,value) VALUES ('payment_control_from','2026-11-19')").rowcount:
         con.execute("UPDATE payment_control_jobs SET next_at=NULL WHERE lease_owner IS NULL")

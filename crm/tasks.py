@@ -220,9 +220,12 @@ def schedule_renewal(con, student_id: int) -> int | None:
     if not plan:return None
     due,note=plan['due'],plan['note']
     key = f"subscription-renew:{student_id}"
-    existing = con.execute("SELECT id FROM tasks WHERE auto_key=?", (key,)).fetchone()
+    existing_rows = con.execute("SELECT id FROM tasks WHERE auto_key=? ORDER BY id", (key,)).fetchall()
+    existing = existing_rows[0] if existing_rows else None
+    for duplicate in existing_rows[1:]:
+        con.execute("UPDATE tasks SET status='cancelled',done_at=?,result='Дубликат задачи продления' WHERE id=?",(_iso(_now()),duplicate['id']))
     # Закрываем прежние задачи продажи/продления, сохраняя историю и ручные поручения.
-    sale_kinds = {'renew', 'why_not_bought', 'close_sale', 'first_pay'}
+    sale_kinds = {'call_lead', 'no_answer', 'revive', 'renew', 'why_not_bought', 'close_sale', 'first_pay'}
     erp_titles = {'проверить оплату абонемента', 'проверить продление', 'думает'}
     for task in con.execute("SELECT * FROM tasks WHERE student_id=? AND status='open'", (student_id,)).fetchall():
         if task['auto_key'] == key:
@@ -239,6 +242,28 @@ def schedule_renewal(con, student_id: int) -> int | None:
                        auto_key=key, source='subscription',note=note)
         con.execute("UPDATE tasks SET assignee_id=NULL WHERE id=?", (tid,))
     return tid
+
+
+def reconcile_subscription_clients(con, on: date | None = None) -> int:
+    """Repair stale lead state/tasks for children who already have service.
+
+    The check is per student, never per family: siblings may be at different
+    stages.  No payment, receipt or subscription amount is changed.
+    """
+    from . import logic
+    on=on or _now().date();month=logic.month_of(on);changed=0
+    students=con.execute('''SELECT DISTINCT s.id FROM students s JOIN subscriptions x ON x.student_id=s.id
+        WHERE s.archived=0 AND COALESCE(s.erp_id,'')!='132389' AND x.status!='cancelled'
+          AND COALESCE(x.kind,'month')='month' AND x.month>=?''',(month,)).fetchall()
+    for row in students:
+        sid=row['id']
+        current=con.execute('SELECT funnel,stage FROM students WHERE id=?',(sid,)).fetchone()
+        if current and (current['funnel']!='members' or current['stage']!='active'):
+            con.execute("UPDATE students SET funnel='members',stage='active',priority=0 WHERE id=?",(sid,));changed+=1
+        before=con.total_changes
+        schedule_renewal(con,sid)
+        changed+=int(con.total_changes>before)
+    return changed
 
 
 def import_erp_task(con, erp_status: str, student_id: int, due: str, note: str = "") -> int | None:
@@ -499,6 +524,7 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     request_missing_data(con, now.date())
     planner.generate(con, now.date())
     program.apply_pending(con, now.date())
+    reconcile_subscription_clients(con,now.date())
     refresh_subscription_renewals(con)
     from . import pu, waitlist, ownerbot, lifecycle
     pu.tick(con, now)

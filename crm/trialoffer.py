@@ -43,6 +43,11 @@ def years(birth: str, on: date | None = None) -> int | None:
     return on.year - b.year - ((on.month, on.day) < (b.month, b.day))
 
 
+def age_fits_trial_group(age: int, ages: tuple[int, int]) -> bool:
+    """A two-year-old may attend the youngest 3–4 group with the real birth date."""
+    return ages[0] <= age <= ages[1] or (age == 2 and ages == (3, 4))
+
+
 def slots(con, age: int, branch_id: int | None = None, limit: int = 4, days: int = 14, diagnostics=None) -> list[dict]:
     from . import capacity, closures, schedule
     now = datetime.now()
@@ -57,7 +62,7 @@ def slots(con, age: int, branch_id: int | None = None, limit: int = 4, days: int
                   'Это сборная — пробное не предусмотрено' if g['program_id'] else
                   'В настройках группы выключена запись на пробное' if not g['trial_ok'] else
                   'Не указан возраст группы' if not r else
-                  f'Группа для возраста {g["age"] or str(r[0])+"–"+str(r[1])}' if not r[0]<=age<=r[1] else
+                  f'Группа для возраста {g["age"] or str(r[0])+"–"+str(r[1])}' if not age_fits_trial_group(age,r) else
                   'Это не детская футбольная группа' if 'взросл' in (g['age'] or '').lower() or 'пап' in g['name'].lower() or 'офп' in g['name'].lower() else '')
         diag={'group':g['name'],'reason':reason,'scheduled':0,'closed':0,'full':0,'missing_time':0,'too_soon':0,'available':0}
         if diagnostics is not None:diagnostics.append(diag)
@@ -158,7 +163,7 @@ def booking_options(con, sid: int, birth: str = '', day: str = '', branch_id: in
             d = start + timedelta(days=offset)
             age = years(birth,d)
             actual = schedule.on(con,group,d)
-            if not ages[0] <= age <= ages[1] or d.weekday() not in logic.parse_weekdays(actual['weekdays']):
+            if not age_fits_trial_group(age,ages) or d.weekday() not in logic.parse_weekdays(actual['weekdays']):
                 continue
             if closures.is_closed(con,group['id'],d):
                 continue
@@ -201,6 +206,16 @@ def book_inline(con,sid: int,data: dict,user: dict) -> dict:
         raise sv.ApiError('Выбранное время недоступно. Обновите варианты и выберите свободное занятие')
     con.execute('SAVEPOINT inline_trial_booking')
     try:
+        # Rebooking must not overwrite the result of an earlier trial.  Keep it
+        # as an exact historical visit; source_id stays NULL because this is a
+        # native CRM visit, not an invented ERP mark.
+        if s['trial_at'] and s['trial_came'] is not None and s['trial_at'] != day+'T'+time:
+            previous_group=s['trial_group_id'] or s['group_id']
+            old=con.execute('''SELECT id FROM erp_trial_visits WHERE student_id=? AND group_id=?
+                AND visit_at=?''',(sid,previous_group,s['trial_at'])).fetchone() if previous_group else None
+            if previous_group and not old:
+                con.execute('''INSERT INTO erp_trial_visits(source_id,student_id,group_id,visit_at,came)
+                    VALUES (NULL,?,?,?,?)''',(sid,previous_group,s['trial_at'],s['trial_came']))
         fields = {k:data[k] for k in ('child_name','birth','parent_name','phone') if k in data}
         if str(data.get('email') or '').strip():
             fields['email'] = data['email']

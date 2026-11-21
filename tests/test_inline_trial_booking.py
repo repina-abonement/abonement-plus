@@ -98,5 +98,24 @@ class InlineBookingTest(unittest.TestCase):
         self.con.execute('UPDATE groups SET trial_ok=1,age=\'8–10\' WHERE id=?',(self.gid,))
         self.assertEqual(trialoffer.booking_options(self.con,self.sid,self.birth,self.day.isoformat())['slots'],[])
 
+    def test_two_year_old_books_youngest_group_and_rebooking_keeps_first_visit(self):
+        self.con.execute("UPDATE groups SET age='3–4' WHERE id=?",(self.gid,))
+        birth=(self.day.replace(year=self.day.year-3)+timedelta(days=1)).isoformat()
+        data={**self.data,'birth':birth}
+        self.assertEqual(len(trialoffer.booking_options(self.con,self.sid,birth,self.day.isoformat())['slots']),1)
+        with patch('crm.tasks.send_booked'):
+            trialoffer.book_inline(self.con,self.sid,data,self.user)
+        sv.mark_trial(self.con,self.sid,True,self.user)
+        first_history=self.con.execute("SELECT COUNT(*) FROM history WHERE student_id=? AND text='Пришёл на пробное'",(self.sid,)).fetchone()[0]
+        second=self.day+timedelta(days=7)
+        self.con.execute("UPDATE groups SET weekdays=? WHERE id=?",(str(second.weekday()),self.gid))
+        with patch('crm.tasks.send_booked'):
+            trialoffer.book_inline(self.con,self.sid,{**data,'date':second.isoformat()},self.user)
+        student=sv.get_student_row(self.con,self.sid)
+        self.assertEqual((student['birth'],student['trial_at'],student['trial_came']),(birth,second.isoformat()+'T16:45',None))
+        first=self.con.execute('SELECT visit_at,came,source_id FROM erp_trial_visits WHERE student_id=?',(self.sid,)).fetchone()
+        self.assertEqual((first['visit_at'],first['came'],first['source_id']),(self.day.isoformat()+'T16:45',1,None))
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM history WHERE student_id=? AND text='Пришёл на пробное'",(self.sid,)).fetchone()[0],first_history)
+
 
 if __name__=='__main__':unittest.main()
