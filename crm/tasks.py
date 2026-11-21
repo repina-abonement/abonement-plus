@@ -245,11 +245,11 @@ def schedule_renewal(con, student_id: int) -> int | None:
 
 
 def import_erp_task(con, erp_status: str, student_id: int, due: str, note: str = "") -> int | None:
-    """Для переноса из ERP: задача со статусом ERP встаёт на ответственного за пробные."""
-    kind = ERP_STATUSES.get(erp_status.strip(), "manual")
+    """Перенести задачу ERP без переименования; kind нужен только для колонки CRM."""
+    title = erp_status.strip()
+    kind = ERP_STATUSES.get(title, "manual")
     return add_task(con, kind, student_id, due, source="erp", note=note,
-                    title=KINDS[kind][0] if kind != "manual" else erp_status,
-                    auto_key=f"erp:{erp_status}:{student_id}:{due}")
+                    title=title, auto_key=f"erp:{title}:{student_id}:{due}")
 
 
 # ---------------- автоматика: задачи и сообщения ----------------
