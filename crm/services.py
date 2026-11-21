@@ -658,6 +658,7 @@ def card_summary(con, s: dict, st: dict) -> dict:
         "parent": parent["name"] if parent else "", "phone": parent["phone"] if parent else "",
         "group": grp["name"] if grp else "", "tariff": s["tariff"], "siblings": sib,
         "stage": s["stage"], "stage_changed_at": s["stage_changed_at"], "trial_at": s["trial_at"],
+        "source": s.get("source", ""),
         "priority": s.get("priority", 0),
         "branch": "" if grp else _branch_name(con, s.get("branch_id")),
         "score": (__import__("crm.smart", fromlist=["lead_score"]).lead_score(con, s) or {}).get("level") if s["funnel"] == "sales" else None,
@@ -680,8 +681,9 @@ def new_cards_today(con, ref=None):
             continue
         card=card_summary(con,dict(row),settings(con))
         card['created_at']=row['created_at']
-        card['needs_processing']=bool(con.execute("""SELECT 1 FROM tasks
-            WHERE student_id=? AND kind='call_lead' AND status='open' LIMIT 1""", (row['id'],)).fetchone())
+        # This daily funnel follows the current client stage. Completing a task
+        # alone must not hide a card that is still a new lead.
+        card['needs_processing']=card['stage']=='lead'
         cards.append(card)
     return {'date':day.isoformat(),'cards':cards}
 

@@ -35,7 +35,7 @@ class NewClientTest(unittest.TestCase):
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM families').fetchone()[0], 0)
 
     def test_manual_card_is_lead_with_immediate_shared_task(self):
-        sid=sv.create_new_lead(self.con,self.data,self.user)
+        sid=sv.create_new_lead(self.con,{**self.data,'source':'Промоутер: Иван Ивакин'},self.user)
         student=sv.get_student_row(self.con,sid)
         self.assertEqual((student['funnel'],student['stage']),('sales','lead'))
         today=datetime.now(ZoneInfo('Europe/Moscow')).date().isoformat()
@@ -47,7 +47,11 @@ class NewClientTest(unittest.TestCase):
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM tasks WHERE auto_key=?",(f'life:call_lead:{sid}',)).fetchone()[0],1)
         card=next(x for x in sv.new_cards_today(self.con)['cards'] if x['id']==sid)
         self.assertTrue(card['needs_processing'])
+        self.assertEqual(card['source'],'Промоутер: Иван Ивакин')
         self.con.execute("UPDATE tasks SET status='done' WHERE student_id=? AND kind='call_lead'",(sid,))
+        card=next(x for x in sv.new_cards_today(self.con)['cards'] if x['id']==sid)
+        self.assertTrue(card['needs_processing'])
+        self.con.execute("UPDATE students SET stage='no_answer' WHERE id=?",(sid,))
         card=next(x for x in sv.new_cards_today(self.con)['cards'] if x['id']==sid)
         self.assertFalse(card['needs_processing'])
 
