@@ -696,7 +696,7 @@ def create_new_lead(con,data,user):
     stamp=datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None,second=0,microsecond=0).isoformat(timespec='minutes')
     sid=create_student(con,{**data,'funnel':'sales'},user)
     con.execute('UPDATE students SET created_at=?,stage_changed_at=? WHERE id=?',(stamp,stamp,sid))
-    tid=tasks.add_task(con,'call_lead',sid,stamp[:10]+'T23:59',auto_key=f'life:call_lead:{sid}',title='Новый лид',source='life')
+    tid=tasks.add_task(con,'call_lead',sid,stamp,auto_key=f'life:call_lead:{sid}',title='Новый лид',source='life')
     if tid:
         con.execute('UPDATE tasks SET assignee_id=NULL,priority=1 WHERE id=?',(tid,))
     family=con.execute('SELECT family_id FROM students WHERE id=?',(sid,)).fetchone()[0]
@@ -1123,6 +1123,8 @@ def create_student(con, data: dict, user) -> int:
     log(con, sid, "Карточка создана", user, "system")
     if comment:log(con,sid,comment,user,'note')
     audit(con, user, "student.create", str(sid))
+    from . import erpstatus
+    erpstatus.sync_one(con, sid)
     return sid
 
 
@@ -1187,6 +1189,8 @@ def update_student(con, sid: int, data: dict, user) -> None:
              "trial_at": "пробное", "source": "источник", "source_id": "источник", "refusal_reason": "причина отказа"}
     if changes:
         log(con, sid, "Изменено: " + ", ".join(names[c] for c in changes), user, "system")
+        from . import erpstatus
+        erpstatus.sync_one(con, sid)
 
 
 def add_vacation(con, sid: int, start: str, end: str, note: str, user) -> None:
@@ -1444,6 +1448,8 @@ def mark_trial(con, sid: int, came: bool, user) -> None:
     log(con, sid, "Пришёл на пробное" if came else "Не пришёл на пробное", user, "attendance")
     from . import pu
     pu.on_trial_mark(con, sid, came, user)
+    from . import erpstatus
+    erpstatus.sync_one(con, sid)
 
 
 def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -> None:

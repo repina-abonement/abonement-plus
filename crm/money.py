@@ -123,6 +123,8 @@ def reconcile(con, sid: int) -> None:
     if con.execute("SELECT 1 FROM subscriptions WHERE student_id=? AND status='paid' AND paid_at >= date('now', '-1 day')", (sid,)).fetchone():
         from . import nodeadline
         nodeadline.auto_exit(con, sid, "оплатил")
+    from . import erpstatus
+    erpstatus.sync_one(con, sid)
 
 
 def obligations(con,sid):

@@ -52,6 +52,8 @@ def add(con, sid: int, group_id: int, month: str | None, data: dict, user: dict)
                       (group_id, sid, month, data.get("tariff") or "", int(data["ofp_group_id"]) if data.get("ofp_group_id") else None,
                        (data.get("note") or "").strip()[:200], user.get("name", ""), _now(), _now())).lastrowid
     sv.log(con, sid, f"В листе ожидания: {g['name']} с {logic.month_label(month)}", user, "system")
+    from . import erpstatus
+    erpstatus.sync_one(con, sid)
     return wid
 
 
@@ -64,6 +66,8 @@ def set_status(con, wid: int, status: str, user: dict):
         raise ApiError("Запись не найдена", 404)
     con.execute("UPDATE waitlist SET status=?, updated_at=? WHERE id=?", (status, _now(), wid))
     sv.log(con, w["student_id"], f"Лист ожидания, {w['name']}: {STATUSES[status]}", user, "system")
+    from . import erpstatus
+    erpstatus.sync_one(con, w["student_id"])
 
 
 def _sync_done(con):

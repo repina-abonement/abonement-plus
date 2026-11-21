@@ -22,7 +22,7 @@ class ProfileTest(unittest.TestCase):
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM messages').fetchone()[0],0)
         with self.assertRaises(sv.ApiError):clientprofile.save(self.con,self.sid,self.body,self.user)
     def test_imported_erp_status_is_preserved(self):
-        self.con.execute("UPDATE students SET erp_status='Постоянный посетитель' WHERE id=?",(self.sid,))
+        self.con.execute("UPDATE students SET erp_id='42',erp_status='Постоянный посетитель' WHERE id=?",(self.sid,))
         body={**self.body,'expected':clientprofile.signature(self.con,self.sid),'stage':'no_answer'}
         with self.assertRaises(sv.ApiError):clientprofile.save(self.con,self.sid,body,self.user)
         self.assertEqual(sv.get_student_row(self.con,self.sid)['erp_status'],'Постоянный посетитель')

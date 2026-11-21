@@ -41,7 +41,7 @@ class NewClientTest(unittest.TestCase):
         today=datetime.now(ZoneInfo('Europe/Moscow')).date().isoformat()
         self.assertEqual(student['created_at'][:10],today)
         task=self.con.execute('SELECT * FROM tasks WHERE student_id=?',(sid,)).fetchone()
-        self.assertEqual((task['title'],task['due_at'],task['priority']),('Новый лид',today+'T23:59',1))
+        self.assertEqual((task['title'],task['due_at'],task['priority']),('Новый лид',student['created_at'][:16],1))
         self.assertIsNone(task['assignee_id'])
         lifecycle.tick(self.con)
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM tasks WHERE auto_key=?",(f'life:call_lead:{sid}',)).fetchone()[0],1)
