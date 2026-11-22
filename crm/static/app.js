@@ -2080,6 +2080,17 @@ function clientBalanceHtml(d) {
     <h4 class="finance-history-title">История денег</h4>${d.payments.length?`<ul class="pay-list ${d.payments.length>4?'folded':''}">${d.payments.map(p=>`<li class="payment-card ${p.cancelled?'is-cancelled':''}"><div class="finance-card-head"><div><b class="payment-amount ${p.amount<0?'refund':''}">${p.amount<0?'−':'+'}${rub(Math.abs(p.amount))}</b><div class="small muted">${p.method==='refund_pending'?'Зарезервировано для возврата':p.amount<0?'Возврат':'Поступление'} · ${esc(p.method_label||PAY_METHODS[p.method]||p.method)}</div></div><time>${dtShort(p.paid_at)}</time></div>${p.comment?`<div class="payment-comment">${esc(p.comment)}</div>`:''}<div class="small muted">${esc(p.user_name||'')}${p.cancelled?' · отменён':p.confirmed?'':' · ждёт подтверждения'}</div>${S.user.role==='admin'&&!p.cancelled&&!['unknown','refund_pending','refund'].includes(p.method)?`<details class="finance-detail"><summary>Действия с платежом</summary>${p.confirmed?'':`<button class="btn sm" data-pconf="${p.id}">Подтвердить</button>`}<button class="btn sm danger" data-pcancel="${p.id}">Отменить платёж</button></details>`:''}</li>`).join('')}</ul>`:'<p class="muted">Платежей пока нет</p>'}${d.payments.length>4?`<button class="linkish" id="pay-more">Показать всю историю (${d.payments.length})</button>`:''}
     ${d.family_kids.length||d.balance.deposit?`<details class="finance-detail"><summary>Другие операции</summary><div class="sc-actions">${d.family_kids.length?'<button class="btn sm" id="pay-fam">Оплата за семью</button>':''}${d.balance.deposit&&d.family_kids.length?'<button class="btn sm" id="bal-move">Перенести баланс другому ребёнку</button>':''}${d.balance.deposit&&can('payments','view')?'<button class="btn sm" id="bal-refund">Вернуть деньги с баланса</button>':''}</div></details>`:''}`;
 }
+function clientHistoryHtml(rows){
+  const technical=rows.filter(row=>row.technical_only),events=rows.filter(row=>!row.technical_only);
+  const labels={payment:'Оплата',sale:'Абонемент',stage:'Статус',group:'Группа',task:'Задача',note:'Комментарий',message:'Сообщение',system:'CRM'};
+  const item=row=>{
+    const text=String(row.display_text||row.text||'').trim(),long=text.length>320||text.split('\n').length>4;
+    const visible=long?text.slice(0,280).trimEnd()+'…':text;
+    return `<li class="client-history-event"><div class="client-history-meta"><span class="client-history-kind">${esc(labels[row.kind]||'Событие')}</span><time>${dtShort(row.ts)}</time><span>${esc(row.display_author||row.user_name||'CRM')}</span></div><div class="client-history-text">${esc(visible)}</div>${long?`<details class="client-history-full"><summary>Показать полностью</summary><div>${esc(text)}</div></details>`:''}${row.technical_text&&!row.technical_only?`<details class="client-history-source"><summary>Исходная запись ERP</summary><div>${esc(row.technical_text)}</div></details>`:''}</li>`;
+  };
+  const archive=technical.length?`<details class="client-history-technical"><summary>Технические данные переноса ERP · ${technical.length}</summary><p>Сохранены для проверки переноса и не относятся к рабочей истории общения с клиентом.</p>${technical.map(row=>`<details><summary>${dtShort(row.ts)} · ${esc(row.display_text||'Исходные данные')}</summary><div>${esc(row.technical_text||row.text||'')}</div></details>`).join('')}</details>`:'';
+  return `${events.length?`<ul class="history client-history-list">${events.map(item).join('')}</ul>`:'<p class="muted">Рабочих событий пока нет</p>'}${archive}`;
+}
 async function loadClientPaymentLinks(sid) {
   const box=$('#pay-links');if(!box)return;
   const generation=String(Number(box.dataset.linkLoad||0)+1);box.dataset.linkLoad=generation;
@@ -2221,7 +2232,7 @@ async function openStudent(id, options = {}) {
     <h3>История</h3>
     ${isOwner() ? `<button class="btn" id="erp-full-client">Исходные данные ERP</button><div id="erp-full-client-out"></div>` : ''}
     <div class="row" style="margin-bottom:10px"><input id="note" placeholder="Комментарий, итог звонка…"><button class="btn sm" id="note-add" style="flex:0">Добавить</button></div>
-    <ul class="history">${d.history.map((h) => `<li><div class="when">${dtShort(h.ts)} · ${esc(h.display_author||h.user_name)}</div><div style="white-space:pre-wrap">${esc(h.display_text||h.text)}</div>${h.technical_text?`<details class="small muted"><summary>Подробности ERP</summary><div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(h.technical_text)}</div></details>`:''}</li>`).join("")}</ul>
+    ${clientHistoryHtml(d.history)}
   </div>
   <div style="margin-top:14px" data-sc="arch"><button class="btn sm ${s.archived ? "" : "danger"}" id="s-arch">${s.archived ? "Вернуть из архива" : "Перенести в архив"}</button></div>`;
   openDrawer(html, "wide", { keepStudentRequest: true });
