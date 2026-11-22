@@ -42,11 +42,17 @@ PILOT_KEYS = {
     "9cfc5e4d13bf8c5db09ee7ca25231c122bc9739216ba27e57c11847358e0ab0e",
     # Матвей Миллер: точечно разрешённый проверенный перенос ERP 79204 / ноябрь 2026.
     "d1fe38c74aa308bef7b80c2c483eb012f05f666240561cf91fe28e1475788167",
+    # Веткин (Данзанов): отдельный октябрьский пилот, ERP 125824.
+    "3792ceb0d0b3a0ace66c3f2b7a6deb0e6c65ede732445fa0e44946559a1a08b1",
 }
 PILOT_CONTRACTS = {
     ("84894", "2026-11"): {
         "827955": ("2026-11-01", "2026-11-29", 9, 13500),
         "827957": ("2026-11-07", "2026-11-28", 4, 4800),
+    },
+    ("125824", "2026-10"): {
+        "821284": ("2026-10-06", "2026-10-27", 7, 10500),
+        "821285": ("2026-10-08", "2026-10-29", 4, 4800),
     },
 }
 SHARIPOV_NOVEMBER_MESSAGES = {"26745", "26789", "26810", "26908", "27065"}
@@ -234,6 +240,61 @@ def _pilot_contract_issue(row, erp_id, month):
         if len(visits) != 5 or {str(x.get("source_message_id") or "") for x in visits} != SHARIPOV_NOVEMBER_MESSAGES or any(
                 str(x.get("source_chat_id") or "") != "-1001602433070" for x in visits):
             return "Пять посещений Шарипова должны ссылаться на подтверждённые сообщения групповых отчётов"
+        return ""
+    if (erp_id, month) == ("125824", "2026-10"):
+        # Веткин (Данзанов): обе октябрьские записи должны быть перенесены
+        # отдельно; план и фактические отметки берутся из ERP, без догадок.
+        subs = {str(x.get("erp_id") or ""): x for x in _subscriptions(row)}
+        if set(subs) != {"821284", "821285"}:
+            return "Для Веткина должны быть ровно абонементы 821284 и 821285"
+        if not row.get("partial_attendance"):
+            return "Для Веткина требуется раздельно передать план и фактические отметки"
+        expected_plan_dates = {
+            "821284": {
+                ("2026-10-06", "18:30"), ("2026-10-11", "19:30"),
+                ("2026-10-13", "18:30"), ("2026-10-18", "19:30"),
+                ("2026-10-20", "18:30"), ("2026-10-25", "19:30"),
+                ("2026-10-27", "18:30"),
+            },
+            "821285": {
+                ("2026-10-08", "20:30"), ("2026-10-15", "20:30"),
+                ("2026-10-22", "20:30"), ("2026-10-29", "20:30"),
+            },
+        }
+        planned_by_sub = {}
+        for sub_id, sub in subs.items():
+            planned = _planned_lessons(row, sub)
+            actual_plan = {(str(x.get("date") or ""), str(x.get("time") or "")) for x in planned}
+            if actual_plan != expected_plan_dates[sub_id]:
+                return f"План абонемента {sub_id} не совпадает с проверенным расписанием октября"
+            planned_by_sub[sub_id] = {
+                (str(x.get("date") or ""), str(x.get("time") or ""), _norm(x.get("group")))
+                for x in planned
+            }
+        visits = row.get("attendance") or []
+        if len(visits) != 11:
+            return "У Веткина должно быть ровно 11 фактических отметок по двум октябрьским абонементам"
+        seen_ids, seen_marks, counts = set(), set(), {"821284": 0, "821285": 0}
+        for item in visits:
+            sub_id = str(item.get("erp_subscription_id") or "")
+            mark_id = str(item.get("erp_attendance_id") or "").strip()
+            status = _norm(item.get("status"))
+            if sub_id not in counts or not mark_id or mark_id in seen_ids:
+                return "Все 11 отметок Веткина должны иметь уникальные ERP ID и относиться к одному из двух абонементов"
+            if _norm(item.get("type")) != "абонемент" or status not in ("был", "присутствовал", "present", "не был", "отсутствовал", "absent"):
+                return "Отметки Веткина должны содержать тип «Абонемент» и фактический статус из ERP"
+            key = (str(item.get("date") or ""), str(item.get("time") or ""), _norm(item.get("group")))
+            if key not in planned_by_sub[sub_id] or key in seen_marks:
+                return "Отметка Веткина не совпадает с уникальным плановым занятием своего абонемента"
+            seen_ids.add(mark_id)
+            seen_marks.add(key)
+            counts[sub_id] += 1
+        if counts != {"821284": 7, "821285": 4}:
+            return "По Веткину нужно перенести 7 отметок сборной и 4 отметки ОФП"
+        if not any(str(x.get("erp_subscription_id")) == "821284" and
+                   str(x.get("date")) == "2026-10-06" and str(x.get("time")) == "18:30" and
+                   _norm(x.get("status")) in ("был", "присутствовал", "present") for x in visits):
+            return "Подтверждённое посещение Веткина 6 октября должно остаться «Был»"
         return ""
     expected = PILOT_CONTRACTS.get((erp_id, month))
     if not expected:
