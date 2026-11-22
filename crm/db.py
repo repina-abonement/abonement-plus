@@ -322,6 +322,8 @@ def init_db(con: sqlite3.Connection):
     targetedrenewalpayment.apply(con)
     from . import targetedkononenkotask
     targetedkononenkotask.apply(con)
+    from . import targetedminibaevtask
+    targetedminibaevtask.apply(con)
     from . import lifecycle, channels
     lifecycle.init(con)
     channels.init(con)
