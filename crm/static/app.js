@@ -2445,13 +2445,22 @@ async function openStudent(id, options = {}) {
       const form = document.createElement("form");
       form.innerHTML = `<label class="field">Текст комментария<textarea rows="6" required></textarea></label>
         <button class="btn primary" type="submit">Сохранить</button>
-        <button class="btn" type="button">Отмена</button>`;
+        <button class="btn" type="button">Отмена</button>
+        <button class="btn" type="button" data-archive-note>Убрать из истории</button>`;
       const input = form.querySelector("textarea");
       input.value = note.text;
       edit.hidden = true;
       edit.after(form);
       input.focus();
       form.querySelector('[type="button"]').onclick = () => { form.remove(); edit.hidden = false; };
+      form.querySelector("[data-archive-note]").onclick = async () => {
+        if (!confirm("Убрать сохранённый комментарий из истории карточки?")) return;
+        try {
+          await api("POST", `/api/students/${id}/notes/${note.id}/archive`, {original: note.text});
+          await openStudent(id);
+          toast("Комментарий убран из истории");
+        } catch (error) { fail(error); }
+      };
       form.onsubmit = async event => {
         event.preventDefault();
         const save = form.querySelector('[type="submit"]');

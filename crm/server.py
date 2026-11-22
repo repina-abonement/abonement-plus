@@ -1403,6 +1403,18 @@ def edit_student_note(con, h, user, body, q, sid, nid):
     return {"ok": True}
 
 
+@route("POST", "/api/students/{sid}/notes/{nid}/archive", role="admin")
+def archive_student_note(con, h, user, body, q, sid, nid):
+    result = con.execute(
+        "UPDATE history SET kind='archived_note' WHERE id=? AND student_id=? AND kind='note' AND text=?",
+        (int(nid), int(sid), body.get("original")),
+    )
+    if result.rowcount != 1:
+        raise ApiError("Комментарий изменился или уже архивирован. Обновите карточку", 409)
+    sv.audit(con, user, "student.note.archive", json.dumps({"student_id": int(sid), "history_id": int(nid)}))
+    return {"ok": True}
+
+
 @route("POST", "/api/students/{sid}/vacations", role="operator|client_ops:full")
 def vacation_add(con, h, user, body, q, sid):
     sv.add_vacation(con, int(sid), body.get("start"), body.get("end"), body.get("note"), user)

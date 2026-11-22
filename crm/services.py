@@ -1004,7 +1004,7 @@ def student_detail(con, sid: int) -> dict:
             excluded=json.loads(sub.get('excluded_dates') or '[]')
             if trial_day and trial_day[:7]==sub['month'] and excluded and all(day<=trial_day for day in excluded):
                 sub['calculation_reason']='Клиент пришёл на ПУ внутри месяца ('+date.fromisoformat(trial_day).strftime('%d.%m.%Y')+'). Абонемент рассчитан на занятия после ПУ'
-    hist = _rows(con.execute("SELECT id, ts, user_name, kind, text FROM history WHERE student_id=? AND NOT EXISTS (SELECT 1 FROM erp_full_history_corrections c WHERE c.history_id=history.id AND c.assigned_student_id IS NULL) ORDER BY id DESC LIMIT 100",
+    hist = _rows(con.execute("SELECT id, ts, user_name, kind, text FROM history WHERE student_id=? AND kind!='archived_note' AND NOT EXISTS (SELECT 1 FROM erp_full_history_corrections c WHERE c.history_id=history.id AND c.assigned_student_id IS NULL) ORDER BY id DESC LIMIT 100",
                              (sid,)))
     # A promoter may only know the child's age, not the exact date of birth.
     # Keep that provenance explicit: never manufacture a birth date, and only
