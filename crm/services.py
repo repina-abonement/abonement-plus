@@ -1515,19 +1515,31 @@ def meta(con) -> dict:
     }
 
 
+def client_text_search_sql(q: str) -> tuple[str, list[str]]:
+    """Order-independent name search shared by both client screens."""
+    variants = []
+    for value in keyboard_layout_variants(q):
+        words = [word for word in value.lower().split() if word]
+        if words and words not in variants:
+            variants.append(words)
+    clauses, args = [], []
+    for words in variants:
+        clauses.append("(" + " AND ".join(
+            "(ulower(s.name) LIKE ? OR ulower(f.name) LIKE ? OR EXISTS "
+            "(SELECT 1 FROM parents sp WHERE sp.family_id=f.id AND ulower(sp.name) LIKE ?))"
+            for _ in words
+        ) + ")")
+        args.extend(item for word in words for item in (f"%{word}%",) * 3)
+    return (" OR ".join(clauses) or "0"), args
+
+
 def search_students(con, q: str, archived: bool = False) -> list[dict]:
     st = settings(con)
-    text_variants = keyboard_layout_variants(q)
-    likes = [f"%{value.lower()}%" for value in text_variants]
-    text_where = " OR ".join(
-        "(ulower(s.name) LIKE ? OR ulower(f.name) LIKE ? OR ulower(p.name) LIKE ?)"
-        for _ in likes
-    ) or "0"
-    text_args = [item for like in likes for item in (like, like, like)]
+    text_where, text_args = client_text_search_sql(q)
     rows = _rows(con.execute(
         """SELECT DISTINCT s.* FROM students s JOIN families f ON f.id=s.family_id
-           LEFT JOIN parents p ON p.family_id=f.id
-           WHERE ((""" + text_where + """) OR (phone_match(p.phone_norm,?) OR phone_match(p.phone,?)))
+           WHERE ((""" + text_where + """) OR EXISTS (SELECT 1 FROM parents p WHERE p.family_id=f.id
+                    AND (phone_match(p.phone_norm,?) OR phone_match(p.phone,?))))
              AND s.archived = ? ORDER BY s.name LIMIT 100""",
         (*text_args, q, q, 1 if archived else 0)))
     return [card_summary(con, s, st) | {"funnel": s["funnel"], "archived": s.get("archived", 0)} for s in rows]

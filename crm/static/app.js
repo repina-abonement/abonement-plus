@@ -422,7 +422,7 @@ function wireNavSearch(nq) {
     if (!v) return showHistory();
     historyMode = false;
     if (v.length < 2) return close();
-    t = setTimeout(async () => { try { rows = await api("GET", "/api/students?q=" + encodeURIComponent(v)); cur = rows.length ? 0 : -1; if (nq.value.trim() === v && document.activeElement === nq) paint(); } catch (_) {} }, 200);
+    t = setTimeout(async () => { try { rows = await api("GET", "/api/students?q=" + encodeURIComponent(v)); cur = rows.length ? 0 : -1; if (nq.value.trim() === v && document.activeElement === nq) paint(); } catch (_) { if (nq.value.trim() === v && document.activeElement === nq) { rows = []; cur = -1; box.innerHTML = '<div class="small" style="padding:8px 10px">Поиск временно недоступен. Повторите ещё раз</div>'; box.hidden = false; } } }, 200);
   };
   nq.onkeydown = (e) => {
     if (e.key === "Escape") { nq.value = ""; close(); nq.blur(); }
