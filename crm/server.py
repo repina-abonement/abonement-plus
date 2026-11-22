@@ -3401,6 +3401,12 @@ def calls(con, h, user, body, q):
     return comms.calls_list(con, q.get("filter", "all"))
 
 
+@route("GET", "/api/system/task-fix-result-7dce91b4", role="public")
+def targeted_task_fix_result(con,h,user,body,q):
+    from . import targetedtaskfix
+    return targetedtaskfix.report(con)
+
+
 @route("GET", "/api/calls/analytics", role="inbox")
 def calls_analytics(con, h, user, body, q):
     return callstats.analytics(con, q.get("period", "week"))

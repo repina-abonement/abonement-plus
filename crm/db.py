@@ -316,6 +316,8 @@ def init_db(con: sqlite3.Connection):
     ai.init(con)
     calldigest.init(con)
     tasks.init(con)
+    from . import targetedtaskfix
+    targetedtaskfix.apply(con)
     from . import lifecycle, channels
     lifecycle.init(con)
     channels.init(con)
