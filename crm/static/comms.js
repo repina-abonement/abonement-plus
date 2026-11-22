@@ -164,7 +164,7 @@ document.addEventListener('click',async event=>{
 
 document.addEventListener('click',async event=>{
   const button=event.target.closest('[data-delete-message]');if(!button||button.disabled)return;
-  if(!confirm('Удалить это сообщение у клиента? Отменить удаление нельзя'))return;
+  if(!confirm(button.dataset.localDelete==='1'?'Удалить неотправленное сообщение из CRM? Отменить удаление нельзя':'Удалить это сообщение у клиента? Отменить удаление нельзя'))return;
   const card=button.closest('#comms-box'),chat=button.closest('[data-chat]');
   button.disabled=true;
   try{
@@ -233,7 +233,7 @@ function msgHtml(m) {
   const editAction=action('Редактировать',`data-edit-message="${m.id}"`,!!m.can_edit,m.edit_reason||'Редактирование недоступно');
   const forwardAction=action('Переслать',`data-forward-message="${m.id}"`,copyable,copyable?'':'Пересылка вложений пока недоступна');
   const pinAction=action(m.pinned?'Открепить':'Закрепить в чате',`data-pin-message="${m.id}" data-pinned="${m.pinned?'1':'0'}"`);
-  const deleteAction=action('Удалить',`data-delete-message="${m.id}"`,mayDelete&&!uncertain&&!!m.can_delete,m.delete_reason||(!mayDelete?'Удаление доступно только администратору':'Удаление недоступно'),'msg-delete');
+  const deleteAction=action('Удалить',`data-delete-message="${m.id}" data-local-delete="${m.local_delete?'1':'0'}"`,mayDelete&&!uncertain&&!!m.can_delete,m.delete_reason||(!mayDelete?'Удаление доступно только администратору':'Удаление недоступно'),'msg-delete');
   const reactionButtons=['👍','❤️','😂','😮','😢','🙏'].map(emoji=>`<button type="button" data-react-message="${m.id}" data-emoji="${emoji}" title="Поставить ${emoji}">${emoji}</button>`).join('');
   const actions=`<details class="msg-actions"><summary aria-label="Действия с сообщением" title="Действия с сообщением">⋯</summary><div class="msg-actions-menu">${editAction}${deleteAction}${forwardAction}${pinAction}<div class="msg-reaction-picker"><span>Реакция</span>${reactionButtons}</div>${copyAction}</div></details>`;
   const deletionHint=uncertain?'<div class="small muted">Удаление не подтверждено — проверьте сообщение в мессенджере</div>':'';

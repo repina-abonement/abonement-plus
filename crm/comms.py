@@ -1825,7 +1825,7 @@ def history(con, family_id: int | None, phones: list[str], mark_read: bool = Tru
                              (c["id"],)):
             from . import messagedeletion, messageactions
             message=messageactions.public(con,_with_reply_context(con,messagedeletion.public(con,dict(m)|{"channel":c["channel"]},c["channel"])),user)
-            items.append({"type": "msg", "can_delete":message["can_delete"],"delete_reason":message["delete_reason"],"deletion_status":message["deletion_status"], "ts": m["ts"], "channel": c["channel"], "channel_label": c["channel_label"],
+            items.append({"type": "msg", "can_delete":message["can_delete"],"delete_reason":message["delete_reason"],"deletion_status":message["deletion_status"],"local_delete":message["local_delete"], "ts": m["ts"], "channel": c["channel"], "channel_label": c["channel_label"],
                           "conversation_id": c["id"], **{k: m[k] for k in ("id", "direction", "text", "kind", "media",
                                                                             "user_name", "status", "error")},
                           "pinned":message["pinned"], "reactions":message["reactions"], "can_edit":message["can_edit"], "edit_reason":message["edit_reason"],

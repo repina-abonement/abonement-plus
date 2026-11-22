@@ -38,7 +38,7 @@ class DeleteTest(unittest.TestCase):
             with self.assertRaises(comms.CommsError):deletion.delete(self.con,self.mid,self.user)
         provider.assert_not_called()
         route=next(r for r in server.ROUTES if r[0]=='DELETE' and r[1].pattern.startswith('^/api/messages/'))
-        self.assertEqual(route[3],'operator')
+        self.assertEqual(route[3],'inbox')
     def test_webhook_confirmation_is_scoped_to_conversation_and_survives_later_echo(self):
         wrong=comms.upsert_conversation(self.con,'wazzup_telegram','99999',meta={'channelId':'test-tg','chatType':'telegram'})
         deletion.confirmed(self.con,wrong,'remote-message-1')
@@ -60,5 +60,16 @@ class DeleteTest(unittest.TestCase):
         for channel in comms.WZ_ROUTE:
             self.con.execute('UPDATE conversations SET channel=? WHERE id=?',(channel,self.cid))
             self.assertTrue(comms.conversation(self.con,self.cid,False)['history'][0]['can_delete'])
+
+    def test_failed_unsent_message_is_removed_locally_without_provider_call(self):
+        failed=comms.add_message(self.con,self.cid,'out','Never delivered',status='error',error='provider rejected')
+        row=comms.conversation(self.con,self.cid,False)['history'][-1]
+        self.assertTrue(row['can_delete']);self.assertTrue(row['local_delete'])
+        with patch.object(comms,'wz_call') as provider:
+            result=deletion.delete(self.con,failed,self.user)
+        self.assertEqual(result,{'ok':True,'state':'deleted','local':True});provider.assert_not_called()
+        self.assertIsNone(self.con.execute('SELECT id FROM messages WHERE id=?',(failed,)).fetchone())
+        self.assertEqual(self.con.execute('SELECT last_text FROM conversations WHERE id=?',(self.cid,)).fetchone()[0],'Вы: Synthetic text')
+        self.assertEqual(self.con.execute("SELECT count(*) FROM audit WHERE action='message.delete_local'").fetchone()[0],1)
 
 if __name__=='__main__':unittest.main()
