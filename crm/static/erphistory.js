@@ -25,17 +25,22 @@ function erpHistorySetup(box){
   const creditButton=document.createElement('button');
   creditButton.type='button';
   creditButton.className='btn';
-  creditButton.textContent='Перенести остаток 280 ₽ по предыдущему абонементу';
+  const reviewedCredits={'129268':{subscription:'825627',amount:280},'132408':{subscription:'826081',amount:1430}};
   const creditResult=document.createElement('p');
   panel.append(creditButton,creditResult);
   const erpIdField=panel.querySelector('[data-eh-id]');
-  const toggleCredit=()=>{creditButton.hidden=erpIdField.value.trim()!=='129268';creditResult.textContent=''};
+  const toggleCredit=()=>{
+    const credit=reviewedCredits[erpIdField.value.trim()];
+    creditButton.hidden=!credit;
+    creditButton.textContent=credit?'Перенести остаток '+rub(credit.amount)+' по предыдущему абонементу':'';
+    creditResult.textContent='';
+  };
   erpIdField.addEventListener('input',toggleCredit);
   toggleCredit();
   creditButton.onclick=async()=>{
     creditButton.disabled=true;
     try{
-      const result=await api('POST','/api/erp/balance-recovery/prior-credit',{erp_id:erpIdField.value.trim(),subscription:'825627',amount:280});
+      const result=await api('POST','/api/erp/balance-recovery/prior-credit',{erp_id:erpIdField.value.trim(),...reviewedCredits[erpIdField.value.trim()]});
       creditResult.textContent=(result.added?'Остаток перенесён. ':'Остаток уже учтён. ')+'На балансе '+rub(result.balance);
     }catch(error){creditResult.textContent=error.message}
     finally{creditButton.disabled=false}
