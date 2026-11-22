@@ -1379,6 +1379,30 @@ def student_note(con, h, user, body, q, sid):
     return {"ok": True}
 
 
+@route("PATCH", "/api/students/{sid}/notes/{nid}", role="admin")
+def edit_student_note(con, h, user, body, q, sid, nid):
+    updated = body.get("text")
+    original = body.get("original")
+    if not isinstance(updated, str) or not updated.strip() or not isinstance(original, str):
+        raise ApiError("Введите текст комментария")
+    updated = updated.strip()
+    row = con.execute(
+        "SELECT text FROM history WHERE id=? AND student_id=? AND kind='note'",
+        (int(nid), int(sid)),
+    ).fetchone()
+    if not row:
+        raise ApiError("Комментарий не найден", 404)
+    if row["text"] != original:
+        raise ApiError("Комментарий уже изменён. Откройте карточку заново и сверьте текст", 409)
+    if updated != original:
+        con.execute("UPDATE history SET text=? WHERE id=?", (updated, int(nid)))
+        sv.audit(con, user, "student.note.edit", json.dumps({
+            "student_id": int(sid), "history_id": int(nid),
+            "before": original, "after": updated,
+        }, ensure_ascii=False))
+    return {"ok": True}
+
+
 @route("POST", "/api/students/{sid}/vacations", role="operator|client_ops:full")
 def vacation_add(con, h, user, body, q, sid):
     sv.add_vacation(con, int(sid), body.get("start"), body.get("end"), body.get("note"), user)

@@ -2083,12 +2083,13 @@ function clientBalanceHtml(d) {
 function clientHistoryHtml(rows){
   const technical=rows.filter(row=>row.technical_only),events=rows.filter(row=>!row.technical_only);
   const labels={payment:'Оплата',sale:'Абонемент',stage:'Статус',group:'Группа',task:'Задача',note:'Комментарий',message:'Сообщение',system:'CRM'};
+  const editButton = row => S.user.role === "admin" && row.kind === "note" ? `<button type="button" class="btn sm" data-edit-history="${row.id}">Изменить комментарий</button>` : "";
   const item=row=>{
     const text=String(row.display_text||row.text||'').trim(),long=text.length>320||text.split('\n').length>4;
     const visible=long?text.slice(0,280).trimEnd()+'…':text;
-    return `<li class="client-history-event"><div class="client-history-meta"><span class="client-history-kind">${esc(labels[row.kind]||'Событие')}</span><time>${dtShort(row.ts)}</time><span>${esc(row.display_author||row.user_name||'CRM')}</span></div><div class="client-history-text">${esc(visible)}</div>${long?`<details class="client-history-full"><summary>Показать полностью</summary><div>${esc(text)}</div></details>`:''}${row.technical_text&&!row.technical_only?`<details class="client-history-source"><summary>Исходная запись ERP</summary><div>${esc(row.technical_text)}</div></details>`:''}</li>`;
+    return `<li class="client-history-event"><div class="client-history-meta"><span class="client-history-kind">${esc(labels[row.kind]||'Событие')}</span><time>${dtShort(row.ts)}</time><span>${esc(row.display_author||row.user_name||'CRM')}</span></div><div class="client-history-text">${esc(visible)}</div>${long?`<details class="client-history-full"><summary>Показать полностью</summary><div>${esc(text)}</div></details>`:''}${row.technical_text&&!row.technical_only?`<details class="client-history-source"><summary>Исходная запись ERP</summary><div>${esc(row.technical_text)}</div></details>`:''}${editButton(row)}</li>`;
   };
-  const archive=technical.length?`<details class="client-history-technical"><summary>Технические данные переноса ERP · ${technical.length}</summary><p>Сохранены для проверки переноса и не относятся к рабочей истории общения с клиентом.</p>${technical.map(row=>`<details><summary>${dtShort(row.ts)} · ${esc(row.display_text||'Исходные данные')}</summary><div>${esc(row.technical_text||row.text||'')}</div></details>`).join('')}</details>`:'';
+  const archive=technical.length?`<details class="client-history-technical"><summary>Технические данные переноса ERP · ${technical.length}</summary><p>Сохранены для проверки переноса и не относятся к рабочей истории общения с клиентом.</p>${technical.map(row=>`<details><summary>${dtShort(row.ts)} · ${esc(row.display_text||'Исходные данные')}</summary><div>${esc(row.technical_text||row.text||'')}</div>${editButton(row)}</details>`).join('')}</details>`:'';
   return `${events.length?`<ul class="history client-history-list">${events.map(item).join('')}</ul>`:'<p class="muted">Рабочих событий пока нет</p>'}${archive}`;
 }
 async function loadClientPaymentLinks(sid) {
@@ -2438,6 +2439,31 @@ async function openStudent(id, options = {}) {
     if (!s.archived && !confirm("Перенести карточку в архив? Она пропадёт из воронок, вернуть можно в любой момент")) return;
     try { await api("POST", `/api/students/${id}/archive`, { archived: !s.archived }); toast(s.archived ? "Карточка возвращена" : "Карточка в архиве"); closeDrawer(); render(); } catch (e) { fail(e); }
   };
+  for (const edit of body.querySelectorAll("[data-edit-history]")) {
+    edit.onclick = () => {
+      const note = d.history.find(item => item.id === Number(edit.dataset.editHistory));
+      const form = document.createElement("form");
+      form.innerHTML = `<label class="field">Текст комментария<textarea rows="6" required></textarea></label>
+        <button class="btn primary" type="submit">Сохранить</button>
+        <button class="btn" type="button">Отмена</button>`;
+      const input = form.querySelector("textarea");
+      input.value = note.text;
+      edit.hidden = true;
+      edit.after(form);
+      input.focus();
+      form.querySelector('[type="button"]').onclick = () => { form.remove(); edit.hidden = false; };
+      form.onsubmit = async event => {
+        event.preventDefault();
+        const save = form.querySelector('[type="submit"]');
+        save.disabled = true;
+        try {
+          await api("PATCH", `/api/students/${id}/notes/${note.id}`, {text: input.value, original: note.text});
+          await openStudent(id);
+          toast("Комментарий сохранён");
+        } catch (error) { save.disabled = false; fail(error); }
+      };
+    };
+  }
   $("#note-add").onclick = async () => {
     const t = $("#note").value.trim(); if (!t) return;
     try { await api("POST", `/api/students/${id}/note`, { text: t }); openStudent(id); } catch (e) { fail(e); }
