@@ -228,6 +228,22 @@ def allocation(con, sid):
         result['covered'][target] += amount
         result['sources'][target].append({'payment_id': pid, 'amount': amount})
         remaining[pid] -= amount
+    # When a booked single is cancelled, its specifically bound ERP receipt
+    # backs spendable client credit. Count it once, while preserving the original binding.
+    if meta['funds'] and con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='single_cancelled_payment_credits'").fetchone():
+        for credit in con.execute("""SELECT c.*,s.status FROM single_cancelled_payment_credits c
+                JOIN subscriptions s ON s.id=c.subscription_id WHERE s.student_id=?""",(sid,)):
+            fund = meta['funds'].get(credit['fund_id'])
+            if not fund:
+                continue
+            pid, subid = credit['payment_id'], credit['subscription_id']
+            binding = binding_by_key.get((pid,subid))
+            if (credit['status'] != 'cancelled' or not binding or
+                    binding['amount'] - refund_by_binding[(pid,subid)] < fund['amount'] or
+                    remaining.get(pid,0) < fund['amount']):
+                conflicts.append('Возврат разового на баланс требует сверки с исходной оплатой')
+                return conservative()
+            remaining[pid] -= fund['amount']
     funds = {fid: row['amount'] for fid, row in meta['funds'].items()}
     for use in meta['uses']:
         subid = use['subscription_id']

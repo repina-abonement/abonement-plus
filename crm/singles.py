@@ -21,6 +21,12 @@ CREATE TABLE IF NOT EXISTS single_visits (
     created_at TEXT NOT NULL,
     created_by TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS single_cancelled_payment_credits (
+    fund_id INTEGER PRIMARY KEY REFERENCES balance_credit_funds(id),
+    payment_id INTEGER NOT NULL REFERENCES payments(id),
+    subscription_id INTEGER NOT NULL REFERENCES subscriptions(id),
+    UNIQUE(payment_id,subscription_id)
+);
 CREATE INDEX IF NOT EXISTS single_visits_day ON single_visits(group_id, date);
 CREATE INDEX IF NOT EXISTS single_visits_kid ON single_visits(student_id, date);
 """
@@ -86,6 +92,18 @@ def sync_paid_tasks(con, now: datetime, sid: int | None = None):
         LEFT JOIN subscriptions x ON x.id=v.subscription_id
         WHERE v.date>=? AND (? IS NULL OR v.student_id=?)""",
         ((today - timedelta(days=1)).isoformat(), sid, sid)).fetchall()
+    # A new booking or a paid membership resolves the cancellation follow-up,
+    # including later no-answer steps created by the existing ERP lead workflow.
+    con.execute("""WITH RECURSIVE resolved(id) AS (
+        SELECT t.id FROM tasks t WHERE t.auto_key LIKE 'single-recontact:%'
+            AND (? IS NULL OR t.student_id=?) AND (
+                EXISTS (SELECT 1 FROM single_visits v WHERE v.student_id=t.student_id AND v.status='booked' AND v.date>=?)
+                OR EXISTS (SELECT 1 FROM subscriptions s WHERE s.student_id=t.student_id AND s.kind='month'
+                           AND s.status='paid' AND s.month>=?))
+        UNION ALL SELECT t.id FROM tasks t JOIN resolved r ON t.auto_key LIKE 'erp-rule:'||r.id||':%'
+    ) UPDATE tasks SET status='cancelled',done_at=?,result='У клиента есть следующая запись или абонемент'
+    WHERE status='open' AND id IN (SELECT id FROM resolved)""",
+    (sid,sid,today.isoformat(),today.isoformat()[:7],now.isoformat(timespec='minutes')))
     active_keys = set()
     for v in visits:
         if v["archived"] or v["status"] != "booked" or v["invoice_status"] != "paid":
@@ -182,7 +200,7 @@ def book(con, sid: int, group_id: int, day: str, user: dict | None, note: str = 
                    title=unpaid_title(day), source="single",
                    note=message(con, v))
     # «пока не знаем» / «в ближайший набор» больше не нужны: дату выбрали
-    con.execute("UPDATE tasks SET status='cancelled', done_at=?, result='Записан на разовое' WHERE student_id=? AND kind='single_next' AND status='open'",
+    con.execute("UPDATE tasks SET status='cancelled', done_at=?, result='Записан на разовое' WHERE student_id=? AND (kind='single_next' OR auto_key LIKE 'single-recontact:%') AND status='open'",
                 (_now().isoformat(timespec="minutes"), sid))
     g = (con.execute("SELECT name FROM groups WHERE id=?", (group_id,)).fetchone() or [""])[0]
     sv.log(con, sid, f"Записан на разовое занятие {d:%d.%m.%Y}, {g}", user, "stage")
@@ -191,15 +209,8 @@ def book(con, sid: int, group_id: int, day: str, user: dict | None, note: str = 
 
 
 def cancel(con, vid: int, user: dict | None) -> None:
-    from . import services as sv
-    v = con.execute("SELECT * FROM single_visits WHERE id=?", (vid,)).fetchone()
-    if not v:
-        raise sv.ApiError("Запись не найдена", 404)
-    con.execute("UPDATE single_visits SET status='cancelled' WHERE id=?", (vid,))
-    con.execute("UPDATE tasks SET status='cancelled', done_at=?, result='Разовое отменено' WHERE auto_key=? AND status='open'",
-                (_now().isoformat(timespec="minutes"), f"single:{vid}:{v['date']}"))
-    sync_paid_tasks(con, _now(), v["student_id"])
-    sv.log(con, v["student_id"], f"Отменено разовое {v['date'][8:10]}.{v['date'][5:7]}", user, "stage")
+    from . import singlechanges
+    return singlechanges.cancel(con, vid, user)
 
 
 def next_step(con, sid: int, how: str, user: dict | None, group_id: int | None = None, day: str = "") -> dict:

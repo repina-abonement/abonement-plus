@@ -48,7 +48,57 @@ function wireClientAttendance(body,studentData,onChanged){
     root.innerHTML=`<h4>${dShort(day)} · ${monthLabel(month)}</h4>${events.length?events.map((e,i)=>`<div class="attendance-event"><div><span class="pill att-${e.kind}">${ATTENDANCE_KINDS[e.kind][1]}</span><b>${ATTENDANCE_STATUS[e.status]}</b></div><div class="small muted">${esc([e.time,e.group,e.branch].filter(Boolean).join(' · '))}</div>${e.note?`<p>${esc(e.note)}</p>`:''}
       ${can('journal','full')&&e.group_id&&(e.kind!=='trial'||e.trial_editable)&&!e.future?`<div class="sc-actions"><button class="btn attendance-detail-mark" data-att-mark="${i}|present">Был</button><button class="btn attendance-detail-mark" data-att-mark="${i}|absent">Пропуск</button>${e.kind!=='trial'?`<button class="btn attendance-detail-mark" data-att-mark="${i}|clear">Снять отметку</button>`:''}</div>`:''}
       ${can('journal','full')&&e.future&&e.kind==='subscription'?`<button class="btn attendance-detail-mark" data-att-warn="${i}">${e.status==='warned'?'Снова придёт':'Не придёт'}</button>`:''}
+      ${e.single_id && e.date >= data.today && e.status==='planned' && (can('client_ops','full')||can('members','full')) ? `<div class="sc-actions"><button class="btn sm" data-single-move="${i}">Перенести разовое</button><button class="btn sm" data-single-cancel="${i}">Отменить разовое</button></div><div data-single-options="${i}"></div>`:''}
       ${e.makeup_id&&e.status==='planned'?`<button class="linkish small" data-att-unbook="${e.makeup_id}">Отменить запись на отработку</button>`:''}</div>`).join(''):'<p class="muted">На этот день нет занятий</p>'}`;
+    root.querySelectorAll('[data-single-cancel]').forEach(button=>button.onclick=async()=>{
+      const e=events[+button.dataset.singleCancel];
+      const panel=root.querySelector(`[data-single-options="${button.dataset.singleCancel}"]`);
+      try {
+        const opt=await api('GET',`/api/singles/${e.single_id}/cancel-options`);
+        panel.innerHTML=`<p>Оплаченная сумма вернётся на баланс клиента</p>
+          ${opt.continuation?'<p>У клиента уже есть следующая запись или оплаченный абонемент</p>':`<label>После отмены <select data-mode>
+          ${opt.due?`<option value="auto">Уточнить следующую запись ${dShort(opt.due)} в 10:00</option>`:''}
+          <option value="date">Выбрать дату связи</option><option value="lead">Вернуть в работу по цепочке «Новый лид»</option></select></label>
+          <label data-custom>Дата связи <input type="date" min="${data.today}" value="${opt.due||data.today}"></label>`}
+          <button class="btn sm danger" data-confirm>Подтвердить отмену</button>`;
+        const mode=panel.querySelector('[data-mode]'),custom=panel.querySelector('[data-custom]'),confirm=panel.querySelector('[data-confirm]');
+        if(mode){mode.onchange=()=>{custom.hidden=mode.value!=='date'};mode.onchange()}
+        confirm.onclick=async()=>{
+          confirm.disabled=true;
+          try{
+            const result=await api('POST',`/api/singles/${e.single_id}/cancel-with-followup`,{expected_date:e.date,expected_group_id:e.group_id,
+              follow_up:mode?.value||'auto',contact_date:custom?.querySelector('input').value});
+            toast(result.already_cancelled?'Запись уже отменена':`Разовое отменено. На баланс возвращено ${rub(result.balance_credit)}`);refresh();
+          }catch(err){confirm.disabled=false;fail(err)}
+        };
+      } catch(err){fail(err)}
+    });
+    root.querySelectorAll('[data-single-move]').forEach(button=>button.onclick=()=>{
+      const i=button.dataset.singleMove,e=events[+i],form=root.querySelector(`[data-single-options="${i}"]`);
+      form.innerHTML=`<label>Новая дата <input type="date" min="${data.today}" value="${e.date}"></label>
+        <label>Группа и время <select aria-label="Группа и время"></select></label>
+        <button class="btn sm primary">Сохранить перенос</button><span class="small" role="status"></span>`;
+      const date=form.querySelector('input'),group=form.querySelector('select'),save=form.querySelector('button'),status=form.querySelector('[role=status]');
+      let generation=0;
+      const loadSlots=async()=>{
+        const n=++generation;save.disabled=true;group.innerHTML='';status.textContent='';
+        if(!date.value)return;
+        try{
+          const result=await api('GET',`/api/singles/${e.single_id}/slots?date=${encodeURIComponent(date.value)}`);
+          if(n!==generation)return;
+          for(const slot of result.slots)group.add(new Option([slot.time,slot.branch,slot.group].join(' · '),slot.group_id));
+          save.disabled=!group.length;status.textContent=group.length?'':'На эту дату нет свободных занятий';
+        }catch(err){if(n===generation)status.textContent=err.message}
+      };
+      date.onchange=loadSlots;loadSlots();
+      save.onclick=async()=>{
+        save.disabled=true;
+        try{
+          await api('POST',`/api/singles/${e.single_id}/move`,{expected_date:e.date,expected_group_id:e.group_id,date:date.value,group_id:+group.value});
+          day=date.value;month=day.slice(0,7);toast('Разовое перенесено');refresh();
+        }catch(err){save.disabled=false;fail(err)}
+      };
+    });
     root.querySelectorAll('[data-att-mark]').forEach(b=>b.onclick=()=>{const [i,status]=b.dataset.attMark.split('|');markEvent(events[+i],status,b)});
     root.querySelectorAll('[data-att-warn]').forEach(b=>b.onclick=()=>warnEvent(events[+b.dataset.attWarn],b));
     root.querySelectorAll('[data-att-unbook]').forEach(b=>b.onclick=async()=>{try{await api('POST',`/api/makeups/${b.dataset.attUnbook}/status`,{status:'cancelled'});slots=null;refresh()}catch(err){fail(err)}});
