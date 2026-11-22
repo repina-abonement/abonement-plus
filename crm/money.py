@@ -574,6 +574,13 @@ def _payment_receipt_info(con,payment):
 
 def payment_receipt_info(con,payment):
     import json
+    if payment['method']=='tochka_qr_link':
+        from . import manualpaymentcheck
+        manual=manualpaymentcheck.state(con,payment['id'])
+        receipt=manual['receipt']
+        return {'status':receipt['status'],'label':receipt['label'],'receipt_id':receipt.get('receipt_id'),
+                'receipt_at':receipt.get('receipt_at'),'note':'Проверяется по выбранному чеку Эвотор в ОФД',
+                'manual_check':manual}
     result=_payment_receipt_info(con,payment)
     check=con.execute('SELECT result FROM fiscal_payment_checks WHERE payment_id=?',(payment['id'],)).fetchone()
     if check:

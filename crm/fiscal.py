@@ -182,6 +182,8 @@ def init(con):
     sberbank.init(con)
     from . import paymentworker
     paymentworker.init(con)
+    from . import manualpaymentcheck
+    manualpaymentcheck.init(con)
     con.execute('CREATE TABLE IF NOT EXISTS fiscal_ofd_days(day TEXT PRIMARY KEY,checked_at TEXT NOT NULL,ok INTEGER NOT NULL)')
     columns = {r[1] for r in con.execute('PRAGMA table_info(fx_receipts)')}
     for key in ('fiscal_fn', 'fiscal_fd', 'fiscal_fp'):

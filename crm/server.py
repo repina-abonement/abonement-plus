@@ -1497,6 +1497,18 @@ def payment_fiscal_check(con,h,user,body,q,pid):
     return fiscalcheck.check(con,int(pid),user)
 
 
+@route("POST", "/api/payments/{pid}/manual-check/refresh", role="payments:view")
+def payment_manual_check_refresh(con,h,user,body,q,pid):
+    from . import manualpaymentcheck
+    return manualpaymentcheck.refresh(con,int(pid),user)
+
+
+@route("POST", "/api/payments/{pid}/manual-check/bind", role="payments:view")
+def payment_manual_check_bind(con,h,user,body,q,pid):
+    from . import manualpaymentcheck
+    return manualpaymentcheck.bind(con,int(pid),body,user)
+
+
 @route("POST", "/api/subscriptions/{sub}/pay", role="operator|client_sales:full")
 def pay(con, h, user, body, q, sub):
     sv.pay_subscription(con, int(sub), user, body.get("method") or "cash", body.get("amount"),body.get("paid_date"),body.get("request_id"))

@@ -4,6 +4,10 @@ from . import fiscal
 
 
 def payment_state(con, payment):
+    if payment['method']=='tochka_qr_link':
+        from . import manualpaymentcheck
+        manual=manualpaymentcheck.state(con,payment['id'])
+        return {'bank':manual['bank'],'ofd':manual['receipt'],'complete':manual['status']=='confirmed'}
     bank = {'status': 'unverified', 'label': 'Зачисление на расчётный счёт не подтверждено',
             'note': 'Ожидается сопоставление клиентской оплаты PayKeeper с выпиской: СБП отдельно, карты общей выплатой'}
     if payment['method'] == 'cash':
