@@ -385,8 +385,10 @@ function wireReplyTarget(select,onchange) {
 async function loadFamilyComms(familyId, parents, studentId, kid) {
   const box = $("#comms-box");
   if (!box) return;
+  S.familyDrafts = S.familyDrafts || {};
+  const familyDraftKey = `${S.user.id}:${familyId}`;
   const sameFamily = box.dataset.familyId === String(familyId);
-  let draft = sameFamily ? $("#cm-text")?.value || "" : "";
+  let draft = sameFamily ? $("#cm-text")?.value || "" : S.familyDrafts[familyDraftKey] || "";
   let d;
   try { d = await api("GET", `/api/families/${familyId}/comms`); } catch (e) { box.innerHTML = `<h3>Связь с семьёй</h3><div class="error">${esc(e.message)}</div>`; return; }
   if ($("#comms-box") !== box) return;
@@ -421,7 +423,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
         ${replyTargetHtml('cm-to',targets,selectedTarget)}
         <div class="row"><textarea id="cm-text" rows="3" placeholder="Сообщение родителю…"></textarea><button class="btn primary" id="cm-send" style="flex:0">Отправить</button></div>
       </div>` : `<div class="small muted">Написать отсюда можно, когда родитель напишет школе в Telegram или MAX${st.whatsapp || st.wazzup_telegram ? "" : ". Первыми написать можно после подключения Wazzup"}</div>`}`;
-  if ($("#cm-text")) { $("#cm-text").value = draft; $("#cm-text").addEventListener("input",e=>resizeMessageInput(e.target)); resizeMessageInput($("#cm-text")); }
+  if ($("#cm-text")) { $("#cm-text").value = draft; $("#cm-text").addEventListener("input",e=>{S.familyDrafts[familyDraftKey]=e.target.value;resizeMessageInput(e.target)}); resizeMessageInput($("#cm-text")); }
   wireMakeupOffer(box,kid?[kid]:[],"#cm-text");
   const toSelect = $("#cm-to"); wireReplyTarget(toSelect,()=>{S.familySendTargets[targetKey]=toSelect.value});
   const feed = $("#feed"); if (feed) feed.scrollTop = feed.scrollHeight;
@@ -487,6 +489,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
       }
       if(box.isConnected&&$('#comms-box')===box&&box.dataset.familyId===String(familyId)){
         clearSentComposerDraft(box.querySelector('#cm-text'),sentValue);
+        delete S.familyDrafts[familyDraftKey];
         await loadFamilyComms(familyId, parents, studentId, kid);
       }
     } catch (e) { fail(e); send.disabled = false; }
