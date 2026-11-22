@@ -2098,7 +2098,6 @@ async function loadClientPaymentLinks(sid) {
   box.querySelectorAll('[data-plx]').forEach(b=>b.onclick=async()=>{await api('POST',`/api/paylinks/${b.dataset.plx}/cancel`,{});loadClientPaymentLinks(sid)});
 }
 
-const NEXT_GO = { reply: "Ответить", call: "Позвонить", offer: "Предложить дни", trial: "Записать", sell: "Продать", link: "Ссылка на оплату", makeup: "Отработка", task: "К задаче" };
 async function openStudent(id, options = {}) {
   const request=S.studentCardRequest=(S.studentCardRequest||0)+1;
   const previous = history.state?.studentCard;
@@ -2159,7 +2158,6 @@ async function openStudent(id, options = {}) {
     ${isMember && d.balance.debt ? `<div class="sc-debt-summary">Задолженность <b>${rub(d.balance.debt)}</b></div>` : ""}
     ${d.family.note ? `<div class="sc-staff-note" ${full?'data-profile-note tabindex="0" role="button" title="Изменить заметку"':''}><b>Заметка для команды</b><div>${esc(d.family.note)}</div></div>` : ""}
     ${alerts ? `<div class="sc-alerts">${alerts}</div>` : ""}
-    ${d.next_step && !(d.next_step.action === "task" && d.tasks?.open?.length) ? `<div class="next-step"><span><b>Задача:</b> ${esc(d.next_step.text)}</span><button class="btn sm primary" id="ns-go">${NEXT_GO[d.next_step.action] || "Сделать"}</button></div>` : ""}
     <div class="sc-header-tools" role="toolbar" aria-label="Действия клиента">
       <button type="button" class="btn sc-tool" id="act-trial" title="Записать на пробное" aria-label="Записать на пробное">ПУ</button>
       ${saleFull?`<button type="button" class="btn sc-tool primary" id="act-sell" title="Продать абонемент или разовое занятие" aria-label="Продать абонемент или разовое занятие"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l3 12h11l2-8H6M9 20h.01M18 20h.01"/></svg></button>`:''}
@@ -2313,17 +2311,6 @@ async function openStudent(id, options = {}) {
     if (!confirm("Остановить автоцепочку для этого клиента? Больше сообщений по ней не уйдёт")) return;
     try { await api("POST", `/api/chain-runs/${b.dataset.chstop}/stop`, {}); toast("Цепочка остановлена"); reload(); } catch (e) { fail(e); }
   }));
-  if ($("#ns-go")) $("#ns-go").onclick = () => {
-    const a = d.next_step.action, click = (sel) => { const b = body.querySelector(sel); if (b) { b.click(); return true; } return false; };
-    if (a === "reply") { scTab("feed"); const t = $("#cm-text"); if (t) { t.scrollIntoView({ block: "center", behavior: "smooth" }); t.focus(); } }
-    else if (a === "call") dial(firstPhone);
-    else if (a === "offer") { scTab("feed"); click("#to-open"); }
-    else if (a === "trial") click("#act-trial");
-    else if (a === "sell") { if (!click("#act-sell")) { openFold(body, "family"); const f = $("#f-stage"); if (f) { f.scrollIntoView({ block: "center", behavior: "smooth" }); f.focus(); } } }
-    else if (a === "link") { click("#act-sell"); }
-    else if (a === "makeup") openFold(body, "skips");
-    else if (a === "task") { closeDrawer(); go("planner"); }
-  };
   if ($("#fam-note")) $("#fam-note").onchange = async (e) => { try { await api("PATCH", `/api/families/${s.family_id}`, { note: e.target.value }); toast("Заметка сохранена"); reload(); } catch (err) { fail(err); } };
 
   if (isMember) loadWarnBox(s.family_id, body.querySelector("#warn-box"), id);
