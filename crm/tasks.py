@@ -119,6 +119,11 @@ def init(con):
     con.executescript(SCHEMA)
     if "renewal_reason" not in {row[1] for row in con.execute("PRAGMA table_info(tasks)")}:
         con.execute("ALTER TABLE tasks ADD COLUMN renewal_reason TEXT")
+    con.execute('''CREATE TABLE IF NOT EXISTS task_text_revisions(
+        id INTEGER PRIMARY KEY, task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        changed_at TEXT NOT NULL, changed_by TEXT NOT NULL DEFAULT '',
+        title TEXT NOT NULL, note TEXT NOT NULL DEFAULT '')''')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_task_text_revisions ON task_text_revisions(task_id,id DESC)')
     if not comms.get(con,'msg_after_approved_20261116'):
         previous=comms.get(con,'msg_after')
         if previous and previous!=trialscripts.AFTER_TEXT:comms.put(con,'msg_after_previous_20261116',previous)
@@ -746,6 +751,8 @@ def _task_out(con, r) -> dict:
     d = dict(r)
     d["icon"] = KINDS.get(d["kind"], ("", "✅"))[1]
     d["manual"] = d["kind"] in MANUAL_KINDS
+    previous=con.execute('SELECT title,note,changed_at,changed_by FROM task_text_revisions WHERE task_id=? ORDER BY id DESC LIMIT 1',(d['id'],)).fetchone()
+    d['previous_text']=dict(previous) if previous else None
     d["client_task"] = bool(d.get("student_id") or d.get("family_id"))
     if d["student_id"]:
         s = con.execute("""SELECT s.id, s.name, s.trial_at, s.trial_came, s.stage, s.funnel, s.converted_at, s.created_at, s.erp_id, s.family_id, f.name AS family,
@@ -830,6 +837,7 @@ def edit(con, tid: int, data: dict, user: dict) -> dict:
         if data.get("assignee_id") and not planner.can_change_plan(con, user, int(data["assignee_id"])):
             raise comms.CommsError("Нет доступа к планеру участника команды")
     sets, args, notes = [], [], []
+    text_changed=('title' in data and (data.get('title') or '').strip()[:200]!=t['title']) or ('note' in data and (data.get('note') or '').strip()[:1000]!=(t['note'] or ''))
     if client and t["assignee_id"] is not None:
         sets.append("assignee_id=NULL")
     if "assignee_id" in data and not client:
@@ -867,6 +875,9 @@ def edit(con, tid: int, data: dict, user: dict) -> dict:
         if note != (t["note"] or ""):
             sets.append("note=?"); args.append(note)
     if sets:
+        if text_changed:
+            con.execute('INSERT INTO task_text_revisions(task_id,changed_at,changed_by,title,note) VALUES(?,?,?,?,?)',
+                (tid,_iso(_now()),user.get('name',''),t['title'],t['note'] or ''))
         con.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id=?", (*args, tid))
         if t["student_id"]:
             from . import services as sv

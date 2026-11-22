@@ -28,6 +28,11 @@ def main():
     assert personal not in {t['id'] for x in mine.values() for t in x}
     assert tasks.for_student(c,sid)['open'][0]['id']==b
     assert tuple(c.execute('SELECT title,note FROM tasks WHERE id=?',(a,)).fetchone())==('Обычная','Подробный контекст задачи для другого администратора')
+    changed=tasks.edit(c,a,{'title':'Новое короткое название','note':''},u)
+    assert changed['previous_text']['title']=='Обычная'
+    assert changed['previous_text']['note']=='Подробный контекст задачи для другого администратора'
+    restored=tasks.edit(c,a,{'title':changed['previous_text']['title'],'note':changed['previous_text']['note']},u)
+    assert (restored['title'],restored['note'])==('Обычная','Подробный контекст задачи для другого администратора')
     # Старый исполнитель-тренер не скрывает клиентскую задачу от администраторов.
     c.execute('UPDATE tasks SET assignee_id=? WHERE id=?',(coach,a))
     assert a in [t['id'] for col in tasks.erp_board(c,'today',v)['columns'] for t in col['cards']]

@@ -151,25 +151,31 @@ function openTaskEdit(t, onDone, focus) {
     ${client?`<label class="check task-priority-control"><input type="checkbox" name="priority" ${t.priority?"checked":""}> 🔥 Приоритет — первой в колонке на этот день</label><p class="small muted">Общая задача для всех администраторов.</p>`:""}
     ${renewalReasonHtml(t)}
     <div class="field"><label>Подробное описание задачи</label><textarea name="note" rows="4" maxlength="1000" placeholder="Контекст, с кем связаться, что уточнить и какой результат нужен">${esc(t.note || "")}</textarea><small class="muted">Здесь хранится вся информация, необходимая для выполнения задачи.</small></div>
+    ${t.previous_text?`<button type="button" class="linkish small" data-task-restore>↶ Вернуть предыдущий текст</button>`:''}
     <div class="need-err small"></div>
     <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap"><button class="btn primary" style="flex:1">Сохранить</button>
       ${t.kind === "rebook" ? `<button type="button" class="btn" data-rebook="${t.id}" data-tclose>Итог звонка</button>` : t.erp_outcomes?.length?'':`<button type="button" class="btn" data-tfinish>Выполнено</button>`}
       <button type="button" class="btn" data-tcancelf style="flex:0 0 auto">Отмена</button></div>
     ${erpOutcomePicker(t,false,'t')}</form>`;
   document.body.appendChild(wrap);
-  const f = wrap.querySelector("form"), close = () => wrap.remove();
+  const f = wrap.querySelector("form");
+  const original=()=>JSON.stringify({title:f.elements.title.value,note:f.elements.note.value,due:f.elements.due_at.value,assignee:f.elements.assignee_id?.value||'',priority:!!f.elements.priority?.checked});
+  const initial=original();
+  const close = (force=false) => {if(!force&&original()!==initial&&!confirm('Есть несохранённые изменения. Закрыть задачу и потерять их?'))return false;wrap.remove();return true};
   setTimeout(() => (focus === "assignee" && f.elements.assignee_id ? f.elements.assignee_id : f.elements.title).focus(), 50);
-  wrap.querySelector("[data-tcancelf]").onclick = close;
+  wrap.querySelector("[data-tcancelf]").onclick = ()=>close();
   wrap.addEventListener("click", (e) => { if (e.target === wrap) close(); });
-  const cl = wrap.querySelector("[data-tclose]"); if (cl) cl.addEventListener("click", () => setTimeout(close, 0));
+  const cl = wrap.querySelector("[data-tclose]"); if (cl) cl.addEventListener("click", () => setTimeout(()=>close(), 0));
+  wrap.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+  const restore=wrap.querySelector('[data-task-restore]');if(restore)restore.onclick=()=>{f.elements.title.value=t.previous_text.title;f.elements.note.value=t.previous_text.note;f.elements.note.focus();toast('Предыдущий текст восстановлен в форме. Нажмите «Сохранить»')};
   const fin = wrap.querySelector("[data-tfinish]");
   if (fin) fin.onclick = () => { const b = wrap.querySelector(".task-done"); b.hidden = false; b.querySelector("input").focus(); };
   const ok = wrap.querySelector("[data-tok]");
   if (ok) ok.onclick = async () => {
-    try { await api("POST", `/api/tasks/${t.id}/done`, { result: wrap.querySelector("[data-tresult]").value }); toast("Задача выполнена"); close(); onDone && onDone(); }
+    try { await api("POST", `/api/tasks/${t.id}/done`, { result: wrap.querySelector("[data-tresult]").value }); toast("Задача выполнена"); close(true); onDone && onDone(); }
     catch (e) { wrap.querySelector(".need-err").textContent = e.message; }
   };
-  wireErpOutcome(wrap,t,t.id,'t',()=>{close();onDone&&onDone()});
+  wireErpOutcome(wrap,t,t.id,'t',()=>{close(true);onDone&&onDone()});
   f.onsubmit = async (e) => {
     e.preventDefault();
     const body = { title: f.elements.title.value, due_at: f.elements.due_at.value, note: f.elements.note.value };
@@ -178,7 +184,7 @@ function openTaskEdit(t, onDone, focus) {
     try {
       const r = await api("PATCH", `/api/tasks/${t.id}`, body);
       toast(!client && r.assignee_id !== t.assignee_id ? `Задача передана: ${r.assignee}` : "Задача сохранена");
-      close(); onDone && onDone();
+      close(true); onDone && onDone();
     } catch (err) { wrap.querySelector(".need-err").textContent = err.message; }
   };
 }
