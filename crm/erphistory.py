@@ -145,8 +145,8 @@ def _visit_source(item, erp_student_id=""):
     # to ERP 125824 / October 2026 only.
     if (str(erp_student_id) == "125824" and
             str(item.get("erp_subscription_id") or "") in {"821284", "821285"} and
-            re.fullmatch(r"2026-10-\\d{2}", str(item.get("date") or "")) and
-            re.fullmatch(r"\\d{2}:\\d{2}", str(item.get("time") or "")) and
+            re.fullmatch(r"2026-10-\d{2}", str(item.get("date") or "")) and
+            re.fullmatch(r"\d{2}:\d{2}", str(item.get("time") or "")) and
             _norm(item.get("type")) == "абонемент"):
         identity = [str(erp_student_id), str(item.get("erp_subscription_id") or ""),
                     str(item.get("date") or ""), str(item.get("time") or ""), _norm(item.get("type"))]
