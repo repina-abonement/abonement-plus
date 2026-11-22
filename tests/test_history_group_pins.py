@@ -12,6 +12,10 @@ def main():
     event=historyview.present({'text':raw,'user_name':'ERP'})
     assert event['display_text']=='Перенесён срок задачи «Думают» — 04.09.2026\nПокупка абонемента'
     assert event['technical_text']==raw and event['display_author']=='Варвара'
+    archive='Архив ERP 88202 · Счета 2024. Номер | создан | оплачен | сумма | статус'
+    archived=historyview.present({'text':archive,'user_name':'Юлия'})
+    assert archived['technical_only'] is True and archived['display_text']=='Счета 2024'
+    assert archived['technical_text']==archive and archived['display_author']=='ERP'
     assert historyview.present({'text':'Обычная заметка'})=={'text':'Обычная заметка'}
     def user(login):return {'id':con.execute("INSERT INTO users(login,name,role,pw_hash) VALUES (?,?,'operator','disabled')",(login,login)).lastrowid,'role':'operator','name':login}
     a=user('one');b=user('two')
