@@ -1389,6 +1389,24 @@ async function renderWorkdesk(page) {
     <div class="fresh-leads-head"><span class="fresh-leads-icon">🔥</span><div class="grow"><h3>Новая заявка</h3><p>Новые заявки остаются здесь до первой обработки, в том числе если они поступили в предыдущие дни.</p></div><span class="count">${freshLeads.length}</span></div>
     <div class="fresh-leads-status"><div class="fresh-leads-status-head"><b>Новая заявка</b><span>${freshLeads.length}</span></div>
       <div class="fresh-leads-list">${freshLeads.map((lead) => `<button type="button" class="fresh-lead-card" data-fresh-lead="${lead.id}"><b>${esc(lead.name)}</b><span>${esc(lead.parent || "Родитель не указан")}${lead.phone ? ` · ${esc(lead.phone)}` : ""}</span><em>Источник: ${esc(lead.source || "не указан")}</em><strong>Открыть и обработать →</strong></button>`).join("")}</div></div></section>`;
+  const newCardsPanel = `${freshLeadAlert}${processedNewCards.length ? `<section class="new-cards-today" id="dw-new-cards">
+    <div class="now-head"><h3>Обработанные сегодня</h3><span class="count">${processedNewCards.length}</span></div>
+    <div class="new-cards-list">${processedNewCards.map(k=>`<button type="button" class="btn" data-new-card="${k.id}"><b>${esc(k.name)}</b><span class="small muted">${esc(k.stage==='lead'?'Новый лид':k.trial_at?'Записан на ПУ':'В работе')}</span></button>`).join('')}</div>
+  </section>` : ""}${!freshLeads.length && !processedNewCards.length ? '<div class="pipeline-empty">Сегодня новых карточек нет</div>' : ""}`;
+  const pipelineItems = [
+    { key:"new", icon:"✨", label:"Новые карточки", count:(d.new_cards_today?.cards||[]).length, html:newCardsPanel },
+    { key:"sales", icon:"🛒", label:"Продажи", count:(d.board?.columns||[]).reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-sales">${boardHtml(d.board)}</div>` },
+    ...(renew ? [{ key:"renew", icon:"🔁", label:"Продления", count:renew.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-renew">${boardHtml(renew)}</div>` }] : []),
+    ...(skips ? [{ key:"skips", icon:"🩹", label:"Пропуски и отработки", count:skips.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-skips">${skips.note?`<div class="pipeline-note">${esc(skips.note)}</div>`:""}${boardHtml(skips)}</div>` }] : []),
+    ...((d.manual_payment_checks?.columns?.[0]?.cards||[]).length ? [{ key:"manual-payments", icon:"🧾", label:"Оплаты Точки", count:d.manual_payment_checks.columns[0].cards.length, danger:true, html:`<div id="dw-manual-payment-checks"><p class="pipeline-note">Нужно подтвердить поступление на расчётный счёт и чек в ОФД.</p>${boardHtml(d.manual_payment_checks)}</div>` }] : []),
+    ...(erpHtml ? [{ key:"tasks", icon:"✅", label:"Задачи", count:null, html:`<div id="dw-erptasks-hub">${erpHtml}</div>` }] : [])
+  ];
+  if (!pipelineItems.some(item=>item.key===S.deskPipeline)) S.deskPipeline = freshLeads.length ? "new" : "sales";
+  const pipelineHub = `<section class="pipeline-hub" aria-label="Работа с клиентами">
+    <div class="pipeline-hub-head"><div><h2>Работа с клиентами</h2><p>Все воронки в одном месте</p></div><span class="pipeline-hub-total">${pipelineItems.reduce((sum,item)=>sum+(item.count||0),0)} карточек</span></div>
+    <nav class="pipeline-tabs" aria-label="Выберите воронку">${pipelineItems.map(item=>`<button type="button" class="pipeline-tab ${item.key===S.deskPipeline?'active':''} ${item.danger?'danger':''}" data-pipeline-tab="${item.key}" aria-selected="${item.key===S.deskPipeline}"><span>${item.icon}</span><b>${esc(item.label)}</b>${item.count!==null?`<em>${item.count}</em>`:''}</button>`).join('')}</nav>
+    <div class="pipeline-panels">${pipelineItems.map(item=>`<section class="pipeline-panel" data-pipeline-panel="${item.key}" ${item.key===S.deskPipeline?'':'hidden'}><div class="pipeline-panel-title"><span>${item.icon}</span><h3>${esc(item.label)}</h3>${item.count!==null?`<span class="count">${item.count}</span>`:''}</div>${item.html}</section>`).join('')}</div>
+  </section>`;
   const hot = `<section class="now ${u.length ? "" : "calm"}" id="dw-hot">
       <div class="now-head"><h3>${u.length ? (reds ? `🔥 Горит прямо сейчас: ${reds}` : "Ждут ответа") : "Всё обработано"}</h3>
         ${u.length ? `<span class="muted small">Красное сначала, потом сообщения и пробные</span>` : ""}</div>
@@ -1416,32 +1434,12 @@ async function renderWorkdesk(page) {
       <div class="grow"><b>Новый отзыв на ${esc(r.label)}</b><div class="small">${esc(r.subject)} · пришёл ${esc(dtShort(r.created_at))}</div></div>
       <a class="btn sm" href="${esc(r.link)}" target="_blank" rel="noopener">Открыть отзывы</a>
       <button class="btn sm primary" data-rvclose="${r.id}">Ответили ✓</button></div>`).join("")}
-    ${freshLeadAlert}
-    ${erpHtml}
     <div class="desk">
       <div class="desk-main">
         ${who === "offline" ? "" : refundRequestsHtml(d.refund_requests||[],true)}
         ${who === "offline" ? `<section class="section"><h3>Сегодня на смене</h3><p class="muted small">Здесь только ваши дела. Общие клиентские воронки и контроль старшего администратора не показываются.</p></section>` : `
-        ${processedNewCards.length ? `<section class="section new-cards-today" id="dw-new-cards">
-          <div class="now-head"><h3>✨ Новые карточки сегодня</h3><span class="count">${d.new_cards_today?.cards.length||0}</span></div>
-          <p class="small muted">Приоритетная обработка · ${esc(dShort(d.new_cards_today?.date||S.meta.today))}</p>
-          <div class="new-cards-list">${processedNewCards.map(k=>`<button type="button" class="btn" data-new-card="${k.id}"><b>${esc(k.name)}</b><span class="small muted">${esc(k.stage==='lead'?'Новый лид':k.trial_at?'Записан на ПУ':'В работе')}</span></button>`).join('')}</div>
-        </section>` : ""}
         ${hot}
-        ${(d.manual_payment_checks?.columns?.[0]?.cards||[]).length?`<section class="desk-funnel" id="dw-manual-payment-checks">
-          <div class="now-head"><h3>🧾 Оплаты Точки и чеки Эвотор</h3><span class="small muted">${d.manual_payment_checks.columns[0].cards.length}</span></div>
-          <p class="small muted">Ручные оплаты, для которых ещё не подтверждены поступление на расчётный счёт и чек в ОФД.</p>
-          ${boardHtml(d.manual_payment_checks)}</section>`:''}
-        <section class="desk-funnel" id="dw-sales">
-          <div class="now-head"><h3>Воронка продаж</h3></div>
-          ${boardHtml(d.board)}
-        </section>
-        ${renew ? `<section class="desk-funnel" id="dw-renew">
-          <div class="now-head"><h3>🔁 Продления</h3><span class="small muted">${renew.columns.reduce((a, c) => a + c.cards.length, 0) || "пусто"}</span></div>
-          ${boardHtml(renew)}</section>` : ""}
-        ${skips ? `<section class="desk-funnel" id="dw-skips">
-          <div class="now-head"><h3>🩹 Пропуски и отработки</h3><span class="small muted">${skips.columns.reduce((a, c) => a + c.cards.length, 0) || "пусто"}</span></div>
-          ${skips.note ? `<div class="note">${esc(skips.note)}</div>` : ""}${boardHtml(skips)}</section>` : ""}`}
+        ${pipelineHub}`}
       </div>
       <div class="desk-side">${widgets.filter(dwShown).map((k) => `<div class="dw" id="dw-${k}">${W[k].html}</div>`).join("")}
         ${widgets.some((k) => !dwShown(k)) ? `<section class="dw-folded"><div class="dwf-title small muted">Ещё на столе: сейчас там пусто или не срочно</div>${widgets.filter((k) => !dwShown(k)).map((k) => `<details class="dwf" data-dwk="${k}" ${S.dwOpen[k] ? "open" : ""}>
@@ -1450,6 +1448,12 @@ async function renderWorkdesk(page) {
   page.querySelectorAll("[data-rvclose]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/reviews/${b.dataset.rvclose}/close`, {}); render(); } catch (e) { fail(e); } }));
   page.querySelectorAll("[data-new-card]").forEach(b=>b.onclick=()=>openStudent(+b.dataset.newCard));
   page.querySelectorAll("[data-fresh-lead]").forEach(b=>b.onclick=()=>openStudent(+b.dataset.freshLead));
+  page.querySelectorAll("[data-pipeline-tab]").forEach(button=>button.onclick=()=>{
+    S.deskPipeline=button.dataset.pipelineTab;
+    page.querySelectorAll("[data-pipeline-tab]").forEach(tab=>{const active=tab===button;tab.classList.toggle("active",active);tab.setAttribute("aria-selected",active?"true":"false")});
+    page.querySelectorAll("[data-pipeline-panel]").forEach(panel=>panel.hidden=panel.dataset.pipelinePanel!==S.deskPipeline);
+    const board=page.querySelector(`[data-pipeline-panel="${S.deskPipeline}"] .board`);if(board)requestAnimationFrame(()=>board.scrollLeft=0);
+  });
   wireRefundRequests(page,render);
   const hm = $("#hot-more"); if (hm) hm.onclick = () => { S.hotAll = !S.hotAll; render(); };
   page.querySelectorAll(".dwf").forEach((x) => x.addEventListener("toggle", () => { S.dwOpen[x.dataset.dwk] = x.open; }));

@@ -45,6 +45,21 @@ def test_task_failure_does_not_replace_the_entire_workdesk():
     assert "data-reload-workdesk" in app
 
 
+def test_admin_funnels_share_one_readable_pipeline_hub():
+    app = (ROOT / "crm/static/app.js").read_text(encoding="utf-8")
+    styles = (ROOT / "crm/static/style.css").read_text(encoding="utf-8")
+
+    assert 'class="pipeline-hub"' in app
+    assert 'data-pipeline-tab="${item.key}"' in app
+    assert 'data-pipeline-panel="${item.key}"' in app
+    for label in ("Новые карточки", "Продажи", "Продления", "Пропуски и отработки", "Оплаты Точки", "Задачи"):
+        assert label in app
+    assert "S.deskPipeline=button.dataset.pipelineTab" in app
+    assert ".pipeline-tabs" in styles
+    assert ".pipeline-panel[hidden]" in styles
+    assert "flex-basis: 82vw" in styles
+
+
 def test_new_application_is_a_prominent_action_until_client_status_changes():
     app = (ROOT / "crm/static/app.js").read_text(encoding="utf-8")
     styles = (ROOT / "crm/static/style.css").read_text(encoding="utf-8")

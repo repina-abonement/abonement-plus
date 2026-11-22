@@ -1402,11 +1402,47 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .desk-funnel .board { min-height: 0; height: auto; }
 .desk-funnel .col { min-height: 0; }
 .desk .now-list { max-height: none; }
+.pipeline-hub { margin-top: 16px; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); }
+.pipeline-hub-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 20px 14px; }
+.pipeline-hub-head h2 { margin: 0; font-family: var(--display); font-size: 21px; }
+.pipeline-hub-head p { margin: 3px 0 0; color: var(--ink-2); font-size: 13px; }
+.pipeline-hub-total { flex: none; padding: 6px 10px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 12px; font-weight: 700; }
+.pipeline-tabs { display: flex; gap: 4px; overflow-x: auto; padding: 0 14px 12px; scrollbar-width: thin; }
+.pipeline-tab { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; min-height: 42px; padding: 8px 12px; border: 1px solid transparent; border-radius: 12px; background: transparent; color: var(--ink-2); cursor: pointer; font: inherit; }
+.pipeline-tab:hover { background: var(--surface-2); color: var(--ink); }
+.pipeline-tab.active { border-color: color-mix(in srgb,var(--accent) 30%,var(--line)); background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+.pipeline-tab.danger:not(.active) em { background: var(--red-soft); color: var(--red); }
+.pipeline-tab b { font-size: 13px; white-space: nowrap; }
+.pipeline-tab em { display: inline-grid; min-width: 23px; height: 23px; place-items: center; padding: 0 6px; border-radius: 999px; background: var(--surface-2); color: var(--ink); font-size: 11px; font-style: normal; font-weight: 800; }
+.pipeline-tab.active em { background: var(--surface); color: var(--accent); }
+.pipeline-panels { border-top: 1px solid var(--line); background: color-mix(in srgb,var(--surface-2) 55%,var(--surface)); }
+.pipeline-panel { padding: 16px 18px 18px; }
+.pipeline-panel[hidden] { display: none; }
+.pipeline-panel-title { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.pipeline-panel-title h3 { margin: 0; font-size: 16px; }
+.pipeline-panel-title .count { min-width: 25px; padding: 2px 7px; border-radius: 999px; background: var(--surface); color: var(--ink-2); text-align: center; font-size: 12px; font-weight: 800; }
+.pipeline-panel .board { margin: 0; min-height: 120px; }
+.pipeline-panel .col { min-height: 110px; max-height: min(68vh,620px); border: 1px solid color-mix(in srgb,var(--line) 80%,transparent); }
+.pipeline-panel .fresh-leads-alert { margin-bottom: 14px; box-shadow: none; }
+.pipeline-panel .new-cards-today { margin: 0; padding: 14px; border-radius: 14px; }
+.pipeline-note { margin: 0 0 12px; padding: 9px 11px; border-radius: 10px; background: var(--surface); color: var(--ink-2); font-size: 13px; }
+.pipeline-empty { padding: 42px 20px; border: 1px dashed var(--line); border-radius: 14px; color: var(--ink-2); text-align: center; }
+.pipeline-panel .et-box { margin: 0; border: 0; box-shadow: none; background: transparent; padding: 0; }
+.pipeline-panel .et-box > .now-head { display: none; }
 /* на телефоне: сначала «Горит», потом задачи, потом воронка */
 @media (max-width: 1179px) {
   .desk { display: flex; flex-direction: column; }
   .desk-main { display: contents; }
   #dw-hot { order: 1; } .desk-side { order: 2; } .desk-funnel { order: 3; margin-top: 0; }
+}
+@media (max-width: 700px) {
+  .pipeline-hub { border-radius: 16px; }
+  .pipeline-hub-head { align-items: flex-start; padding: 15px 14px 12px; }
+  .pipeline-hub-total { display: none; }
+  .pipeline-tabs { padding: 0 10px 10px; }
+  .pipeline-tab { padding: 7px 10px; }
+  .pipeline-panel { padding: 13px 10px 15px; }
+  .pipeline-panel .col { flex-basis: 82vw; }
 }
 
 /* «Чаты»: мессенджер виден только внутри диалога; новые сообщения: красная полоса слева */
