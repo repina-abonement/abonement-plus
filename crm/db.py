@@ -324,6 +324,8 @@ def init_db(con: sqlite3.Connection):
     targetedkononenkotask.apply(con)
     from . import targetedminibaevtask
     targetedminibaevtask.apply(con)
+    from . import targetedmillertask
+    targetedmillertask.apply(con)
     from . import lifecycle, channels
     lifecycle.init(con)
     channels.init(con)

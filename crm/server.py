@@ -1968,6 +1968,12 @@ def minibaev_task_report(con,h,user,body,q):
     return targetedminibaevtask.report(con)
 
 
+@route("GET", "/api/maintenance/miller-task-report", role="admin")
+def miller_task_report(con,h,user,body,q):
+    from . import targetedmillertask
+    return targetedmillertask.report(con)
+
+
 @route("GET", "/api/incoming-control", role="admin")
 def incoming_control_view(con,h,user,body,q):
     from . import incomingcontrol
