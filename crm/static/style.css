@@ -615,6 +615,7 @@ h2.sub { font-size: 17px; }
 .overdue-col .pcard { flex: 0 1 240px; }
 .pcard { display: flex; gap: 8px; align-items: flex-start; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 9px 10px; cursor: grab; position: relative; }
 .pcard.hot { border-left: 3px solid var(--red, #e5484d); }
+.pcard.merch-order{background:var(--red-soft,#fde8e8);border-color:color-mix(in srgb,var(--red,#e5484d) 45%,var(--line));}
 .pcard.done { opacity: .55; cursor: default; }
 .pcard.done .ptitle { text-decoration: line-through; }
 .pcard.dragging { opacity: .4; }

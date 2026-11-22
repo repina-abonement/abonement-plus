@@ -619,8 +619,9 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     now = now or _now()
     from . import erpstatus
     erpstatus.sync_all(con, now.date())
-    from . import planner, program
+    from . import planner, program, merch
     request_missing_data(con, now.date())
+    merch.keep_order_task_today(con, now.date())
     planner.generate(con, now.date())
     program.apply_pending(con, now.date())
     refresh_subscription_renewals(con)

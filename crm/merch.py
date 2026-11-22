@@ -69,6 +69,7 @@ STOCK_MINIMUMS = [
     ("Форма (размер L)", 6, "шт."), ("Форма (размер XL)", 5, "шт."),
 ]
 WEEKDAY_NAMES = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+ORDER_TASK_KEY = "merch-stock-order"
 
 
 class MerchError(ValueError):
@@ -141,6 +142,61 @@ def stock_count_values(con, counted_on: str | None = None) -> dict:
     return {"counted_on": day.isoformat(), "values": values}
 
 
+def current_order(con) -> list[dict]:
+    """Актуальный дефицит всего склада, а не только строк последнего пересчёта."""
+    return [{"name": row["name"], "qty": row["norm"] - row["stock"],
+             "stock": row["stock"], "norm": row["norm"]}
+            for row in con.execute("""SELECT name,stock,norm FROM merch_items
+                WHERE active=1 AND norm>0 AND stock IS NOT NULL AND stock<norm
+                ORDER BY sort,name""")]
+
+
+def reconcile_order_task(con, today: date | None = None, actor: str = "CRM", reset_due: bool = False) -> int | None:
+    """Одна живая задача заказа; старые снимки пересчёта закрываются как дубли."""
+    today = today or _now().date()
+    now = _now().isoformat(timespec="minutes")
+    order = current_order(con)
+    keyed = con.execute("SELECT * FROM tasks WHERE auto_key=? ORDER BY id LIMIT 1", (ORDER_TASK_KEY,)).fetchone()
+    legacy = con.execute("""SELECT * FROM tasks WHERE status='open' AND kind='plan'
+        AND title LIKE 'Заказать мерч:%' AND note LIKE 'Пересчёт %' ORDER BY id DESC""").fetchall()
+    chosen = keyed or (legacy[0] if legacy else None)
+    keep_id = chosen["id"] if chosen else None
+    for row in legacy:
+        if row["id"] != keep_id:
+            con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',
+                result='Заменена одной актуальной задачей заказа мерча' WHERE id=?""", (now, row["id"]))
+    if not order:
+        if chosen and chosen["status"] == "open":
+            con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',
+                result='Дефицит мерча устранён' WHERE id=?""", (now, chosen["id"]))
+        return None
+    if keyed and keyed["status"] != "open" and not reset_due and not legacy:
+        return None
+    owner = con.execute("SELECT id FROM users WHERE role='admin' AND active=1 ORDER BY id LIMIT 1").fetchone()
+    if not owner:
+        return None
+    title = "Заказать мерч: " + ", ".join(f"{item['name']} {item['qty']}" for item in order)
+    note = "Актуальный заказ по последним сохранённым остаткам. " + "; ".join(
+        f"{item['name']}: есть {item['stock']} из {item['norm']}" for item in order)
+    due = today.isoformat() + "T23:59"
+    if chosen:
+        con.execute("""UPDATE tasks SET title=?,assignee_id=?,note=?,source='auto',auto_key=?,priority=1,
+            status='open',done_at=NULL,done_by='',result='',due_at=CASE WHEN ? THEN ? ELSE due_at END
+            WHERE id=?""", (title[:300], owner[0], note[:1000], ORDER_TASK_KEY,
+                              int(reset_due or not keyed), due, chosen["id"]))
+        return chosen["id"]
+    return con.execute("""INSERT INTO tasks(kind,title,assignee_id,due_at,source,auto_key,note,created_at,created_by,priority)
+        VALUES('plan',?,?,?,'auto',?,?,?,'CRM',1)""",
+        (title[:300], owner[0], due, ORDER_TASK_KEY, note[:1000], now)).lastrowid
+
+
+def keep_order_task_today(con, today: date | None = None) -> None:
+    """Открытый заказ всегда находится в колонке «Сегодня», а не в верхней просрочке."""
+    today = today or _now().date()
+    con.execute("""UPDATE tasks SET due_at=?,priority=1 WHERE auto_key=? AND status='open'
+        AND substr(due_at,1,10)<>?""", (today.isoformat() + "T23:59", ORDER_TASK_KEY, today.isoformat()))
+
+
 def planner_task_section(con, task: dict, repeat: dict | None, user: dict) -> dict | None:
     """Данные пересчёта только для существующей повторяемой задачи по мерчу."""
     haystack = f"{task.get('title', '')} {task.get('note', '')}".lower().replace("ё", "е")
@@ -159,7 +215,6 @@ def planner_task_section(con, task: dict, repeat: dict | None, user: dict) -> di
 def stock_count(con, rows: list, user: dict, can_norm: bool, counted_on: str | None = None) -> dict:
     """Пересчёт мерча (общий склад): вписали, сколько есть, CRM считает, что заказать, и ставит задачу руководителю.
     Например, кружки 5 при норме 15: заказать 10. Норму меняют администраторы с правом складского учёта."""
-    from . import planner
     today = _now().date()
     try: count_day = date.fromisoformat(counted_on) if counted_on else today
     except (TypeError, ValueError): raise MerchError("Выберите корректную дату пересчёта")
@@ -191,13 +246,9 @@ def stock_count(con, rows: list, user: dict, can_norm: bool, counted_on: str | N
                     (count_id,item["id"],item["name"],stock,norm,item["stock_unit"]))
         if norm > stock: order.append({"name":item["name"],"qty":norm-stock,"stock":stock,"norm":norm})
     task = None
-    if order and count_day == today:
-        owner = con.execute("SELECT id FROM users WHERE role='admin' AND active=1 ORDER BY id LIMIT 1").fetchone()
-        if owner:
-            title = "Заказать мерч: " + ", ".join(f"{o['name']} {o['qty']}" for o in order)
-            note = f"Пересчёт {now[8:10]}.{now[5:7]} ({user.get('name', '')}). " + "; ".join(f"{o['name']}: есть {o['stock']} из {o['norm']}" for o in order)
-            # задачу руководителю ставит сама CRM, поэтому и администратор, который считал, может её создать
-            task = planner.add(con, user | {"role": "admin"}, {"title": title[:300], "assignee_id": owner[0], "note": note})
+    if count_day == today:
+        order = current_order(con)
+        task = reconcile_order_task(con, today, user.get("name", ""), reset_due=True)
     return {"order": order, "task": task, "counted_on": count_day.isoformat(), "historical": count_day < today,
             "stock_status": stock_status(con)}
 

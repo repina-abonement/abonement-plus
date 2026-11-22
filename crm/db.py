@@ -332,6 +332,7 @@ def init_db(con: sqlite3.Connection):
     lifecycle.init(con)
     channels.init(con)
     planner.init(con)
+    merch.reconcile_order_task(con)
     expenses.init(con)
     from . import staffexpenses
     staffexpenses.init(con)

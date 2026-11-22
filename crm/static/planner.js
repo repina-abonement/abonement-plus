@@ -139,7 +139,8 @@ async function renderPlanner(page) {
 const PL_DAY = new Intl.DateTimeFormat("ru-RU", { weekday: "long", day: "numeric", month: "long" });
 function pcard(t) {
   const done = t.status === "done",readOnly=Boolean(S.planner.readOnly);
-  return `<article class="pcard ${done ? "done" : ""} ${t.priority ? "hot" : ""}" draggable="${done||readOnly ? "false" : "true"}" data-pc="${t.id}" role="button" tabindex="0" aria-label="${esc(t.title)}">
+  const merchOrder=t.auto_key==='merch-stock-order';
+  return `<article class="pcard ${done ? "done" : ""} ${t.priority ? "hot" : ""} ${merchOrder?'merch-order':''}" draggable="${done||readOnly ? "false" : "true"}" data-pc="${t.id}" role="button" tabindex="0" aria-label="${esc(t.title)}">
     <label class="pcheck"><input type="checkbox" aria-label="Задача выполнена" data-pdone="${t.id}" ${done ? "checked" : ""} ${readOnly?'disabled':''}></label>
     <div class="grow"><div class="ptitle">${t.priority ? "🔥 " : ""}${esc(t.title)}</div>
       ${t.subtasks?.length?`<div class="small muted" data-checklist-progress>${t.subtasks.filter(x=>x.done).length}/${t.subtasks.length} подзадач</div>`:''}

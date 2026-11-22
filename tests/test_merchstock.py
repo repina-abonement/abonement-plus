@@ -30,7 +30,13 @@ def main():
     check(merch.planner_task_section(con, {"title": "Другая задача", "note": "", "recur_id": 8},
                                      {"weekdays": [4]}, VARYA) is None,
           "В прочих карточках Планера раздел мерча не появляется")
+    legacy = [con.execute("""INSERT INTO tasks(kind,title,assignee_id,due_at,source,note,created_at)
+        VALUES('plan',?,?,'2026-11-20T23:59','manual',?,'2026-11-20T10:00')""",
+        (f"Заказать мерч: старый снимок {n}", owner, f"Пересчёт 20.11 (Варя). Снимок {n}")).lastrowid for n in (1, 2)]
     partial = merch.stock_count(con, [{"id": a, "stock": 5, "norm": 15}, {"id": b, "stock": "", "norm": 6}], VARYA, True)
+    first_task = partial["task"]
+    check(first_task == legacy[-1] and con.execute("SELECT status FROM tasks WHERE id=?", (legacy[0],)).fetchone()[0] == "cancelled",
+          "Старые задачи-снимки объединяются в одну актуальную")
     snapshot = merch.stock_count_values(con, date.today().isoformat())["values"]
     check(str(a) in snapshot and str(b) not in snapshot and snapshot[str(a)]["stock"] == 5,
           "Частичный пересчёт сохраняет заполненную строку, пустую оставляет непересчитанной")
@@ -45,10 +51,21 @@ def main():
           "Недельный пересчёт закрыт, дефицит остаётся предупреждением руководителю")
     t = con.execute("SELECT title, assignee_id FROM tasks WHERE id=?", (r["task"],)).fetchone()
     check(t["assignee_id"] == owner and f"{name[a]} 10" in t["title"], "Задача руководителю в Планере: что заказать")
+    check(r["task"] == first_task and con.execute("SELECT COUNT(*) FROM tasks WHERE auto_key=? AND status='open'", (merch.ORDER_TASK_KEY,)).fetchone()[0] == 1,
+          "Повторный пересчёт обновляет одну задачу, а не создаёт дубли")
+    task_state = con.execute("SELECT due_at,priority FROM tasks WHERE id=?", (first_task,)).fetchone()
+    check(task_state["due_at"][:10] == date.today().isoformat() and task_state["priority"] == 1,
+          "Актуальный заказ стоит в «Сегодня» и отмечен красным приоритетом")
+    con.execute("UPDATE tasks SET due_at=? WHERE id=?", ((date.today()-timedelta(days=1)).isoformat()+"T23:59", first_task))
+    merch.keep_order_task_today(con)
+    check(con.execute("SELECT due_at FROM tasks WHERE id=?", (first_task,)).fetchone()[0][:10] == date.today().isoformat(),
+          "Открытый заказ не уходит в верхнюю просрочку, а переносится в «Сегодня»")
     second = [{"id": x["id"], "stock": 15 if x["id"] == a else x["norm"], "norm": 1 if x["id"] == a else x["norm"]} for x in merch.items(con, inventory=True)]
     r = merch.stock_count(con, second, {"id": olga, "name": "Ольга", "role": "operator"}, True)
     check(not r["order"] and con.execute("SELECT norm FROM merch_items WHERE id=?", (a,)).fetchone()[0] == 1,
           "Администратор меняет норму; при достаточном остатке задача не создаётся")
+    check(r["task"] is None and con.execute("SELECT status FROM tasks WHERE id=?", (first_task,)).fetchone()[0] == "cancelled",
+          "Когда дефицита нет, актуальная задача заказа закрывается")
     OFFLINE = {"id": olga, "name": "Виктория", "role": "operator", "is_offline_admin": 1}
     offline_section = merch.planner_task_section(
         con, {"title": "Учёт мерча", "note": "", "recur_id": 7, "due_at": "2026-11-20T12:00"},
