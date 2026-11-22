@@ -1,6 +1,6 @@
 import tempfile
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import patch
 from crm import db, services as sv, singles, money, smart, program, schedule
 
@@ -8,7 +8,7 @@ from crm import db, services as sv, singles, money, smart, program, schedule
 def main():
     con=db.connect(str(Path(tempfile.mkdtemp())/'single-sale.sqlite3'));db.init_db(con);smart.REQUIRE=False
     user={'id':1,'role':'admin','name':'Пример'};sv.today=lambda:date(2026,11,10)
-    b=schedule.save_branch(con,{'name':'Демо'});g=schedule.save_group(con,{'name':'Сб','branch_id':b,'weekdays':[5]})
+    b=schedule.save_branch(con,{'name':'Демо'});g=schedule.save_group(con,{'name':'Сб','branch_id':b,'weekdays':[5],'time':'10:00'})
     con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES ('price_single','1800')")
     sid=sv.create_student(con,{'name':'Иван Примеров','parent_name':'Анна','phone':'+79000000401','funnel':'members'},user)
     before=con.total_changes;q=singles.sale_quote(con,sid,g,'2026-12');assert con.total_changes==before
@@ -26,7 +26,22 @@ def main():
     group_name=con.execute('SELECT name FROM groups WHERE id=?',(g,)).fetchone()[0]
     assert detail['subscriptions'][0]['single_date']=='2026-12-05' and detail['subscriptions'][0]['group_name']==group_name
     assert detail['subscriptions'][0]['group_id']==g
-    money.add_payment(con,sid,1800,'cash',user,subscription_id=r['id'])
+    with patch.object(singles, '_now', return_value=datetime(2026, 11, 22, 16)):
+        money.add_payment(con,sid,1800,'cash',user,subscription_id=r['id'])
+    open_steps = lambda: con.execute("SELECT id,kind,due_at,title,note FROM tasks WHERE student_id=? AND source='single_paid' AND status='open' ORDER BY due_at",(sid,)).fetchall()
+    steps = open_steps()
+    assert [t['due_at'] for t in steps] == ['2026-12-04T10:00', '2026-12-05T07:00', '2026-12-06T10:00']
+    assert all('ссылк' not in (t['title']+t['note']).lower() for t in steps)
+    singles.sync_paid_tasks(con, datetime(2026,11,23,12))
+    assert [t['id'] for t in open_steps()] == [t['id'] for t in steps]
+    con.execute("UPDATE tasks SET status='done' WHERE id=?", (steps[0]['id'],))
+    singles.sync_paid_tasks(con, datetime(2026,12,5,8))
+    assert len(open_steps()) == 2
+    with patch.object(singles, '_now', return_value=datetime(2026,12,5,8)):
+        another = singles.book(con, sid, g, '2026-12-12', user)
+        assert [t['kind'] for t in open_steps()] == ['single_paid_remind']
+        singles.cancel(con, another, user)
+        assert len(open_steps()) == 2
     assert singles.sale_quote(con,sid,g,'2026-12','2026-12-05')['total']==0
     for bad in ('2026-12-06','2026-11-01'):
         try:singles.sale_quote(con,sid,g,bad[:7],bad)

@@ -65,7 +65,7 @@ function wireErpTasks(page) {
     const t = S.taskById[b.dataset.etdone];
     if (t && t.kind === "rebook" && typeof openRebook === "function") return openRebook(t.id);
     if (t && t.kind === "reinvite_pu") return reinviteDone(t);
-    if (t && ["single_remind", "single_next"].includes(t.kind)) return singleTaskDialog(t, render);
+    if (t && ["single_remind", "single_next", "single_paid_next"].includes(t.kind)) return singleTaskDialog(t, render);
     if(t.erp_outcomes?.length)return erpOutcomeDialog(t,render);
     const result = window.prompt("Итог (необязательно): дозвонилась, подтвердили…", "");
     if (result === null) return;

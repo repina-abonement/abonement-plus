@@ -77,6 +77,91 @@ def _remind_due(day: str) -> str:
     return max(due, _now()).isoformat(timespec="minutes")
 
 
+def sync_paid_tasks(con, now: datetime, sid: int | None = None):
+    """Сверяет задачи с текущей записью и оплатой, сохраняя закрытые задачи."""
+    from . import tasks
+    today = now.date()
+    visits = con.execute("""SELECT v.*, x.status AS invoice_status, x.paid_at, s.archived, g.name AS group_name
+        FROM single_visits v JOIN students s ON s.id=v.student_id JOIN groups g ON g.id=v.group_id
+        LEFT JOIN subscriptions x ON x.id=v.subscription_id
+        WHERE v.date>=? AND (? IS NULL OR v.student_id=?)""",
+        ((today - timedelta(days=1)).isoformat(), sid, sid)).fetchall()
+    active_keys = set()
+    for v in visits:
+        if v["archived"] or v["status"] != "booked" or v["invoice_status"] != "paid":
+            continue
+        day = date.fromisoformat(v["date"])
+        clock = lesson_time(con, v["group_id"], v["date"])
+        if not clock:
+            continue
+        start = datetime.fromisoformat(f"{day}T{clock}")
+        base = f"single:{v['id']}:{day}"
+        label = f"{day:%d.%m} в {clock}"
+        day_before = datetime.combine(day - timedelta(days=1), datetime.min.time()).replace(hour=REMIND_HOUR)
+        following = day_before + timedelta(days=2)
+        stages = [
+            (base, "single_paid_remind", day_before, f"Напомнить о завтрашнем разовом занятии {label}",
+             f"Завтра разовое занятие {label}, {v['group_name']}. Занятие оплачено", now.date() < day),
+            (base + ":3h", "single_paid_remind", start - timedelta(hours=3),
+             f"Напомнить за 3 часа о разовом занятии {label}",
+             f"Сегодня разовое занятие {label}, {v['group_name']}. Занятие оплачено", now < start),
+            (base + ":next", "single_paid_next", following,
+             f"Уточнить дату следующего разового после {day:%d.%m}", "Уточнить у семьи, когда придут в следующий раз",
+             not con.execute("SELECT 1 FROM single_visits WHERE student_id=? AND date>? AND status='booked' LIMIT 1",
+                             (v["student_id"], v["date"])).fetchone()),
+        ]
+        for key, kind, due, title, note, relevant in stages:
+            row = con.execute("SELECT * FROM tasks WHERE auto_key=?", (key,)).fetchone()
+            if not relevant:
+                if row and row["status"] == "open":
+                    con.execute("UPDATE tasks SET status='cancelled',done_at=?,result='Шаг разового больше не актуален' WHERE id=?",
+                                (now.isoformat(timespec="minutes"), row["id"]))
+                continue
+            active_keys.add(key)
+            if row:
+                if row["status"] == "open" and (row["kind"] != kind or row["title"] != title or row["note"] != note):
+                    con.execute("UPDATE tasks SET kind=?,source='single_paid',title=?,note=?,due_at=? WHERE id=?",
+                                (kind, title, note, due.isoformat(timespec="minutes"), row["id"]))
+                elif row["status"] == "cancelled" and row["result"] == "Шаг разового больше не актуален":
+                    con.execute("UPDATE tasks SET kind=?,source='single_paid',title=?,note=?,due_at=?,status='open',result='',done_at=NULL WHERE id=?",
+                                (kind, title, note, due.isoformat(timespec="minutes"), row["id"]))
+            else:
+                tasks.add_task(con, kind, v["student_id"], due, auto_key=key, title=title, note=note, source="single_paid")
+
+        con.execute("""UPDATE tasks SET status='cancelled',done_at=?,result='Оплачено разовое после пробного'
+            WHERE student_id=? AND kind='why_not_bought' AND status='open' AND source='auto'
+            AND auto_key=('why_not_bought:' || student_id || ':' ||
+                (SELECT trial_at FROM students WHERE id=tasks.student_id))
+            AND (SELECT substr(trial_at,1,10) FROM students WHERE id=tasks.student_id)<=?""",
+            (now.isoformat(timespec="minutes"), v["student_id"], (v["paid_at"] or "")[:10]))
+
+    # При отмене или переносе снимаем только задачи прежней записи. Просроченный
+    # вопрос о следующем занятии сохраняем в очереди до результата администратора.
+    for row in con.execute("""SELECT * FROM tasks WHERE source='single_paid' AND status='open'
+                              AND (? IS NULL OR student_id=?)""", (sid, sid)).fetchall():
+        if row["auto_key"] in active_keys:
+            continue
+        _, visit_id, booked_day, *_ = row["auto_key"].split(":")
+        v = con.execute("""SELECT v.*, x.status AS invoice_status, s.archived FROM single_visits v
+            JOIN students s ON s.id=v.student_id LEFT JOIN subscriptions x ON x.id=v.subscription_id
+            WHERE v.id=?""", (visit_id,)).fetchone()
+        valid = v and v["status"] == "booked" and not v["archived"] and v["date"] == booked_day
+        if valid and v["invoice_status"] == "paid" and row["kind"] == "single_paid_next":
+            if not con.execute("SELECT 1 FROM single_visits WHERE student_id=? AND date>? AND status='booked'",
+                               (v["student_id"], booked_day)).fetchone():
+                continue
+        if valid and v["invoice_status"] not in ("paid", "cancelled") and row["auto_key"] == f"single:{visit_id}:{booked_day}" and booked_day > today.isoformat():
+            con.execute("UPDATE tasks SET kind='single_remind',source='single',title=?,note=? WHERE id=?",
+                        (unpaid_title(booked_day), message(con, v), row["id"]))
+        else:
+            con.execute("UPDATE tasks SET status='cancelled',done_at=?,result='Шаг разового больше не актуален' WHERE id=?",
+                        (now.isoformat(timespec="minutes"), row["id"]))
+
+
+def unpaid_title(day):
+    return f"Разовое {day[8:10]}.{day[5:7]}: подтвердить и отправить ссылку на оплату"
+
+
 def book(con, sid: int, group_id: int, day: str, user: dict | None, note: str = "") -> int:
     from . import services as sv, tasks
     try:
@@ -94,13 +179,14 @@ def book(con, sid: int, group_id: int, day: str, user: dict | None, note: str = 
                       (sid, group_id, day, (note or "")[:200], _now().isoformat(timespec="minutes"), (user or {}).get("name", ""))).lastrowid
     v = con.execute("SELECT * FROM single_visits WHERE id=?", (vid,)).fetchone()
     tasks.add_task(con, "single_remind", sid, _remind_due(day), auto_key=f"single:{vid}:{day}",
-                   title=f"Разовое {day[8:10]}.{day[5:7]}: подтвердить и отправить ссылку на оплату", source="single",
+                   title=unpaid_title(day), source="single",
                    note=message(con, v))
     # «пока не знаем» / «в ближайший набор» больше не нужны: дату выбрали
     con.execute("UPDATE tasks SET status='cancelled', done_at=?, result='Записан на разовое' WHERE student_id=? AND kind='single_next' AND status='open'",
                 (_now().isoformat(timespec="minutes"), sid))
     g = (con.execute("SELECT name FROM groups WHERE id=?", (group_id,)).fetchone() or [""])[0]
     sv.log(con, sid, f"Записан на разовое занятие {d:%d.%m.%Y}, {g}", user, "stage")
+    sync_paid_tasks(con, _now(), sid)
     return vid
 
 
@@ -112,6 +198,7 @@ def cancel(con, vid: int, user: dict | None) -> None:
     con.execute("UPDATE single_visits SET status='cancelled' WHERE id=?", (vid,))
     con.execute("UPDATE tasks SET status='cancelled', done_at=?, result='Разовое отменено' WHERE auto_key=? AND status='open'",
                 (_now().isoformat(timespec="minutes"), f"single:{vid}:{v['date']}"))
+    sync_paid_tasks(con, _now(), v["student_id"])
     sv.log(con, v["student_id"], f"Отменено разовое {v['date'][8:10]}.{v['date'][5:7]}", user, "stage")
 
 
@@ -193,6 +280,7 @@ def sell_visit(con, sid, group_id, day, user):
         sub=money.sell_single(con,sid,user,group_id)
         con.execute("UPDATE subscriptions SET month=? WHERE id=?",(day[:7],sub))
         con.execute("UPDATE single_visits SET subscription_id=? WHERE id=?",(sub,vid))
+        sync_paid_tasks(con, _now(), sid)
         q["existing_id"]=sub
         con.execute("RELEASE sell_single_visit")
         return {"id":sub,"quote":q}

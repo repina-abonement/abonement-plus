@@ -127,6 +127,8 @@ def reconcile(con, sid: int) -> None:
     erpstatus.sync_one(con, sid)
     from . import tasks
     tasks.sync_subscription_payment_tasks(con, sid)
+    from . import singles
+    singles.sync_paid_tasks(con, singles._now(), sid)
 
 
 def obligations(con,sid):

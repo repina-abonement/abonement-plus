@@ -24,6 +24,8 @@ KINDS = {
     "rebook": ("Перезаписать на ПУ", "🔁"),
     "reinvite_pu": ("Пригласить на ПУ повторно", "🔄"),
     "single_remind": ("Разовое завтра: подтвердить и отправить ссылку на оплату", "1️⃣"),
+    "single_paid_remind": ("Напомнить о разовом занятии", "1️⃣"),
+    "single_paid_next": ("Уточнить дату следующего разового", "1️⃣"),
     "single_next": ("Разовые: договориться о следующем занятии", "1️⃣"),
     "request_data": ("Запросить данные", "📋"),
     "manual": ("Задача", "✅"),
@@ -673,6 +675,8 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
                  or (kind in ("how_was", "why_not_bought") and s["trial_came"] == 0))
         if stale:
             con.execute("UPDATE tasks SET status='cancelled', done_at=? WHERE id=?", (_iso(now), tid))
+    from . import singles
+    singles.sync_paid_tasks(con, now)
     return {"tasks": made, "sent": sent}
 
 
@@ -876,7 +880,7 @@ def _erp_col(t: dict) -> tuple[str, str]:
             return k, name
     if kind == "rebook":  # этап «Не дошёл до ПУ»: нет отметки тренера или не пришли
         return ("not_marked", "Клиент не отмечен на ПУ") if t.get("miss") == "no_mark" else ("no_show", "Не пришли на ПУ")
-    if kind in ("single_remind", "single_next"):
+    if kind in ("single_remind", "single_next", "single_paid_remind", "single_paid_next"):
         return "single", "Разовые занятия"
     if kind in THINK_KINDS or title.lower() == "думает":
         return "think", "Думает"
