@@ -22,6 +22,24 @@ function erpHistorySetup(box){
   const runPreview=async()=>{invalidate();try{let payload=JSON.parse(input.value);const id=panel.querySelector('[data-eh-id]').value.trim(),period=panel.querySelector('[data-eh-period]').value,studentId=student.value;if(!id||!period)throw new Error('Укажите ERP ID и период');const rows=Array.isArray(payload)?payload:[payload],chosen=rows.filter(x=>String(x.erp_student_id||'')===id);if(chosen.length!==1)throw new Error('В JSON должна быть ровно одна запись выбранного ребёнка');payload=chosen[0];const student_ids=studentId?{[id]:Number(studentId)}:{},unassigned_visit_ids=[...approvedUnassigned],visit_group_ids={...selectedVisitGroups},r=await api('POST','/api/erp/history/preview',{payload,period,student_ids,unassigned_visit_ids,visit_group_ids});draw(r);out.querySelectorAll('[data-eh-unassigned]').forEach(x=>x.onchange=()=>{if(x.checked)approvedUnassigned.add(x.dataset.ehUnassigned);else approvedUnassigned.delete(x.dataset.ehUnassigned);runPreview()});out.querySelectorAll('[data-eh-visit]').forEach(x=>x.onchange=()=>{selectedVisitGroups[x.dataset.ehVisit]=Number(x.value);runPreview()});if(r.can_apply){checked={payload,period,student_ids,unassigned_visit_ids,visit_group_ids,token:r.token};apply.disabled=false}}catch(e){out.textContent=e.message;fail(e)}};
   panel.querySelector('[data-eh-preview]').onclick=()=>{approvedUnassigned.clear();selectedVisitGroups={};runPreview()};
   apply.onclick=async()=>{if(!checked)return;apply.disabled=true;try{const r=await api('POST','/api/erp/history/apply',checked);draw(r.preview);toast(`Перенесено: абонементов ${r.subscriptions_added}, занятий в плане ${r.planned_lessons_added||0}, новых отметок ${r.visits_added}, уточнено ${r.visits_updated||0}`);checked=null}catch(e){fail(e);out.textContent=e.message}};
+  const creditButton=document.createElement('button');
+  creditButton.type='button';
+  creditButton.className='btn';
+  creditButton.textContent='Перенести остаток 280 ₽ по предыдущему абонементу';
+  const creditResult=document.createElement('p');
+  panel.append(creditButton,creditResult);
+  const erpIdField=panel.querySelector('[data-eh-id]');
+  const toggleCredit=()=>{creditButton.hidden=erpIdField.value.trim()!=='129268';creditResult.textContent=''};
+  erpIdField.addEventListener('input',toggleCredit);
+  toggleCredit();
+  creditButton.onclick=async()=>{
+    creditButton.disabled=true;
+    try{
+      const result=await api('POST','/api/erp/balance-recovery/prior-credit',{erp_id:erpIdField.value.trim(),subscription:'825627',amount:280});
+      creditResult.textContent=(result.added?'Остаток перенесён. ':'Остаток уже учтён. ')+'На балансе '+rub(result.balance);
+    }catch(error){creditResult.textContent=error.message}
+    finally{creditButton.disabled=false}
+  };
   const rc=panel.querySelector('[data-rc-box]'),rcTarget=rc.querySelector('[data-rc-target]'),rcAbs=rc.querySelector('[data-rc-absences]'),rcPreview=rc.querySelector('[data-rc-preview]'),rcApply=rc.querySelector('[data-rc-apply]'),rcOut=rc.querySelector('[data-rc-out]');let rcChecked=null,rcStudent=null;
   rc.querySelector('[data-rc-load]').onclick=async()=>{rcChecked=null;rcApply.disabled=true;try{const erp=rc.querySelector('[data-rc-erp]').value.trim();if(!erp)throw new Error('Укажите ERP ID ребёнка');const data=await api('GET','/api/erp/revenue-carry/context?erp_id='+encodeURIComponent(erp));rcStudent=data.student.id;rcTarget.innerHTML='<option value="">Выберите декабрьский абонемент</option>'+data.subscriptions.map(x=>`<option value="${x.id}">${esc(monthLabel(x.month))} · ${esc(x.group_name||'Группа')} · ${rub(x.price)}</option>`).join('');rcTarget.disabled=false;rcAbs.innerHTML='<b>Подтверждённые пропуски</b>'+data.absences.map(x=>`<label><input type="checkbox" data-rc-absence value="${x.id}"> ${dShort(x.date)} · ${esc(x.group_name)}${x.resolved?' · уже '+esc(x.resolved):''}</label>`).join('');rcPreview.disabled=false;rcOut.textContent=data.pending.length?'Есть переносы, ожидающие загрузки исходной выручки: '+data.pending.length:''}catch(e){rcOut.textContent=e.message;fail(e)}};
   const rcPayload=()=>({student_id:rcStudent,target_subscription_id:Number(rcTarget.value),absence_ids:[...rc.querySelectorAll('[data-rc-absence]:checked')].map(x=>Number(x.value)),source_erp_subscription_id:rc.querySelector('[data-rc-source]').value.trim(),basis:rc.querySelector('[data-rc-basis]').value.trim()});
