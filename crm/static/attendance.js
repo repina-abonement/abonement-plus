@@ -50,6 +50,20 @@ function wireClientAttendance(body,studentData,onChanged){
       ${can('journal','full')&&e.future&&e.kind==='subscription'?`<button class="btn attendance-detail-mark" data-att-warn="${i}">${e.status==='warned'?'Снова придёт':'Не придёт'}</button>`:''}
       ${e.single_id && e.date >= data.today && e.status==='planned' && (can('client_ops','full')||can('members','full')) ? `<div class="sc-actions"><button class="btn sm" data-single-move="${i}">Перенести разовое</button><button class="btn sm" data-single-cancel="${i}">Отменить разовое</button></div><div data-single-options="${i}"></div>`:''}
       ${e.makeup_id&&e.status==='planned'?`<button class="linkish small" data-att-unbook="${e.makeup_id}">Отменить запись на отработку</button>`:''}</div>`).join(''):'<p class="muted">На этот день нет занятий</p>'}`;
+    if(S.user.role==='admin' && day<data.today){
+      root.insertAdjacentHTML('beforeend','<details><summary>Внести прошедшую отработку</summary><form class="sub-form"><label>Группа<select name="group" required><option value="">Выберите группу</option></select></label><label>Кто подтвердил посещение<textarea name="source" required maxlength="500"></textarea></label><button class="btn primary">Сохранить отработку</button></form></details>');
+      const form=root.lastElementChild.querySelector('form');
+      for(const group of S.meta.groups)form.elements.group.add(new Option(group.name,group.id));
+      form.onsubmit=async ev=>{
+        ev.preventDefault();
+        const button=form.querySelector('button');
+        button.disabled=true;
+        try{
+          await api('POST',`/api/students/${sid}/past-makeup`,{date:day,group_id:+form.elements.group.value,source:form.elements.source.value});
+          toast('Отработка сохранена');refresh();
+        }catch(error){button.disabled=false;fail(error)}
+      };
+    }
     root.querySelectorAll('[data-single-cancel]').forEach(button=>button.onclick=async()=>{
       const e=events[+button.dataset.singleCancel];
       const panel=root.querySelector(`[data-single-options="${button.dataset.singleCancel}"]`);
