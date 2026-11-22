@@ -4,6 +4,11 @@
 S.tasks = { scope: "mine" };
 const AUTO_LABEL = { day_before: "за день", "2h_before": "за 2 часа", after: "после пробного" };
 
+function erpOutcomePicker(t,hidden=true,prefix='') {
+  if(!t.erp_outcomes?.length)return `<div class="task-done" ${hidden?'hidden':''}><input placeholder="Итог: дозвонилась, подтвердили…" data-${prefix}result><button type="button" class="btn sm primary" ${prefix?'data-tok':'data-finish'}>Готово</button></div>`;
+  return `<div class="task-done erp-outcome-picker" ${hidden?'hidden':''}><div class="small"><b>Выберите следующий шаг по цепочке ERP</b></div>${t.erp_outcomes.map((outcome,index)=>`<button type="button" class="erp-outcome-choice" data-${prefix}erp-outcome="${index}"><strong>${esc(outcome)}</strong><small>${outcome==='Закрыть задачу'?'Текущая задача закроется без следующей':`Будет создана следующая задача «${esc(outcome)}»`}</small></button>`).join('')}</div>`;
+}
+
 function taskRow(t, options = {}) {
   const s = t.student || {};
   const trial = s.trial_at ? `пробное ${dtWhen(s.trial_at)}` : "";
@@ -20,7 +25,7 @@ function taskRow(t, options = {}) {
       ${t.note ? `<div class="small muted">${esc(t.note)}</div>` : ""}
       ${auto ? `<div class="chips" style="margin-top:6px">${auto}</div>` : ""}
       ${!t.client_task && t.assignee && (S.tasks.scope === "all" || t.assignee_id !== S.user.id) ? `<div class="small muted">Исполнитель: ${esc(t.assignee)}</div>` : ""}
-      <div class="task-done" hidden><input placeholder="Итог: дозвонилась, подтвердили…" data-result><button class="btn sm primary" data-finish>Готово</button></div>
+      ${erpOutcomePicker(t)}
     </div>
     <span class="small muted when">${t.client_task?dShort(t.due_at):dtWhen(t.due_at)}</span>
     <div class="now-act">
@@ -61,13 +66,14 @@ function wireTasks(root) {
   }));
   root.querySelectorAll(".task[data-task]").forEach((row) => {
     const id = row.dataset.task;
-    if (row.querySelector("[data-done]")) row.querySelector("[data-done]").onclick = () => { const f = row.querySelector(".task-done"); f.hidden = !f.hidden; if (!f.hidden) f.querySelector("input").focus(); };
+    if (row.querySelector("[data-done]")) row.querySelector("[data-done]").onclick = () => { const f = row.querySelector(".task-done"); f.hidden = !f.hidden; if (!f.hidden) (f.querySelector("input")||f.querySelector("button"))?.focus(); };
     const finish = async () => {
       try { await api("POST", `/api/tasks/${id}/done`, { result: row.querySelector("[data-result]").value }); toast("Задача выполнена"); render(); }
       catch (e) { fail(e); }
     };
-    row.querySelector("[data-finish]").onclick = finish;
-    row.querySelector("[data-result]").onkeydown = (e) => { if (e.key === "Enter") finish(); };
+    if(row.querySelector("[data-finish]"))row.querySelector("[data-finish]").onclick = finish;
+    if(row.querySelector("[data-result]"))row.querySelector("[data-result]").onkeydown = (e) => { if (e.key === "Enter") finish(); };
+    row.querySelectorAll('[data-erp-outcome]').forEach(button=>button.onclick=async()=>{button.disabled=true;try{await api('POST',`/api/tasks/${id}/done`,{result:S.taskById[id].erp_outcomes[+button.dataset.erpOutcome]});toast('Следующий шаг создан');render()}catch(e){button.disabled=false;fail(e)}});
     const dl = row.querySelector("[data-dial]");
     if (dl) dl.onclick = () => dial(dl.dataset.dial);
     const op = row.querySelector("[data-open]");
@@ -135,9 +141,9 @@ function openTaskEdit(t, onDone, focus) {
     <div class="field"><label>Заметка</label><textarea name="note" rows="2" maxlength="1000" placeholder="Подробности задачи">${esc(t.note || "")}</textarea></div>
     <div class="need-err small"></div>
     <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap"><button class="btn primary" style="flex:1">Сохранить</button>
-      ${t.kind === "rebook" ? `<button type="button" class="btn" data-rebook="${t.id}" data-tclose>Итог звонка</button>` : `<button type="button" class="btn" data-tfinish>Выполнено</button>`}
+      ${t.kind === "rebook" ? `<button type="button" class="btn" data-rebook="${t.id}" data-tclose>Итог звонка</button>` : t.erp_outcomes?.length?'':`<button type="button" class="btn" data-tfinish>Выполнено</button>`}
       <button type="button" class="btn" data-tcancelf style="flex:0 0 auto">Отмена</button></div>
-    <div class="task-done" hidden style="margin-top:8px"><input placeholder="Итог: дозвонилась, подтвердили…" data-tresult><button type="button" class="btn sm primary" data-tok>Готово</button></div></form>`;
+    ${erpOutcomePicker(t,false,'t')}</form>`;
   document.body.appendChild(wrap);
   const f = wrap.querySelector("form"), close = () => wrap.remove();
   setTimeout(() => (focus === "assignee" && f.elements.assignee_id ? f.elements.assignee_id : f.elements.title).focus(), 50);
@@ -151,6 +157,7 @@ function openTaskEdit(t, onDone, focus) {
     try { await api("POST", `/api/tasks/${t.id}/done`, { result: wrap.querySelector("[data-tresult]").value }); toast("Задача выполнена"); close(); onDone && onDone(); }
     catch (e) { wrap.querySelector(".need-err").textContent = e.message; }
   };
+  wrap.querySelectorAll('[data-terp-outcome]').forEach(button=>button.onclick=async()=>{button.disabled=true;try{await api('POST',`/api/tasks/${t.id}/done`,{result:t.erp_outcomes[+button.dataset.terpOutcome]});toast('Следующий шаг по цепочке создан');close();onDone&&onDone()}catch(e){button.disabled=false;wrap.querySelector('.need-err').textContent=e.message}});
   f.onsubmit = async (e) => {
     e.preventDefault();
     const body = { title: f.elements.title.value, due_at: f.elements.due_at.value, note: f.elements.note.value };

@@ -1,0 +1,15 @@
+const assert=require('assert'),fs=require('fs'),vm=require('vm');
+const source=fs.readFileSync('crm/static/tasks.js','utf8');
+const start=source.indexOf('function erpOutcomePicker');
+const end=source.indexOf('function taskRow',start);
+const context={esc:value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;')};vm.createContext(context);vm.runInContext(source.slice(start,end),context);
+const task={erp_outcomes:['Новый лид (ндз)','Напоминание о ПУ (звонок)','Закрыть задачу']};
+const html=context.erpOutcomePicker(task,false,'t');
+assert(html.includes('Выберите следующий шаг по цепочке ERP'));
+assert(html.includes('data-terp-outcome="0"'));
+assert(html.includes('Будет создана следующая задача «Новый лид (ндз)»'));
+assert(html.includes('Текущая задача закроется без следующей'));
+assert(!html.includes('<input'));
+const ordinary=context.erpOutcomePicker({erp_outcomes:[]},true,'t');
+assert(ordinary.includes('data-tresult'));assert(ordinary.includes('data-tok'));
+console.log('PASS ERP task modal exposes its real outcome chain without manual result input');
