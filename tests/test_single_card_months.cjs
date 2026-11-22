@@ -125,7 +125,7 @@ const ok = (condition,message) => { assert(condition,message); checks++; };
     eq(await live().count(),4);
     ok((await tile('2026-11').innerText()).includes('16 500 ₽'));
     ok((await page.locator('[data-sc="balance"] .has-debt').innerText()).includes('9 000 ₽'));
-    eq(await page.locator('.sc-head .pill').filter({hasText:'Требует оплаты'}).count(),1);
+    eq(await page.locator('.sc-head .pill').filter({hasText:'Требует оплаты'}).count(),0);
     eq(await page.locator('[data-sc="balance"] .finance-note').count(),1);
 
     selectedCase='partial'; await clearMonth(); await open();
@@ -134,13 +134,13 @@ const ok = (condition,message) => { assert(condition,message); checks++; };
     ok((await partial.innerText()).includes('Оплачен частично'));
     ok((await partial.locator('.subscription-money').innerText()).includes('2 000 ₽'));
     ok((await partial.locator('.subscription-money').innerText()).includes('7 000 ₽'));
-    eq(await page.locator('.sc-head .pill').filter({hasText:'Требует оплаты'}).count(),1);
+    eq(await page.locator('.sc-head .pill').filter({hasText:'Требует оплаты'}).count(),0);
 
     selectedCase='stale_paid'; await clearMonth(); await open();
     const stale = live().filter({hasText:'Негибкий'});
     ok((await stale.innerText()).includes('Оплачен частично'),'Stale paid status must not hide ledger shortfall');
     ok((await stale.locator('.subscription-money').innerText()).includes('7 000 ₽'));
-    eq(await page.locator('.sc-head .pill').filter({hasText:'Требует оплаты'}).count(),1);
+    eq(await page.locator('.sc-head .pill').filter({hasText:'Требует оплаты'}).count(),0);
     eq(mutations.length,0,JSON.stringify(mutations));
     eq(errors.length,0,errors.join('\n'));
     console.log(`Single-card months: ${checks} assertions passed; actual openStudent GET, five services.student_detail fixtures, no mutations`);

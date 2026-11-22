@@ -2070,9 +2070,6 @@ async function confirmSubscriptionRefund(rid,button,d,reload) {
   box.querySelector('form').onsubmit=async e=>{e.preventDefault();const form=e.target,submit=form.querySelector('button');submit.disabled=true;try{const result=await api('POST',`/api/subscription-refunds/${rid}/confirm`,{actually_returned:form.elements.returned?.checked,proof:form.elements.proof?.value,receipt_fn:form.elements.receipt_fn.value,receipt_fd:form.elements.receipt_fd.value,receipt_fp:form.elements.receipt_fp.value});toast(result.message||'Подтверждение сохранено',result.status!=='done');reload()}catch(err){box.querySelector('.need-err').textContent=err.message;submit.disabled=false}};
 }
 
-function clientUnpaidAlertsHtml(d) {
-  return (d.unpaid_cur || []).map(g=>`<span class="pill red" title="Есть неоплаченная покупка или не оформлены занятия текущего месяца">Требует оплаты: ${esc(g)}</span>`).join('');
-}
 function clientBalanceHtml(d) {
   return `<h3>Оплаты и баланс</h3><div class="balance-summary"><div class="${d.balance.debt?'has-debt':''}"><small>Задолженность</small><b>${rub(d.balance.debt)}</b><span>По прошедшим и текущим счетам</span></div><div><small>Будущие занятия</small><b>${rub(d.balance.upcoming)}</b><span>К оплате за следующий месяц</span></div><div><small>Деньги на балансе</small><b>${rub(d.balance.deposit)}</b><span>Доступны для оплаты занятий</span>${balanceLabelsHtml(d.balance.balance_labels)}</div></div>
     ${(d.unpaid_cur||[]).length?`<div class="finance-note">Нужно проверить оплату текущих занятий: ${(d.unpaid_cur||[]).map(esc).join(', ')}</div>`:''}
@@ -2151,9 +2148,6 @@ async function openStudent(id, options = {}) {
 
 
     ...(d.trial_hold || []).map((h) => `<span class="pill yellow" title="Пока родитель присылает данные, другим это время не предлагается">⏳ Держим место на пробное ${esc(dShort(h.date))} в ${esc(h.time)} до ${esc(h.until.slice(11, 16))}</span>`),
-    clientUnpaidAlertsHtml(d),
-
-
     !s.birth ? `<span class="pill yellow">${s.reported_age != null ? `Возраст: ${esc(reportedAgeText(s))}; дата рождения не указана` : "Нет даты рождения"}</span>` : "",
     ...d.enrollments.filter((e) => e.age_warn).map((e) => `<span class="pill red">⚠️ ${esc(e.group_name)}: ${esc(e.age_warn)}</span>`),
     d.trial_age_warn ? `<span class="pill red">⚠️ Пробное ${esc(d.trial_age_warn)}</span>` : "",
