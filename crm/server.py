@@ -1956,6 +1956,12 @@ def renewal_payment_report(con,h,user,body,q):
     return targetedrenewalpayment.report(con)
 
 
+@route("GET", "/api/maintenance/kononenko-report", role="admin")
+def kononenko_report(con,h,user,body,q):
+    from . import targetedkononenkotask
+    return targetedkononenkotask.report(con)
+
+
 @route("GET", "/api/incoming-control", role="admin")
 def incoming_control_view(con,h,user,body,q):
     from . import incomingcontrol

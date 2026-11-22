@@ -38,6 +38,7 @@ PILOT_KEYS = {
     "b05a6695f5f2fd90d48242b5ecc350fee14171df5e11e847d1264e44ff94eb99",
     "e096e0e682db8cb70845d2d6fe84476b0ca8ba0cefe4e8beff3340bf6a3df7be",
     "f866bad935d3d87f73f94421f1d2412a3d1417bedf450cf4c52210385ff82c25",
+    "6d63ff26d801c60d5698cb7a7f032b4091d914836f038467027e2ffd169d09bd",
 }
 PILOT_CONTRACTS = {
     ("84894", "2026-11"): {
@@ -155,6 +156,23 @@ def _legacy_visit(con, table, item, student_id, group_id, kind, status):
 
 
 def _pilot_contract_issue(row, erp_id, month):
+    if (erp_id, month) == ("92421", "2026-11"):
+        subs = _subscriptions(row)
+        if {str(x.get("erp_id") or "") for x in subs} != {"825986", "825983"}:
+            return "Абонементы не совпадают с разрешённым точечным предпросмотром Кононенко"
+        if row.get("attendance"):
+            return "Для Кононенко разрешён только план без отметок посещения"
+        if not row.get("partial_attendance"):
+            return "Для Кононенко требуется сохранить пустые отметки посещения"
+        plans = [(sub, _planned_lessons(row, sub)) for sub in subs]
+        if sum(len(items) for _, items in plans) != 10:
+            return "В точечном плане Кононенко должно быть ровно 10 занятий"
+        for sub, items in plans:
+            if len(items) != int(sub.get("lesson_count") or 0):
+                return "Число занятий Кононенко не совпадает с абонементом"
+            if any(not re.fullmatch(r"2026-11-\d{2}", str(item.get("date") or "")) for item in items):
+                return "Все занятия Кононенко должны относиться к ноябрю 2026"
+        return ""
     if (erp_id, month) == ("85160", "2026-11"):
         subs = _subscriptions(row)
         if {str(x.get("erp_id") or "") for x in subs} != {"828113", "828114"}:
@@ -367,6 +385,12 @@ def preview(con, payload, period=None, student_ids=None, unassigned_visit_ids=No
             child["subscriptions"].append(output)
             result["existing" if sub_state == "already_exists" else "added" if sub_state == "add" else "review"] += 1
         child["subscription"] = child["subscriptions"][0] if child["subscriptions"] else None
+        if (erp_id, month) == ("92421", "2026-11"):
+            mapped_groups = {x["source_id"]: x["group_id"] for x in child["subscriptions"]}
+            if not student or student["id"] != 2:
+                child["issues"].append("Точечный перенос Кононенко разрешён только в CRM 2")
+            if mapped_groups != {"825986": 31, "825983": 34}:
+                child["issues"].append("Абонементы Кононенко должны вести только в группы CRM 31 и 34")
         if not child["subscriptions"]: child["issues"].append("В источнике нет абонементов")
         if child["issues"] or any(x["state"] == "review" for x in child["subscriptions"]) or any(x["state"] == "review" for x in child["planned"]) or any(x["state"] == "review" for x in child["visits"]): result["can_apply"] = False
         result["children"].append(child)

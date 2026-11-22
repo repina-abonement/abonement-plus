@@ -320,6 +320,8 @@ def init_db(con: sqlite3.Connection):
     targetedtaskfix.apply(con)
     from . import targetedrenewalpayment
     targetedrenewalpayment.apply(con)
+    from . import targetedkononenkotask
+    targetedkononenkotask.apply(con)
     from . import lifecycle, channels
     lifecycle.init(con)
     channels.init(con)
