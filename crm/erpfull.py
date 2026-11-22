@@ -513,6 +513,12 @@ def _process(con, files, now):
                                 t = con.execute('SELECT t.* FROM tasks t JOIN erp_full_task_links l ON l.task_id=t.id WHERE l.source_id=?', (r['task_id'],)).fetchone()
                             kind = task_service.ERP_STATUSES.get(title, 'manual')
                             translated = task_service.KINDS[kind][0] if kind != 'manual' else title
+                            if state_task == 'open' and task_service.renewal_covered(con,sid,due,title):
+                                state_task = 'cancelled'
+                                if t and t['student_id'] == sid and t['source'] == 'erp' and t['status'] == 'open' and t['title'] == title and t['due_at'][:10] == due[:10]:
+                                    con.execute("UPDATE tasks SET status='cancelled',done_at=?,result=? WHERE id=?",
+                                                (now, 'На месяц продления уже оформлен абонемент', t['id']))
+                                    t = con.execute('SELECT * FROM tasks WHERE id=?', (t['id'],)).fetchone()
                             if t:
                                 if t['student_id'] == sid and t['status'] == state_task and t['due_at'][:10] == due[:10] and t['title'] in (title,translated):
                                     state, tbl, target = 'native', 'tasks', t['id']

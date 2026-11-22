@@ -114,7 +114,8 @@ def prepare(con,ids):
                 continue
             if candidates:old=candidates[0]
         kind=tasks.ERP_STATUSES.get(rec['title'],'manual')
-        if not old:
+        covered = rec['status']=='open' and tasks.renewal_covered(con, sid, rec['due_at'], rec['title'])
+        if not old and not covered:
             auto=con.execute("""SELECT id FROM tasks WHERE student_id=? AND source NOT IN ('erp','manual')
                 AND status='open' AND substr(due_at,1,10)=? AND (title=? OR kind=?)""",(sid,rec['due_at'][:10],rec['title'],kind)).fetchall() if kind!='manual' else []
             if auto:
@@ -123,6 +124,8 @@ def prepare(con,ids):
         after={'kind':kind,'title':rec['title'],'student_id':sid,'assignee_id':None,'due_at':rec['due_at'],
                'status':rec['status'],'note':rec['note'],'source':'erp','auto_key':'erp-full-task:'+erpid,
                'done_at':rec['done_at'],'done_by':old['done_by'] if old and rec['status']!='open' else '', 'result':old['result'] if old else ''}
+        if covered:
+            after.update(status='cancelled', result='На месяц продления уже оформлен абонемент')
         before=dict(old) if old else None
         changed=not before or any(before[k]!=v for k,v in after.items())
         actions.append({'erp_task_id':erpid,'client_erp_id':resolved_client,'trial_source_id':rec['trial_source_id'],'namespace':resolved_namespace,

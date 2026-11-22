@@ -193,7 +193,8 @@ def tick(con, now: datetime | None = None) -> int:
                 WHERE k.family_id=? AND t.status='open' AND t.auto_key LIKE 'subscription-renew:%'""",
                 (s['family_id'],)).fetchone():
             seen.add(s['family_id']);continue
-        if now.day >= 20 and sv.unpaid_groups(con, s["id"], nxt) and not con.execute(
+        from . import tasks
+        if now.day >= 20 and not tasks.renewal_covered(con, s["id"], cur, "Проверить продление") and sv.unpaid_groups(con, s["id"], nxt) and not con.execute(
                 "SELECT 1 FROM tasks WHERE student_id=? AND auto_key=? AND status='open'",
                 (s["id"], f"subscription-renew:{s['id']}")).fetchone():
             seen.add(s["family_id"])
@@ -277,6 +278,9 @@ def cleanup(con, now: datetime):
             kids = [r[0] for r in con.execute("SELECT id FROM students WHERE family_id=? AND funnel='members' AND stage!='left' AND archived=0",
                                                 (t["family_id"],))]
             stale = not any(sv.unpaid_groups(con, x, ym) for x in kids)  # оплатили
+            if k == 'renew' and not stale:
+                from . import logic, tasks
+                stale = tasks.renewal_covered(con, t['sid'], logic.shift_month(ym, -1), 'Проверить продление')
         if stale:
             con.execute("UPDATE tasks SET status='cancelled', done_at=?, result='Этап сменился' WHERE id=?", (_iso(now), t["id"]))
 

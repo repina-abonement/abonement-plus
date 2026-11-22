@@ -157,9 +157,27 @@ def _iso(d: datetime) -> str:
     return d.isoformat(timespec="minutes")
 
 
+def renewal_covered(con, student_id, due, title):
+    """ERP renewal checks refer to the month after the deadline month."""
+    if not student_id or title.strip().casefold() != "проверить продление":
+        return False
+    from . import logic
+    target = logic.shift_month(str(due)[:7], 1)
+    if con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND month=?
+            AND status!='cancelled' AND COALESCE(kind,'month')='month' LIMIT 1""",
+            (student_id, target)).fetchone():
+        return True
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
+        return bool(con.execute("SELECT 1 FROM erp_history_subscriptions WHERE student_id=? AND month=? LIMIT 1",
+                                (student_id, target)).fetchone())
+    return False
+
+
 def add_task(con, kind: str, student_id: int | None, due: datetime | str, *, auto_key: str | None = None,
              title: str = "", source: str = "auto", assignee: int | None = None, note: str = "") -> int | None:
     due_s = due if isinstance(due, str) else _iso(due)
+    if source in ("erp", "erp_rule", "auto") and renewal_covered(con, student_id, due_s, title):
+        return None
     cur = con.execute("""INSERT OR IGNORE INTO tasks(kind, title, student_id, assignee_id, due_at, source, auto_key, note,
                          created_at) VALUES (?,?,?,?,?,?,?,?,?)""",
                       (kind, title or KINDS.get(kind, ("Задача",))[0], student_id, assignee or owner(con), due_s, source,
@@ -170,9 +188,10 @@ def add_task(con, kind: str, student_id: int | None, due: datetime | str, *, aut
 def subscription_renewal_plan(con, student_id):
     from . import logic, schedule, closures
     month=con.execute("SELECT MAX(month) FROM subscriptions WHERE student_id=? AND status!='cancelled' AND COALESCE(kind,'month')='month'",(student_id,)).fetchone()[0]
-    if not month and con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
-        month=con.execute("SELECT MAX(month) FROM erp_history_subscriptions WHERE student_id=?",(student_id,)).fetchone()[0]
-        if month:
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
+        history_month=con.execute("SELECT MAX(month) FROM erp_history_subscriptions WHERE student_id=?",(student_id,)).fetchone()[0]
+        if history_month and (not month or history_month > month):
+            month = history_month
             names=[r[0] for r in con.execute("""SELECT DISTINCT COALESCE(g.name,'') FROM erp_history_subscriptions h
                 LEFT JOIN groups g ON g.id=h.group_id WHERE h.student_id=? AND h.month=? ORDER BY g.name""",(student_id,month)) if r[0]]
             note=f"Абонемент: {logic.month_label(month)}"+(' · '+' + '.join(names) if names else '')+". Перенесён из истории ERP"
@@ -1001,6 +1020,8 @@ def complete(con, tid: int, user: dict, result: str = "", comment: str = "", nex
                 except (TypeError,ValueError):
                     raise comms.CommsError('Выберите дату следующей задачи') from None
             kind=erpworkflow.next_kind(outcome,t)
+            if renewal_covered(con, t["student_id"], transition_due, outcome):
+                raise comms.CommsError("На месяц продления уже оформлен абонемент. Выберите другой результат")
             add_task(con,kind,t['student_id'],transition_due,
                      title=outcome,source='erp_rule',assignee=t['assignee_id'],
                      auto_key=f"erp-rule:{tid}:{outcome}",note=transition_comment)

@@ -55,6 +55,16 @@ class PartialRenewalTest(unittest.TestCase):
         tasks.refresh_subscription_renewals(self.con)
         self.assertEqual((self.task()['status'],self.task()['note']),('done','Completed'))
 
+    def test_paid_target_month_suppresses_erp_check_only_for_that_month(self):
+        invoice = self.sale('2026-12')
+        sv.pay_subscription(self.con, invoice['id'], self.u, 'card_branch', invoice['due'],
+                            '2026-11-16', 'renewal-covered-december')
+        self.assertIsNone(tasks.import_erp_task(self.con, 'Проверить продление', self.sid, '2026-11-27'))
+        self.assertFalse(tasks.renewal_covered(self.con, self.sid, '2026-12-21', 'Проверить продление'))
+        self.assertFalse(tasks.renewal_covered(self.con, self.sid, '2026-11-27', 'Проверить оплату абонемента'))
+        self.con.execute("UPDATE subscriptions SET status='cancelled' WHERE id=?", (invoice['id'],))
+        self.assertFalse(tasks.renewal_covered(self.con, self.sid, '2026-11-27', 'Проверить продление'))
+
     def test_valid_until_uses_last_included_lesson(self):
         invoice=self.sale('2026-12')
         self.con.execute("UPDATE subscriptions SET valid_until='2026-12-16' WHERE student_id=?",(self.sid,))
