@@ -79,7 +79,7 @@ class HistoricalEntryTest(unittest.TestCase):
         pricing.correct(self.con,result['subscription_id'],price-100,'Согласовано с руководителем',self.user)
         self.assertIn('Согласовано с руководителем',sv.student_detail(self.con,self.sid)['subscriptions'][0]['calculation_reason'])
 
-    def test_historical_sale_without_email_keeps_data_request(self):
+    def test_historical_sale_without_email_does_not_create_data_request(self):
         from crm import smart, tasks
         with patch.object(smart,'REQUIRE',True):
             r=historyentry.record(self.con,self.sid,{**self.data,'email':''},self.user)
@@ -88,8 +88,7 @@ class HistoricalEntryTest(unittest.TestCase):
             smart.require(self.con,self.sid,'sale')  # Почта с 17.11 не блокирует и обычную продажу
         tasks.request_missing_data(self.con,historyentry.now().date())
         task=self.con.execute("SELECT * FROM tasks WHERE student_id=? AND kind='request_data' AND status='open'",(self.sid,)).fetchone()
-        self.assertIsNotNone(task)
-        self.assertIn('Почта',task['note'])
+        self.assertIsNone(task)
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM subscriptions WHERE student_id=?',(self.sid,)).fetchone()[0],1)
 
     def test_select_discount_and_keep_it_in_subscription(self):

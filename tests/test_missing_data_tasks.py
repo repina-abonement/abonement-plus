@@ -26,7 +26,7 @@ def main():
     rows = con.execute("SELECT * FROM tasks WHERE kind='request_data'").fetchall()
     assert {r['student_id'] for r in rows} == {sid, crossing}
     task = next(r for r in rows if r['student_id']==sid)
-    assert 'Дата рождения' in task['note'] and 'Почта' in task['note']
+    assert 'Дата рождения' in task['note'] and 'Почта' not in task['note']
     assert tasks._erp_col(dict(task)) == ('request_data', 'Запрос данных')
     assert tasks.request_missing_data(con, date(2026,11,13)) == 0
     before = dict(con.execute('SELECT * FROM tasks WHERE id=?', (other,)).fetchone())
@@ -40,14 +40,15 @@ def main():
         pass
     assert con.execute('SELECT status FROM tasks WHERE id=?',(task['id'],)).fetchone()[0] == 'open'
     con.execute("UPDATE students SET birth='2021-01-01' WHERE id=?", (sid,))
-    con.execute("UPDATE parents SET name='Анна',email='test@example.org' WHERE family_id=(SELECT family_id FROM students WHERE id=?)",(sid,))
+    con.execute("UPDATE parents SET name='Анна' WHERE family_id=(SELECT family_id FROM students WHERE id=?)",(sid,))
     tasks.request_missing_data(con, date(2026,11,13))
-    assert con.execute('SELECT status FROM tasks WHERE id=?',(task['id'],)).fetchone()[0] == 'open'
-    tasks.complete(con, task['id'], user)
+    closed = con.execute('SELECT status,result FROM tasks WHERE id=?',(task['id'],)).fetchone()
+    assert closed['status'] == 'cancelled'
+    assert 'Почту родитель укажет' in closed['result']
     assert tasks.request_missing_data(con, date(2026,11,14)) == 0
     assert dict(con.execute('SELECT * FROM tasks WHERE id=?', (other,)).fetchone()) == before
     assert con.execute('SELECT priority FROM students WHERE id=?',(sid,)).fetchone()[0] == 1
-    assert con.execute('SELECT COUNT(*) FROM tasks WHERE student_id=?',(sid,)).fetchone()[0] == 2
+    assert con.execute("SELECT COUNT(*) FROM tasks WHERE student_id=? AND status='open'",(sid,)).fetchone()[0] == 1
     print('PASS active/expired/future/cancelled/cross-month, deduplication, isolated completion, no recreation or chain')
 
 if __name__ == '__main__': main()

@@ -563,9 +563,28 @@ _PAYLINK_SYNC = datetime.min
 
 
 def request_missing_data(con, day: date) -> int:
-    """Независимая задача: одна на клиента, без цепочки и повторов после закрытия."""
+    """Независимая задача по обязательным данным; email родитель вводит при оплате."""
     from . import logic, smart
     made = 0
+
+    # Почта для чека вводится родителем по ссылке и после успешного создания счёта
+    # сохраняется в основной контакт. Старые автозадачи только из-за почты больше
+    # не должны оставаться в планере.
+    for task in con.execute(
+        """SELECT id,student_id FROM tasks
+           WHERE kind='request_data' AND status='open'
+             AND source='data_quality' AND auto_key LIKE 'request_data:%'"""
+    ).fetchall():
+        info = smart.required_info(con, task['student_id'], 'sale')
+        required = [key for key in info['missing'] if key != 'email']
+        if not required:
+            con.execute(
+                """UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',
+                   result='Почту родитель укажет при следующей оплате по ссылке'
+                   WHERE id=?""",
+                (_iso(_now()), task['id']),
+            )
+
     for student in con.execute("SELECT id FROM students WHERE archived=0 AND funnel='members' AND stage!='left'").fetchall():
         sid = student['id']
         active = False
@@ -577,11 +596,16 @@ def request_missing_data(con, day: date) -> int:
         if not active:
             continue
         info = smart.required_info(con, sid, 'sale')
-        if not info['missing']:
-            con.execute("UPDATE tasks SET note=? WHERE student_id=? AND kind='request_data' AND status='open'", ('Обязательные данные заполнены. Проверьте карточку и закройте задачу вручную.', sid))
+        missing = [key for key in info['missing'] if key != 'email']
+        if not missing:
             continue
-        note = 'Необходимо запросить и заполнить: ' + ', '.join(info['labels'][k] for k in info['missing']) + '. После выполнения закройте задачу вручную.'
-        existing = con.execute("SELECT id FROM tasks WHERE student_id=? AND kind='request_data' AND status='open' ORDER BY id LIMIT 1", (sid,)).fetchone()
+        note = 'Необходимо запросить и заполнить: ' + ', '.join(info['labels'][k] for k in missing) + '. После выполнения закройте задачу вручную.'
+        existing = con.execute(
+            """SELECT id FROM tasks WHERE student_id=? AND kind='request_data'
+               AND status='open' AND source='data_quality'
+               AND auto_key LIKE 'request_data:%' ORDER BY id LIMIT 1""",
+            (sid,),
+        ).fetchone()
         if existing:
             con.execute("UPDATE tasks SET note=? WHERE id=?", (note, existing['id']))
             continue
@@ -953,8 +977,9 @@ def complete(con, tid: int, user: dict, result: str = "", comment: str = "", nex
     if t["kind"] == "request_data":
         from . import smart
         info = smart.required_info(con, t["student_id"], 'sale')
-        if info['missing']:
-            raise comms.CommsError('Задача остаётся открытой. Заполните: ' + ', '.join(info['labels'][k] for k in info['missing']))
+        missing = [key for key in info['missing'] if key != 'email']
+        if missing:
+            raise comms.CommsError('Задача остаётся открытой. Заполните: ' + ', '.join(info['labels'][k] for k in missing))
     if t["kind"] == "rebook":
         raise comms.CommsError("Эту задачу закрывают результатом: перезаписан, не дозвонились, перезвонить позже или отказ")
     from . import erpworkflow
