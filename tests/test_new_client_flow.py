@@ -67,6 +67,13 @@ class NewClientTest(unittest.TestCase):
         self.con.execute("UPDATE tasks SET status='done' WHERE student_id=? AND kind='call_lead'",(sid,))
         self.assertNotIn(sid,[x['id'] for x in sv.new_cards_today(self.con,ref)['cards']])
 
+    def test_lead_rescheduled_for_tomorrow_leaves_urgent_new_application_queue(self):
+        sid=sv.create_new_lead(self.con,{**self.data,'source':'Промоутер: Иван Ивакин'},self.user)
+        self.con.execute("UPDATE students SET created_at='2026-11-20T12:00' WHERE id=?",(sid,))
+        self.con.execute("UPDATE tasks SET due_at='2026-11-23T23:59' WHERE student_id=? AND kind='call_lead'",(sid,))
+        ref=datetime.fromisoformat('2026-11-22T12:00:00+03:00')
+        self.assertNotIn(sid,[x['id'] for x in sv.new_cards_today(self.con,ref)['cards']])
+
     def test_today_list_uses_creation_not_stage_change_and_moscow(self):
         sid=sv.create_student(self.con,self.data,self.user)
         ref=datetime.fromisoformat('2026-11-18T00:30:00+03:00')

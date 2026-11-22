@@ -683,7 +683,8 @@ def new_cards_today(con, ref=None):
         has_subscription=con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND status!='cancelled'
             AND COALESCE(kind,'month')='month' AND month>=? LIMIT 1""",(row['id'],logic.month_of(day))).fetchone()
         pending = row['stage']=='lead' and not row['erp_id'] and not has_subscription and con.execute(
-            "SELECT 1 FROM tasks WHERE student_id=? AND kind='call_lead' AND status='open' LIMIT 1",(row['id'],)).fetchone()
+            """SELECT 1 FROM tasks WHERE student_id=? AND kind='call_lead' AND status='open'
+               AND substr(due_at,1,10)<=? LIMIT 1""", (row['id'], day.isoformat())).fetchone()
         # Красная очередь включает все необработанные заявки, даже если они поступили раньше.
         # Обычные карточки после обработки показываем здесь только в день создания.
         if created.date()!=day and not pending:
