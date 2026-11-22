@@ -137,6 +137,21 @@ def _visit_source(item, erp_student_id=""):
                     str(item.get("date") or ""), str(item.get("time") or ""), _norm(item.get("type"))]
         visit_id = hashlib.sha256(_json(identity).encode()).hexdigest()
         return f"telegram:{message}:visit:{visit_id}", "telegram", source_ref
+    # The October 2026 ERP journal for this one pilot exposes the full row
+    # (student, subscription, date, time, type and mark) but no native row ID.
+    # Derive a stable, namespaced identity from the immutable lesson identity.
+    # A changed mark then conflicts against the same source row instead of
+    # silently creating a second visit. This fallback is intentionally scoped
+    # to ERP 125824 / October 2026 only.
+    if (str(erp_student_id) == "125824" and
+            str(item.get("erp_subscription_id") or "") in {"821284", "821285"} and
+            re.fullmatch(r"2026-10-\\d{2}", str(item.get("date") or "")) and
+            re.fullmatch(r"\\d{2}:\\d{2}", str(item.get("time") or "")) and
+            _norm(item.get("type")) == "абонемент"):
+        identity = [str(erp_student_id), str(item.get("erp_subscription_id") or ""),
+                    str(item.get("date") or ""), str(item.get("time") or ""), _norm(item.get("type"))]
+        derived_id = hashlib.sha256(_json(identity).encode()).hexdigest()
+        return f"erp-derived:{derived_id}", "erp_derived", "ERP journal row; stable identity derived because no native row ID is exposed"
     # A manager-confirmed absence is first-party CRM evidence, not an ERP
     # attendance record.  Keep its namespace explicit and derive a stable key
     # from the exact approved fact so repeated imports remain idempotent.
@@ -273,28 +288,43 @@ def _pilot_contract_issue(row, erp_id, month):
             }
         visits = row.get("attendance") or []
         if len(visits) != 11:
-            return "У Веткина должно быть ровно 11 фактических отметок по двум октябрьским абонементам"
-        seen_ids, seen_marks, counts = set(), set(), {"821284": 0, "821285": 0}
+            return "У Веткина должно быть ровно 11 строк журнала по двум октябрьским абонементам"
+        seen_marks, seen_ids, counts = set(), set(), {"821284": 0, "821285": 0}
+        expected_status = {
+            ("821284", "2026-10-06", "18:30"): "был",
+            ("821284", "2026-10-11", "19:30"): "был",
+            ("821284", "2026-10-13", "18:30"): "был",
+            ("821284", "2026-10-18", "19:30"): "был",
+            ("821284", "2026-10-20", "18:30"): "был",
+            ("821284", "2026-10-25", "19:30"): "был",
+            ("821284", "2026-10-27", "18:30"): "был",
+            ("821285", "2026-10-08", "20:30"): "был",
+            ("821285", "2026-10-15", "20:30"): "не был",
+            ("821285", "2026-10-22", "20:30"): "не был",
+            ("821285", "2026-10-29", "20:30"): "был",
+        }
+        expected_group = "арктика сборная вт 18 30 четверг 20 30 вс 19 30"
         for item in visits:
             sub_id = str(item.get("erp_subscription_id") or "")
-            mark_id = str(item.get("erp_attendance_id") or "").strip()
             status = _norm(item.get("status"))
-            if sub_id not in counts or not mark_id or mark_id in seen_ids:
-                return "Все 11 отметок Веткина должны иметь уникальные ERP ID и относиться к одному из двух абонементов"
-            if _norm(item.get("type")) != "абонемент" or status not in ("был", "присутствовал", "present", "не был", "отсутствовал", "absent"):
-                return "Отметки Веткина должны содержать тип «Абонемент» и фактический статус из ERP"
-            key = (str(item.get("date") or ""), str(item.get("time") or ""), _norm(item.get("group")))
-            if key not in planned_by_sub[sub_id] or key in seen_marks:
-                return "Отметка Веткина не совпадает с уникальным плановым занятием своего абонемента"
-            seen_ids.add(mark_id)
+            key = (sub_id, str(item.get("date") or ""), str(item.get("time") or ""))
+            if sub_id not in counts or key not in expected_status or key in seen_marks:
+                return "Строки журнала Веткина должны однозначно соответствовать 11 датам двух абонементов"
+            if _norm(item.get("type")) != "абонемент" or status != expected_status[key]:
+                return "Тип и отметки 11 строк Веткина должны точно совпадать с журналом ERP: 9 «Был», 2 «Не был»"
+            if _norm(item.get("group")) != expected_group:
+                return "Точное название группы в строках журнала Веткина не совпадает с ERP"
+            mark_id = str(item.get("erp_attendance_id") or "").strip()
+            if mark_id and mark_id in seen_ids:
+                return "Нативные ERP ID отметок Веткина не должны повторяться"
+            if mark_id:
+                seen_ids.add(mark_id)
+            if (str(item.get("date") or ""), str(item.get("time") or ""), _norm(item.get("group"))) not in planned_by_sub[sub_id]:
+                return "Строка журнала Веткина не совпадает с планом своего абонемента"
             seen_marks.add(key)
             counts[sub_id] += 1
         if counts != {"821284": 7, "821285": 4}:
-            return "По Веткину нужно перенести 7 отметок сборной и 4 отметки ОФП"
-        if not any(str(x.get("erp_subscription_id")) == "821284" and
-                   str(x.get("date")) == "2026-10-06" and str(x.get("time")) == "18:30" and
-                   _norm(x.get("status")) in ("был", "присутствовал", "present") for x in visits):
-            return "Подтверждённое посещение Веткина 6 октября должно остаться «Был»"
+            return "По Веткину должно быть 7 строк по абонементу 821284 и 4 строки по 821285"
         return ""
     expected = PILOT_CONTRACTS.get((erp_id, month))
     if not expected:
