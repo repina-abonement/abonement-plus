@@ -353,3 +353,32 @@ def register(route):
         if not isinstance(body, dict) or set(body) - {'token'}:
             raise ApiError('Нужно подтверждение точечной отмены')
         return rollback(con, int(rid), body.get('token'), user)
+
+    @route('POST', '/api/erp/balance-recovery/prior-credit', role='admin')
+    def prior_credit(con, h, user, body, q):
+        from . import balancecredit, money
+        _owner(user)
+        if body != {'erp_id': '129268', 'subscription': '825627', 'amount': 280}:
+            raise ApiError('Нет согласованного остатка для этой записи')
+        source = con.execute(
+            "SELECT student_id FROM erp_history_subscriptions WHERE source_id=? "
+            "AND month=? AND revenue_amount=? AND lessons=?",
+            ('825627', '2026-11', 13950, 9)).fetchone()
+        if not source:
+            raise ApiError('Сначала перенесите проверенный ноябрьский абонемент')
+        sid = source['student_id']
+        ref = 'erp:129268:invoice:714842:overpayment'
+        old = con.execute('SELECT student_id,amount FROM balance_credit_funds WHERE source_ref=?', (ref,)).fetchone()
+        if old:
+            if old['student_id'] != sid or old['amount'] != 280:
+                raise ApiError('Исходная переплата уже связана с другой записью')
+            return {'added': False, 'balance': money.balance(con, sid)['deposit']}
+        before = money.balance(con, sid)
+        if before['deposit'] or before['debt'] or before['upcoming'] or before['allocation_conflicts']:
+            raise ApiError('Баланс изменился. Нужна повторная сверка')
+        balancecredit.add_existing_fund(con, sid, 280, source_ref=ref,
+            label='Переплата по предыдущему абонементу', user=user)
+        after = money.balance(con, sid)
+        if after['deposit'] != 280 or after['covered'] != before['covered']:
+            raise ApiError('Остаток не прошёл проверку')
+        return {'added': True, 'balance': after['deposit']}
