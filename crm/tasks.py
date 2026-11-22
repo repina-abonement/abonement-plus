@@ -206,7 +206,7 @@ def subscription_renewal_plan(con, student_id):
             note=f"Абонемент: {logic.month_label(month)}"+(' · '+' + '.join(names) if names else '')+". Перенесён из истории ERP"
             return {'due':month+'-20T23:59','note':note}
     if not month:return None
-    plans=[]
+    notes=[]
     for sub in con.execute("SELECT * FROM subscriptions WHERE student_id=? AND month=? AND status!='cancelled' AND COALESCE(kind,'month')='month'",(student_id,month)):
         enrollment=con.execute('SELECT * FROM enrollments WHERE id=?',(sub['enrollment_id'],)).fetchone()
         try:parts=json.loads(sub['lesson_schedule'] or '[]')
@@ -234,16 +234,14 @@ def subscription_renewal_plan(con, student_id):
                 if sub['valid_until'] and day>sub['valid_until']:continue
                 actual.add((group['id'],day))
         partial=bool(expected-actual) or bool(excluded)
-        due=month+'-20'
         note=f"Абонемент: {logic.month_label(month)}"+(' · '+' + '.join(dict.fromkeys(names)) if names else '')
         if actual:
             last=max(day for _,day in actual)
             note+=f". Последнее занятие: {date.fromisoformat(last):%d.%m.%Y}"
             if partial:
-                due=(date.fromisoformat(last)-timedelta(days=3)).isoformat()
-                note+=f". Неполный месяц, включено занятий: {len(actual)}. Проверить продление за 3 календарных дня до последнего занятия: {date.fromisoformat(due):%d.%m.%Y}"
-        plans.append((due,note))
-    return {'due':min(due for due,_ in plans)+'T23:59','note':'\n'.join(note for _,note in plans)}
+                note+=f". Неполный месяц, включено занятий: {len(actual)}"
+        notes.append(note)
+    return {'due':month+'-20T23:59','note':'\n'.join(notes)}
 
 
 def update_renewal_reason(con, task_id, reason):
@@ -267,7 +265,7 @@ def refresh_subscription_renewals(con):
 
 
 def schedule_renewal(con, student_id: int) -> int | None:
-    """Одна общая задача: неполный месяц — за три дня до последнего занятия."""
+    """Одна общая задача на 20 число месяца действия абонемента."""
     plan=subscription_renewal_plan(con,student_id)
     if not plan:return None
     due,note=plan['due'],plan['note']

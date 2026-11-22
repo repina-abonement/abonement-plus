@@ -28,7 +28,7 @@ class ErrorLessonAdjustments(unittest.TestCase):
         self.assertEqual((row['price'],row['lessons']),(3840,3))
         self.assertEqual(before,[dict(r) for r in self.con.execute('SELECT * FROM payments')])
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM subscription_lesson_adjustments').fetchone()[0],1)
-        self.assertEqual(self.con.execute("SELECT due_at FROM tasks WHERE auto_key=?",(f'subscription-renew:{self.sid}',)).fetchone()[0],'2026-11-22T23:59')
+        self.assertEqual(self.con.execute("SELECT due_at FROM tasks WHERE auto_key=?",(f'subscription-renew:{self.sid}',)).fetchone()[0],'2026-11-20T23:59')
 
     def test_remove_all_cancels_without_refund_or_payment_loss(self):
         sub=self.sale();body,q=self.body(sub,[])

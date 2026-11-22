@@ -15,21 +15,21 @@ class PartialRenewalTest(unittest.TestCase):
     def task(self):
         return self.con.execute("SELECT * FROM tasks WHERE auto_key=?",(f'subscription-renew:{self.sid}',)).fetchone()
 
-    def test_partial_month_last_actual_lesson_minus_three_and_note(self):
+    def test_partial_month_twentieth_and_note(self):
         self.sale('2026-11')
         task=self.task()
-        self.assertEqual(task['due_at'],'2026-11-27T23:59')
+        self.assertEqual(task['due_at'],'2026-11-20T23:59')
         self.assertIn('30.11.2026',task['renewal_reason'])
         self.assertIn('Неполный месяц',task['renewal_reason'])
-        self.assertIn('3 календарных дня',task['renewal_reason'])
+        self.assertNotIn('3 календарных дня',task['renewal_reason'])
         self.assertIsNone(task['assignee_id'])
 
-    def test_early_end_december_not_twentieth(self):
+    def test_early_end_december_still_twentieth(self):
         q=sv.quote_for(self.con,self.sid,'2026-12',group_id=self.gid,paid_date='2026-11-16',user=self.u)
         excluded=[d for d in q['calendar_dates'] if d>'2026-12-16']
         invoice=self.sale('2026-12',excluded)
         sv.pay_subscription(self.con,invoice['id'],self.u,'card_branch',invoice['due'],'2026-11-16','partial-renewal-paid-1')
-        self.assertEqual(self.task()['due_at'],'2026-12-13T23:59')
+        self.assertEqual(self.task()['due_at'],'2026-12-20T23:59')
         self.assertIn('16.12.2026',self.task()['renewal_reason'])
 
     def test_full_following_month_supersedes_partial_current(self):
@@ -47,9 +47,9 @@ class PartialRenewalTest(unittest.TestCase):
     def test_refresh_existing_only_open_automatic_and_snapshot_not_count(self):
         result=self.sale('2026-11')
         self.con.execute("UPDATE subscriptions SET lessons=99 WHERE id=?",(result['id'],))
-        self.con.execute("UPDATE tasks SET due_at='2026-11-20T23:59',note='' WHERE id=?",(self.task()['id'],))
+        self.con.execute("UPDATE tasks SET due_at='2026-11-27T23:59',note='' WHERE id=?",(self.task()['id'],))
         tasks.refresh_subscription_renewals(self.con)
-        self.assertEqual(self.task()['due_at'],'2026-11-27T23:59')
+        self.assertEqual(self.task()['due_at'],'2026-11-20T23:59')
         self.assertIn('включено занятий: 4',self.task()['renewal_reason'])
         self.con.execute("UPDATE tasks SET status='done',note='Completed' WHERE id=?",(self.task()['id'],))
         tasks.refresh_subscription_renewals(self.con)
@@ -69,7 +69,7 @@ class PartialRenewalTest(unittest.TestCase):
         tasks.schedule_renewal(self.con,self.sid)
         self.assertEqual(self.task()['note'],'Проверить оплату')
         self.assertNotEqual(self.task()['renewal_reason'],task['renewal_reason'])
-        self.assertNotEqual(self.task()['due_at'],task['due_at'])
+        self.assertEqual(self.task()['due_at'],task['due_at'])
 
     def test_paid_target_month_suppresses_erp_check_only_for_that_month(self):
         invoice = self.sale('2026-12')
@@ -81,10 +81,10 @@ class PartialRenewalTest(unittest.TestCase):
         self.con.execute("UPDATE subscriptions SET status='cancelled' WHERE id=?", (invoice['id'],))
         self.assertFalse(tasks.renewal_covered(self.con, self.sid, '2026-11-27', 'Проверить продление'))
 
-    def test_valid_until_uses_last_included_lesson(self):
+    def test_valid_until_does_not_change_renewal_date(self):
         invoice=self.sale('2026-12')
         self.con.execute("UPDATE subscriptions SET valid_until='2026-12-16' WHERE student_id=?",(self.sid,))
         sv.pay_subscription(self.con,invoice['id'],self.u,'card_branch',invoice['due'],'2026-11-16','partial-renewal-paid-3')
-        self.assertEqual(self.task()['due_at'],'2026-12-13T23:59')
+        self.assertEqual(self.task()['due_at'],'2026-12-20T23:59')
 
 if __name__=='__main__':unittest.main()
