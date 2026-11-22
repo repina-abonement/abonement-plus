@@ -13,7 +13,11 @@ def main():
     assert present({"kind":"task","text":"Следующий шаг ERP: закрыть; перенос истории"})["technical_only"]
     assert not present({"kind":"note","text":"Семья сообщила о пропуске"}).get("technical_only")
     assert "clientHistoryHtml(d.history)" in app
-    assert "client-history-event" in css and "client-history-technical" in css
+    assert 'class="client-history-table"' in app
+    for heading in ("Дата", "Время", "Событие / задача", "Комментарий", "Автор"):
+        assert heading in app
+    assert "client-history-table" in css and "client-history-technical" in css
+    assert ".client-history-table td::before" in css
     print("PASS concise client history and separate ERP transfer data")
 
 

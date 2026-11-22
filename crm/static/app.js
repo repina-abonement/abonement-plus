@@ -2086,12 +2086,17 @@ function clientHistoryHtml(rows){
   const events=rows.filter(row=>!row.technical_only);
   const labels={payment:'Оплата',sale:'Абонемент',stage:'Статус',group:'Группа',task:'Задача',note:'Комментарий',message:'Сообщение',system:'CRM'};
   const editButton = row => S.user.role === "admin" && row.kind === "note" ? `<button type="button" class="btn sm" data-edit-history="${row.id}">Изменить комментарий</button>` : "";
+  const dateParts = value => {
+    const raw=String(value||''),date=(raw.slice(0,10)||'').split('-');
+    return {date:date.length===3?`${date[2]}.${date[1]}.${date[0]}`:'—',time:raw.length>=16?raw.slice(11,16):'—'};
+  };
   const item=row=>{
     const text=String(row.display_text||row.text||'').trim(),long=text.length>320||text.split('\n').length>4;
     const visible=long?text.slice(0,280).trimEnd()+'…':text;
-    return `<li class="client-history-event"><div class="client-history-meta"><span class="client-history-kind">${esc(labels[row.kind]||'Событие')}</span><time>${dtShort(row.ts)}</time><span>${esc(row.display_author||row.user_name||'CRM')}</span></div><div class="client-history-text">${esc(visible)}</div>${long?`<details class="client-history-full"><summary>Показать полностью</summary><div>${esc(text)}</div></details>`:''}${editButton(row)}</li>`;
+    const when=dateParts(row.ts),author=row.display_author||row.user_name||'CRM';
+    return `<tr class="client-history-event"><td data-label="Дата"><time datetime="${esc(row.ts||'')}">${esc(when.date)}</time></td><td data-label="Время">${esc(when.time)}</td><td data-label="Событие"><span class="client-history-kind">${esc(labels[row.kind]||'Событие')}</span></td><td data-label="Комментарий"><div class="client-history-text">${esc(visible||'—')}</div>${long?`<details class="client-history-full"><summary>Показать полностью</summary><div>${esc(text)}</div></details>`:''}${editButton(row)}</td><td data-label="Автор">${esc(author)}</td></tr>`;
   };
-  return `${events.length?`<ul class="history client-history-list">${events.map(item).join('')}</ul>`:'<p class="muted">Рабочих событий пока нет</p>'}`;
+  return `${events.length?`<div class="client-history-table-wrap"><table class="client-history-table"><thead><tr><th>Дата</th><th>Время</th><th>Событие / задача</th><th>Комментарий</th><th>Автор</th></tr></thead><tbody>${events.map(item).join('')}</tbody></table></div>`:'<p class="muted">Рабочих событий пока нет</p>'}`;
 }
 async function loadClientPaymentLinks(sid) {
   const box=$('#pay-links');if(!box)return;
