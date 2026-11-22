@@ -16,6 +16,30 @@ def _save(con, report):
     return report
 
 
+def _matches_student(con, student):
+    if not student or " ".join(student["name"].casefold().split()) not in NAMES:
+        return False
+    direct = str(student["erp_id"] or "")
+    if direct and direct != ERP_ID:
+        return False
+    owners = con.execute("SELECT id FROM students WHERE erp_id=?", (ERP_ID,)).fetchall()
+    if any(row[0] != STUDENT_ID for row in owners):
+        return False
+    linked = []
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_full_identities'").fetchone():
+        linked = con.execute("""SELECT source_id,student_id FROM erp_full_identities
+            WHERE namespace='student' AND (source_id=? OR student_id=?)""", (ERP_ID, STUDENT_ID)).fetchall()
+        if any(str(row[0]) != ERP_ID or row[1] != STUDENT_ID for row in linked):
+            return False
+    if direct == ERP_ID or linked:
+        return True
+    if not con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
+        return False
+    historical = con.execute("""SELECT source_id FROM erp_history_subscriptions
+        WHERE student_id=? AND month='2026-11'""", (STUDENT_ID,)).fetchall()
+    return sorted(str(row[0]) for row in historical) == ["825123", "825124"]
+
+
 def apply(con):
     previous = con.execute("SELECT value FROM settings WHERE key=?", (KEY,)).fetchone()
     if previous:
@@ -28,8 +52,7 @@ def apply(con):
             return {"state": "invalid_previous_report", "student_id": STUDENT_ID}
 
     student = con.execute("SELECT id,name,erp_id,erp_status FROM students WHERE id=?", (STUDENT_ID,)).fetchone()
-    if (not student or " ".join(student["name"].casefold().split()) not in NAMES
-            or str(student["erp_id"] or "") != ERP_ID):
+    if not _matches_student(con, student):
         return _save(con, {"state": "identity_mismatch", "student_id": STUDENT_ID, "erp_id": ERP_ID})
 
     invoices = con.execute("""SELECT id,price,status,paid_at FROM subscriptions
