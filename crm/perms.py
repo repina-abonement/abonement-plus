@@ -27,7 +27,7 @@ SECTIONS: dict[str, dict[str, str]] = {
     "journal": {"owner": "full", "senior": "full", "operator": "full", "coach": "own", "journal": "full"},  # journal: отметка «отмечает журнал»
     "schedule": {"owner": "full", "senior": "full", "operator": "view", "coach": "view", "promoter": "view"},
     "coaches": {"owner": "full", "senior": "view", "coach": "own"},
-    "team": {"owner": "full", "senior": "view", "operator": "view", "coach": "view", "promoter": "view", "lawyer": "view"},
+    "team": {"owner": "full"},
     "pay": {"owner": "full", "senior": "own", "operator": "own", "coach": "own", "promoter": "own", "lawyer": "own"},
     "payments": {"owner": "full", "senior": "view"},
     "fiscal": {"owner": "full", "senior": "full"},
