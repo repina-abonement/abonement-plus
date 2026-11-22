@@ -2992,7 +2992,7 @@ def conversation_username(con, h, user, body, q):
 
 @route("GET", "/api/conversations/{cid}", role="inbox")
 def conv_get(con, h, user, body, q, cid):
-    detail = cx(comms.conversation, con, int(cid),q.get("read")!="0")
+    detail = cx(comms.conversation, con, int(cid),q.get("read")!="0",user)
     from . import chatinbox
     pref=chatinbox.preferences(con,user['id']).get(int(cid),{})
     detail['conversation']['muted']=bool(pref.get('muted'))
@@ -3395,6 +3395,30 @@ def family_whatsapp(con, h, user, body, q, fid):
 def message_delete(con,h,user,body,q,mid):
     from . import messagedeletion
     return cx(messagedeletion.delete,con,int(mid),user)
+
+
+@route("POST", "/api/messages/{mid}/pin", role="inbox")
+def message_pin(con,h,user,body,q,mid):
+    from . import messageactions
+    return cx(messageactions.pin,con,int(mid),user,body.get("pinned") is not False)
+
+
+@route("POST", "/api/messages/{mid}/reaction", role="inbox")
+def message_reaction(con,h,user,body,q,mid):
+    from . import messageactions
+    return cx(messageactions.react,con,int(mid),user,body.get("emoji") or "")
+
+
+@route("POST", "/api/messages/{mid}/forward", role="inbox")
+def message_forward(con,h,user,body,q,mid):
+    from . import messageactions
+    return cx(messageactions.forward,con,int(mid),int(body.get("conversation_id") or 0),user,body.get("request_id") or "")
+
+
+@route("PATCH", "/api/messages/{mid}", role="inbox")
+def message_edit(con,h,user,body,q,mid):
+    from . import messageactions
+    return cx(messageactions.edit,con,int(mid),body.get("text") or "",user)
 
 
 @route("GET", "/api/messages/{mid}/media", role="inbox")

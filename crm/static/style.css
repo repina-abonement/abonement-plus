@@ -1952,9 +1952,10 @@ select:not([multiple]):not([size]){appearance:none;-webkit-appearance:none;paddi
 .msg-actions>summary{cursor:pointer;list-style:none;padding:0 6px;font-size:20px;line-height:24px;color:var(--ink-2)}
 .msg-actions>summary::before,.msg-actions>summary::after{display:none!important}.msg-actions>summary::-webkit-details-marker{display:none}
 .msg-actions-menu{position:absolute;right:0;top:100%;min-width:190px;padding:5px;z-index:40;background:var(--surface);border:1px solid var(--line);border-radius:9px;box-shadow:0 6px 18px #0002}
-.msg-actions-menu .msg-delete{padding:8px;margin:0;width:100%;text-align:left}
-.msg-actions-menu .msg-copy{display:block;width:100%;padding:8px;margin:0;border:0;background:none;color:var(--ink);font:inherit;font-size:12px;text-align:left;cursor:pointer;border-radius:5px}
-.msg-actions-menu .msg-copy:hover:not(:disabled),.msg-actions-menu .msg-copy:focus-visible{background:var(--surface-2)}.msg-actions-menu .msg-copy:disabled{opacity:.45;cursor:wait}
+.msg-actions-menu .msg-action,.msg-actions-menu .msg-delete{display:block;width:100%;padding:8px;margin:0;border:0;background:none;color:var(--ink);font:inherit;font-size:12px;text-align:left;cursor:pointer;border-radius:5px}
+.msg-actions-menu .msg-action:hover:not(:disabled),.msg-actions-menu .msg-action:focus-visible,.msg-actions-menu .msg-delete:hover:not(:disabled){background:var(--surface-2)}.msg-actions-menu button:disabled{opacity:.45;cursor:not-allowed}
+.msg-reaction-picker{display:flex;align-items:center;gap:3px;padding:6px 4px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.msg-reaction-picker span{font-size:11px;color:var(--ink-2);margin-right:3px}.msg-reaction-picker button,.msg-reaction{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:3px 6px;cursor:pointer}.msg-reactions{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px}.msg-reaction.mine{border-color:var(--green);background:var(--green-soft)}
+.msg-pin-label{font-size:11px;color:var(--ink-2);margin-bottom:4px}.msg-pinned{box-shadow:inset 3px 0 var(--green)}
 .chat-message-copyable,.no-copy .page .chat-message-copyable,.no-copy .drawer-panel .chat-message-copyable{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;cursor:text}
 
 .msg-error-details{margin-top:7px;font-size:12px;line-height:1.4;color:var(--red);overflow-wrap:anywhere}.msg-error-details>summary{cursor:pointer}

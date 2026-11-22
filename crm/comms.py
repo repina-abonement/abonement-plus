@@ -145,6 +145,8 @@ def init(con):
         PRIMARY KEY(external_id,channel_id))""")
     from . import messagedeletion
     messagedeletion.init(con)
+    from . import messageactions
+    messageactions.init(con)
     from . import chatinbox
     chatinbox.init(con)
     con.execute("CREATE TABLE IF NOT EXISTS conversation_pins(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,created_at TEXT NOT NULL,PRIMARY KEY(user_id,conversation_id))")
@@ -1709,12 +1711,12 @@ def _with_reply_context(con, message: dict) -> dict:
     return message
 
 
-def conversation(con, cid: int, mark_read: bool = True) -> dict:
+def conversation(con, cid: int, mark_read: bool = True, user=None) -> dict:
     r = con.execute("SELECT * FROM conversations WHERE id=?", (cid,)).fetchone()
     if not r:
         raise CommsError("Переписка не найдена")
-    from . import messagedeletion
-    msgs = [_with_reply_context(con,messagedeletion.public(con,dict(x),r["channel"])) for x in con.execute(
+    from . import messagedeletion, messageactions
+    msgs = [messageactions.public(con,_with_reply_context(con,messagedeletion.public(con,dict(x)|{"channel":r["channel"]},r["channel"])),user) for x in con.execute(
         "SELECT * FROM (SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 200) ORDER BY id", (cid,))]
     # Restored/late messages keep their original time, not their insertion order.
     msgs.sort(key=lambda m:(str(m.get('ts') or '').replace(' ','T'),m['id']))
@@ -1725,7 +1727,7 @@ def conversation(con, cid: int, mark_read: bool = True) -> dict:
     phones = [r["phone_norm"]] if r["phone_norm"] else []
     if r["family_id"]:
         phones += [x[0] for x in con.execute("SELECT phone_norm FROM parents WHERE family_id=? AND phone_norm != ''", (r["family_id"],))]
-    convs, items = history(con, r["family_id"], phones, False)
+    convs, items = history(con, r["family_id"], phones, False, user)
     if not any(c["id"] == cid for c in convs):  # переписка без телефона и семьи: только она сама
         convs_label = _conv_out(con, r)["channel_label"]
         convs, items = [_conv_out(con, r)], [{"type": "msg", "channel": r["channel"], "conversation_id": cid,
@@ -1810,7 +1812,7 @@ def _call_summary(k) -> str:
         return ""
 
 
-def history(con, family_id: int | None, phones: list[str], mark_read: bool = True) -> tuple[list[dict], list[dict]]:
+def history(con, family_id: int | None, phones: list[str], mark_read: bool = True, user=None) -> tuple[list[dict], list[dict]]:
     """Вся история семьи (или номера, если семьи нет): переписки во всех мессенджерах и звонки одной лентой."""
     phones = list(dict.fromkeys(normalize_phone(str(p)) for p in phones if p and normalize_phone(str(p))))
     ph_sql = ",".join("?" * len(phones)) or "NULL"
@@ -1821,11 +1823,12 @@ def history(con, family_id: int | None, phones: list[str], mark_read: bool = Tru
     for c in convs:
         for m in con.execute("SELECT * FROM (SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 60)",
                              (c["id"],)):
-            from . import messagedeletion
-            message=_with_reply_context(con,messagedeletion.public(con,dict(m),c["channel"]))
+            from . import messagedeletion, messageactions
+            message=messageactions.public(con,_with_reply_context(con,messagedeletion.public(con,dict(m)|{"channel":c["channel"]},c["channel"])),user)
             items.append({"type": "msg", "can_delete":message["can_delete"],"delete_reason":message["delete_reason"],"deletion_status":message["deletion_status"], "ts": m["ts"], "channel": c["channel"], "channel_label": c["channel_label"],
                           "conversation_id": c["id"], **{k: m[k] for k in ("id", "direction", "text", "kind", "media",
                                                                             "user_name", "status", "error")},
+                          "pinned":message["pinned"], "reactions":message["reactions"], "can_edit":message["can_edit"], "edit_reason":message["edit_reason"],
                           **({"reply_context":message["reply_context"]} if message.get("reply_context") else {})})
     for k in con.execute(f"SELECT * FROM calls WHERE (family_id=? AND family_id IS NOT NULL) OR (family_id IS NULL AND phone_norm IN ({ph_sql})) ORDER BY id DESC LIMIT 60",
                          (family_id, *phones)):
