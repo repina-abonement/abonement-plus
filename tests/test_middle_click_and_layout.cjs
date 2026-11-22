@@ -9,11 +9,11 @@ const navStart = source.indexOf('function crmNavigationUrl');
 const navEnd = source.indexOf('/* ---------- навигация', navStart);
 assert(helperStart >= 0 && helperEnd > helperStart && navStart >= 0 && navEnd > navStart);
 
-let auxclick, mousedown;
+let auxclick, mousedown, click;
 const opened = [];
 const context = {
   location: { origin: 'https://ab-plus.ru', pathname: '/' },
-  document: { addEventListener: (name, callback) => { if (name === 'auxclick') auxclick = callback; if (name === 'mousedown') mousedown = callback; } },
+  document: { addEventListener: (name, callback) => { if (name === 'auxclick') auxclick = callback; if (name === 'mousedown') mousedown = callback; if (name === 'click') click = callback; } },
   window: { open: (...args) => opened.push(args) },
   URLSearchParams,
 };
@@ -25,6 +25,8 @@ assert(context.searchTextMatches('Иванов Александр', 'bdfyjd'));
 assert(context.searchTextMatches('John Smith', 'Smith'));
 assert.strictEqual(context.crmNavigationUrl({ dataset: { view: 'payments' } }), 'https://ab-plus.ru/#payments');
 assert.strictEqual(context.crmNavigationUrl({ dataset: { open: '1719' } }), 'https://ab-plus.ru/#members?student=1719');
+assert.strictEqual(context.crmNavigationUrl({ dataset: { etopen: '84894' } }), 'https://ab-plus.ru/#members?student=84894');
+assert.strictEqual(context.crmNavigationUrl({ dataset: { freshLead: '85160' } }), 'https://ab-plus.ru/#members?student=85160');
 assert.strictEqual(context.crmNavigationUrl({ dataset: { conv: '42' } }), 'https://ab-plus.ru/#inbox?conversation=42');
 assert.strictEqual(context.crmNavigationUrl({ dataset: { tile: 'erp' } }), 'https://ab-plus.ru/#settings?settings_tab=erp');
 
@@ -38,5 +40,14 @@ assert.deepStrictEqual(opened[0], ['https://ab-plus.ru/#members?student=1719', '
 auxclick({ button: 1, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
   target: { closest: () => studentTarget }, preventDefault: () => {}, stopPropagation: () => {} });
 assert.strictEqual(opened.length, 1, 'mousedown and auxclick must not open two tabs');
+
+const funnelCard = { dataset: { etopen: '84894' } };
+mousedown({ button: 1, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
+  target: { closest: () => funnelCard }, preventDefault: () => {}, stopPropagation: () => {} });
+assert.deepStrictEqual(opened[1], ['https://ab-plus.ru/#members?student=84894', '_blank', 'noopener']);
+
+click({ button: 0, ctrlKey: true, metaKey: false, altKey: false, shiftKey: false,
+  target: { closest: () => funnelCard }, preventDefault: () => {}, stopPropagation: () => {} });
+assert.deepStrictEqual(opened[2], ['https://ab-plus.ru/#members?student=84894', '_blank', 'noopener']);
 
 console.log('PASS wrong-layout matching and middle-click routes for sections, cards, chats, and settings');
