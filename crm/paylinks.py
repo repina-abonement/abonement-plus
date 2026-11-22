@@ -54,7 +54,8 @@ def ready(con) -> bool:
     return all(fiscal.cfg(con, k) for k in ("fx_pk_server", "fx_pk_user", "fx_pk_password"))
 
 
-def create(con, sid: int, amount: int, user: dict, purpose: str = "", subscription_id: int | None = None, full_payment: bool | None = False) -> dict:
+def create(con, sid: int, amount: int, user: dict, purpose: str = "", subscription_id: int | None = None,
+           full_payment: bool | None = False, replace_open: bool = False) -> dict:
     if not ready(con):
         raise PayLinkError("PayKeeper не подключён: Чеки → Подключение, адрес, логин и пароль PayKeeper")
     amount = int(amount or 0)
@@ -62,6 +63,8 @@ def create(con, sid: int, amount: int, user: dict, purpose: str = "", subscripti
         raise PayLinkError("Укажите сумму")
     if full_payment is not None and type(full_payment) is not bool:
         raise PayLinkError('Подтвердите, на всю ли сумму счёта создаётся ссылка')
+    if type(replace_open) is not bool:
+        raise PayLinkError('Не удалось проверить замену прежней ссылки')
     if full_payment is True and not subscription_id:
         raise PayLinkError('Для полной оплаты выберите исходный счёт')
     if subscription_id:
@@ -77,6 +80,12 @@ def create(con, sid: int, amount: int, user: dict, purpose: str = "", subscripti
             raise PayLinkError('Этот счёт уже оплачен. Ссылка на оплату не требуется')
         if amount>left or full_payment is not False and amount!=left:
             raise PayLinkError("Сумма к оплате изменилась. Обновите расчёт и создайте ссылку заново")
+        if replace_open:
+            previous = con.execute("""SELECT id,invoice_id,checkout_state FROM pay_links
+                WHERE student_id=? AND subscription_id=? AND status='open' ORDER BY id""",
+                (sid, subscription_id)).fetchall()
+            if any(row['invoice_id'] or row['checkout_state'] in ('creating','uncertain','ready') for row in previous):
+                raise PayLinkError('По прежней ссылке PayKeeper уже начал создание счёта. Не создавайте второй счёт — сначала проверьте прежнюю ссылку')
     s = con.execute("""SELECT s.name, (SELECT p.name FROM parents p WHERE p.family_id=s.family_id ORDER BY p.id LIMIT 1),
                        (SELECT p.phone FROM parents p WHERE p.family_id=s.family_id AND p.phone!='' ORDER BY p.id LIMIT 1)
                        FROM students s WHERE s.id=?""", (sid,)).fetchone()
@@ -97,6 +106,9 @@ def create(con, sid: int, amount: int, user: dict, purpose: str = "", subscripti
                          VALUES (?,?,?,?,?,?,?,?,?,'new',?,?)""",
                       (sid,amount,orderid,url,purpose,_now(),user.get('name',''),subscription_id,receipt_token,
                        None if full_payment is None else int(full_payment),scope)).lastrowid
+    if replace_open and subscription_id:
+        con.execute("""UPDATE pay_links SET status='expired' WHERE student_id=? AND subscription_id=?
+            AND status='open' AND id!=? AND invoice_id='' AND checkout_state IN ('','new')""", (sid, subscription_id, lid))
     con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
                 (sid, _now(), user.get("name", ""), "payment", f"Создана ссылка на оплату {amount} ₽; email для чека введёт клиент"))
     return {"id": lid, "url": url, "amount": amount, "purpose": purpose}

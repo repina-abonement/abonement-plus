@@ -379,7 +379,8 @@ def paylinks_create(con, h, user, body, q, sid):
         sub = int(body["subscription_id"]) if body.get("subscription_id") else None
         if sub and not con.execute("SELECT 1 FROM subscriptions WHERE id=? AND student_id=?", (sub, int(sid))).fetchone():
             raise ApiError("Абонемент не найден")
-        return paylinks.create(con, int(sid), body.get("amount"), user, body.get("purpose") or "", sub, full_payment=body.get("full_payment"))
+        return paylinks.create(con, int(sid), body.get("amount"), user, body.get("purpose") or "", sub,
+                               full_payment=body.get("full_payment"), replace_open=body.get("replace_open", False))
     except paylinks.PayLinkError as e:
         raise ApiError(str(e))
 

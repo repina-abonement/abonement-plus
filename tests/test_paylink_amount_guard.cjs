@@ -53,7 +53,7 @@ finally:f.doCleanups()
      return json(data);
     }
     if(method==='POST'&&url.pathname==='/api/students/1/paylinks'){
-     eq(body.subscription_id,10);eq(body.full_payment,true);eq(body.amount,state.due);
+     eq(body.subscription_id,10);eq(body.full_payment,true);eq(body.amount,state.due);eq(body.replace_open,true);
      if(state.createFails){state.createFails=false;return json({error:'Временная ошибка создания ссылки'},503)}
      const result=link(state.serial++,state.wrongIssuedAmount||body.amount);state.links.push(result);state.wrongIssuedAmount=null;
      if(state.holdCreate){state.holdCreate=false;await new Promise(resolve=>release=resolve)}

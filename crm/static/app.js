@@ -1714,7 +1714,7 @@ async function renewInvoicePaymentLink(studentId,subscriptionId,purpose='') {
   if(!subscriptionId)throw Error('Откройте оформление абонемента и создайте новую общую ссылку');
   const quote=await api('GET',`/api/subscriptions/${subscriptionId}/payment-quote?use_balance=0`),amount=quote.balance_preview?.payable??quote.total;
   if(!Number.isInteger(amount)||amount<=0)throw Error('По счёту сейчас нет суммы к оплате. Обновите карточку');
-  const link=await api('POST',`/api/students/${studentId}/paylinks`,{amount,purpose,subscription_id:subscriptionId,full_payment:true});
+  const link=await api('POST',`/api/students/${studentId}/paylinks`,{amount,purpose,subscription_id:subscriptionId,full_payment:true,replace_open:true});
   await validatePaymentLinkForSharing(link,studentId,subscriptionId,true);return link;
 }
 
@@ -1854,7 +1854,7 @@ async function openSell(d, reload) {
   const showSaleLink=async(order,subscriptionId,link)=>{
     const generation=++shareVersion,current=()=>isCurrent()&&generation===shareVersion;
     const title=order.single?`Разовое занятие${order.date?' '+dShort(order.date):''}`:`Абонемент на ${monthLabel(order.month)}`;
-    $('#sl-res').innerHTML=`<p class="small muted" id="sl-link-check" role="status">Проверяем актуальную сумму ссылки…</p><p class="need-err" id="sl-link-warning" role="alert" hidden></p><button type="button" class="btn" id="sl-refresh-link" hidden>Обновить ссылку</button><div id="sl-link-content" hidden><p class="small muted">По ссылке родитель проверит email для чека. Перед копированием и вставкой ещё раз проверим сумму.</p><label style="margin-top:14px">Сообщение родителю</label><textarea id="sl-msg" rows="9"></textarea><div class="sc-actions" style="margin-top:10px"><button type="button" class="btn primary" id="sl-send">Вставить в чат с семьёй</button><button type="button" class="btn" id="sl-copy">Скопировать</button><button type="button" class="btn" id="sl-done">Готово</button></div></div>`;
+    $('#sl-res').innerHTML=`<p class="small muted" id="sl-link-check" role="status">Проверяем актуальную сумму ссылки…</p><p class="need-err" id="sl-link-warning" role="alert" hidden></p><button type="button" class="btn" id="sl-refresh-link">Сформировать новую ссылку</button><div id="sl-link-content" hidden><p class="small muted">По ссылке родитель проверит email для чека. Перед копированием и вставкой ещё раз проверим сумму.</p><label style="margin-top:14px">Сообщение родителю</label><textarea id="sl-msg" rows="9"></textarea><div class="sc-actions" style="margin-top:10px"><button type="button" class="btn primary" id="sl-send">Вставить в чат с семьёй</button><button type="button" class="btn" id="sl-copy">Скопировать</button><button type="button" class="btn" id="sl-done">Готово</button></div></div>`;
     const message=$('#sl-msg'),content=$('#sl-link-content'),status=$('#sl-link-check'),warning=$('#sl-link-warning'),refresh=$('#sl-refresh-link'),copy=$('#sl-copy'),send=$('#sl-send');
     let sharing=false,invalid=false;
     const setPending=value=>{copy.disabled=send.disabled=value||invalid;message.disabled=value||invalid;refresh.disabled=value;};
@@ -1890,7 +1890,7 @@ async function openSell(d, reload) {
       const r=await invoice(order);if(!isCurrent())return;if(r.payable<=0){toast('Счёт уже оплачен с баланса');reload();return}
       const title=order.single?`Разовое занятие${order.date?' '+dShort(order.date):''}`:`Абонемент на ${monthLabel(order.month)}`;
       const previousLink=(st.links||[]).find(l=>l.status==='open'&&l.subscription_id===r.id&&l.amount===r.payable);
-      const l=previousLink||await api('POST',`/api/students/${id}/paylinks`,{amount:r.payable,purpose:`${title}: ${displayChildName(d.student.name)}`,subscription_id:r.id,full_payment:true});if(!isCurrent())return;
+      const l=previousLink||await api('POST',`/api/students/${id}/paylinks`,{amount:r.payable,purpose:`${title}: ${displayChildName(d.student.name)}`,subscription_id:r.id,full_payment:true,replace_open:true});if(!isCurrent())return;
       await showSaleLink(order,r.id,l);
     }catch(e){fail(e);if(isCurrent()){lock(!!savedInvoice);busy(false)}}finally{linkBusy=false}
   };

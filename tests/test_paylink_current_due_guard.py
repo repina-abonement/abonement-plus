@@ -96,6 +96,21 @@ class PaylinkCurrentDueGuardTest(unittest.TestCase):
         self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments WHERE cancelled=0').fetchone()[0],0)
         self.assertEqual(sv.payment_quote(self.con,sub,'2026-11-20')['total'],9450)
 
+    def test_replace_open_expires_only_unused_previous_link(self):
+        sub=self.seven();first=self.link(sub)
+        with patch.object(paylinks,'ready',return_value=True):
+            second=paylinks.create(self.con,self.sid,9450,self.u,subscription_id=sub,full_payment=True,replace_open=True)
+        self.assertEqual(self.con.execute('SELECT status FROM pay_links WHERE id=?',(first['id'],)).fetchone()[0],'expired')
+        self.assertEqual(self.con.execute('SELECT status FROM pay_links WHERE id=?',(second['id'],)).fetchone()[0],'open')
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM payments WHERE cancelled=0').fetchone()[0],0)
+
+    def test_replace_open_refuses_when_provider_invoice_may_exist(self):
+        sub=self.seven();first=self.link(sub)
+        self.con.execute("UPDATE pay_links SET checkout_state='ready',invoice_id='provider-existing' WHERE id=?",(first['id'],))
+        with patch.object(paylinks,'ready',return_value=True),self.assertRaisesRegex(paylinks.PayLinkError,'второй счёт'):
+            paylinks.create(self.con,self.sid,9450,self.u,subscription_id=sub,full_payment=True,replace_open=True)
+        self.assertEqual(self.con.execute('SELECT COUNT(*) FROM pay_links').fetchone()[0],1)
+
     def test_http_omitted_full_choice_is_not_a_silent_partial_link_escape(self):
         sub=self.seven()
         with patch.object(paylinks,'ready',return_value=True):
