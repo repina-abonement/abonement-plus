@@ -7,6 +7,21 @@ _ERP_ARCHIVE = re.compile(r'^Архив\s+ERP\s+([^·.\n]+)\s*·\s*([^\.\n]+)', 
 
 def present(row):
     out=dict(row);raw=out.get('text') or ''
+    text = raw.strip()
+    kind = out.get('kind')
+    export = kind == 'note' and re.match(r'^Выгрузка ERP\s+[^·\n]+\s*·', text, re.I)
+    profile_edit = kind == 'system' and text.startswith('Изменены данные ребёнка и контакты семьи в шапке карточки')
+    task_rename = kind == 'note' and text.startswith('Задача «') and '» переименована: «' in text
+    migration_task = kind == 'task' and (
+        ('Следующий шаг ERP:' in text and 'перенос истории' in text.lower())
+        or 'выполнена: ошибочно перенесена вручную' in text.lower()
+    )
+    if export or profile_edit or task_rename or migration_task:
+        out.update(technical_only=True, technical_text=raw)
+        return out
+    if kind == 'system' and text.startswith('Статус по правилам ERP:'):
+        out['display_text'] = 'Статус: ' + text.partition(':')[2].strip()
+        return out
     archive = _ERP_ARCHIVE.match(raw.strip())
     if archive:
         out.update(display_text=archive.group(2).strip(), technical_text=raw,

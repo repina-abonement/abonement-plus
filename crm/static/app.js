@@ -2078,16 +2078,15 @@ function clientBalanceHtml(d) {
     ${d.family_kids.length||d.balance.deposit?`<details class="finance-detail"><summary>Другие операции</summary><div class="sc-actions">${d.family_kids.length?'<button class="btn sm" id="pay-fam">Оплата за семью</button>':''}${d.balance.deposit&&d.family_kids.length?'<button class="btn sm" id="bal-move">Перенести баланс другому ребёнку</button>':''}${d.balance.deposit&&can('payments','view')?'<button class="btn sm" id="bal-refund">Вернуть деньги с баланса</button>':''}</div></details>`:''}`;
 }
 function clientHistoryHtml(rows){
-  const technical=rows.filter(row=>row.technical_only),events=rows.filter(row=>!row.technical_only);
+  const events=rows.filter(row=>!row.technical_only);
   const labels={payment:'Оплата',sale:'Абонемент',stage:'Статус',group:'Группа',task:'Задача',note:'Комментарий',message:'Сообщение',system:'CRM'};
   const editButton = row => S.user.role === "admin" && row.kind === "note" ? `<button type="button" class="btn sm" data-edit-history="${row.id}">Изменить комментарий</button>` : "";
   const item=row=>{
     const text=String(row.display_text||row.text||'').trim(),long=text.length>320||text.split('\n').length>4;
     const visible=long?text.slice(0,280).trimEnd()+'…':text;
-    return `<li class="client-history-event"><div class="client-history-meta"><span class="client-history-kind">${esc(labels[row.kind]||'Событие')}</span><time>${dtShort(row.ts)}</time><span>${esc(row.display_author||row.user_name||'CRM')}</span></div><div class="client-history-text">${esc(visible)}</div>${long?`<details class="client-history-full"><summary>Показать полностью</summary><div>${esc(text)}</div></details>`:''}${row.technical_text&&!row.technical_only?`<details class="client-history-source"><summary>Исходная запись ERP</summary><div>${esc(row.technical_text)}</div></details>`:''}${editButton(row)}</li>`;
+    return `<li class="client-history-event"><div class="client-history-meta"><span class="client-history-kind">${esc(labels[row.kind]||'Событие')}</span><time>${dtShort(row.ts)}</time><span>${esc(row.display_author||row.user_name||'CRM')}</span></div><div class="client-history-text">${esc(visible)}</div>${long?`<details class="client-history-full"><summary>Показать полностью</summary><div>${esc(text)}</div></details>`:''}${editButton(row)}</li>`;
   };
-  const archive=technical.length?`<details class="client-history-technical"><summary>Технические данные переноса ERP · ${technical.length}</summary><p>Сохранены для проверки переноса и не относятся к рабочей истории общения с клиентом.</p>${technical.map(row=>`<details><summary>${dtShort(row.ts)} · ${esc(row.display_text||'Исходные данные')}</summary><div>${esc(row.technical_text||row.text||'')}</div>${editButton(row)}</details>`).join('')}</details>`:'';
-  return `${events.length?`<ul class="history client-history-list">${events.map(item).join('')}</ul>`:'<p class="muted">Рабочих событий пока нет</p>'}${archive}`;
+  return `${events.length?`<ul class="history client-history-list">${events.map(item).join('')}</ul>`:'<p class="muted">Рабочих событий пока нет</p>'}`;
 }
 async function loadClientPaymentLinks(sid) {
   const box=$('#pay-links');if(!box)return;
