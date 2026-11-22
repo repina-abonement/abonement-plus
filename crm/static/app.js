@@ -2221,7 +2221,7 @@ async function openStudent(id, options = {}) {
     <h3>История</h3>
     ${isOwner() ? `<button class="btn" id="erp-full-client">Исходные данные ERP</button><div id="erp-full-client-out"></div>` : ''}
     <div class="row" style="margin-bottom:10px"><input id="note" placeholder="Комментарий, итог звонка…"><button class="btn sm" id="note-add" style="flex:0">Добавить</button></div>
-    <ul class="history">${d.history.map((h) => `<li><div class="when">${dtShort(h.ts)} · ${esc(h.display_author||h.user_name)}</div><div style="white-space:pre-wrap">${esc(h.display_text||h.text)}</div>${h.technical_text?`<details class="small muted"><summary>Подробности ERP</summary><div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(h.technical_text)}</div></details>`:''}</li>`).join("")}</ul>
+    <ul class="history">${d.history.map((h) => `<li><div class="when">${dtShort(h.ts)} · ${esc(h.display_author||h.user_name)}</div><div style="white-space:pre-wrap">${esc(h.display_text||h.text)}</div>${h.technical_text?`<details class="small muted"><summary>Подробности ERP</summary><div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(h.technical_text)}</div></details>`:''}${S.user.role === "admin" && h.kind === "note" ? `<button type="button" class="btn sm" data-edit-history="${h.id}">Изменить комментарий</button>` : ""}</li>`).join("")}</ul>
   </div>
   <div style="margin-top:14px" data-sc="arch"><button class="btn sm ${s.archived ? "" : "danger"}" id="s-arch">${s.archived ? "Вернуть из архива" : "Перенести в архив"}</button></div>`;
   openDrawer(html, "wide", { keepStudentRequest: true });
@@ -2427,6 +2427,31 @@ async function openStudent(id, options = {}) {
     if (!s.archived && !confirm("Перенести карточку в архив? Она пропадёт из воронок, вернуть можно в любой момент")) return;
     try { await api("POST", `/api/students/${id}/archive`, { archived: !s.archived }); toast(s.archived ? "Карточка возвращена" : "Карточка в архиве"); closeDrawer(); render(); } catch (e) { fail(e); }
   };
+  for (const edit of body.querySelectorAll("[data-edit-history]")) {
+    edit.onclick = () => {
+      const note = d.history.find(item => item.id === Number(edit.dataset.editHistory));
+      const form = document.createElement("form");
+      form.innerHTML = `<label class="field">Текст комментария<textarea rows="6" required></textarea></label>
+        <button class="btn primary" type="submit">Сохранить</button>
+        <button class="btn" type="button">Отмена</button>`;
+      const input = form.querySelector("textarea");
+      input.value = note.text;
+      edit.hidden = true;
+      edit.after(form);
+      input.focus();
+      form.querySelector('[type="button"]').onclick = () => { form.remove(); edit.hidden = false; };
+      form.onsubmit = async event => {
+        event.preventDefault();
+        const save = form.querySelector('[type="submit"]');
+        save.disabled = true;
+        try {
+          await api("PATCH", `/api/students/${id}/notes/${note.id}`, {text: input.value, original: note.text});
+          await openStudent(id);
+          toast("Комментарий сохранён");
+        } catch (error) { save.disabled = false; fail(error); }
+      };
+    };
+  }
   $("#note-add").onclick = async () => {
     const t = $("#note").value.trim(); if (!t) return;
     try { await api("POST", `/api/students/${id}/note`, { text: t }); openStudent(id); } catch (e) { fail(e); }
