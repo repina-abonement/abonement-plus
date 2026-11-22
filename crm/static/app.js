@@ -2165,7 +2165,7 @@ async function openStudent(id, options = {}) {
   const html = `
   <div class="sc-head">
     <div class="sc-title"><h2>${full?`<button type="button" class="profile-text-edit" data-profile-edit="name" title="Изменить имя">${esc(displayChildName(s.name))}</button>`:esc(displayChildName(s.name))}</h2></div>
-    <div class="sc-status" ${full?'data-profile-open tabindex="0" role="button" title="Изменить данные клиента"':''}>${s.birth?esc(ageText(s.birth))+' · ':reportedAgeText(s)?esc(reportedAgeText(s))+' · ':''}${esc((s.erp_status||'').trim()||'Статус ERP не перенесён')}${s.archived?' · в архиве':''}</div>
+    <div class="sc-status" ${full?'data-profile-open tabindex="0" role="button" title="Изменить данные клиента"':''}>${s.birth?esc(ageText(s.birth))+' · ':reportedAgeText(s)?esc(reportedAgeText(s))+' · ':''}${esc((s.erp_status||'').trim()||'Статус не указан')}${s.archived?' · в архиве':''}</div>
     ${d.siblings.length ? `<div class="chips sc-kids"><span class="chip on">${esc(displayChildName(s.name))}</span>${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join("")}</div>` : ""}
     <div class="sc-meta" ${full?'data-head-group tabindex="0" role="button" title="Изменить группу"':''}>${isMember ? (regular.length ? regular.map((e) => `<span class="pill">${esc(e.group_name)}</span>`).join(" ") : `<span class="muted small">Группа не выбрана</span>`)
       : `${s.trial_at ? `<span class="pill">Пробное ${dtShort(s.trial_at)}</span>` : ""}`}</div>
@@ -2190,7 +2190,7 @@ async function openStudent(id, options = {}) {
 
   <div class="section" data-sc="stage">
     <div class="row">
-      <div class="field"><label>Статус ERP</label><input readonly value="${esc((s.erp_status||'').trim()||'Статус ERP не перенесён')}"></div>
+      <div class="field"><label>Статус клиента</label><input readonly value="${esc((s.erp_status||'').trim()||'Статус не указан')}"></div>
       ${!isMember ? `<div class="field"><label>Тариф</label><select id="f-tariff"><option value="fixed" ${s.tariff === "fixed" ? "selected" : ""}>Негибкий</option><option value="flex" ${s.tariff === "flex" ? "selected" : ""}>Гибкий</option></select></div>` : ""}
     </div>
     ${!isMember ? `<div class="field"><label>Филиал</label><select id="f-branch"><option value="">— не выбран —</option>${S.meta.branches.filter((b) => b.active).map((b) => `<option value="${b.id}" ${b.id === s.branch_id ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select></div>` : ""}
@@ -2820,7 +2820,7 @@ async function renderSearch(page) {
     <div class="page-head"><h2 class="grow">Клиенты</h2>
       <input class="search" id="q" placeholder="Имя, фамилия или телефон" value="${esc(S.search)}">
       <button class="btn sm ${S.searchArch ? "primary" : ""}" id="q-arch">Архив</button></div>
-    ${d.erp.length ? `<div class="row" style="max-width:420px;margin-bottom:10px"><div class="field"><label>Статус ERP</label><select id="p-erp"><option value="">Все статусы</option>${d.erp.map(([e, n]) => `<option value="${esc(e)}" ${f.erp === e ? "selected" : ""}>${esc(e==='__erp_missing__'?'Статус ERP не перенесён':e)} (${n})</option>`).join("")}</select></div></div>` : ""}
+    ${d.erp.length ? `<div class="row" style="max-width:420px;margin-bottom:10px"><div class="field"><label>Статус клиента</label><select id="p-erp"><option value="">Все статусы</option>${d.erp.map(([e, n]) => `<option value="${esc(e)}" ${f.erp === e ? "selected" : ""}>${esc(e==='__erp_missing__'?'Статус не указан':e)} (${n})</option>`).join("")}</select></div></div>` : ""}
     <div class="small muted" style="margin-bottom:6px">Найдено: ${d.total}${d.total > d.limit ? `, показаны первые ${d.limit}. Уточните поиск или фильтр` : ""}</div>
     <div id="results" class="list">${d.rows.length ? d.rows.map((r) => `
       <div class="list-row click" data-who="${r.id}"><div class="grow"><b>${esc(displayChildName(r.name))}</b>
