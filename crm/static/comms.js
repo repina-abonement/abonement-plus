@@ -1187,7 +1187,7 @@ function wireTrialOffer(c, textSel = "#chat-text") {
       <div class="row" style="flex-wrap:wrap;align-items:flex-end">
         ${leads.length > 1 ? `<div class="field"><label>Ребёнок</label><select id="to-kid">${leads.map((k) => `<option value="${k.id}">${esc(k.name)}</option>`).join("")}</select></div>` : ""}
         <div class="field" style="flex:0 0 110px"><label>Возраст, лет</label><input id="to-age" type="number" min="2" max="17" value="${kid && isFinite(ageOf(kid.birth)) ? ageOf(kid.birth) : ""}" placeholder="4"></div>
-        <div class="field"><label>Филиал</label><select id="to-br"><option value="">Любой, где раньше</option>${S.meta.branches.map((b) => `<option value="${b.id}">${esc(b.name)}</option>`).join("")}</select></div>
+        <div class="field"><label>Филиал</label><select id="to-br" data-search-select="off"><option value="">Любой, где раньше</option>${S.meta.branches.map((b) => `<option value="${b.id}">${esc(b.name)}</option>`).join("")}</select></div>
         <button class="btn sm primary" id="to-go" style="flex:0">Подобрать</button>
         <button class="btn sm" id="to-ask-age" style="flex:0" title="Возраст неизвестен: спросить у родителя">💬 Спросить возраст</button></div>
       <div id="to-res"></div></div>`;
