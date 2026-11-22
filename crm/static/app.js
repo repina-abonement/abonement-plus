@@ -1328,7 +1328,15 @@ async function renderWorkdesk(page) {
   if (S.viewAs && S.viewAs.role === "coach") { await renderCoachToday(page, S.viewAs.id, bar); return wireViewAs(page); }
   const taskDeskUser = S.viewAs || S.user;
   const taskLayout = taskDeskUser.role === "operator" && !taskDeskUser.is_senior && !taskDeskUser.is_offline_admin ? "funnel" : "grid";
-  const [d, tasksHtml, schedHtml, erpHtml, skips, members] = await Promise.all([api("GET", "/api/workdesk" + (S.viewAs ? "?as_user=" + S.viewAs.id : "")), tasksSection(), scheduleWidget().catch(() => ""),
+  const workdeskUrl = "/api/workdesk" + (S.viewAs ? "?as_user=" + S.viewAs.id : "");
+  const workdeskData = api("GET", workdeskUrl).catch(async (error) => {
+    // Во время автоматической публикации служба перезапускается на несколько секунд.
+    // GET безопасно повторить: не оставляем вместо рабочего стола постоянную «Ошибка сервера».
+    if (error.status && error.status < 500) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    return api("GET", workdeskUrl);
+  });
+  const [d, tasksHtml, schedHtml, erpHtml, skips, members] = await Promise.all([workdeskData, tasksSection(), scheduleWidget().catch(() => ""),
     (can("sales") || S.viewAs || S.user.is_offline_admin) ? erpTasksSection(S.viewAs, taskLayout) : Promise.resolve(""), can("skips") ? api("GET", "/api/board/skips").catch(() => null) : Promise.resolve(null),
     can("members", "full") ? api("GET", "/api/board/members").catch(() => null) : Promise.resolve(null)]);
   // воронка «Продления» (Юлия, 04.11): разовые, не оплачен, продлить (с 20 числа), счёт выставлен, ушёл. Оплатившие не попадают
