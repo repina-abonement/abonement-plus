@@ -13,6 +13,8 @@ assert(html.includes('Комментарий к изменению статус�
 assert(html.includes('data-terp-comment'));
 assert(html.includes('Дата следующей задачи'));
 assert(html.includes('data-terp-due'));
+assert(html.indexOf('Дата следующей задачи')<html.indexOf('Комментарий к изменению статуса'));
+assert(!html.includes(' required'));
 assert(html.includes('data-terp-confirm'));
 assert(!html.includes('data-tresult'));
 const ordinary=context.erpOutcomePicker({erp_outcomes:[]},true,'t');
