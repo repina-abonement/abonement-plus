@@ -128,6 +128,9 @@ const ok = (condition,message) => { assert(condition,message); checks++; };
     eq(await page.locator('.sc-head .pill').filter({hasText:'Требует оплаты'}).count(),0);
     eq(await page.locator('[data-sc="balance"] .finance-note').count(),1);
 
+    const manualProof=await page.evaluate(()=>{const box=document.createElement('div');box.innerHTML=subscriptionPaymentDetailsHtml({id:999},{subscription_payment_details:{999:[{payment_id:77,amount:9450,payment_total:9450,method:'tochka_qr_link',method_label:'По QR/ссылке Точки от администратора',paid_at:'2026-11-20T15:30',receipt:{status:'confirmed',label:'Чек Эвотор найден в ОФД',receipt_id:'fn:42'},reconciliation:{bank:{status:'confirmed',label:'Поступление подтверждено выпиской Точки',checked_at:'2026-11-23T00:42'},ofd:{status:'confirmed',label:'Чек Эвотор найден в ОФД'}}}]}});return {text:box.innerText,rows:box.querySelectorAll('.manual-proof-row').length,buttons:box.querySelectorAll('[data-manual-payment-check]').length,hint:box.textContent.includes('PayKeeper') }});
+    eq(manualProof.rows,2);eq(manualProof.buttons,0);eq(manualProof.hint,false);eq((manualProof.text.match(/Чек Эвотор/g)||[]).length,1);ok(manualProof.text.includes('Поступление в Точку'));ok(manualProof.text.includes('Подтверждён в ОФД'));
+
     selectedCase='partial'; await clearMonth(); await open();
     ok((await page.locator('[data-sc="balance"] .has-debt').innerText()).includes('7 000 ₽'));
     const partial = live().filter({hasText:'Негибкий'});
