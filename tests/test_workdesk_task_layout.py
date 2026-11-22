@@ -27,6 +27,8 @@ def test_workdesk_task_cards_keep_primary_actions_and_context():
     assert 'data-etdone="${t.id}"' in script
     assert 'data-etmove="${t.id}"' in script
     assert 'data-etopen="${s.id}"' in script
+    assert '["future", "Будущие"]' in script
+    assert 'future: "Будущих задач пока нет"' in script
 
 
 def test_workdesk_retries_a_temporary_server_or_network_failure():

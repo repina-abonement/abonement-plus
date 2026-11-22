@@ -29,6 +29,7 @@ KINDS = {
     "single_next": ("Разовые: договориться о следующем занятии", "1️⃣"),
     "request_data": ("Запросить данные", "📋"),
     "manual_payment_check": ("Проверить оплату Точки и чек Эвотор", "🧾"),
+    "client_followup": ("Определить следующий шаг", "🧭"),
     "manual": ("Задача", "✅"),
     "plan": ("Задача", "📌"),
     "bday": ("День рождения участника команды", "🎂"),
@@ -654,6 +655,39 @@ def request_missing_data(con, day: date) -> int:
     return made
 
 
+def ensure_client_task_coverage(con, now: datetime | None = None) -> int:
+    """Every non-archived client has an open next action; normal chain tasks take precedence."""
+    now = (now or _now()).replace(second=0, microsecond=0)
+    due = now.date().isoformat() + "T23:59"
+    made = 0
+    for student in con.execute("SELECT id,family_id,funnel,stage FROM students WHERE archived=0 ORDER BY id").fetchall():
+        sid = student["id"]
+        key = f"client-coverage:{sid}"
+        normal = con.execute("""SELECT 1 FROM tasks WHERE status='open' AND kind!='client_followup'
+            AND (student_id=? OR (kind='rebook' AND family_id=?)) LIMIT 1""",
+            (sid, student["family_id"] or -1)).fetchone()
+        coverage = con.execute("SELECT id,status FROM tasks WHERE auto_key=? ORDER BY id LIMIT 1", (key,)).fetchone()
+        if normal:
+            if coverage and coverage["status"] == "open":
+                con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',
+                    result='Появилась штатная задача цепочки' WHERE id=?""", (_iso(now), coverage["id"]))
+            continue
+        note = ("В карточке нет открытой задачи штатной цепочки. Проверьте актуальный статус, последнее событие, "
+                "оплату и договорённость с клиентом; затем поставьте конкретную следующую задачу со сроком. "
+                f"Текущий раздел: {student['funnel']}; этап: {student['stage']}.")
+        if coverage:
+            con.execute("""UPDATE tasks SET kind='client_followup',title='Определить следующий шаг',note=?,
+                due_at=?,status='open',priority=1,done_at=NULL,done_by='',result='',student_id=? WHERE id=?""",
+                (note, due, sid, coverage["id"]))
+        else:
+            tid = add_task(con, "client_followup", sid, due, title="Определить следующий шаг",
+                           source="coverage", auto_key=key, note=note)
+            if tid:
+                con.execute("UPDATE tasks SET assignee_id=NULL,priority=1 WHERE id=?", (tid,))
+                made += 1
+    return made
+
+
 def run(con, now: datetime | None = None, send: bool = True) -> dict:
     """Один проход: создать задачи по пробным, отправить автосообщения, закрыть неактуальные задачи."""
     now = now or _now()
@@ -742,6 +776,7 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
             con.execute("UPDATE tasks SET status='cancelled', done_at=? WHERE id=?", (_iso(now), tid))
     from . import singles
     singles.sync_paid_tasks(con, now)
+    made += ensure_client_task_coverage(con, now)
     return {"tasks": made, "sent": sent}
 
 
@@ -915,6 +950,7 @@ def manual_board(con, user: dict, scope: str = "mine") -> dict:
 # ручные в «Ручных»: ни одна задача не теряется
 ERP_COLUMNS = [
     ("unpaid_visit", "Был на занятии без оплаты"),  # красная, первая (Юлия, 04.11)
+    ("client_followup", "Без следующего шага"),
     ("new_application", "Новая заявка"),
     ("old_unprocessed_lead", "Необработанные ранее"),
     ("trial_confirm", "Напоминание о ПУ (звонок)"),
@@ -983,7 +1019,7 @@ def erp_board(con, day: str = "today", user: dict | None = None) -> dict:
         base += " AND (t.student_id IS NOT NULL OR t.family_id IS NOT NULL OR t.assignee_id=?)"
         scope_args.append(int(user["id"]))
     cond = {"overdue": ("substr(t.due_at,1,10) < ?", t0), "today": ("substr(t.due_at,1,10) = ?", t0),
-            "tomorrow": ("substr(t.due_at,1,10) = ?", tomorrow)}
+            "tomorrow": ("substr(t.due_at,1,10) = ?", tomorrow), "future": ("substr(t.due_at,1,10) > ?", tomorrow)}
     counts = {k: con.execute(f"SELECT COUNT(*) FROM ({base} AND {c})", (*visible_ids, *scope_args, v)).fetchone()[0] for k, (c, v) in cond.items()}
     c, v = cond.get(day, cond["today"])
     order = [k for k, _ in ERP_COLUMNS]

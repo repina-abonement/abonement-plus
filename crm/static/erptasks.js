@@ -8,7 +8,7 @@ async function erpTasksSection(asUser=null, layout="grid") {
   try { d = await api("GET", "/api/tasks/erp-board?day=" + S.etDay + (asUser ? "&as_user=" + encodeURIComponent(asUser.id) : "")); } catch (_) { return ""; }
   S.taskById = S.taskById || {};
   d.columns.forEach((c) => c.cards.forEach((t) => (S.taskById[t.id] = t)));
-  const tabs = [["overdue", "Просрочено"], ["today", "Сегодня"], ["tomorrow", "Завтра"]];
+  const tabs = [["overdue", "Просрочено"], ["today", "Сегодня"], ["tomorrow", "Завтра"], ["future", "Будущие"]];
   const when = (t) => {
     if(t.client_task||t.student_id||t.student?.id||t.family_id)return `📅 ${dShort(t.due_at)}`;
     const hm = (t.due_at || "").slice(11, 16);
@@ -28,7 +28,7 @@ async function erpTasksSection(asUser=null, layout="grid") {
       <button type="button" class="et-details-toggle" data-etdetails="${t.id}" aria-expanded="false">Подробности</button>
     </article>`;
   };
-  const empty = { overdue: "Просроченных задач нет 👍", today: "На сегодня задач нет", tomorrow: "На завтра задач пока нет" }[d.day];
+  const empty = { overdue: "Просроченных задач нет 👍", today: "На сегодня задач нет", tomorrow: "На завтра задач пока нет", future: "Будущих задач пока нет" }[d.day];
   const funnel = layout === "funnel";
   return `<section class="et-box ${funnel ? "et-funnel-layout" : "et-grid-layout"}" id="dw-erptasks">
     <div class="now-head"><h3>📋 Задачи</h3>

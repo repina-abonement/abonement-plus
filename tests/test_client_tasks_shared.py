@@ -10,16 +10,34 @@ def main():
     one=staff('one','operator');two=staff('two','operator');coach=staff('coach','coach')
     u={'id':one,'name':'one','role':'operator'};v={'id':two,'name':'two','role':'operator'}
     sid=sv.create_student(c,{'name':'Тест Клиент','parent_name':'Анна','phone':'+79000000441','funnel':'members'},u)
+    uncovered=sv.create_student(c,{'name':'Без Задачи','parent_name':'Мария','phone':'+79000000442','funnel':'members'},u)
     today=date.today().isoformat();tomorrow=(date.today()+timedelta(days=1)).isoformat()
     a=tasks.add_client_task(c,sid,{'title':'Обычная','due':today,'note':'Подробный контекст задачи для другого администратора'},u)
     b=tasks.add_client_task(c,sid,{'title':'Приоритет','due':today,'priority':True},u)
     later=tasks.add_client_task(c,sid,{'title':'Завтра','due':tomorrow,'priority':True},u)
+    future_day=(date.today()+timedelta(days=8)).isoformat()
+    future=tasks.add_client_task(c,sid,{'title':'Дальняя задача','due':future_day},u)
     personal=tasks.add_task(c,'plan',None,today+'T12:00',title='Личное',assignee=one)
     unrelated=tasks.add_task(c,'manual',None,today+'T13:00',title='Чужое бытовое',assignee=two)
     # Задачи клиента видит другой администратор; личные поручения не становятся общими.
     cards=[t for col in tasks.erp_board(c,'today',v)['columns'] for t in col['cards']]
     assert [t['id'] for t in cards if t.get('student_id')==sid]==[b,a]
     assert personal not in [t['id'] for t in cards] and later not in [t['id'] for t in cards]
+    assert future in [t['id'] for col in tasks.erp_board(c,'future',v)['columns'] for t in col['cards']]
+    assert tasks.erp_board(c,'future',v)['counts']['future']>=1
+    assert tasks.ensure_client_task_coverage(c)>0
+    fallback=c.execute("SELECT * FROM tasks WHERE student_id=? AND kind='client_followup'",(uncovered,)).fetchone()
+    assert fallback and fallback['status']=='open' and fallback['priority']==1
+    assert fallback['id'] in [t['id'] for col in tasks.erp_board(c,'today',v)['columns'] for t in col['cards']]
+    normal=tasks.add_client_task(c,uncovered,{'title':'Конкретный следующий шаг','due':tomorrow},u)
+    tasks.ensure_client_task_coverage(c)
+    assert c.execute('SELECT status FROM tasks WHERE id=?',(fallback['id'],)).fetchone()[0]=='cancelled'
+    tasks.complete(c,normal,u);tasks.ensure_client_task_coverage(c)
+    assert c.execute('SELECT status FROM tasks WHERE id=?',(fallback['id'],)).fetchone()[0]=='open'
+    visible={t['id'] for day in ('overdue','today','tomorrow','future') for col in tasks.erp_board(c,day,v)['columns'] for t in col['cards']}
+    expected={r[0] for r in c.execute("""SELECT id FROM tasks WHERE status='open' AND kind!='manual_payment_check'
+        AND (student_id IS NOT NULL OR family_id IS NOT NULL)""")}
+    assert expected<=visible,(expected-visible)
     own_cards=[t for col in tasks.erp_board(c,'today',u)['columns'] for t in col['cards']]
     assert personal in [t['id'] for t in own_cards] and unrelated not in [t['id'] for t in own_cards]
     senior=dict(u,is_senior=1)
