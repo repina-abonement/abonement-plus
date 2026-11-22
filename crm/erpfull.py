@@ -190,7 +190,7 @@ class Matcher:
             self.by_name[ei._norm(s['name'])].add(s['id'])
         for s in con.execute('SELECT s.id,s.name,p.phone_norm FROM students s JOIN parents p ON p.family_id=s.family_id'):
             if s['phone_norm']:
-                self.by_np[(ei._norm(s['name']), s['phone_norm'][-10:])].add(s['id'])
+                self.by_np[(tuple(sorted(ei._norm(s['name']).split())), s['phone_norm'][-10:])].add(s['id'])
                 self.phones[s['id']].add(s['phone_norm'][-10:])
 
     def find(self, r, kind):
@@ -206,12 +206,12 @@ class Matcher:
             return (sid, '') if sid else (None, 'ID заявки ERP не сопоставлен с карточкой; ID ученика не используется')
         ids = self.by_id.get(eid, set()) if eid and not lead else set()
         if not ids and name and phone:
-            ids = self.by_np.get((name, phone), set())
+            ids = self.by_np.get((tuple(sorted(name.split())), phone), set())
         if not ids and kind == 'clients' and not name and phone:
             # Legacy import uses this exact placeholder for an unnamed lead.
             # Match only another unnamed card, never a named sibling sharing
             # the parent's phone. Multiple placeholder cards remain ambiguous.
-            ids = self.by_np.get((ei._norm(ei.NO_NAME), phone), set())
+            ids = self.by_np.get((tuple(sorted(ei._norm(ei.NO_NAME).split())), phone), set())
         # Task history omits phone and often ID. Unique full name is usable;
         # a first name alone must not be treated as a unique identity.
         if not ids and kind in ('tasks', 'visits') and len(name.split()) >= 2 and not eid and ';' not in name:
@@ -232,7 +232,8 @@ class Matcher:
             known = ei._norm(s['name'])
             prefix = len(name.split()) >= 2 and known.startswith(name + ' ')
             verified_catalog = not phone and self.identities.get(('student', eid)) == sid
-            if not (prefix and ((phone and phone in self.phones[sid]) or verified_catalog)):
+            same_full_name = len(name.split()) >= 2 and sorted(name.split()) == sorted(known.split())
+            if not ((prefix or same_full_name) and ((phone and phone in self.phones[sid]) or verified_catalog)):
                 return None, 'ID ERP найден, имя отличается: ' + s['name']
         birth = _date(r.get('birth', ''))
         if birth and s['birth'] and birth[:10] != s['birth'][:10]:
