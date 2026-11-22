@@ -402,7 +402,11 @@ def _student(con, row, selected_id=None):
     return (candidates[0], "profile") if len(candidates) == 1 else (None, "Несколько подходящих карточек" if candidates else "Карточка CRM не найдена")
 
 
-def _group(con, source, day, tm, student_id=None, kind=""):
+def _group(con, source, day, tm, student_id=None, kind="", *, erp_id="", subscription_id=""):
+    # Confirmed destination for the four October Thursdays; retain the ERP label in the source payload.
+    vetkin_ofp = (erp_id == "125824" and student_id == 55 and str(subscription_id) == "821285"
+                  and day in {"2026-10-08", "2026-10-15", "2026-10-22", "2026-10-29"}
+                  and tm == "20:30" and kind == "subscription")
     before_journal = _norm(str(source).split("журнал", 1)[0])
     # Age bands are meaningful: dropping 6/8 made «ПУП 6–8» indistinguishable
     # from other programmes at the same branch and time.
@@ -414,6 +418,10 @@ def _group(con, source, day, tm, student_id=None, kind=""):
         if date.fromisoformat(day).weekday() not in logic.parse_weekdays(version.get("weekdays", "")): continue
         if logic.group_time(version, date.fromisoformat(day).weekday()) != tm: continue
         whole = set(_norm(version.get("name", "") + " " + g.get("source_name", "") + " " + g["branch_name"]).split())
+        if vetkin_ofp:
+            if _norm(g["branch_name"]) == "тц небо" and "офп" in _norm(version.get("name") or g["name"]).split():
+                candidates.append((1, g["id"], version.get("name") or g["name"], g["branch_name"]))
+            continue
         overlap = source_tokens & whole
         branch_ok = bool(set(_norm(g["branch_name"]).split()) & set(before_journal.split()))
         membership = 4 if kind == "subscription" and g["id"] in enrolled else 0
@@ -449,7 +457,7 @@ def preview(con, payload, period=None, student_ids=None, unassigned_visit_ids=No
             source_id, source_type, source_ref = _visit_source(item, erp_id)
             kind = "makeup" if _norm(item.get("type")) == "отработка" else "subscription" if _norm(item.get("type")) == "абонемент" else ""
             status = "present" if _norm(item.get("status")) in ("присутствовал", "был", "present") else "absent" if _norm(item.get("status")) in ("отсутствовал", "не был", "absent") else ""
-            group, issue, group_candidates = _group(con, item.get("group"), str(item.get("date") or ""), str(item.get("time") or ""), student["id"] if student else None, kind) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(item.get("date") or "")) else (None, "Некорректная дата", [])
+            group, issue, group_candidates = _group(con, item.get("group"), str(item.get("date") or ""), str(item.get("time") or ""), student["id"] if student else None, kind, erp_id=erp_id, subscription_id=item.get("erp_subscription_id")) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(item.get("date") or "")) else (None, "Некорректная дата", [])
             if not group and kind == "makeup" and issue.startswith("Несколько групп подходят одинаково:"):
                 confirmed = _confirmed_group(con, item, group_candidates)
                 if confirmed:
@@ -496,7 +504,7 @@ def preview(con, payload, period=None, student_ids=None, unassigned_visit_ids=No
             planned = []
             for item in _planned_lessons(row, sub):
                 day, tm = str(item.get("date") or ""), str(item.get("time") or "")
-                group, issue, _ = _group(con, item.get("group") or sub.get("group"), day, tm, student["id"] if student else None, "subscription") if re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) else (None, "Некорректная дата", [])
+                group, issue, _ = _group(con, item.get("group") or sub.get("group"), day, tm, student["id"] if student else None, "subscription", erp_id=erp_id, subscription_id=subid) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) else (None, "Некорректная дата", [])
                 existing_plan = con.execute("SELECT * FROM erp_history_planned_lessons WHERE source_subscription_id=? AND lesson_date=? AND lesson_time=?", (subid,day,tm)).fetchone() if subid else None
                 conflict = bool(existing_plan and student and group and (existing_plan["student_id"] != student["id"] or existing_plan["group_id"] != group[1]))
                 outside = not day.startswith(month + "-")
