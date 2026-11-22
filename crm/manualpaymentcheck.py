@@ -93,6 +93,7 @@ def bind(con, pid, body, user):
     except Exception as error:
         if 'UNIQUE constraint' in str(error): raise sv.ApiError('Эта операция или чек уже привязаны к другой оплате', 409) from None
         raise
+    reconcile_tasks(con, only_payment=payment['id'])
     return state(con, payment['id'])
 
 
@@ -111,3 +112,45 @@ def state(con, pid):
             'bank':{'status':'confirmed','label':'Поступление подтверждено выпиской Точки','operation_id':row['bank_operation_id'],'checked_at':row['confirmed_at']},
             'receipt':{'status':'confirmed','label':'Чек Эвотор найден в ОФД','receipt_id':row['receipt_number'],
                        'receipt_at':row['receipt_at'],'fn':row['fiscal_fn'],'fd':row['fiscal_fd'],'fp':row['fiscal_fp']}}
+
+
+def reconcile_tasks(con, only_payment=None):
+    """One client task per unverified manual Tochka payment; exact evidence closes it."""
+    from . import tasks
+    where = " AND p.id=?" if only_payment is not None else ""
+    rows = con.execute("""SELECT p.*,s.name AS child FROM payments p JOIN students s ON s.id=p.student_id
+        WHERE p.cancelled=0 AND p.amount>0 AND p.method='tochka_qr_link'""" + where,
+        (() if only_payment is None else (only_payment,))).fetchall()
+    active = set()
+    today = datetime.now(ZoneInfo('Europe/Moscow')).date().isoformat() + 'T23:59'
+    for payment in rows:
+        key = f"manual-tochka:{payment['id']}"
+        if state(con,payment['id'])['status']=='confirmed':
+            con.execute("""UPDATE tasks SET status='done',done_at=?,done_by='CRM',result='Поступление Точки и чек Эвотор подтверждены'
+                WHERE auto_key=? AND status='open'""", (datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None).isoformat(timespec='minutes'),key))
+            continue
+        active.add(key)
+        note = (f"Ручная оплата по ссылке Точки: {payment['amount']:,} ₽ · {str(payment['paid_at'])[:10]}.\n"
+                "Нужно выбрать поступление в выписке Точки и соответствующий чек Эвотор в ОФД.").replace(',', ' ')
+        existing = con.execute('SELECT id,status FROM tasks WHERE auto_key=?',(key,)).fetchone()
+        if existing:
+            con.execute("""UPDATE tasks SET status='open',due_at=?,title='Проверить оплату Точки и чек Эвотор',
+                note=?,priority=1,done_at=NULL,done_by='',result='' WHERE id=?""",(today,note,existing['id']))
+        else:
+            tid=tasks.add_task(con,'manual_payment_check',payment['student_id'],today,auto_key=key,
+                title='Проверить оплату Точки и чек Эвотор',note=note)
+            if tid:con.execute('UPDATE tasks SET priority=1 WHERE id=?',(tid,))
+    if only_payment is None:
+        for row in con.execute("SELECT id,auto_key FROM tasks WHERE kind='manual_payment_check' AND status='open'"):
+            if row['auto_key'] not in active:
+                con.execute("UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',result='Оплата отменена или больше не требует проверки' WHERE id=?",
+                    (datetime.now(ZoneInfo('Europe/Moscow')).replace(tzinfo=None).isoformat(timespec='minutes'),row['id']))
+
+
+def task_board(con):
+    from . import tasks
+    reconcile_tasks(con)
+    cards=[tasks._task_out(con,row) for row in con.execute("""SELECT * FROM tasks
+        WHERE kind='manual_payment_check' AND status='open' ORDER BY priority DESC,due_at,id""")]
+    return {'funnel':'manual_payment_checks','draggable':False,'columns':[{
+        'key':'manual_payment_check','title':'Проверить оплату Точки и чек Эвотор','cards':cards}]}

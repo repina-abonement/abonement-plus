@@ -1417,7 +1417,11 @@ async function renderWorkdesk(page) {
           <div class="new-cards-list">${processedNewCards.map(k=>`<button type="button" class="btn" data-new-card="${k.id}"><b>${esc(k.name)}</b><span class="small muted">${esc(k.stage==='lead'?'Новый лид':k.trial_at?'Записан на ПУ':'В работе')}</span></button>`).join('')}</div>
         </section>` : ""}
         ${hot}
-        <section class="desk-funnel">
+        ${(d.manual_payment_checks?.columns?.[0]?.cards||[]).length?`<section class="desk-funnel" id="dw-manual-payment-checks">
+          <div class="now-head"><h3>🧾 Оплаты Точки и чеки Эвотор</h3><span class="small muted">${d.manual_payment_checks.columns[0].cards.length}</span></div>
+          <p class="small muted">Ручные оплаты, для которых ещё не подтверждены поступление на расчётный счёт и чек в ОФД.</p>
+          ${boardHtml(d.manual_payment_checks)}</section>`:''}
+        <section class="desk-funnel" id="dw-sales">
           <div class="now-head"><h3>Воронка продаж</h3></div>
           ${boardHtml(d.board)}
         </section>
@@ -1440,9 +1444,10 @@ async function renderWorkdesk(page) {
   page.querySelectorAll(".dwf").forEach((x) => x.addEventListener("toggle", () => { S.dwOpen[x.dataset.dwk] = x.open; }));
   page.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => { const el = document.getElementById(b.dataset.jump); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }));
   if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
-  const salesBoard=page.querySelector(".desk-funnel");if(salesBoard)wireBoard(salesBoard,"sales",d.board);
+  const salesBoard=page.querySelector("#dw-sales");if(salesBoard)wireBoard(salesBoard,"sales",d.board);
   const skipsBoard=page.querySelector("#dw-skips");if(skips&&skipsBoard)wireBoard(skipsBoard,"skips",skips);
   const renewBoard=page.querySelector("#dw-renew");if(renew&&renewBoard)wireBoard(renewBoard,"members",renew);
+  const manualPaymentBoard=page.querySelector("#dw-manual-payment-checks");if(manualPaymentBoard)wireBoard(manualPaymentBoard,"manual_payment_checks",d.manual_payment_checks);
   wireErpTasks(page);
   wireTasks(page);
   wireViewAs(page);

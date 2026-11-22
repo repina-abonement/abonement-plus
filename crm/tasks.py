@@ -28,6 +28,7 @@ KINDS = {
     "single_paid_next": ("Уточнить дату следующего разового", "1️⃣"),
     "single_next": ("Разовые: договориться о следующем занятии", "1️⃣"),
     "request_data": ("Запросить данные", "📋"),
+    "manual_payment_check": ("Проверить оплату Точки и чек Эвотор", "🧾"),
     "manual": ("Задача", "✅"),
     "plan": ("Задача", "📌"),
     "bday": ("День рождения участника команды", "🎂"),
@@ -943,7 +944,7 @@ def erp_board(con, day: str = "today", user: dict | None = None) -> dict:
     tomorrow = (today + timedelta(days=1)).isoformat()
     t0 = today.isoformat()
     base = """SELECT t.* FROM tasks t LEFT JOIN users u ON u.id=t.assignee_id
-              WHERE t.status='open' AND t.kind != 'bday'
+              WHERE t.status='open' AND t.kind NOT IN ('bday','manual_payment_check')
                 AND NOT (t.kind='plan' AND t.student_id IS NULL AND t.family_id IS NULL AND u.role='offline_pool')
                 AND (t.student_id IS NOT NULL OR t.family_id IS NOT NULL OR u.id IS NULL OR u.role != 'coach')"""
     privacy, visible_ids = _planner_privacy(con, user, "t.") if user is not None else ("", [])
@@ -1000,6 +1001,8 @@ def complete(con, tid: int, user: dict, result: str = "", comment: str = "", nex
         missing = [key for key in info['missing'] if key != 'email']
         if missing:
             raise comms.CommsError('Задача остаётся открытой. Заполните: ' + ', '.join(info['labels'][k] for k in missing))
+    if t["kind"] == "manual_payment_check":
+        raise comms.CommsError('Эта задача закроется автоматически после подтверждения поступления Точки и чека Эвотор')
     if t["kind"] == "rebook":
         raise comms.CommsError("Эту задачу закрывают результатом: перезаписан, не дозвонились, перезвонить позже или отказ")
     from . import erpworkflow

@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime
 from unittest.mock import patch
 
-from crm import fiscal, incomingcontrol, manualpaymentcheck, money, reconciliation
+from crm import fiscal, incomingcontrol, manualpaymentcheck, money, reconciliation, tasks
 from tests import test_paylinks as fixture
 
 
@@ -24,6 +24,11 @@ class ManualTochkaEvotorCheck(unittest.TestCase):
 
     def test_amount_candidates_require_explicit_pair_then_confirm_both(self):
         pid = self.payment(); event, receipt = self.evidence()
+        manualpaymentcheck.reconcile_tasks(self.con)
+        task = self.con.execute("SELECT * FROM tasks WHERE auto_key=?", (f'manual-tochka:{pid}',)).fetchone()
+        self.assertEqual((task['status'],task['kind'],task['priority']), ('open','manual_payment_check',1))
+        self.assertEqual(len(manualpaymentcheck.task_board(self.con)['columns'][0]['cards']),1)
+        with self.assertRaises(Exception): tasks.complete(self.con,task['id'],self.user)
         before = manualpaymentcheck.candidates(self.con, pid, self.user)
         self.assertEqual(len(before['bank_candidates']), 1)
         self.assertEqual(len(before['receipt_candidates']), 1)
@@ -36,6 +41,9 @@ class ManualTochkaEvotorCheck(unittest.TestCase):
         self.assertEqual(chain['bank']['status'], 'confirmed')
         self.assertEqual(chain['ofd']['status'], 'confirmed')
         self.assertTrue(chain['complete'])
+        self.assertEqual(self.con.execute("SELECT status FROM tasks WHERE id=?",(task['id'],)).fetchone()['status'],'done')
+        manualpaymentcheck.reconcile_tasks(self.con)
+        self.assertEqual(self.con.execute("SELECT count(*) FROM tasks WHERE auto_key=?",(f'manual-tochka:{pid}',)).fetchone()[0],1)
 
     def test_wrong_amount_refund_and_reuse_are_rejected(self):
         pid = self.payment(); event, receipt = self.evidence(amount=9451)

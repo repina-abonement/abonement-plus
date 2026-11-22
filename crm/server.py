@@ -1208,6 +1208,7 @@ def workdesk(con, h, user, body, q):
     rest = [x for x in items if x["level"] != "red"]
     rest.sort(key=lambda x: x["ts"] or "", reverse=True)
     return {"urgent": reds + rest, "board": board, "refund_requests": __import__("crm.refundapproval",fromlist=["listing"]).listing(con) if user["role"]=="admin" else [], "new_cards_today": sv.new_cards_today(con), "birthdays": sv.birthdays(con), "needs_subs": schedule.needs_subs(con),
+            "manual_payment_checks": __import__("crm.manualpaymentcheck",fromlist=["task_board"]).task_board(con),
             "checkins": staff.day_report(con) if checkin_reviewer(con, user) else None,
             "merch_alerts": merch_alerts(con),
             "waitlist": __import__("crm.waitlist", fromlist=["funnel"]).funnel(con),
