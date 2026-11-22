@@ -17,7 +17,7 @@ async function openTaskForm(box, done, preset = {}) {
   if(lockedTarget&&!target){box.innerHTML='<p class="need-err">Эта доска недоступна для назначения. Обновите страницу и выберите планер заново</p>';return}
 
   box.innerHTML = `<div class="sub-form task-form">${lockedTarget?`<div class="planner-form-target"><b>Новая задача</b><div>Кому: ${esc(target.name)}</div><input type="hidden" data-ta value="${targetId}"></div>`:''}
-    <div class="field"><label>Название задачи</label><input data-tt maxlength="200" placeholder="Коротко: что нужно сделать" value="${esc(preset.title || "")}"><small class="muted">Короткое название действия. Подробности укажите ниже.</small></div>
+    <div class="field"><label>Название задачи</label><input data-tt maxlength="200" placeholder="Коротко: что нужно сделать" value="${esc(preset.title || "")}"><small class="muted">Короткое название действия. Подробности укажите ниже</small></div>
     <div class="row" style="flex-wrap:wrap;align-items:flex-end">
       ${p.can_manage && !lockedTarget ? `<div class="field"><label>Кому</label><select data-ta>${staff.map((u) => `<option value="${u.id}" ${+u.id === targetId ? "selected" : ""}>${esc(u.name)}${u.id === S.user.id ? " (себе)" : ""}</option>`).join("")}</select></div>` : ""}
       <div class="field" style="flex:0 0 150px"><label>Когда</label><input type="date" data-td value="${preset.date || S.meta.today}"></div>
@@ -26,8 +26,8 @@ async function openTaskForm(box, done, preset = {}) {
         ${Object.entries(p.rules).map(([k, t]) => `<option value="${k}">${t[0].toUpperCase() + t.slice(1)}</option>`).join("")}</select></div>
     </div>
     <div data-twd hidden class="chips" style="margin:-2px 0 8px">${WD_SHORT.map((w, i) => `<button type="button" class="chip day" data-twdi="${i}">${w}</button>`).join("")}</div>
-    <div class="field" data-shift-field><label>Смена</label><select data-task-shift>${planShiftOptions(preset.shift||'common')}</select><small class="muted">Утренняя и основная смены отдельно по понедельникам и средам. В другие дни задача выполняется один раз.</small></div>
-    <div class="field"><label>Подробное описание задачи</label><textarea data-tn rows="4" maxlength="1000" placeholder="Контекст, условия выполнения и ожидаемый результат"></textarea><small class="muted">Вся информация, которая понадобится исполнителю.</small></div>
+    <div class="field" data-shift-field><label>Смена</label><select data-task-shift>${planShiftOptions(preset.shift||'common')}</select><small class="muted">Утренняя и основная смены отдельно по понедельникам и средам. В другие дни задача выполняется один раз</small></div>
+    <div class="field"><label>Подробное описание задачи</label><textarea data-tn rows="4" maxlength="1000" placeholder="Контекст, условия выполнения и ожидаемый результат"></textarea><small class="muted">Вся информация, которая понадобится исполнителю</small></div>
     <div class="field"><label>Подзадачи (каждая с новой строки)</label><textarea data-new-subtasks rows="3" placeholder="Проверить кассу&#10;Проверить уборку"></textarea><small class="muted">У каждого дня и каждой смены будут свои галочки</small></div>
     <div class="row" style="align-items:center;flex-wrap:wrap"><label class="check grow"><input type="checkbox" data-tp> 🔥 Важно</label>
       <button class="btn" data-tcancel style="flex:0">Отмена</button>
@@ -91,7 +91,7 @@ async function renderPlanner(page) {
   } else if (C.tab === "team") {
     const staffOpts = (p.people||p.staff).filter((u) => u.role !== "coach" && u.role !== "offline_pool").map((u) => `<option value="${u.id}" ${u.id === p.controller ? "selected" : ""}>${esc(u.name)}</option>`).join("");
     body = `${S.user.role === "admin" ? `<div class="row" style="max-width:520px;align-items:flex-end;margin-bottom:12px"><div class="field"><label>Контролёр задач команды</label><select id="pl-ctrl"><option value="">Только я</option>${staffOpts}</select></div></div>` : ""}
-      ${S.user.role==='admin'?`<div class="field" style="max-width:520px"><label>Общий Планер офлайн-администраторов — кто ещё может смотреть</label><select id="pl-offline-viewer"><option value="">Только руководитель и офлайн-администраторы</option>${(p.people||p.staff).filter(u=>u.role==='operator').map(u=>`<option value="${u.id}" ${String(p.offline_viewer)===String(u.id)?'selected':''}>${esc(u.name)}</option>`).join('')}</select><span class="small muted">Выберите Варю. Доступ только на просмотр.</span></div>`:''}
+      ${S.user.role==='admin'?`<div class="field" style="max-width:520px"><label>Общий Планер офлайн-администраторов — кто ещё может смотреть</label><select id="pl-offline-viewer"><option value="">Только руководитель и офлайн-администраторы</option>${(p.people||p.staff).filter(u=>u.role==='operator').map(u=>`<option value="${u.id}" ${String(p.offline_viewer)===String(u.id)?'selected':''}>${esc(u.name)}</option>`).join('')}</select><span class="small muted">Выберите Варю. Доступ только на просмотр</span></div>`:''}
       ${p.team.length ? p.team.map((u) => `<section class="panel" style="padding:12px 14px;margin-bottom:10px">
         <div class="team-head"><b>${esc(u.name)}</b>
           ${u.overdue.length ? `<span class="pill red">просрочено ${u.overdue.length}</span>` : ""}<span class="pill">сегодня ${u.today.length}</span><span class="pill green">сделано ${u.done_today}</span></div>
@@ -318,7 +318,7 @@ async function loadPlannerTaskSettings(id) {
     host.parentElement?.querySelector('.planner-merch-stock')?.remove();
     const section=document.createElement('section');
     section.className='planner-merch-stock';
-    section.innerHTML=`<h3>Еженедельный учёт мерча</h3><p class="small muted">Задача в Планере: ${esc(d.merch_stock.schedule)}. Заполните фактический остаток каждой позиции.</p>${merchStockHtml(d.merch_stock)}`;
+    section.innerHTML=`<h3>Еженедельный учёт мерча</h3><p class="small muted">Задача в Планере: ${esc(d.merch_stock.schedule)}. Заполните фактический остаток каждой позиции</p>${merchStockHtml(d.merch_stock)}`;
     host.before(section);
     wireMerchStock(section,d.merch_stock,()=>loadPlannerTaskSettings(id));
   }
@@ -344,11 +344,11 @@ async function loadPlannerTaskSettings(id) {
       <div class="row" style="flex-wrap:wrap"><div class="field"><label>Дата</label><input name="date" type="date" value="${esc(t.due_at.slice(0,10))}" required></div>
         <div class="field"><label>Время</label><input name="time" type="time" value="${t.due_at.slice(11,16) === "23:59" ? "" : esc(t.due_at.slice(11,16))}"></div></div>
       <div class="field"><label>Исполнитель</label><select name="assignee_id" ${d.can_assign ? "" : "disabled"}>${d.staff.map(u => `<option value="${u.id}" ${u.id === t.assignee_id ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select></div>
-      ${t.assignee_id===d.staff.find(x=>x.role==='offline_pool')?.id?`<div class="field"><label>Смена</label><select name="shift_mode">${planShiftOptions(t.shift||'common')}</select><small class="muted">Для двух смен у повтора выберите «Эта и будущие задачи». В другие дни задача остаётся общей.</small></div>`:''}
+      ${t.assignee_id===d.staff.find(x=>x.role==='offline_pool')?.id?`<div class="field"><label>Смена</label><select name="shift_mode">${planShiftOptions(t.shift||'common')}</select><small class="muted">Для двух смен у повтора выберите «Эта и будущие задачи». В другие дни задача остаётся общей</small></div>`:''}
       <div class="field"><label>Повтор</label><select name="rule"><option value="">Не повторять</option>${Object.entries({daily:"Каждый день",weekly:"Каждую неделю",monthly:"Каждый месяц",yearly:"Каждый год"}).map(([k,v]) => `<option value="${k}" ${repeat.rule === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
       <div class="chips" data-edit-weekdays>${WD_SHORT.map((label,i) => `<label class="check"><input type="checkbox" data-edit-weekday="${i}" ${weekdays.includes(i) ? "checked" : ""}>${label}</label>`).join("")}</div>
-      ${t.recur_id ? `<p class="small muted" data-repeat-hint>Чтобы изменить повтор, выберите «Эта и будущие задачи».</p>` : ""}
-      <div class="field"><label>Список подзадач (каждая с новой строки)</label><textarea name="subtasks" rows="4">${esc((t.subtasks||[]).map(x=>x.title).join('\n'))}</textarea><small class="muted">Для изменения списка в следующих повторах выберите «Эта и будущие задачи». Отметки сохранятся у неизменённых пунктов этой задачи.</small></div>
+      ${t.recur_id ? `<p class="small muted" data-repeat-hint>Чтобы изменить повтор, выберите «Эта и будущие задачи»</p>` : ""}
+      <div class="field"><label>Список подзадач (каждая с новой строки)</label><textarea name="subtasks" rows="4">${esc((t.subtasks||[]).map(x=>x.title).join('\n'))}</textarea><small class="muted">Для изменения списка в следующих повторах выберите «Эта и будущие задачи». Отметки сохранятся у неизменённых пунктов этой задачи</small></div>
       <label class="check"><input name="priority" type="checkbox" ${t.priority ? "checked" : ""}>Важно</label>
       <div class="error small" data-edit-error style="margin-top:8px"></div>
       <button type="submit" class="btn primary" style="margin-top:12px">Сохранить изменения</button>

@@ -75,7 +75,7 @@ function anChurn(box, d) {
         <div class="kpi-note">не продлили ${d.left_count} из ${d.prev_holders}, кто занимался в прошлом месяце</div></div>
       <div class="kpi"><div class="kpi-head"><span>Продление на ${esc(d.next_label)}</span></div><div class="kpi-value">${anPct(d.renewal_pct)}</div>
         <div class="kpi-note">оплатили ${r.paid} на ${rub(r.paid_rub)} · ждём оплату ${r.invoiced} на ${rub(r.invoiced_rub)}${r.none ? ` · без счёта ${r.none}` : ""}</div></div>
-      <div class="kpi"><div class="kpi-head"><span>Средний срок с нами</span></div><div class="kpi-value">${d.avg_months ?? "—"} <small>мес.</small></div>
+      <div class="kpi"><div class="kpi-head"><span>Средний срок с нами</span></div><div class="kpi-value">${d.avg_months ?? "—"} <small>мес</small></div>
         <div class="kpi-note">сколько месяцев в среднем оплачивает ученик</div></div>
       <div class="kpi"><div class="kpi-head"><span>Средний доход с ученика</span></div><div class="kpi-value">${d.avg_ltv != null ? fmtNum(d.avg_ltv) : "—"} <small>₽</small></div>
         <div class="kpi-note">за всё время, пока занимается</div></div>

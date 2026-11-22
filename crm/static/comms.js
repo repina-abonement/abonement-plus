@@ -188,7 +188,7 @@ function openChatImageViewer(link) {
   title.textContent=link.querySelector('img')?.alt||'Фото';
   const image=document.createElement('img');image.alt=title.textContent;image.hidden=true;
   image.onload=()=>{status.hidden=true;image.hidden=false;};
-  image.onerror=()=>{image.hidden=true;status.hidden=false;status.textContent='Не удалось открыть вложение. Закройте просмотр и попробуйте ещё раз.';};
+  image.onerror=()=>{image.hidden=true;status.hidden=false;status.textContent='Не удалось открыть вложение. Закройте просмотр и попробуйте ещё раз';};
   stage.append(image);
   let finished=false;
   const close=()=>{
@@ -732,7 +732,7 @@ async function openChat(cid, keepScroll = false) {
         ${replyTargetHtml('chat-to',d.targets.map(x=>({v:x.id,t:x.label,channel:x.channel})),replyId)}
 
         <div class="row"><textarea id="chat-text" rows="2" placeholder="Ответ…">${esc(draft)}</textarea><button class="btn primary" id="chat-send" aria-label="Отправить сообщение" style="flex:0">Отправить</button></div>
-        ${c.channel === "telegram" && !replyId ? `<div class="small muted">Переписка бота сохранена. Для ответа выберите нужного родителя через Wazzup; если канала здесь нет, откройте карточку клиента выше.</div>` : ""}
+        ${c.channel === "telegram" && !replyId ? `<div class="small muted">Переписка бота сохранена. Для ответа выберите нужного родителя через Wazzup; если канала здесь нет, откройте карточку клиента выше</div>` : ""}
       </div>
     </div>`;
   const panel=S.view==='inbox'?$('#inbox-chat-pane'):null;
@@ -848,7 +848,7 @@ async function renderCommsSettings(box, users) {
   const ok = (on, text) => `<span class="pill ${on ? "green" : ""}">${on ? "подключено" : text || "не подключено"}</span>`;
   box.innerHTML = `
     <h3>Связь с клиентами</h3>
-    <div class="small muted" style="margin-bottom:10px">Ключи хранятся на вашем сервере. Чтобы заменить ключ, вставьте новый и нажмите «Сохранить».</div>
+    <div class="small muted" style="margin-bottom:10px">Ключи хранятся на вашем сервере. Чтобы заменить ключ, вставьте новый и нажмите «Сохранить»</div>
 
     <div class="int"><div class="int-head"><b>Телефония Sipuni</b>${ok(st.sipuni)}</div>
       <div class="row"><div class="field"><label>Номер кабинета</label><input data-k="sipuni_user" value="${esc(v.sipuni_user)}" placeholder="«Кабинет №…» слева вверху в Sipuni"></div>
@@ -863,7 +863,7 @@ async function renderCommsSettings(box, users) {
       ${inf.tg_bot ? `<div class="small">Бот: ${esc(inf.tg_bot)}</div>` : ""}${inf.tg_error ? `<div class="error">${esc(inf.tg_error)}</div>` : ""}
       <button class="btn sm" data-connect="telegram">Сохранить и подключить</button>
       <button type="button" class="btn sm" data-tg-diagnostics>Проверить связь</button>
-      <div class="small muted" data-tg-diagnostics-result>Проверка сохранённого подключения без отправки сообщений.</div>
+      <div class="small muted" data-tg-diagnostics-result>Проверка сохранённого подключения без отправки сообщений</div>
     </div>
 
     <div class="int"><div class="int-head"><b>MAX</b>${ok(st.max)}</div>
@@ -874,7 +874,7 @@ async function renderCommsSettings(box, users) {
 
     <div class="int"><div class="int-head"><b>WhatsApp, MAX и Telegram через Wazzup</b>${ok(st.whatsapp || st.wazzup_telegram || st.wazzup_max)}</div>
       <div class="chips small" style="margin-bottom:8px"><span>WhatsApp: ${ok(st.whatsapp)}</span><span>Telegram: ${ok(st.wazzup_telegram)}</span><span>MAX: ${ok(st.wazzup_max)}</span></div>
-      <div class="small muted" style="margin-bottom:6px">Подключает рабочие аккаунты школы. Сообщения родителей в WhatsApp, Telegram и MAX приходят в «Чаты», ответ уходит из CRM. В WhatsApp, Telegram и MAX можно написать родителю первыми по номеру из карточки. Для Telegram через Wazzup отдельный Telegram-бот и мост не нужны.</div>
+      <div class="small muted" style="margin-bottom:6px">Подключает рабочие аккаунты школы. Сообщения родителей в WhatsApp, Telegram и MAX приходят в «Чаты», ответ уходит из CRM. В WhatsApp, Telegram и MAX можно написать родителю первыми по номеру из карточки. Для Telegram через Wazzup отдельный Telegram-бот и мост не нужны</div>
       <div class="field"><label>API-ключ Wazzup</label><input data-k="wazzup_key" value="${esc(v.wazzup_key)}"></div>
       ${inf.wazzup_channels.length ? `<div class="small">Каналы: ${inf.wazzup_channels.map((c) => esc(`${c.transport} ${c.name} (${c.state})`)).join(", ")}</div>` : ""}
       ${inf.wazzup_error ? `<div class="error">${esc(inf.wazzup_error)}</div>` : ""}

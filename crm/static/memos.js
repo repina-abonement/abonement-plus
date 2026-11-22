@@ -148,7 +148,7 @@ async function renderMemosSettings(box) {
   await memoSync();
   const d = await api("GET", "/api/memos");
   box.innerHTML = `<h3>Памятки для родителей</h3>
-    <div class="small muted" style="margin-bottom:10px">Картинки автоматически обновляются из действующих цен, сроков, расписания и правил CRM. Устаревшая версия не отправляется. В чате правила вставляются вместе с актуальной картинкой, отправка отдельной кнопкой.</div>
+    <div class="small muted" style="margin-bottom:10px">Картинки автоматически обновляются из действующих цен, сроков, расписания и правил CRM. Устаревшая версия не отправляется. В чате правила вставляются вместе с актуальной картинкой, отправка отдельной кнопкой</div>
     <div class="memo-grid">${d.items.map((m) => `<div class="memo-card"><b>${esc(m.data.title)}</b>
       ${m.drawn_at ? `<a href="/api/memos/png?key=${m.key}&h=${m.hash}" target="_blank"><img src="/api/memos/png?key=${m.key}&h=${m.hash}" alt="Памятка ${esc(m.data.title)}" loading="lazy"></a>` : `<div class="small muted">Рисую…</div>`}
       <div class="small muted">${m.fresh ? `✅ актуальная, нарисована ${esc((m.drawn_at || "").replace("T", " "))}` : "⏳ перерисовывается"}</div>

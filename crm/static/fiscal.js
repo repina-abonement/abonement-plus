@@ -106,25 +106,25 @@ async function fxSberSetup(box) {
   if (!box || S.user.role !== "admin") return;
   let d;
   try { d = await api("GET", "/api/sber/settings"); }
-  catch (e) { box.innerHTML = '<p class="small">Сбер Бизнес: не удалось загрузить настройки подключения. Обновите страницу.</p>'; return; }
+  catch (e) { box.innerHTML = '<p class="small">Сбер Бизнес: не удалось загрузить настройки подключения. Обновите страницу</p>'; return; }
   const date = value => { const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? "дата не получена" : esc(parsed.toLocaleString("ru-RU", {timeZone:"Europe/Moscow"})) + " МСК"; };
   const masked = Array.isArray(d.accounts_masked) ? d.accounts_masked.map(x => esc(x)).join(", ") : "";
   box.innerHTML = `<details class="panel" id="fx-sber-details"><summary><b>Сбер Бизнес</b> · ${d.connected ? "разрешение на чтение получено" : "подключить выписку"}</summary>
-    <p class="small">CRM будет читать поступления по расписанию при закрытом браузере. При подключении выбирайте только чтение выписки и сведений о счетах.</p>
-    ${d.connected ? '<p class="small">Разрешение получено. Фактическое чтение выписки проверяется отдельно.</p>' : ''}
+    <p class="small">CRM будет читать поступления по расписанию при закрытом браузере. При подключении выбирайте только чтение выписки и сведений о счетах</p>
+    ${d.connected ? '<p class="small">Разрешение получено. Фактическое чтение выписки проверяется отдельно</p>' : ''}
     ${(d.maintenance||[]).map(note=>`<p class="small" role="status">${esc(note)}</p>`).join('')}
     ${d.last_error?`<p class="small" role="alert">Последняя попытка: ${esc(d.last_error.note)}</p>`:''}
-    ${!d.connected&&!d.last_error&&d.last_connection_check?.ok?'<p class="small" role="status">Связь с сервером Сбера установлена. Нажмите «Разрешить чтение в Сбере».</p>':''}
-    <ol class="small"><li>В карточке активированного сервиса Sber API откройте параметры подключения и перенесите client_id и client_secret в поля ниже.</li>
-      <li>В разделе Сбера «Сертификаты шифрования» создайте сертификат, задайте пароль и скачайте файл .p12. Выберите его ниже.</li>
-      <li>Если Сбер не вернул список счетов, укажите номера расчётных счетов и нажмите «Сохранить». CRM проверит выписку по ним через уже выданное разрешение.</li></ol>
+    ${!d.connected&&!d.last_error&&d.last_connection_check?.ok?'<p class="small" role="status">Связь с сервером Сбера установлена. Нажмите «Разрешить чтение в Сбере»</p>':''}
+    <ol class="small"><li>В карточке активированного сервиса Sber API откройте параметры подключения и перенесите client_id и client_secret в поля ниже</li>
+      <li>В разделе Сбера «Сертификаты шифрования» создайте сертификат, задайте пароль и скачайте файл .p12. Выберите его ниже</li>
+      <li>Если Сбер не вернул список счетов, укажите номера расчётных счетов и нажмите «Сохранить». CRM проверит выписку по ним через уже выданное разрешение</li></ol>
     <div class="field"><label for="sber-client-id">client_id из карточки сервиса</label><input id="sber-client-id" type="text" value="${esc(d.client_id || '')}" autocomplete="off" spellcheck="false"></div>
     <div class="field"><label for="sber-client-secret">client_secret</label><input id="sber-client-secret" type="password" value="" autocomplete="new-password" placeholder="${d.client_secret_set ? 'Уже сохранён · оставьте пустым, чтобы сохранить' : 'Вставьте из карточки сервиса'}"></div>
     <div class="field"><label for="sber-accounts">Ожидаемые расчётные счета (необязательно)</label><textarea id="sber-accounts" rows="2" autocomplete="off" placeholder="${d.accounts_set ? 'Оставьте пустым, если список счетов не меняется' : 'Каждый номер счёта с новой строки · пусто = доступные счета'}"></textarea>${masked ? `<span class="small muted">Сохранены счета, заканчивающиеся на: ${masked}</span>` : ''}</div>
-    <div class="field"><label for="sber-certificate">Сертификат .p12</label><input id="sber-certificate" type="file" accept=".p12,.pfx,application/x-pkcs12">${d.certificate_set ? `<span class="small muted">Сертификат сохранён${d.certificate_expires_at ? ' · действует до ' + date(d.certificate_expires_at) : ''}. Новый файл выбирайте только для замены.</span>` : ''}</div>
+    <div class="field"><label for="sber-certificate">Сертификат .p12</label><input id="sber-certificate" type="file" accept=".p12,.pfx,application/x-pkcs12">${d.certificate_set ? `<span class="small muted">Сертификат сохранён${d.certificate_expires_at ? ' · действует до ' + date(d.certificate_expires_at) : ''}. Новый файл выбирайте только для замены</span>` : ''}</div>
     <div class="field"><label for="sber-certificate-password">Пароль сертификата</label><input id="sber-certificate-password" type="password" value="" autocomplete="new-password" placeholder="Пароль, заданный при создании выбранного файла"></div>
     <details><summary class="small">Адрес возврата для карточки сервиса Сбера</summary><p class="small">Укажите в Сбере этот redirect_uri:</p><input aria-label="Адрес возврата" readonly value="${esc(d.redirect_uri || '')}" style="width:100%"></details>
-    <p class="small muted">Секрет и пароль не показываются после сохранения. Файл и реквизиты передаются на сервер CRM через защищённое соединение.</p>
+    <p class="small muted">Секрет и пароль не показываются после сохранения. Файл и реквизиты передаются на сервер CRM через защищённое соединение</p>
     <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:12px"><button type="button" class="btn" id="sber-save">Сохранить</button><button type="button" class="btn primary" id="sber-authorize">Разрешить чтение в Сбере</button><button type="button" class="btn" id="sber-test">Проверить выписку</button></div>
     <div class="small" role="status" aria-live="polite" id="sber-result" style="margin-top:10px"></div>
   </details>`;

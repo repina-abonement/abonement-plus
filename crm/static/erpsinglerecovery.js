@@ -6,7 +6,7 @@ function erpSingleRecoverySetup(box) {
   const panel = document.createElement("details");
   panel.className = "erp-step"; panel.id = "erp-single-recovery";
   panel.innerHTML = `<summary><b>Восстановить разовые занятия</b></summary>
-    <p class="small">Сверьте отдельные продажи ERP с уже внесёнными покупками и оплатами CRM. Проверка сначала покажет изменения; восстановление выполняется отдельной кнопкой.</p>
+    <p class="small">Сверьте отдельные продажи ERP с уже внесёнными покупками и оплатами CRM. Проверка сначала покажет изменения; восстановление выполняется отдельной кнопкой</p>
     <div class="row" style="gap:8px;align-items:end;flex-wrap:wrap"><div class="field"><label for="esr-erp-id">ID клиента ERP</label><input id="esr-erp-id" inputmode="numeric" value="133513" autocomplete="off"></div><button type="button" class="btn" data-esr-load>Загрузить данные для сверки</button></div>
     <div data-esr-history></div><div data-esr-context></div><div data-esr-plan></div><div class="small" data-esr-status role="status" aria-live="polite"></div>`;
   const full = box.querySelector("#erp-full");
@@ -32,7 +32,7 @@ function erpSingleRecoverySetup(box) {
     const rollbackButton = historyBox.querySelector("[data-esr-rollback]"), rollbackConfirm = historyBox.querySelector("[data-esr-rollback-confirm]");
     if (rollbackButton) rollbackButton.disabled = busy || !lastRun?.can_rollback || !lastRun?.rollback_token || !rollbackConfirm?.checked;
   };
-  const invalidate = () => { checked = null; planBox.innerHTML = ""; status.textContent = "Выбор изменён. Сначала проверьте план восстановления ещё раз."; };
+  const invalidate = () => { checked = null; planBox.innerHTML = ""; status.textContent = "Выбор изменён. Сначала проверьте план восстановления ещё раз"; };
   const summaryHtml = summary => {
     if (!summary) return '<p class="small">Данные не подтверждены</p>';
     const entries = [
@@ -50,9 +50,9 @@ function erpSingleRecoverySetup(box) {
   };
   const runHtml = r => {
     const canRollback = r.state === "applied" && r.can_rollback === true && !!r.rollback_token;
-    return `<section class="panel"><h4>${r.state === "rolled_back" ? "Последнее восстановление отменено" : "Последнее восстановление"}</h4><p class="small">Номер операции: ${text(r.run_id)}${r.created_at ? " · " + text(r.created_at.replace("T", " ")) : ""}${r.user_name ? " · " + text(r.user_name) : ""}${r.backup_created ? ". Резервная копия сохранена" : ""}.</p>
-      ${r.state === "applied" ? `<details><summary>Состав до восстановления</summary>${summaryHtml(r.before_summary)}</details><b>После восстановления</b>${summaryHtml(r.after_summary)}` : '<p class="small">Для новой проверки используйте перечитанные данные ниже.</p>'}
-      ${canRollback ? '<details><summary>Отменить это восстановление</summary><p class="small">Отмена относится только к этой операции. CRM проверит, что записи после неё не были изменены.</p><label class="check"><input type="checkbox" data-esr-rollback-confirm> Отменить именно это восстановление</label><button type="button" class="btn" data-esr-rollback disabled>Вернуть состояние до восстановления</button></details>' : r.state === "applied" ? '<p class="small">Автоматическая отмена недоступна: после восстановления записи изменились либо подтверждение отмены не получено. Последующие правки сохраняются.</p>' : ''}</section>`;
+    return `<section class="panel"><h4>${r.state === "rolled_back" ? "Последнее восстановление отменено" : "Последнее восстановление"}</h4><p class="small">Номер операции: ${text(r.run_id)}${r.created_at ? " · " + text(r.created_at.replace("T", " ")) : ""}${r.user_name ? " · " + text(r.user_name) : ""}${r.backup_created ? ". Резервная копия сохранена" : ""}</p>
+      ${r.state === "applied" ? `<details><summary>Состав до восстановления</summary>${summaryHtml(r.before_summary)}</details><b>После восстановления</b>${summaryHtml(r.after_summary)}` : '<p class="small">Для новой проверки используйте перечитанные данные ниже</p>'}
+      ${canRollback ? '<details><summary>Отменить это восстановление</summary><p class="small">Отмена относится только к этой операции. CRM проверит, что записи после неё не были изменены</p><label class="check"><input type="checkbox" data-esr-rollback-confirm> Отменить именно это восстановление</label><button type="button" class="btn" data-esr-rollback disabled>Вернуть состояние до восстановления</button></details>' : r.state === "applied" ? '<p class="small">Автоматическая отмена недоступна: после восстановления записи изменились либо подтверждение отмены не получено. Последующие правки сохраняются</p>' : ''}</section>`;
   };
   const drawRun = r => {
     lastRun = r || null; historyBox.innerHTML = r ? runHtml(r) : "";
@@ -63,14 +63,14 @@ function erpSingleRecoverySetup(box) {
     const sales = Array.isArray(d.sales) ? d.sales : [], payments = Array.isArray(d.payments) ? d.payments : [];
     if (!sales.length) throw new Error("Не получен подтверждённый состав продаж ERP. Восстановление пока недоступно");
     contextBox.innerHTML = `<h4>${text(d.student?.name || "Карточка клиента")} · ERP ${text(d.student?.erp_id || d.erp_id || input.value)}</h4>
-      <p class="small">Группа для этого случая: «Небо», среда 18:45. Время в назначении платежа не используется для выбора группы.</p>
-      ${d.case?.payment_date ? `<p class="small">Оплаты в источнике: ${date(d.case.payment_date)}${d.case.payment_method === "card" ? " · картой" : ""}. Связи с оплатами ниже проверяются по их идентификаторам.</p>` : ''}
+      <p class="small">Группа для этого случая: «Небо», среда 18:45. Время в назначении платежа не используется для выбора группы</p>
+      ${d.case?.payment_date ? `<p class="small">Оплаты в источнике: ${date(d.case.payment_date)}${d.case.payment_method === "card" ? " · картой" : ""}. Связи с оплатами ниже проверяются по их идентификаторам</p>` : ''}
       ${d.provenance ? `<details><summary>Источник данных и версия CRM</summary><p class="small">Работающий процесс: ${text(d.provenance.running_commit || "не определён")}<br>Код на сервере: ${text(d.provenance.checkout_commit || "не определён")}<br>Данные прочитаны: ${text(d.provenance.loaded_at || "не указано")}</p></details>` : ''}
       ${issuesHtml(d.issues)}
       <div class="field"><label for="esr-group">Подтверждённая группа</label><select id="esr-group"><option value="">Выберите группу</option>${(d.groups || []).map(g => `<option value="${text(g.id)}">${text([g.branch_name, g.name, g.weekdays_label || week(g.weekdays), g.time].filter(Boolean).join(" · "))} · №${text(g.id)}</option>`).join("")}</select></div>
       <div class="field"><label for="esr-aggregate">Прежняя объединённая покупка CRM</label><select id="esr-aggregate"><option value="">Выберите запись для восстановления</option>${(d.aggregates || []).map(a => `<option value="${text(a.id)}">№${text(a.id)} · ${text(a.month)} · ${money(a.price)} · ${text(a.lessons)} занятий · ${text(({paid:"оплачено",invoiced:"к оплате",cancelled:"отменено"})[a.status] || a.status)}</option>`).join("")}</select></div>
       <div style="overflow:auto"><table class="tbl"><thead><tr><th>Продажа ERP</th><th>Дата в источнике → сейчас</th><th>Сумма</th><th>Уже внесённая оплата CRM</th></tr></thead><tbody>${sales.map(s => `<tr><td><b>${text(s.sale_id)}</b><div class="small">Счёт: ${text(s.invoice_id || "не указан")}<br>Операция ERP: ${text(s.operation_id || "не указана")}</div></td><td>${date(s.source_date)} → ${date(s.effective_date || s.source_date)}</td><td>${money(s.amount)}</td><td><select data-esr-payment="${text(s.sale_id)}" aria-label="Оплата для продажи ${text(s.sale_id)}"><option value="">Выберите подтверждённую оплату</option>${payments.map(p => `<option value="${text(p.id)}" ${p.cancelled ? "disabled" : ""}>№${text(p.id)} · ${money(p.amount)} · ${date(p.paid_at)}${p.operation_id ? " · ERP " + text(p.operation_id) : ""}${p.source_sale_id ? " · продажа " + text(p.source_sale_id) : ""}${p.cancelled ? " · отменена" : ""}</option>`).join("")}</select></td></tr>`).join("")}</tbody></table></div>
-      <p class="small muted">Одинаковые суммы и даты не доказывают связь оплат с продажами. Выберите каждую связь по подтверждённым сведениям; новых платежей CRM не создаёт.</p>
+      <p class="small muted">Одинаковые суммы и даты не доказывают связь оплат с продажами. Выберите каждую связь по подтверждённым сведениям; новых платежей CRM не создаёт</p>
       <details><summary>Сведения об оплатах для сопоставления</summary>${payments.map(p => `<p class="small"><b>Оплата CRM №${text(p.id)}</b> · ${money(p.amount)} · ${date(p.paid_at)} · ${text(p.method || "")}<br>${text(p.comment || "Без комментария")}</p>`).join("") || '<p class="small">Оплаты не найдены</p>'}</details>
       <div class="field"><label for="esr-reason">Основание восстановления</label><textarea id="esr-reason" rows="2" placeholder="Укажите проверенный источник и основание переноса даты">${text(d.case?.reason || "")}</textarea></div>
       <label class="check"><input type="checkbox" data-esr-mapping-reviewed> Проверила группу, состав продаж и связи с уже учтёнными оплатами</label>
@@ -96,7 +96,7 @@ function erpSingleRecoverySetup(box) {
       const body = requestBody(); setBusy(true); status.textContent = "Проверяем план без изменения рабочей карточки…";
       const r = await api("POST", "/api/erp/singles/recovery/plan", body);
       const ready = r.can_apply === true && r.calendar_verified !== false && typeof r.token === "string" && !!r.token && r.before_summary && r.after_summary;
-      planBox.innerHTML = `<h4>План восстановления</h4><div class="row" style="gap:24px;align-items:start;flex-wrap:wrap"><section><b>Сейчас</b>${summaryHtml(r.before_summary)}</section><section><b>После восстановления</b>${summaryHtml(r.after_summary)}</section></div>${r.calendar_verified === true ? '<p class="small pill green">Календарь и учтённая оплата в журнале проверены на копии</p>' : r.calendar_verified === false ? '<p class="small">Проверка календаря и учтённой оплаты не пройдена. Восстановление заблокировано.</p>' : ""}${issuesHtml(r.issues)}${ready ? '<p class="small">Перед изменением CRM сохранит резервную копию. Проверьте план выше.</p><label class="check"><input type="checkbox" data-esr-confirm> Подтверждаю восстановление по этому плану</label><button type="button" class="btn primary" data-esr-apply disabled>Восстановить проверенные разовые</button>' : '<p class="small">План требует разбора. Рабочая карточка не изменена.</p>'}`;
+      planBox.innerHTML = `<h4>План восстановления</h4><div class="row" style="gap:24px;align-items:start;flex-wrap:wrap"><section><b>Сейчас</b>${summaryHtml(r.before_summary)}</section><section><b>После восстановления</b>${summaryHtml(r.after_summary)}</section></div>${r.calendar_verified === true ? '<p class="small pill green">Календарь и учтённая оплата в журнале проверены на копии</p>' : r.calendar_verified === false ? '<p class="small">Проверка календаря и учтённой оплаты не пройдена. Восстановление заблокировано</p>' : ""}${issuesHtml(r.issues)}${ready ? '<p class="small">Перед изменением CRM сохранит резервную копию. Проверьте план выше</p><label class="check"><input type="checkbox" data-esr-confirm> Подтверждаю восстановление по этому плану</label><button type="button" class="btn primary" data-esr-apply disabled>Восстановить проверенные разовые</button>' : '<p class="small">План требует разбора. Рабочая карточка не изменена</p>'}`;
       if (ready) {
         checked = {body, token: r.token};
         planBox.querySelector("[data-esr-confirm]").onchange = updateApply;
@@ -114,7 +114,7 @@ function erpSingleRecoverySetup(box) {
       if (!r.run_id || !r.after_summary) throw new Error("CRM не вернула полный результат восстановления. Проверьте рабочую карточку перед повтором");
       contextBox.innerHTML = ""; planBox.innerHTML = "";
       drawRun({...r, state:"applied", can_rollback:!!r.rollback_token});
-      status.textContent = "Готово. Новые оплаты не создавались. Проверьте состав покупок и календарь в карточке клиента.";
+      status.textContent = "Готово. Новые оплаты не создавались. Проверьте состав покупок и календарь в карточке клиента";
     } catch (e) { status.textContent = e.message || "Не удалось восстановить записи. Перед повтором снова проверьте план"; }
     finally { setBusy(false); }
   }
@@ -130,7 +130,7 @@ function erpSingleRecoverySetup(box) {
       rolledBack = true; checked = null; context = null; contextBox.innerHTML = ""; planBox.innerHTML = ""; drawRun({...r,can_rollback:false});
       context = await api("GET", "/api/erp/singles/recovery/context?erp_id=" + encodeURIComponent(input.value.trim()));
       drawContext(context); drawRun(context.last_run || context.runs?.[0] || {...r,can_rollback:false});
-      status.textContent = "Состояние до этой операции восстановлено. Данные перечитаны — можно проверить новый план. Новые платежи не создавались.";
+      status.textContent = "Состояние до этой операции восстановлено. Данные перечитаны — можно проверить новый план. Новые платежи не создавались";
     } catch (e) { status.textContent = rolledBack ? "Отмена выполнена, но данные не удалось перечитать. Нажмите «Загрузить данные для сверки»." : e.message || "Отмена недоступна: записи могли измениться. Нужна повторная сверка"; }
     finally { setBusy(false); }
   }
@@ -138,7 +138,7 @@ function erpSingleRecoverySetup(box) {
     if (busy) return;
     const erp = input.value.trim(); if (!/^\d+$/.test(erp)) { status.textContent = "Укажите числовой ID клиента ERP"; return; }
     checked = null; context = null; lastRun = null; contextBox.innerHTML = ""; planBox.innerHTML = ""; historyBox.innerHTML = ""; setBusy(true); status.textContent = "Читаем существующие записи CRM…";
-    try { context = await api("GET", "/api/erp/singles/recovery/context?erp_id=" + encodeURIComponent(erp)); drawContext(context); drawRun(context.last_run || context.runs?.[0]); status.textContent = "Выберите группу, прежнюю покупку и подтверждённые связи оплат."; }
+    try { context = await api("GET", "/api/erp/singles/recovery/context?erp_id=" + encodeURIComponent(erp)); drawContext(context); drawRun(context.last_run || context.runs?.[0]); status.textContent = "Выберите группу, прежнюю покупку и подтверждённые связи оплат"; }
     catch (e) { context = null; status.textContent = e.message || "Не удалось получить данные для сверки"; }
     finally { setBusy(false); }
   };

@@ -116,7 +116,7 @@ async function renderMerch(page) {
     <div class="cfacts" style="margin-bottom:14px"><div class="cfact green"><b>${rub(r.total)}</b><span>всего за период</span></div>
       ${Object.entries(r.by_method).map(([k, v]) => `<div class="cfact"><b>${rub(v)}</b><span>${(MERCH_METHODS[k]||({card:"Карта (канал не уточнён)",qr:"QR (банк не уточнён)"}[k])||k)}</span></div>`).join("")}</div>
     ${r.rows.length ? `<div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:14px;margin-bottom:14px">
-      <section class="panel" style="padding:14px;flex:1 1 280px"><h3 style="margin-top:0">По товарам</h3>${r.by_item.map((x) => `<div class="kid-row"><span class="grow">${esc(x.name)}</span><span class="small muted">${x.qty} шт.</span><b>${rub(x.amount)}</b></div>`).join("")}</section>
+      <section class="panel" style="padding:14px;flex:1 1 280px"><h3 style="margin-top:0">По товарам</h3>${r.by_item.map((x) => `<div class="kid-row"><span class="grow">${esc(x.name)}</span><span class="small muted">${x.qty} шт</span><b>${rub(x.amount)}</b></div>`).join("")}</section>
       <section class="panel" style="padding:14px;flex:1 1 280px"><h3 style="margin-top:0">По продавцам</h3>${r.by_seller.map((x) => `<div class="kid-row"><span class="grow">${esc(x.name)}</span><b>${rub(x.amount)}</b>${x.cash_not_handed ? `<span class="pill yellow">наличные не сданы ${rub(x.cash_not_handed)}</span>` : ""}</div>`).join("")}</section>
     </div>` : ""}
     <div class="list">${r.rows.length ? r.rows.map((x) => `<div class="list-row ${x.status === "cancelled" ? "muted" : ""}">
@@ -165,7 +165,7 @@ function merchStockHtml(it) {
   const status = it.stock_status || {};
   const last = status.last_count;
   return `<section class="panel" style="padding:14px;margin-top:14px"><h3 style="margin-top:0">Еженедельный пересчёт и заказ</h3>
-    <div class="small ${status.weekly_due ? "" : "muted"}" style="margin-bottom:8px">${status.weekly_due ? `На этой неделе пересчитано ${status.counted_items||0} из ${status.total_items||items.length} позиций. ` : "✅ Остатки за эту неделю внесены. "}${last ? `Последнее сохранение ${dShort(last.counted_at)} ${esc(last.counted_by_name)}. ` : ""}Можно сохранить часть списка: пустые строки не меняют остаток.</div>
+    <div class="small ${status.weekly_due ? "" : "muted"}" style="margin-bottom:8px">${status.weekly_due ? `На этой неделе пересчитано ${status.counted_items||0} из ${status.total_items||items.length} позиций. ` : "✅ Остатки за эту неделю внесены. "}${last ? `Последнее сохранение ${dShort(last.counted_at)} ${esc(last.counted_by_name)}. ` : ""}Можно сохранить часть списка: пустые строки не меняют остаток</div>
     <label style="max-width:220px">Дата пересчёта<input type="date" data-mst-date value="${esc(S.merch.stock_date || it.selected_stock_date || S.meta.today)}" max="${S.meta.today}"></label>
     <table class="tbl"><thead><tr><th>Товар</th><th>Есть</th><th>Норма</th><th>Заказать</th></tr></thead><tbody>
     ${items.map((i) => `<tr><td>${esc(i.name)}</td><td><input type="number" min="0" inputmode="numeric" data-mst="${i.id}" value="${saved[i.id]?.stock ?? ""}" placeholder="не считали" style="width:100px"></td>
