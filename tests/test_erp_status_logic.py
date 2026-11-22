@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from datetime import date
 
-from crm import db, erpstatus, services
+from crm import db, erpstatus, services, targetedkononenkotask
 
 
 class ErpStatusLogicTest(unittest.TestCase):
@@ -70,6 +70,33 @@ class ErpStatusLogicTest(unittest.TestCase):
             self.assertEqual(self.status(sid), expected)
         self.con.execute("UPDATE students SET erp_id='84894',erp_status='Постоянный посетитель',stage='lead' WHERE id=?", (sid,))
         self.assertEqual(erpstatus.sync_one(self.con, sid, self.TODAY), "Постоянный посетитель")
+
+    def test_current_and_next_paid_override_stale_imported_lead(self):
+        sid = self.child()
+        self.con.execute("UPDATE students SET erp_id='84894',erp_status='Новый лид',stage='lead' WHERE id=?", (sid,))
+        self.con.execute("""INSERT INTO tasks(student_id,kind,title,due_at,status,created_at)
+                            VALUES (?,'call_lead','Новый лид','2026-11-21T10:00','open','2026-11-21T10:00')""", (sid,))
+        self.paid(sid, "2026-11"); self.paid(sid, "2026-12")
+        self.assertEqual(self.status(sid), "Постоянный посетитель")
+        student = self.con.execute("SELECT funnel,stage,erp_status FROM students WHERE id=?", (sid,)).fetchone()
+        self.assertEqual(tuple(student), ("members", "active", "Постоянный посетитель"))
+        self.assertEqual(self.con.execute("SELECT status FROM tasks WHERE student_id=?", (sid,)).fetchone()[0], "cancelled")
+
+    def test_targeted_kononenko_reconcile_keeps_renewal_task(self):
+        self.child()
+        sid = self.child()
+        self.assertEqual(sid, 2)
+        self.con.execute("UPDATE students SET name='Кононенко Иван',erp_id='92421',erp_status='Куплен на будущий период' WHERE id=2")
+        self.paid(2, "2026-11"); self.paid(2, "2026-12")
+        self.con.execute("""INSERT INTO tasks(student_id,kind,title,due_at,status,created_at)
+                            VALUES (2,'renew','Проверить продление','2026-12-24T23:59','open','2026-11-22T10:00')""")
+        self.con.execute("DELETE FROM settings WHERE key=?", (targetedkononenkotask.PROFILE_KEY,))
+        result = targetedkononenkotask.reconcile_profile(self.con, self.TODAY)
+        self.assertEqual(result["state"], "complete")
+        self.assertEqual((result["status"], result["funnel"], result["open_lead_tasks"]),
+                         ("Постоянный посетитель", "members", 0))
+        task = self.con.execute("SELECT kind,status,due_at FROM tasks WHERE student_id=2").fetchone()
+        self.assertEqual(tuple(task), ("renew", "open", "2026-12-24T23:59"))
 
     def test_waitlist_is_the_confirmed_user_status(self):
         sid = self.child()

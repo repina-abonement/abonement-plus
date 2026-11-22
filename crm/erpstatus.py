@@ -2,7 +2,8 @@
 
 Автоматически рассчитываются только объективные системные статусы. Региональные и
 служебные пользовательские статусы без подтверждённого события здесь не выдумываются.
-Карточки, пришедшие из ERP, сохраняют исходный ``erp_status`` без пересчёта CRM.
+Карточки, пришедшие из ERP, сохраняют исходный ``erp_status``, пока в CRM не появится
+более новое подтверждённое событие — оплаченный абонемент текущего/будущего месяца.
 """
 from __future__ import annotations
 
@@ -53,7 +54,7 @@ def calculate(con, student, on: date | None = None) -> str:
         if not has_cur and has_future:
             return "Куплен на будущий период"
         if has_cur:
-            if had_prev:
+            if had_prev or has_future:
                 return "Постоянный посетитель"
             if had_earlier:
                 return "Вернувшийся"
@@ -82,9 +83,27 @@ def sync_one(con, sid: int, on: date | None = None, *, log: bool = True) -> str:
     row = con.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone()
     if not row:
         return ""
-    if (row["erp_id"] or "").strip():
+    month = logic.month_of(on or date.today())
+    objective_paid = con.execute(
+        """SELECT 1 FROM subscriptions WHERE student_id=? AND status='paid'
+           AND COALESCE(kind,'month')='month' AND month>=? LIMIT 1""", (sid, month)
+    ).fetchone()
+    if (row["erp_id"] or "").strip() and not objective_paid:
         return row["erp_status"] or ""
     value = calculate(con, row, on)
+    has_current = con.execute(
+        """SELECT 1 FROM subscriptions WHERE student_id=? AND status='paid'
+           AND COALESCE(kind,'month')='month' AND month=? LIMIT 1""", (sid, month)
+    ).fetchone()
+    if has_current and (row["funnel"] != "members" or row["stage"] != "active"):
+        con.execute("UPDATE students SET funnel='members',stage='active',priority=0 WHERE id=?", (sid,))
+        con.execute("""UPDATE tasks SET status='cancelled',done_at=datetime('now'),result='Отменена: есть оплаченный абонемент'
+                       WHERE student_id=? AND status='open' AND kind IN
+                       ('call_lead','no_answer','close_sale','trial_confirm','trial_today','how_was','why_not_bought','reinvite_pu','no_show')""", (sid,))
+        if log:
+            from .db import now_iso
+            con.execute("INSERT INTO history(student_id,ts,user_name,kind,text) VALUES (?,?,'CRM','stage','Оплаченный абонемент: карточка переведена в действующие клиенты')",
+                        (sid, now_iso()))
     if value != (row["erp_status"] or ""):
         con.execute("UPDATE students SET erp_status=? WHERE id=?", (value, sid))
         if log:

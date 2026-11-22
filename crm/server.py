@@ -1964,6 +1964,12 @@ def kononenko_report(con,h,user,body,q):
     return targetedkononenkotask.report(con)
 
 
+@route("GET", "/api/maintenance/kononenko-profile-report", role="admin")
+def kononenko_profile_report(con,h,user,body,q):
+    from . import targetedkononenkotask
+    return targetedkononenkotask.profile_report(con)
+
+
 @route("GET", "/api/maintenance/minibaev-task-report", role="admin")
 def minibaev_task_report(con,h,user,body,q):
     from . import targetedminibaevtask

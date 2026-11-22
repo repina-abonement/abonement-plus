@@ -322,6 +322,7 @@ def init_db(con: sqlite3.Connection):
     targetedrenewalpayment.apply(con)
     from . import targetedkononenkotask
     targetedkononenkotask.apply(con)
+    targetedkononenkotask.reconcile_profile(con)
     from . import targetedminibaevtask
     targetedminibaevtask.apply(con)
     from . import targetedmillertask

@@ -1,9 +1,11 @@
 """Read actual December invoice coverage and align only Kononenko's open task."""
 import json
+from datetime import date
 
-from . import money, tasks
+from . import erpstatus, logic, money, tasks
 
 KEY = "targeted_kononenko_december_task_20261122"
+PROFILE_KEY = "targeted_kononenko_profile_reconcile_20261122_v2"
 
 
 def apply(con):
@@ -42,4 +44,35 @@ def apply(con):
 
 def report(con):
     row = con.execute("SELECT value FROM settings WHERE key=?", (KEY,)).fetchone()
+    return json.loads(row[0]) if row else {"state": "pending"}
+
+
+def reconcile_profile(con, on: date | None = None):
+    previous = con.execute("SELECT value FROM settings WHERE key=?", (PROFILE_KEY,)).fetchone()
+    if previous:
+        return json.loads(previous[0])
+    on = on or date.today()
+    student = con.execute("SELECT id,name,erp_id,erp_status,funnel,stage FROM students WHERE id=2").fetchone()
+    identity_ok = bool(student and " ".join(student["name"].casefold().split()) in {"иван кононенко", "кононенко иван"}
+                       and str(student["erp_id"] or "") == "92421")
+    cur, nxt = logic.month_of(on), logic.shift_month(logic.month_of(on), 1)
+    paid_months = [r[0] for r in con.execute("""SELECT DISTINCT month FROM subscriptions WHERE student_id=2
+        AND status='paid' AND COALESCE(kind,'month')='month' AND month IN (?,?) ORDER BY month""", (cur, nxt))]
+    if not identity_ok:
+        result = {"state": "identity_mismatch", "student_id": 2}
+    elif paid_months != [cur, nxt]:
+        result = {"state": "not_applied", "reason": "current_and_next_month_not_both_paid", "paid_months": paid_months}
+    else:
+        status = erpstatus.sync_one(con, 2, on)
+        current = con.execute("SELECT erp_status,funnel,stage FROM students WHERE id=2").fetchone()
+        lead_tasks = con.execute("""SELECT COUNT(*) FROM tasks WHERE student_id=2 AND status='open' AND kind IN
+            ('call_lead','no_answer','close_sale','trial_confirm','trial_today','how_was','why_not_bought','reinvite_pu','no_show')""").fetchone()[0]
+        result = {"state": "complete", "student_id": 2, "erp_id": "92421", "paid_months": paid_months,
+                  "status": status, "funnel": current["funnel"], "stage": current["stage"], "open_lead_tasks": lead_tasks}
+    con.execute("INSERT INTO settings(key,value) VALUES (?,?)", (PROFILE_KEY, json.dumps(result, ensure_ascii=False)))
+    return result
+
+
+def profile_report(con):
+    row = con.execute("SELECT value FROM settings WHERE key=?", (PROFILE_KEY,)).fetchone()
     return json.loads(row[0]) if row else {"state": "pending"}
