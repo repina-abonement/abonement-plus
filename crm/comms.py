@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS messages (
     user_name TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT '',       -- '' | error | demo
     error TEXT NOT NULL DEFAULT '',
+    reply_external_id TEXT,
+    reply_snapshot TEXT NOT NULL DEFAULT '',
     ts TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id, id);
@@ -154,6 +156,11 @@ def init(con):
     scols = {r[1] for r in con.execute("PRAGMA table_info(students)")}
     if "priority" not in scols:
         con.execute("ALTER TABLE students ADD COLUMN priority INTEGER NOT NULL DEFAULT 0")
+    mcols = {r[1] for r in con.execute("PRAGMA table_info(messages)")}
+    if "reply_external_id" not in mcols:
+        con.execute("ALTER TABLE messages ADD COLUMN reply_external_id TEXT")
+    if "reply_snapshot" not in mcols:
+        con.execute("ALTER TABLE messages ADD COLUMN reply_snapshot TEXT NOT NULL DEFAULT ''")
     ccols = {r[1] for r in con.execute("PRAGMA table_info(conversations)")}
     for col in ("open_q INTEGER NOT NULL DEFAULT 0", "open_note TEXT NOT NULL DEFAULT ''", "open_due TEXT",
                 "open_by TEXT NOT NULL DEFAULT ''", "open_at TEXT"):
@@ -416,13 +423,14 @@ def upsert_conversation(con, channel: str, ext: str, *, title: str = "", usernam
 
 def add_message(con, cid: int, direction: str, text: str = "", *, kind: str = "text", media: str = "",
                 external_id: str | None = None, user_name: str = "", status: str = "", error: str = "",
-                ts: str | None = None) -> int | None:
+                ts: str | None = None, reply_external_id: str | None = None, reply_snapshot: dict | None = None) -> int | None:
     ts = ts or ts_now()
     cur = con.execute(
         """INSERT OR IGNORE INTO messages(conversation_id, direction, text, kind, media, external_id, user_name,
-           status, error, ts) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+           status, error, reply_external_id, reply_snapshot, ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
         (cid, direction, text or "", kind, media or "", str(external_id) if external_id is not None else None,
-         user_name, status, error, ts))
+         user_name, status, error, str(reply_external_id) if reply_external_id is not None else None,
+         json.dumps(reply_snapshot, ensure_ascii=False) if reply_snapshot else "", ts))
     if not cur.rowcount:
         return None
     preview = (text or "").strip().replace("\n", " ")[:120] or KIND_LABELS.get(kind, "")
@@ -534,6 +542,19 @@ def _tg_kind_media(m: dict) -> tuple[str, str]:
     return "other", ""
 
 
+def _reply_snapshot(message: dict | None) -> dict | None:
+    """Keep only provider-supplied quote fields; never invent an ERP/Telegram message id."""
+    if not isinstance(message, dict):
+        return None
+    kind, media = _tg_kind_media(message)
+    snapshot = {
+        "text": message.get("text") or message.get("caption") or "",
+        "kind": kind,
+        "media": media,
+    }
+    return snapshot if snapshot["text"] or snapshot["media"] else None
+
+
 def tg_hook(con, upd: dict, headers) -> None:
     if not hmac.compare_digest(headers.get("X-Telegram-Bot-Api-Secret-Token") or "", get(con, "tg_secret")):
         raise PermissionError("неверный секрет Telegram")
@@ -591,9 +612,12 @@ def tg_hook(con, upd: dict, headers) -> None:
     if biz is None and not outgoing:
         # обычный бот: если клиент перестал писать через бизнес-аккаунт, отвечаем от бота
         con.execute("UPDATE conversations SET meta=json_set(meta, '$.biz', NULL) WHERE id=?", (cid,))
+    replied = m.get("reply_to_message") if isinstance(m.get("reply_to_message"), dict) else None
+    reply_id = (f"{'b' if biz else 'm'}{replied.get('message_id')}" if replied and replied.get("message_id") is not None else None)
     new = add_message(con, cid, "out" if outgoing else "in", text, kind=kind, media=media,
                       external_id=f"{'b' if biz else 'm'}{m.get('message_id')}",
-                      user_name="С телефона" if outgoing else "", ts=_ts_from_unix(m.get("date")))
+                      user_name="С телефона" if outgoing else "", ts=_ts_from_unix(m.get("date")),
+                      reply_external_id=reply_id, reply_snapshot=_reply_snapshot(replied))
     if not new or biz:
         return  # в бизнес-аккаунте бот сам ничего не отвечает
     try:
@@ -988,6 +1012,24 @@ def receive_wazzup_statuses(con,payload):
         apply_wazzup_delivery(con,external)
 
 
+def _wazzup_reply(message):
+    """Return the real quoted message id and provider-supplied preview when Wazzup includes them."""
+    quoted = next((message.get(key) for key in ("quotedMessage", "quotedMsg", "replyToMessage", "repliedMessage")
+                   if isinstance(message.get(key), dict)), None)
+    raw_id = next((message.get(key) for key in ("replyToMessageId", "quotedMessageId", "replyMessageId", "replyTo")
+                   if message.get(key) not in (None, "") and not isinstance(message.get(key), dict)), None)
+    if quoted:
+        raw_id = raw_id or quoted.get("messageId") or quoted.get("id")
+        kind = WZ_KINDS.get(quoted.get("type") or "text", "other")
+        snapshot = {"text": quoted.get("text") or quoted.get("caption") or "", "kind": kind,
+                    "media": quoted.get("contentUri") or ""}
+        if not snapshot["text"] and not snapshot["media"]:
+            snapshot = None
+    else:
+        snapshot = None
+    return (str(raw_id) if raw_id not in (None, "") else None), snapshot
+
+
 def wz_hook(con, payload: dict) -> None:
     receive_wazzup_statuses(con,payload)
     for m in payload.get("messages") or []:
@@ -1022,8 +1064,10 @@ def wz_hook(con, payload: dict) -> None:
         if echo and m.get("messageId") and con.execute("SELECT 1 FROM messages WHERE external_id=?", (str(m["messageId"]),)).fetchone():
             continue  # эхо сообщения, которое CRM сама отправила: оно уже в переписке
         dt = _utc_to_local(m.get("dateTime") or "")
+        reply_id, reply_snapshot = _wazzup_reply(m)
         add_message(con, cid, "out" if echo else "in", m.get("text") or "", kind=kind, media=m.get("contentUri") or "",
-                    external_id=m.get("messageId"), user_name="Из Wazzup" if echo else "", ts=dt)
+                    external_id=m.get("messageId"), user_name="Из Wazzup" if echo else "", ts=dt,
+                    reply_external_id=reply_id, reply_snapshot=reply_snapshot)
 
 
 def replay_wazzup_hook(con, hook_id):
@@ -1614,12 +1658,37 @@ def same_reply_contact(current, candidate):
     return bool(peer and peer==telegram_user_id(candidate['channel'],candidate.get('external_id') or ''))
 
 
+def _with_reply_context(con, message: dict) -> dict:
+    external = message.pop("reply_external_id", None)
+    raw_snapshot = message.pop("reply_snapshot", "")
+    if not external and not raw_snapshot:
+        return message
+    original = None
+    if external:
+        original = con.execute(
+            "SELECT id,direction,text,kind,media,external_id,ts FROM messages WHERE conversation_id=? AND external_id=?",
+            (message["conversation_id"], external)).fetchone()
+    if original:
+        message["reply_context"] = {"message_id": original["id"], "external_id": original["external_id"],
+                                    "direction": original["direction"], "text": original["text"],
+                                    "kind": original["kind"], "has_media": bool(original["media"]), "ts": original["ts"]}
+        return message
+    try:
+        snapshot = json.loads(raw_snapshot) if raw_snapshot else {}
+    except (TypeError, ValueError):
+        snapshot = {}
+    if external or snapshot:
+        message["reply_context"] = {"external_id": external or "", "text": snapshot.get("text") or "",
+                                    "kind": snapshot.get("kind") or "other", "has_media": bool(snapshot.get("media"))}
+    return message
+
+
 def conversation(con, cid: int, mark_read: bool = True) -> dict:
     r = con.execute("SELECT * FROM conversations WHERE id=?", (cid,)).fetchone()
     if not r:
         raise CommsError("Переписка не найдена")
     from . import messagedeletion
-    msgs = [messagedeletion.public(con,dict(x),r["channel"]) for x in con.execute(
+    msgs = [_with_reply_context(con,messagedeletion.public(con,dict(x),r["channel"])) for x in con.execute(
         "SELECT * FROM (SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 200) ORDER BY id", (cid,))]
     # Restored/late messages keep their original time, not their insertion order.
     msgs.sort(key=lambda m:(str(m.get('ts') or '').replace(' ','T'),m['id']))
@@ -1727,10 +1796,11 @@ def history(con, family_id: int | None, phones: list[str], mark_read: bool = Tru
         for m in con.execute("SELECT * FROM (SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 60)",
                              (c["id"],)):
             from . import messagedeletion
-            message=messagedeletion.public(con,dict(m),c["channel"])
+            message=_with_reply_context(con,messagedeletion.public(con,dict(m),c["channel"]))
             items.append({"type": "msg", "can_delete":message["can_delete"],"delete_reason":message["delete_reason"],"deletion_status":message["deletion_status"], "ts": m["ts"], "channel": c["channel"], "channel_label": c["channel_label"],
                           "conversation_id": c["id"], **{k: m[k] for k in ("id", "direction", "text", "kind", "media",
-                                                                            "user_name", "status", "error")}})
+                                                                            "user_name", "status", "error")},
+                          **({"reply_context":message["reply_context"]} if message.get("reply_context") else {})})
     for k in con.execute(f"SELECT * FROM calls WHERE (family_id=? AND family_id IS NOT NULL) OR (family_id IS NULL AND phone_norm IN ({ph_sql})) ORDER BY id DESC LIMIT 60",
                          (family_id, *phones)):
         items.append({"type": "call", "ts": k["started_at"], "id": k["id"], "direction": k["direction"],

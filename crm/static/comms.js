@@ -206,12 +206,22 @@ function msgHtml(m) {
     : `<a href="/api/messages/${m.id}/media" target="_blank" rel="noopener">Открыть вложение</a>`) : "";
   const label = !m.text && !media ? ({ sticker: "Стикер", contact: "Контакт", other: "Вложение" }[m.kind] || "") : "";
   const who = m.direction === "out" ? (m.user_name || "") : "";
-  return `<div class="msg ${m.direction}${m.status === "error" ? " err" : ""}">
-    ${actions}${deletionHint}${media}${m.text ? `<div class="msg-text${copyable?' chat-message-copyable':''}">${esc(m.text)}</div>` : ""}${label ? `<div class="msg-text muted">${label}</div>` : ""}
+  const linkedText=value=>{const source=String(value||''),pattern=/https?:\/\/[^\s<>"']+/gi;let html='',at=0,match;while((match=pattern.exec(source))){html+=esc(source.slice(at,match.index));let url=match[0],tail='';while(/[)\]},.;!?]$/.test(url)){tail=url.slice(-1)+tail;url=url.slice(0,-1)}html+=`<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>${esc(tail)}`;at=match.index+match[0].length}return html+esc(source.slice(at))};
+  const reply=m.reply_context,replyLabel=reply?.text||({image:'Фото',file:'Файл',audio:'Аудио',video:'Видео',sticker:'Стикер'}[reply?.kind])||(reply?.has_media?'Вложение':'Исходное сообщение');
+  const replyBlock=reply?`<div class="msg-reply-context" ${reply.message_id?`data-reply-jump="${reply.message_id}" role="button" tabindex="0"`:''}><span>Ответ на сообщение</span><strong>${linkedText(replyLabel)}</strong></div>`:'';
+  return `<div class="msg ${m.direction}${m.status === "error" ? " err" : ""}" data-message-id="${m.id}">
+    ${actions}${deletionHint}${replyBlock}${media}${m.text ? `<div class="msg-text${copyable?' chat-message-copyable':''}">${esc(m.text)}</div>` : ""}${label ? `<div class="msg-text muted">${label}</div>` : ""}
     <div class="msg-meta">${[esc(who), esc(m.channel_label||""), dtWhen(m.ts), m.direction==='out'?({sent:"Отправлено",delivered:"Доставлено",read:"Прочитано",error:"Ошибка отправки",demo:"тест, не отправлено"}[m.status]||""):""].filter(Boolean).join(" · ")}</div>
     ${m.status==='error'&&m.error?`<details class="msg-error-details"><summary>Подробнее об ошибке</summary><div>${esc(m.error)}</div></details>`:''}
   </div>`;
 }
+
+document.addEventListener('click',event=>{
+  const quote=event.target.closest('[data-reply-jump]');if(!quote||event.target.closest('a'))return;
+  const original=document.querySelector(`[data-message-id="${quote.dataset.replyJump}"]`);if(!original)return;
+  original.scrollIntoView({block:'center',behavior:'smooth'});original.classList.remove('msg-reply-highlight');void original.offsetWidth;original.classList.add('msg-reply-highlight');
+});
+document.addEventListener('keydown',event=>{if((event.key==='Enter'||event.key===' ')&&event.target.matches('[data-reply-jump]')){event.preventDefault();event.target.click()}});
 
 function callHtml(k) {
   const missed = k.direction === "in" && ["missed", "busy"].includes(k.status);
@@ -385,10 +395,8 @@ function wireReplyTarget(select,onchange) {
 async function loadFamilyComms(familyId, parents, studentId, kid) {
   const box = $("#comms-box");
   if (!box) return;
-  S.familyDrafts = S.familyDrafts || {};
-  const familyDraftKey = `${S.user.id}:${familyId}`;
   const sameFamily = box.dataset.familyId === String(familyId);
-  let draft = sameFamily ? $("#cm-text")?.value || "" : S.familyDrafts[familyDraftKey] || "";
+  let draft = sameFamily ? $("#cm-text")?.value || "" : "";
   let d;
   try { d = await api("GET", `/api/families/${familyId}/comms`); } catch (e) { box.innerHTML = `<h3>Связь с семьёй</h3><div class="error">${esc(e.message)}</div>`; return; }
   if ($("#comms-box") !== box) return;
@@ -423,7 +431,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
         ${replyTargetHtml('cm-to',targets,selectedTarget)}
         <div class="row"><textarea id="cm-text" rows="3" placeholder="Сообщение родителю…"></textarea><button class="btn primary" id="cm-send" style="flex:0">Отправить</button></div>
       </div>` : `<div class="small muted">Написать отсюда можно, когда родитель напишет школе в Telegram или MAX${st.whatsapp || st.wazzup_telegram ? "" : ". Первыми написать можно после подключения Wazzup"}</div>`}`;
-  if ($("#cm-text")) { $("#cm-text").value = draft; $("#cm-text").addEventListener("input",e=>{S.familyDrafts[familyDraftKey]=e.target.value;resizeMessageInput(e.target)}); resizeMessageInput($("#cm-text")); }
+  if ($("#cm-text")) { $("#cm-text").value = draft; $("#cm-text").addEventListener("input",e=>resizeMessageInput(e.target)); resizeMessageInput($("#cm-text")); }
   wireMakeupOffer(box,kid?[kid]:[],"#cm-text");
   const toSelect = $("#cm-to"); wireReplyTarget(toSelect,()=>{S.familySendTargets[targetKey]=toSelect.value});
   const feed = $("#feed"); if (feed) feed.scrollTop = feed.scrollHeight;
@@ -489,7 +497,6 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
       }
       if(box.isConnected&&$('#comms-box')===box&&box.dataset.familyId===String(familyId)){
         clearSentComposerDraft(box.querySelector('#cm-text'),sentValue);
-        delete S.familyDrafts[familyDraftKey];
         await loadFamilyComms(familyId, parents, studentId, kid);
       }
     } catch (e) { fail(e); send.disabled = false; }

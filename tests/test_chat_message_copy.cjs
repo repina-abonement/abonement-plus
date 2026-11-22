@@ -31,7 +31,7 @@ const messages = [
   {text: 'Удаление пока не подтверждено 🕒', direction: 'out', deletion_status: 'uncertain', can_delete: true},
   {text: 'Текст старого исходящего', direction: 'out', can_delete: false, delete_reason: 'Срок удаления истёк'},
   {text: 'Неотправленный текст\nВсё равно можно скопировать.', direction: 'out', status: 'error', error: 'Synthetic provider diagnostic; not part of message body', can_delete: false},
-  {text: 'Да', direction: 'in'},
+  {text: 'Да', direction: 'in', reply_context:{message_id:2,external_id:'real-provider-id',text:'Оплатить: https://ab-plus.ru/pay/synthetic',kind:'text'}},
 ].map((message, index) => ({id: index + 1, type: 'msg', kind: 'text', status: 'read', ts: '2026-11-20T12:55:56', channel_label: 'MAX', user_name: 'Синтетический автор', conversation_id: 7, ...message}));
 const conversation = {id:7, title:'Тестовая семья', channel:'wazzup_max', channel_label:'MAX', phone_norm:'79990000001', students:[], last_at:'2026-11-20T12:55:56', last_text:outgoing, unread:0};
 const family = {status:{wazzup_max:true}, conversations:[conversation], items:messages};
@@ -139,6 +139,11 @@ const conversationDetail = {conversation, targets:[{id:7,channel:'wazzup_max',la
       eq(await feed.locator('.msg').nth(9).locator('[data-delete-message]').isDisabled(),true);
       eq(await feed.locator('.msg').nth(8).locator('[data-delete-message]').count(),0,'Uncertain deletion cannot be submitted again');
       ok((await feed.locator('.msg').nth(8).innerText()).includes('Удаление не подтверждено'));
+      const quote=feed.locator('.msg').nth(11).locator('.msg-reply-context');
+      eq(await quote.count(),1,'Reply renders its source message');
+      eq(await quote.locator('a').getAttribute('href'),'https://ab-plus.ru/pay/synthetic','Source payment link stays clickable');
+      await quote.click({position:{x:5,y:5}});
+      ok(await feed.locator('.msg').nth(1).evaluate(node=>node.classList.contains('msg-reply-highlight')),'Source quote jumps to the original message');
       eq(await feed.locator('.msg').nth(0).locator('.chat-message-copyable').evaluate(node=>getComputedStyle(node).userSelect),'text','Native selection remains enabled under no-copy CSS');
       for(const index of [0,1,2,8,9,10,11]){
         await configureCopy();await copyMessage(feed,index,messages[index].text);

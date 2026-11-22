@@ -1866,7 +1866,7 @@ async function openSell(d, reload) {
         const paymentUrls=(message.value.match(/https?:\/\/[^\s<>"']+/gi)||[]).map(value=>value.replace(/[)\]},.;!?]+$/g,'')).filter(value=>{try{return new URL(value).pathname.startsWith('/pay/')}catch(_){return false}});
         if(paymentUrls.length!==1||paymentUrls[0]!==link.url)throw Error('Ссылка в сообщении изменена или добавлена другая ссылка на оплату. Обновите сообщение перед копированием или вставкой');
         if(action==='copy')await copyTextWithNotice(message.value,'Текст скопирован');
-        else{scTab('feed');const target=$('#cm-text');if(!target)return toast('Откройте чат в карточке или скопируйте сообщение',true);pasteIntoFamilyComposer(target,message.value);target.focus();target.scrollIntoView({block:'center',behavior:'smooth'});toast('Сообщение вставлено. Проверьте и отправьте')}
+        else{scTab('feed');const target=$('#cm-text');if(!target)return toast('Откройте чат в карточке или скопируйте сообщение',true);target.value=message.value;target.dispatchEvent(new Event('input',{bubbles:true}));target.focus();target.scrollIntoView({block:'center',behavior:'smooth'});toast('Сообщение вставлено. Проверьте и отправьте')}
         if(current())status.textContent='Сумма ссылки проверена';
       }catch(error){block(error)}finally{sharing=false;if(current())setPending(false)}
     };
@@ -1919,18 +1919,6 @@ async function copyTextWithNotice(text, notice='Текст скопирован'
     if(!copied){prompt('Скопируйте текст',text);return false}
   }
   toast(notice);
-  return true;
-}
-function pasteIntoFamilyComposer(target, text) {
-  if (!target) return false;
-  const incoming=String(text||'').trim(),current=target.value.trim();
-  if (!incoming) return false;
-  const urls=value=>(value.match(/https?:\/\/[^\s<>"']+/gi)||[]).map(url=>url.replace(/[)\]},.;!?]+$/g,''));
-  const existingUrls=new Set(urls(current));
-  const addsNewLink=urls(incoming).some(url=>!existingUrls.has(url));
-  if(!current)target.value=incoming;
-  else if(addsNewLink||!urls(incoming).length)target.value=current+'\n\n'+incoming;
-  target.dispatchEvent(new Event('input',{bubbles:true}));
   return true;
 }
 function clientSubscriptionMonth(sub) {
@@ -3465,7 +3453,7 @@ async function openMultiMonthSale(d,id,box,reload,preset={}) {
           await validateLinks();if(!current())return;
           if(issuedLinks.length){const expected=[...new Set(issuedLinks.map(item=>item.link.url))],urls=(message.value.match(/https?:\/\/[^\s<>"']+/gi)||[]).map(value=>value.replace(/[)\]},.;!?]+$/g,'')).filter(value=>{try{return new URL(value).pathname.startsWith('/pay/')}catch(_){return false}});if(urls.length!==expected.length||!expected.every(url=>urls.includes(url)))throw Error('Ссылка в сообщении изменена или добавлена другая ссылка на оплату')}
           if(action==='copy')await copyTextWithNotice(message.value);
-          else{scTab('feed');const target=$('#cm-text');if(!target)return toast('Откройте чат в карточке',true);pasteIntoFamilyComposer(target,message.value);target.focus()}
+          else{scTab('feed');const target=$('#cm-text');if(!target)return toast('Откройте чат в карточке',true);target.value=message.value;target.dispatchEvent(new Event('input',{bubbles:true}));target.focus()}
           if(current())status.textContent='Сумма ссылки проверена';
         }catch(error){block(error)}finally{sharing=false;if(current()&&!invalid){copy.disabled=chat.disabled=false;message.disabled=false}}
       };
