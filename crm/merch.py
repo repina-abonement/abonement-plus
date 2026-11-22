@@ -175,9 +175,10 @@ def reconcile_order_task(con, today: date | None = None, actor: str = "CRM", res
     owner = con.execute("SELECT id FROM users WHERE role='admin' AND active=1 ORDER BY id LIMIT 1").fetchone()
     if not owner:
         return None
-    title = "Заказать мерч: " + ", ".join(f"{item['name']} {item['qty']}" for item in order)
-    note = "Актуальный заказ по последним сохранённым остаткам. " + "; ".join(
-        f"{item['name']}: есть {item['stock']} из {item['norm']}" for item in order)
+    title = "Заказать мерч"
+    note = "Актуальный заказ по последним сохранённым остаткам:\n\n" + "\n".join(
+        f"• {item['name']} — заказать {item['qty']} (есть {item['stock']}, минимум {item['norm']})"
+        for item in order)
     due = today.isoformat() + "T23:59"
     if chosen:
         con.execute("""UPDATE tasks SET title=?,assignee_id=?,note=?,source='auto',auto_key=?,priority=1,

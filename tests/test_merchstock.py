@@ -49,8 +49,11 @@ def main():
     check(r["order"] == [{"name": name[a], "qty": 10, "stock": 5, "norm": 15}], f"{name[a]}: есть 5 из 15, заказать 10; второго хватает")
     check(not r["stock_status"]["weekly_due"] and r["stock_status"]["shortages"][0]["id"] == a,
           "Недельный пересчёт закрыт, дефицит остаётся предупреждением руководителю")
-    t = con.execute("SELECT title, assignee_id FROM tasks WHERE id=?", (r["task"],)).fetchone()
-    check(t["assignee_id"] == owner and f"{name[a]} 10" in t["title"], "Задача руководителю в Планере: что заказать")
+    t = con.execute("SELECT title,note,assignee_id FROM tasks WHERE id=?", (r["task"],)).fetchone()
+    check(t["assignee_id"] == owner and t["title"] == "Заказать мерч",
+          "В Планере короткий заголовок без списка товаров")
+    check(f"• {name[a]} — заказать 10 (есть 5, минимум 15)" in t["note"] and ";" not in t["note"],
+          "Заказ показан понятным списком: одна позиция на строку")
     check(r["task"] == first_task and con.execute("SELECT COUNT(*) FROM tasks WHERE auto_key=? AND status='open'", (merch.ORDER_TASK_KEY,)).fetchone()[0] == 1,
           "Повторный пересчёт обновляет одну задачу, а не создаёт дубли")
     task_state = con.execute("SELECT due_at,priority FROM tasks WHERE id=?", (first_task,)).fetchone()
