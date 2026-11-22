@@ -1797,6 +1797,8 @@ textarea.nav-q { height:40px; min-height:40px; max-height:40px; resize:none; ove
 .sc-head .sc-parent .rel-chip { border:0; border-radius:0; background:none; color:var(--ink-2); padding:0; }
 .sc-head .sc-parent .rel-chip.empty { color:var(--ink-2); }
 .sc-head .sc-parent-email { overflow-wrap:anywhere; }
+.sc-copy-phone { display:inline-grid; place-items:center; width:26px; height:26px; padding:0; border:1px solid var(--line); border-radius:7px; background:var(--surface); color:var(--ink-2); font:inherit; cursor:pointer; }
+.sc-copy-phone:hover,.sc-copy-phone:focus-visible { border-color:var(--accent); color:var(--accent); }
 .sc-head .sc-staff-note { background:var(--bg); border:0; padding:10px 12px; }
 .sc-head .sc-staff-note b { font-size:inherit; font-weight:500; color:inherit; }
 /* Редактируемая шапка: короткая панель действий справа. */
