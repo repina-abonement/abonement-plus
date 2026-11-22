@@ -133,6 +133,9 @@ async function renderManualBoard(page) {
 
 /* Правка задачи: что сделать, срок, исполнитель, заметка. Передать можно любому участнику команды, включая тренера */
 const TASK_ROLE = { admin: "руководитель", operator: "администратор", coach: "тренер" };
+function renewalReasonHtml(task) {
+  return task.renewal_reason ? `<details><summary>Как рассчитан срок</summary><div class="small muted" style="white-space:pre-line">${esc(task.renewal_reason)}</div></details>` : "";
+}
 function openTaskEdit(t, onDone, focus) {
   if (!t) return;
   const client=!!(t.client_task||t.student_id||t.student?.id||t.family_id);
@@ -146,6 +149,7 @@ function openTaskEdit(t, onDone, focus) {
       ${!client?`<div class="field"><label>Исполнитель</label><select name="assignee_id">${staff.map((u) => `<option value="${u.id}" ${u.id === t.assignee_id ? "selected" : ""}>${esc(u.name)} (${TASK_ROLE[u.role] || u.role})</option>`).join("")}
         ${t.assignee_id && !staff.some((u) => u.id === t.assignee_id) ? `<option value="" selected disabled>${esc(t.assignee || "Участник команды в архиве")}: выберите нового</option>` : ""}</select></div>`:""}</div>
     ${client?`<label class="check task-priority-control"><input type="checkbox" name="priority" ${t.priority?"checked":""}> 🔥 Приоритет — первой в колонке на этот день</label><p class="small muted">Общая задача для всех администраторов.</p>`:""}
+    ${renewalReasonHtml(t)}
     <div class="field"><label>Подробное описание задачи</label><textarea name="note" rows="4" maxlength="1000" placeholder="Контекст, с кем связаться, что уточнить и какой результат нужен">${esc(t.note || "")}</textarea><small class="muted">Здесь хранится вся информация, необходимая для выполнения задачи.</small></div>
     <div class="need-err small"></div>
     <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap"><button class="btn primary" style="flex:1">Сохранить</button>

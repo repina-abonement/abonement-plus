@@ -117,6 +117,8 @@ OLD_2H = ("Сегодня в {time} пробное занятие, ждём ва
 
 def init(con):
     con.executescript(SCHEMA)
+    if "renewal_reason" not in {row[1] for row in con.execute("PRAGMA table_info(tasks)")}:
+        con.execute("ALTER TABLE tasks ADD COLUMN renewal_reason TEXT")
     if not comms.get(con,'msg_after_approved_20261116'):
         previous=comms.get(con,'msg_after')
         if previous and previous!=trialscripts.AFTER_TEXT:comms.put(con,'msg_after_previous_20261116',previous)
@@ -238,12 +240,24 @@ def subscription_renewal_plan(con, student_id):
     return {'due':min(due for due,_ in plans)+'T23:59','note':'\n'.join(note for _,note in plans)}
 
 
+def update_renewal_reason(con, task_id, reason):
+    # Older tasks stored both texts in note. Strip only a known generated prefix.
+    con.execute("""UPDATE tasks SET note=CASE
+        WHEN renewal_reason IS NOT NULL THEN note
+        WHEN note=? THEN ''
+        WHEN instr(note, ? || char(10))=1 THEN ltrim(substr(note,length(?)+1),char(10)||char(13))
+        ELSE note END, renewal_reason=? WHERE id=?""", (reason,reason,reason,reason,task_id))
+
+
 def refresh_subscription_renewals(con):
     # Обновляем только открытые автоматические задачи; выполненные не открываем заново.
     for task in con.execute("SELECT * FROM tasks WHERE source='subscription' AND kind='renew' AND status='open' AND auto_key LIKE 'subscription-renew:%'").fetchall():
         plan=subscription_renewal_plan(con,task['student_id'])
-        if plan and (task['due_at']!=plan['due'] or task['note']!=plan['note']):
-            con.execute('UPDATE tasks SET due_at=?,note=? WHERE id=?',(plan['due'],plan['note'],task['id']))
+        if plan:
+            if task['renewal_reason'] != plan['note']:
+                update_renewal_reason(con,task['id'],plan['note'])
+            if task['due_at'] != plan['due']:
+                con.execute('UPDATE tasks SET due_at=? WHERE id=?',(plan['due'],task['id']))
 
 
 def schedule_renewal(con, student_id: int) -> int | None:
@@ -268,11 +282,12 @@ def schedule_renewal(con, student_id: int) -> int | None:
     if existing:
         tid = existing[0]
         con.execute("""UPDATE tasks SET kind='renew', title='Проверить продление', due_at=?,
-            assignee_id=NULL, status='open', done_at=NULL, done_by='', result='',note=? WHERE id=?""", (due,note,tid))
+            assignee_id=NULL, status='open', done_at=NULL, done_by='', result='' WHERE id=?""", (due,tid))
     else:
         tid = add_task(con, 'renew', student_id, due, title='Проверить продление',
-                       auto_key=key, source='subscription',note=note)
+                       auto_key=key, source='subscription')
         con.execute("UPDATE tasks SET assignee_id=NULL WHERE id=?", (tid,))
+    update_renewal_reason(con,tid,note)
     return tid
 
 
