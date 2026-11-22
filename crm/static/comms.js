@@ -325,15 +325,15 @@ function resizeMessageInput(input) {
   input.style.height=Math.max(minimum,Math.min(input.scrollHeight+2,window.innerHeight*.6))+"px";
 }
 function clientChannelPriority(channel) {
-  return ({wazzup_telegram:0,telegram:0,wazzup_max:1,max:1,whatsapp:2})[channel] ?? 3;
+  return ({wazzup_max:0,max:0,wazzup_telegram:1,telegram:1,whatsapp:2})[channel] ?? 3;
 }
 function preferredFamilyTarget(conversations,targets,primary,status) {
-  // Среди существующих переписок: Telegram → MAX → WhatsApp, затем свежесть.
+  // Единый приоритет: MAX → Telegram → WhatsApp, затем свежесть.
   const existing=conversations.filter(c=>!['tg_archive','telegram'].includes(c.channel)&&targets.some(t=>t.v==='c'+c.id));
   existing.sort((a,b)=>clientChannelPriority(a.channel)-clientChannelPriority(b.channel)||(b.last_at||'').localeCompare(a.last_at||'')||b.id-a.id);
   if(existing.length)return 'c'+existing[0].id;
   if(!primary)return targets.length===1?targets[0].v:'';
-  return ['t','m','w'].map(prefix=>targets.find(t=>t.v===prefix+primary.id)).find(Boolean)?.v||'';
+  return ['m','t','w'].map(prefix=>targets.find(t=>t.v===prefix+primary.id)).find(Boolean)?.v||'';
 }
 
 function messengerLogo(label) {

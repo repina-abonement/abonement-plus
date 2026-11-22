@@ -1048,6 +1048,13 @@ WZ_ROUTE = {
     "wazzup_max": ("max", "wazzup_max_channel", "MAX"),
 }
 
+# Единый бизнес-приоритет каналов: MAX → Telegram → WhatsApp.
+CHANNEL_PRIORITY = {"wazzup_max": 0, "max": 0, "wazzup_telegram": 1, "telegram": 2, "whatsapp": 3}
+
+
+def channel_priority(channel: str) -> int:
+    return CHANNEL_PRIORITY.get(channel or "", 99)
+
 
 def _wz_destination(con, conv):
     if conv["channel"] not in WZ_ROUTE:
@@ -1583,6 +1590,18 @@ def preferred_telegram_reply(con,current,conversations):
     return candidates[0]['id'] if len(candidates)==1 else current['id']
 
 
+def preferred_reply(con, current, conversations):
+    """Best channel for the same proven recipient, using MAX → Telegram → WhatsApp."""
+    candidates = [c for c in conversations if c.get("channel") != "tg_archive" and same_reply_contact(current, c)]
+    if not candidates:
+        return current["id"]
+    best_rank = min(channel_priority(c.get("channel")) for c in candidates)
+    best = [c for c in candidates if channel_priority(c.get("channel")) == best_rank]
+    if current.get("channel") == "telegram" and best_rank == channel_priority("wazzup_telegram") and len(best) != 1:
+        return current["id"]
+    return max(best, key=lambda c: (str(c.get("last_at") or ""), c.get("id") or 0))["id"]
+
+
 def same_reply_contact(current, candidate):
     if current['id']==candidate['id']:
         return True
@@ -1626,7 +1645,7 @@ def conversation(con, cid: int, mark_read: bool = True) -> dict:
         for c in convs:
             if c['unread']:
                 con.execute('UPDATE conversations SET unread=0 WHERE id=?',(c['id'],))
-    return {"conversation": _conv_out(con, r), "messages": msgs, "history": items, "preferred_reply_id":preferred_telegram_reply(con,dict(r),convs),
+    return {"conversation": _conv_out(con, r), "messages": msgs, "history": items, "preferred_reply_id":preferred_reply(con,dict(r),convs),
             "targets": [{"id": c["id"], "channel":c["channel"], "same_contact":True, "label": c["channel_label"] + (" · " + c["title"] if c["title"] else "")} for c in convs
                         if c["channel"] != "tg_archive"]}
 

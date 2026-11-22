@@ -40,4 +40,18 @@ class ProfileTest(unittest.TestCase):
         self.con.execute("INSERT INTO conversations(channel,external_id,phone_norm,family_id,created_at) VALUES ('telegram','mom','79001112233',?,'2026-11-13')",(self.fid,))
         self.assertIsNone(tasks.best_conversation(self.con,self.fid))
 
+    def test_messenger_priority_is_max_then_telegram_then_whatsapp(self):
+        phone='79001112233'
+        ids={}
+        for channel,stamp in [('whatsapp','2026-11-22T12:03'),('wazzup_telegram','2026-11-22T12:02'),('wazzup_max','2026-11-22T12:01')]:
+            ids[channel]=self.con.execute("INSERT INTO conversations(channel,external_id,phone_norm,family_id,last_at,created_at) VALUES (?,?,?,?,?,?)",
+                (channel,channel,phone,self.fid,stamp,stamp)).lastrowid
+        self.assertEqual(tasks.best_conversation(self.con,self.fid),ids['wazzup_max'])
+        detail=comms.conversation(self.con,ids['whatsapp'],False)
+        self.assertEqual(detail['preferred_reply_id'],ids['wazzup_max'])
+        self.con.execute("DELETE FROM conversations WHERE id=?",(ids['wazzup_max'],))
+        self.assertEqual(tasks.best_conversation(self.con,self.fid),ids['wazzup_telegram'])
+        self.con.execute("DELETE FROM conversations WHERE id=?",(ids['wazzup_telegram'],))
+        self.assertEqual(tasks.best_conversation(self.con,self.fid),ids['whatsapp'])
+
 if __name__=='__main__':unittest.main()

@@ -275,7 +275,7 @@ def render_template(con, key: str, s: dict, channel: str = "") -> str:
 
 
 def best_conversation(con, family_id: int) -> int | None:
-    """Куда писать семье: последняя живая переписка, иначе новый WhatsApp через Wazzup.
+    """Куда писать семье: MAX → Telegram → WhatsApp для основного родителя.
     Выдуманным (тестовым) семьям не пишем никогда: их случайные номера могут оказаться чужими."""
     fam = con.execute("SELECT * FROM families WHERE id=?", (family_id or 0,)).fetchone()
     if not fam or ("fake" in fam.keys() and fam["fake"]):
@@ -285,15 +285,23 @@ def best_conversation(con, family_id: int) -> int | None:
         username=(primary['messenger'] or '').strip().lstrip('@').casefold()
         r=con.execute("""SELECT id FROM conversations WHERE family_id=? AND external_id NOT LIKE 'demo-%'
             AND ((phone_norm!='' AND phone_norm=?) OR (username!='' AND lower(ltrim(username,'@'))=?))
-            ORDER BY last_at IS NULL,last_at DESC LIMIT 1""",(family_id,primary['phone_norm'],username)).fetchone()
+            ORDER BY CASE channel WHEN 'wazzup_max' THEN 0 WHEN 'max' THEN 0
+                                  WHEN 'wazzup_telegram' THEN 1 WHEN 'telegram' THEN 1
+                                  WHEN 'whatsapp' THEN 2 ELSE 99 END,
+                     last_at IS NULL,last_at DESC LIMIT 1""",(family_id,primary['phone_norm'],username)).fetchone()
     else:
         r = con.execute("""SELECT id FROM conversations WHERE family_id=? AND external_id NOT LIKE 'demo-%'
-                       ORDER BY last_at IS NULL, last_at DESC LIMIT 1""", (family_id,)).fetchone()
+                       ORDER BY CASE channel WHEN 'wazzup_max' THEN 0 WHEN 'max' THEN 0
+                                             WHEN 'wazzup_telegram' THEN 1 WHEN 'telegram' THEN 1
+                                             WHEN 'whatsapp' THEN 2 ELSE 99 END,
+                                last_at IS NULL, last_at DESC LIMIT 1""", (family_id,)).fetchone()
     if r:
         current=dict(con.execute('SELECT * FROM conversations WHERE id=?',(r[0],)).fetchone())
         conversations=[dict(c) for c in con.execute('SELECT * FROM conversations WHERE family_id=?',(family_id,))]
-        preferred=comms.preferred_telegram_reply(con,current,conversations)
+        preferred=comms.preferred_reply(con,current,conversations)
         if current['channel']!='telegram' or preferred!=current['id']:return preferred
+        if not comms.status(con)['wazzup_telegram']:
+            return current['id']
         if primary and primary['phone_norm'] and current.get('phone_norm')==primary['phone_norm'] and comms.status(con)['wazzup_telegram']:
             if any(c['channel']=='wazzup_telegram' and c.get('phone_norm')==primary['phone_norm'] for c in conversations):return None
             cid=comms.start_wazzup_telegram(con,primary['phone'])
@@ -301,12 +309,15 @@ def best_conversation(con, family_id: int) -> int | None:
             if existing and existing[0] not in (None,family_id):return None
             comms.link(con,cid,family_id);return cid
         return None
-    if comms.status(con)["whatsapp"]:
-        p = con.execute("SELECT phone FROM parents WHERE family_id=? AND phone != '' ORDER BY is_primary DESC,id LIMIT 1", (family_id,)).fetchone()
-        if p and (not primary or primary['phone']==p[0]):
-            cid = comms.start_whatsapp(con, p[0])
-            comms.link(con, cid, family_id)
-            return cid
+    available=comms.status(con)
+    starters=(("wazzup_max",comms.start_wazzup_max),("wazzup_telegram",comms.start_wazzup_telegram),("whatsapp",comms.start_whatsapp))
+    for channel,start in starters:
+        if available[channel]:
+            p = con.execute("SELECT phone FROM parents WHERE family_id=? AND phone != '' ORDER BY is_primary DESC,id LIMIT 1", (family_id,)).fetchone()
+            if p and (not primary or primary['phone']==p[0]):
+                cid = start(con, p[0])
+                comms.link(con, cid, family_id)
+                return cid
     return None
 
 
