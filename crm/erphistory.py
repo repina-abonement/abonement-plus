@@ -49,6 +49,7 @@ PILOT_KEYS = {
     # Веткин (Данзанов): отдельный октябрьский пилот, ERP 125824.
     "3792ceb0d0b3a0ace66c3f2b7a6deb0e6c65ede732445fa0e44946559a1a08b1",
 }
+PILOT_KEYS.add("8cb28126f976831e0b2335f8bdb8dbddf6415fc0862b4e52ef3f42ba9b12b00e")
 PILOT_CONTRACTS = {
     ("84894", "2026-11"): {
         "827955": ("2026-11-01", "2026-11-29", 9, 13500),
@@ -193,6 +194,15 @@ def _legacy_visit(con, table, item, student_id, group_id, kind, status):
 
 
 def _pilot_contract_issue(row, erp_id, month):
+    if (erp_id, month) == ("82976", "2026-11"):
+        expected = {"sz:82976:2026-11:arena": (13500, 9), "sz:82976:2026-11:ofp": (4800, 4)}
+        subs = _subscriptions(row)
+        actual = {s.get("source_id"): (_amount(s.get("price")), s.get("lesson_count")) for s in subs}
+        if len(subs) != 2 or actual != expected or row.get("attendance") or not row.get("partial_attendance"):
+            return "Проверьте две исторические продажи СЗ и отдельный план занятий"
+        if any(s.get("source") != "СЗ" or s.get("erp_id") or not s.get("source_note") for s in subs):
+            return "Укажите подтверждение СЗ без номера абонемента ERP"
+        return ""
     if (erp_id, month) == ("64928", "2026-11"):
         subs = _subscriptions(row)
         if {str(x.get("erp_id") or "") for x in subs} != {"825124", "825123"}:
@@ -346,7 +356,7 @@ def _pilot_contract_issue(row, erp_id, month):
         planned = _planned_lessons(row, sub)
         if len(planned) != int(sub.get("lesson_count") or 0):
             return "Число занятий в плане не совпадает с абонементом"
-        if str(sub.get("erp_id")) == "827957" and any(
+        if str(sub.get("erp_id") or sub.get("source_id")) == "827957" and any(
                 str(x.get("time") or "") != "17:00" or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(x.get("date") or ""))
                 or date.fromisoformat(str(x.get("date"))).weekday() != 5 for x in planned):
             return "Субботняя ОФП должна быть запланирована в 17:00"
@@ -503,7 +513,7 @@ def preview(con, payload, period=None, student_ids=None, unassigned_visit_ids=No
             if state == "add_unassigned": out["group_unresolved"] = True
             child["visits"].append(out); mapped.append((item, out)); result["existing" if state == "already_exists" else "added" if state in ("add", "add_unassigned") else "updated" if state == "assign_group" else "review"] += 1
         for sub in _subscriptions(row):
-            subid = str(sub.get("erp_id") or "").strip(); revenue_amount = _amount(sub.get("price"))
+            subid = str(sub.get("erp_id") or sub.get("source_id") or "").strip(); revenue_amount = _amount(sub.get("price"))
             attached = [x[1] for x in mapped if x[1]["kind"] == "subscription" and x[1]["source_subscription_id"] == subid]
             planned = []
             for item in _planned_lessons(row, sub):
@@ -571,12 +581,12 @@ def apply(con, payload, period, token, user, student_ids=None, unassigned_visit_
             linked = con.execute("SELECT student_id FROM erp_full_identities WHERE namespace='student' AND source_id=?", (child["erp_id"],)).fetchone()
             if linked and linked["student_id"] != sid: raise HistoryError("ERP ID уже связан с другой карточкой")
             con.execute("INSERT OR IGNORE INTO erp_full_identities(namespace,source_id,student_id) VALUES ('student',?,?)", (child["erp_id"],sid))
-        raw_subscriptions = {str(x.get("erp_id")): x for x in _subscriptions(raw)}
+        raw_subscriptions = {str(x.get("erp_id") or x.get("source_id")): x for x in _subscriptions(raw)}
         for sub in child["subscriptions"]:
             if sub["state"] == "add":
                 con.execute("INSERT INTO erp_history_subscriptions(source_id,student_id,group_id,month,valid_from,valid_until,lessons,revenue_amount,source_payload,imported_at,imported_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                     (sub["source_id"],sid,sub["group_id"],child["period"],sub["valid_from"],sub["valid_until"],int(sub["lessons"]),sub["revenue_amount"],_json(raw_subscriptions[sub["source_id"]]),now,user.get("name", ""))); created_subs += 1
-        raw_plans = {(str(x.get("erp_subscription_id") or sub.get("erp_id") or ""), str(x.get("date") or ""), str(x.get("time") or "")): x
+        raw_plans = {(str(x.get("erp_subscription_id") or sub.get("erp_id") or sub.get("source_id") or ""), str(x.get("date") or ""), str(x.get("time") or "")): x
                      for sub in _subscriptions(raw) for x in _planned_lessons(raw, sub)}
         for plan in child["planned"]:
             if plan["state"] != "add": continue
