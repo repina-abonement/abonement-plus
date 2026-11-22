@@ -148,6 +148,10 @@ def init(con):
     from . import chatinbox
     chatinbox.init(con)
     con.execute("CREATE TABLE IF NOT EXISTS conversation_pins(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,created_at TEXT NOT NULL,PRIMARY KEY(user_id,conversation_id))")
+    con.execute("""CREATE TABLE IF NOT EXISTS message_send_requests(
+        request_id TEXT PRIMARY KEY,conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        text_hash TEXT NOT NULL,state TEXT NOT NULL,message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+        error TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL)""")
     from . import stickerpacks
     stickerpacks.init(con)
     ucols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
@@ -1237,7 +1241,7 @@ def send_sticker(con, cid: int, sticker: str, user: dict) -> dict:
     return {"id": mid, "demo": demo}
 
 
-def send(con, cid: int, text: str, user: dict) -> dict:
+def send(con, cid: int, text: str, user: dict, request_id: str = "") -> dict:
     text = (text or "").strip()
     if not text:
         raise CommsError("Пустое сообщение")
@@ -1245,6 +1249,20 @@ def send(con, cid: int, text: str, user: dict) -> dict:
     if not conv:
         raise CommsError("Переписка не найдена")
     conv = dict(conv)
+    request_id=(request_id or "").strip()
+    if request_id and not re.fullmatch(r"[A-Za-z0-9_-]{16,80}",request_id):
+        raise CommsError("Некорректный идентификатор отправки. Обновите страницу и повторите")
+    text_hash=hashlib.sha256((str(cid)+"\0"+text).encode()).hexdigest()
+    if request_id:
+        prior=con.execute("SELECT * FROM message_send_requests WHERE request_id=?",(request_id,)).fetchone()
+        if prior:
+            if prior["conversation_id"]!=cid or prior["text_hash"]!=text_hash:
+                raise CommsError("Эта попытка отправки относится к другому сообщению. Обновите страницу")
+            if prior["state"]=="sent" and prior["message_id"]:
+                return {"id":prior["message_id"],"already_sent":True}
+            raise CommsError("Повтор этой попытки заблокирован: доставка не подтверждена. Сначала проверьте чат в мессенджере, затем обновите страницу для осознанного повтора")
+        con.execute("INSERT INTO message_send_requests(request_id,conversation_id,text_hash,state,created_at) VALUES (?,?,?,'pending',?)",
+                    (request_id,cid,text_hash,ts_now()))
     from . import paylinkguard,paylinks
     try:
         paylinkguard.guard_message(con,text,conv)
@@ -1273,9 +1291,13 @@ def send(con, cid: int, text: str, user: dict) -> dict:
         else:
             raise CommsError("Этот канал не поддерживается")
     except CommsError as e:
-        add_message(con, cid, "out", text, user_name=name, status="error", error=str(e))
+        failed=add_message(con, cid, "out", text, user_name=name, status="error", error=str(e))
+        if request_id:
+            con.execute("UPDATE message_send_requests SET state='error',message_id=?,error=? WHERE request_id=?",(failed,str(e),request_id))
         raise
     mid = add_message(con, cid, "out", text, user_name=name, external_id=ext, status="sent" if ext else "")
+    if request_id:
+        con.execute("UPDATE message_send_requests SET state='sent',message_id=? WHERE request_id=?",(mid,request_id))
     return {"id": mid}
 
 

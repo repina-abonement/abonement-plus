@@ -36,3 +36,28 @@ class FirstSendFailureTest(WazzupTest):
         self.assertIsInstance(result, dict)
         self.assertIn('conversation_id', result)
         self.assertEqual(self.con.execute("SELECT external_id FROM messages WHERE id=?", (result['id'],)).fetchone()[0], 'synthetic-ack')
+
+    def test_same_browser_attempt_cannot_resend_after_unconfirmed_failure(self):
+        comms.put(self.con, 'wazzup_channel', 'test-wa')
+        parent = self.con.execute('SELECT id FROM parents WHERE family_id=?', (self.fid,)).fetchone()[0]
+        body={'parent_id':parent,'channel':'whatsapp','text':'Synthetic guarded message','request_id':'requestguard1234567890'}
+        with patch.object(comms,'wz_call',side_effect=comms.CommsError('Wazzup did not confirm')) as provider:
+            first=server.family_whatsapp(self.con,None,self.user,body,{},str(self.fid))
+            second=server.family_whatsapp(self.con,None,self.user,body,{},str(self.fid))
+        self.assertEqual(first.status,400)
+        self.assertEqual(second.status,400)
+        self.assertIn('Повтор этой попытки заблокирован',second.body['error'])
+        self.assertEqual(provider.call_count,1)
+        self.assertEqual(self.con.execute("SELECT count(*) FROM messages WHERE text='Synthetic guarded message'").fetchone()[0],1)
+
+    def test_same_confirmed_request_returns_existing_message_without_resend(self):
+        comms.put(self.con, 'wazzup_channel', 'test-wa')
+        parent = self.con.execute('SELECT id FROM parents WHERE family_id=?', (self.fid,)).fetchone()[0]
+        body={'parent_id':parent,'channel':'whatsapp','text':'Synthetic confirmed message','request_id':'requestsent123456789012'}
+        with patch.object(comms,'wz_call',return_value={'messageId':'one-provider-message'}) as provider:
+            first=server.family_whatsapp(self.con,None,self.user,body,{},str(self.fid))
+            second=server.family_whatsapp(self.con,None,self.user,body,{},str(self.fid))
+        self.assertEqual(first['id'],second['id'])
+        self.assertTrue(second['already_sent'])
+        self.assertEqual(provider.call_count,1)
+        self.assertEqual(self.con.execute("SELECT count(*) FROM messages WHERE external_id='one-provider-message'").fetchone()[0],1)

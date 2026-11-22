@@ -489,13 +489,15 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     if (!to) return toast("Выберите мессенджер для отправки");
     send.disabled = true;
     const sentValue=$('#cm-text').value;
+    const requestId=messageRequestId($('#cm-text'),to,sentValue);
     try {
-      if (to[0] === "c") await api("POST", `/api/conversations/${to.slice(1)}/send`, { text });
+      if (to[0] === "c") await api("POST", `/api/conversations/${to.slice(1)}/send`, { text,request_id:requestId });
       else {
-        const created = await api("POST", `/api/families/${familyId}/whatsapp`, {parent_id:+to.slice(1),text,channel:to[0] === "m" ? "max" : to[0] === "t" ? "telegram" : "whatsapp"});
+        const created = await api("POST", `/api/families/${familyId}/whatsapp`, {parent_id:+to.slice(1),text,request_id:requestId,channel:to[0] === "m" ? "max" : to[0] === "t" ? "telegram" : "whatsapp"});
         if (created.conversation_id) S.familySendTargets[targetKey] = "c" + created.conversation_id;
       }
       if(box.isConnected&&$('#comms-box')===box&&box.dataset.familyId===String(familyId)){
+        clearMessageRequest($('#cm-text'));
         clearSentComposerDraft(box.querySelector('#cm-text'),sentValue);
         await loadFamilyComms(familyId, parents, studentId, kid);
       }
@@ -748,8 +750,10 @@ async function openChat(cid, keepScroll = false) {
     sendBtn.disabled = true;
     const input=$('#chat-text'),sentValue=input.value;
     const to = $("#chat-to") ? +$("#chat-to").value : cid;
+    const requestId=messageRequestId(input,String(to),sentValue);
     try {
-      await api("POST", `/api/conversations/${to}/send`, { text });
+      await api("POST", `/api/conversations/${to}/send`, { text,request_id:requestId });
+      clearMessageRequest(input);
       S.chatDrafts=S.chatDrafts||{};
       if(input.isConnected){clearSentComposerDraft(input,sentValue);S.chatDrafts[cid]={text:input.value,attachment:null};if(c.open_q&&confirm('В этом диалоге открытый вопрос — он решён?'))await api('POST',`/api/conversations/${cid}/question/close`,{});openChat(cid)}
       else {if(S.chatDrafts[cid]?.text===sentValue)S.chatDrafts[cid]={text:'',attachment:null};S.inbox.refresh?.();}
@@ -1446,4 +1450,15 @@ function clearSentComposerDraft(input,sentValue) {
   input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));
   if(typeof resizeMessageInput==='function')resizeMessageInput(input);
   return true;
+}
+
+function messageRequestId(input,target,text) {
+  const signature=String(target)+'\n'+String(text);
+  if(input?.dataset.sendSignature===signature&&input.dataset.sendRequest)return input.dataset.sendRequest;
+  const id=(crypto.randomUUID?crypto.randomUUID().replaceAll('-',''):[...crypto.getRandomValues(new Uint32Array(4))].map(x=>x.toString(16).padStart(8,'0')).join(''));
+  if(input){input.dataset.sendSignature=signature;input.dataset.sendRequest=id}
+  return id;
+}
+function clearMessageRequest(input) {
+  if(!input)return;delete input.dataset.sendSignature;delete input.dataset.sendRequest;
 }
