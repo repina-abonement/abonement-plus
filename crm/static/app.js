@@ -1336,7 +1336,10 @@ async function renderWorkdesk(page) {
     await new Promise((resolve) => setTimeout(resolve, 1200));
     return api("GET", workdeskUrl);
   });
-  const [d, tasksHtml, schedHtml, erpHtml, skips, members] = await Promise.all([workdeskData, tasksSection(), scheduleWidget().catch(() => ""),
+  const tasksHtmlRequest = tasksSection().catch((error) => `<section class="now red-box workdesk-part-error">
+    <div class="now-head"><h3>Задачи временно не загрузились</h3><button type="button" class="btn sm" data-reload-workdesk>Повторить</button></div>
+    <div class="small">Остальные разделы рабочего стола доступны. ${esc(error.message || "Ошибка сервера")}</div></section>`);
+  const [d, tasksHtml, schedHtml, erpHtml, skips, members] = await Promise.all([workdeskData, tasksHtmlRequest, scheduleWidget().catch(() => ""),
     (can("sales") || S.viewAs || S.user.is_offline_admin) ? erpTasksSection(S.viewAs, taskLayout) : Promise.resolve(""), can("skips") ? api("GET", "/api/board/skips").catch(() => null) : Promise.resolve(null),
     can("members", "full") ? api("GET", "/api/board/members").catch(() => null) : Promise.resolve(null)]);
   // воронка «Продления» (Юлия, 04.11): разовые, не оплачен, продлить (с 20 числа), счёт выставлен, ушёл. Оплатившие не попадают
@@ -1459,6 +1462,7 @@ async function renderWorkdesk(page) {
   wireErpTasks(page);
   wireTasks(page);
   wireViewAs(page);
+  page.querySelectorAll("[data-reload-workdesk]").forEach((button) => (button.onclick = render));
   wireNeedsSubs(page, d);
   wireWaitlist(page);
   wireMarks(page);

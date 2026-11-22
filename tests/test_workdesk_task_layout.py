@@ -37,6 +37,14 @@ def test_workdesk_retries_a_temporary_server_or_network_failure():
     assert 'return api("GET", workdeskUrl)' in app
 
 
+def test_task_failure_does_not_replace_the_entire_workdesk():
+    app = (ROOT / "crm/static/app.js").read_text(encoding="utf-8")
+
+    assert "const tasksHtmlRequest = tasksSection().catch" in app
+    assert "Задачи временно не загрузились" in app
+    assert "data-reload-workdesk" in app
+
+
 def test_new_application_is_a_prominent_action_until_client_status_changes():
     app = (ROOT / "crm/static/app.js").read_text(encoding="utf-8")
     styles = (ROOT / "crm/static/style.css").read_text(encoding="utf-8")

@@ -1191,6 +1191,22 @@ def merch_alerts(con):
             "cash_not_handed": [x for x in reg["by_seller"] if x["cash_not_handed"]], "stock": merch.stock_status(con, t)}
 
 
+def _workdesk_piece(con, name, build, fallback, errors):
+    """A broken optional widget must not make the whole workdesk unavailable."""
+    savepoint = "workdesk_" + re.sub(r"[^a-z0-9_]", "_", name.lower())
+    con.execute(f"SAVEPOINT {savepoint}")
+    try:
+        value = build()
+        con.execute(f"RELEASE SAVEPOINT {savepoint}")
+        return value
+    except Exception as error:  # noqa: BLE001 - deliberately isolate an optional widget
+        con.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+        con.execute(f"RELEASE SAVEPOINT {savepoint}")
+        traceback.print_exc()
+        errors.append({"part": name, "type": type(error).__name__})
+        return fallback
+
+
 @route("GET", "/api/workdesk", role="operator|client_ops:full")
 def workdesk(con, h, user, body, q):
     board = sv.board(con, "sales")
@@ -1207,25 +1223,34 @@ def workdesk(con, h, user, body, q):
     reds.sort(key=lambda x: x["ts"] or "", reverse=True)
     rest = [x for x in items if x["level"] != "red"]
     rest.sort(key=lambda x: x["ts"] or "", reverse=True)
-    return {"urgent": reds + rest, "board": board, "refund_requests": __import__("crm.refundapproval",fromlist=["listing"]).listing(con) if user["role"]=="admin" else [], "new_cards_today": sv.new_cards_today(con), "birthdays": sv.birthdays(con), "needs_subs": schedule.needs_subs(con),
-            "manual_payment_checks": __import__("crm.manualpaymentcheck",fromlist=["task_board"]).task_board(con),
-            "checkins": staff.day_report(con) if checkin_reviewer(con, user) else None,
-            "merch_alerts": merch_alerts(con),
-            "waitlist": __import__("crm.waitlist", fromlist=["funnel"]).funnel(con),
-            "missing_marks": __import__("crm.pu", fromlist=["missing_marks"]).missing_marks(con),
-            "alerts": __import__("crm.pu", fromlist=["open_alerts"]).open_alerts(con),
-            "call_focus": calldigest.focus_for(con, (con.execute("SELECT sip_number FROM users WHERE id=?",
-                                                                 (int(q["as_user"]) if q.get("as_user") and user["role"] == "admin" else user["id"],)).fetchone() or [""])[0]),
-            "bills_due": expenses.bills_upcoming(con) if user["role"] == "admin" else [],
-            "ads_alerts": expenses.ads_alerts(con) if user["role"] == "admin" else [],
-            "reviews": __import__("crm.reviews", fromlist=["open_list"]).open_list(con) if user["role"] == "admin" else [],
-            "absences": schedule.absences(con),
-            "coach_answers": __import__("crm.coachreport", fromlist=["answers"]).answers(con)
+    errors = []
+    part = lambda name, build, fallback: _workdesk_piece(con, name, build, fallback, errors)
+    sip_user = int(q["as_user"]) if q.get("as_user") and user["role"] == "admin" else user["id"]
+    sip_number = (con.execute("SELECT sip_number FROM users WHERE id=?", (sip_user,)).fetchone() or [""])[0]
+    result = {"urgent": reds + rest, "board": board,
+            "refund_requests": part("refund_requests", lambda: __import__("crm.refundapproval",fromlist=["listing"]).listing(con), []) if user["role"]=="admin" else [],
+            "new_cards_today": part("new_cards_today", lambda: sv.new_cards_today(con), []),
+            "birthdays": part("birthdays", lambda: sv.birthdays(con), []),
+            "needs_subs": part("needs_subs", lambda: schedule.needs_subs(con), []),
+            "manual_payment_checks": part("manual_payment_checks", lambda: __import__("crm.manualpaymentcheck",fromlist=["task_board"]).task_board(con), {"columns": []}),
+            "checkins": part("checkins", lambda: staff.day_report(con), None) if checkin_reviewer(con, user) else None,
+            "merch_alerts": part("merch_alerts", lambda: merch_alerts(con), None),
+            "waitlist": part("waitlist", lambda: __import__("crm.waitlist", fromlist=["funnel"]).funnel(con), None),
+            "missing_marks": part("missing_marks", lambda: __import__("crm.pu", fromlist=["missing_marks"]).missing_marks(con), []),
+            "alerts": part("alerts", lambda: __import__("crm.pu", fromlist=["open_alerts"]).open_alerts(con), []),
+            "call_focus": part("call_focus", lambda: calldigest.focus_for(con, sip_number), None),
+            "bills_due": part("bills_due", lambda: expenses.bills_upcoming(con), []) if user["role"] == "admin" else [],
+            "ads_alerts": part("ads_alerts", lambda: expenses.ads_alerts(con), []) if user["role"] == "admin" else [],
+            "reviews": part("reviews", lambda: __import__("crm.reviews", fromlist=["open_list"]).open_list(con), []) if user["role"] == "admin" else [],
+            "absences": part("absences", lambda: schedule.absences(con), []),
+            "coach_answers": part("coach_answers", lambda: __import__("crm.coachreport",fromlist=["answers"]).answers(con), [])
             if perms.roles_of(user) & {"owner", "senior", "operator"} else [],
-            "shift_reports": __import__("crm.coachreport", fromlist=["desk"]).desk(con, user["role"] == "admin")
+            "shift_reports": part("shift_reports", lambda: __import__("crm.coachreport",fromlist=["desk"]).desk(con, user["role"] == "admin"), None)
             if perms.can(user, "schedule", "full") else None,
-            "coaches": [dict(r) for r in con.execute("SELECT id, name FROM users WHERE role='coach' AND active=1 ORDER BY name")],
-            **comms.counts(con)}
+            "coaches": part("coaches", lambda: [dict(r) for r in con.execute("SELECT id, name FROM users WHERE role='coach' AND active=1 ORDER BY name")], [])}
+    result.update(part("counts", lambda: comms.counts(con), {}))
+    result["widget_errors"] = errors
+    return result
 
 
 @route("GET", "/api/board/members", role="operator|client_ops:full")
