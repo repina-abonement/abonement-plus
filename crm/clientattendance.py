@@ -74,9 +74,18 @@ def calendar(con, sid, ym):
     if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_planned_lessons'").fetchone():
         for planned in con.execute('''SELECT * FROM erp_history_planned_lessons
             WHERE student_id=? AND lesson_date BETWEEN ? AND ?''', (sid,start.isoformat(),end.isoformat())):
-            add(planned['lesson_date'],planned['group_id'],'subscription','planned',
-                trial_time=planned['lesson_time'],historical_erp=True,
-                source_subscription_id=planned['source_subscription_id'])
+            day, gid = planned['lesson_date'], planned['group_id']
+            event = events.get((day, gid, 'subscription'))
+            if event is None and (day, gid) in marks:
+                event = events.pop((day, gid, 'visit'), None)
+                if event is not None:
+                    event['kind'] = 'subscription'
+                    events[(day, gid, 'subscription')] = event
+            if event is None:
+                add(day, gid, 'subscription')
+                event = events[(day, gid, 'subscription')]
+            event.update(trial_time=planned['lesson_time'], historical_erp=True,
+                         source_subscription_id=planned['source_subscription_id'])
     if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_visits'").fetchone():
         for mark in con.execute('''SELECT * FROM erp_history_visits WHERE student_id=? AND visit_date BETWEEN ? AND ?''',
                                 (sid,start.isoformat(),end.isoformat())):
