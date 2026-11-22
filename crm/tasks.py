@@ -594,7 +594,7 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     """Один проход: создать задачи по пробным, отправить автосообщения, закрыть неактуальные задачи."""
     now = now or _now()
     from . import erpstatus
-    erpstatus.sync_native(con, now.date())
+    erpstatus.sync_all(con, now.date())
     from . import planner, program
     request_missing_data(con, now.date())
     planner.generate(con, now.date())

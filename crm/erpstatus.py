@@ -121,9 +121,15 @@ def sync_one(con, sid: int, on: date | None = None, *, log: bool = True) -> str:
     return value
 
 
-def sync_native(con, on: date | None = None) -> int:
+def sync_all(con, on: date | None = None) -> int:
+    """Reconcile every active card; imported cards without newer evidence remain untouched."""
     changed = 0
-    for row in con.execute("SELECT id,erp_status FROM students WHERE archived=0 AND COALESCE(erp_id,'')='' ORDER BY id"):
+    for row in con.execute("SELECT id,erp_status FROM students WHERE archived=0 ORDER BY id"):
         before = row["erp_status"] or ""
         changed += sync_one(con, row["id"], on) != before
     return changed
+
+
+def sync_native(con, on: date | None = None) -> int:
+    """Backward-compatible name: the safe reconciliation now covers the whole CRM."""
+    return sync_all(con, on)

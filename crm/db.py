@@ -381,6 +381,8 @@ def init_db(con: sqlite3.Connection):
     if old_index and "WHERE" not in old_index[0].upper():
         con.execute("DROP INDEX idx_sub_enr_month")
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sub_enr_month ON subscriptions(enrollment_id, month) WHERE status!='cancelled'")
+    from . import erpstatus
+    erpstatus.sync_all(con)
     for k, v in DEFAULT_SETTINGS.items():
         con.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
     login = os.environ.get("CRM_ADMIN_LOGIN", "admin")

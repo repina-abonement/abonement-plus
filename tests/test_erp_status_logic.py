@@ -95,6 +95,21 @@ class ErpStatusLogicTest(unittest.TestCase):
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM subscriptions WHERE student_id=?", (sid,)).fetchone()[0], 0)
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM payments WHERE student_id=?", (sid,)).fetchone()[0], 0)
 
+    def test_global_sync_covers_imported_cards_and_preserves_unproven_erp_status(self):
+        preserved = self.child()
+        self.con.execute("UPDATE students SET erp_id='111',erp_status='Думают' WHERE id=?", (preserved,))
+        active = self.child()
+        self.con.execute("UPDATE students SET erp_id='222',erp_status='Новый лид' WHERE id=?", (active,))
+        branch = self.con.execute("INSERT INTO branches(name) VALUES ('Global branch')").lastrowid
+        group = self.con.execute("INSERT INTO groups(branch_id,name,weekdays) VALUES (?,'Global group','5')", (branch,)).lastrowid
+        self.con.execute("""INSERT INTO erp_history_subscriptions
+            (source_id,student_id,group_id,month,valid_from,valid_until,lessons,source_payload,imported_at,imported_by)
+            VALUES ('global-history',?,?, '2026-11','2026-11-01','2026-11-30',4,'{}','2026-11-22','test')""", (active, group))
+        erpstatus.sync_all(self.con, self.TODAY)
+        self.assertEqual(self.con.execute("SELECT erp_status FROM students WHERE id=?", (preserved,)).fetchone()[0], "Думают")
+        row = self.con.execute("SELECT funnel,stage,erp_status FROM students WHERE id=?", (active,)).fetchone()
+        self.assertEqual(tuple(row), ("members", "active", "Новый оплативший посетитель"))
+
     def test_targeted_kononenko_reconcile_keeps_renewal_task(self):
         self.child()
         sid = self.child()
