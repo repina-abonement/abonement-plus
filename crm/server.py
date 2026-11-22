@@ -2656,6 +2656,30 @@ def attendance(con, h, user, body, q):
     return {"ok": True}
 
 
+@route("POST", "/api/students/{sid}/past-makeup", role="admin")
+def past_makeup(con, h, user, body, q, sid):
+    from datetime import date
+    from . import clientattendance
+    sid = int(sid)
+    gid = int(body.get("group_id") or 0)
+    day = date.fromisoformat(body.get("date") or "")
+    note = str(body.get("source") or "").strip()
+    if day >= sv.today() or not note or len(note) > 500:
+        raise ApiError("Укажите прошедшую дату и источник подтверждения (до 500 символов)")
+    g = con.execute("SELECT * FROM groups WHERE id=?", (gid,)).fetchone()
+    if not g or day.weekday() not in logic.parse_weekdays(schedule.on(con,g,day)["weekdays"]):
+        raise ApiError("У группы нет занятия в этот день недели")
+    for event in clientattendance.calendar(con,sid,day.strftime("%Y-%m"))["events"]:
+        if event["date"] == day.isoformat() and event["group_id"] == gid:
+            if event["kind"] == "makeup" and event["status"] == "present":
+                return {"ok": True}
+            raise ApiError("В этой группе на дату уже есть занятие. Проверьте его отметку")
+    con.execute("""INSERT INTO attendance(student_id,group_id,date,status,erp_visit_kind,note,marked_at)
+                   VALUES (?,?,?,'present','makeup',?,?)""", (sid,gid,day.isoformat(),note,sv.now_iso()))
+    sv.audit(con,user,"attendance.past_makeup",f"{sid} / {gid} / {day}")
+    return {"ok": True}
+
+
 @route("GET", "/api/coach/today", role="today")
 def coach_today(con, h, user, body, q):
     cid = int(q.get("coach_id") or 0) if perms.can(user, "today", "full") else user["id"]
