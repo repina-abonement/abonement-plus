@@ -167,6 +167,13 @@ def add_task(con, kind: str, student_id: int | None, due: datetime | str, *, aut
 def subscription_renewal_plan(con, student_id):
     from . import logic, schedule, closures
     month=con.execute("SELECT MAX(month) FROM subscriptions WHERE student_id=? AND status!='cancelled' AND COALESCE(kind,'month')='month'",(student_id,)).fetchone()[0]
+    if not month and con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
+        month=con.execute("SELECT MAX(month) FROM erp_history_subscriptions WHERE student_id=?",(student_id,)).fetchone()[0]
+        if month:
+            names=[r[0] for r in con.execute("""SELECT DISTINCT COALESCE(g.name,'') FROM erp_history_subscriptions h
+                LEFT JOIN groups g ON g.id=h.group_id WHERE h.student_id=? AND h.month=? ORDER BY g.name""",(student_id,month)) if r[0]]
+            note=f"Абонемент: {logic.month_label(month)}"+(' · '+' + '.join(names) if names else '')+". Перенесён из истории ERP"
+            return {'due':month+'-20T23:59','note':note}
     if not month:return None
     plans=[]
     for sub in con.execute("SELECT * FROM subscriptions WHERE student_id=? AND month=? AND status!='cancelled' AND COALESCE(kind,'month')='month'",(student_id,month)):

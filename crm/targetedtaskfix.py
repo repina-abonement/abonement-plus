@@ -9,7 +9,10 @@ TARGETS=((6,4644,{'даниил шарипов','шарипов даниил'}),
 def apply(con):
     previous=con.execute("SELECT value FROM settings WHERE key=?",(KEY,)).fetchone()
     if previous:
-        try:return json.loads(previous[0])
+        try:
+            saved=json.loads(previous[0])
+            if saved.get('state')=='complete':return saved
+            con.execute('DELETE FROM settings WHERE key=?',(KEY,))
         except (TypeError,ValueError):return {'state':'invalid_previous_report'}
     rows=[]
     for student_id,old_task_id,names in TARGETS:
@@ -20,6 +23,8 @@ def apply(con):
         if not old or old['student_id']!=student_id or old['status']!='open' or old['title'].strip().casefold()!='новый лид':
             rows.append({'student_id':student_id,'old_task_id':old_task_id,'state':'old_task_not_open'});continue
         months=[r[0] for r in con.execute("SELECT DISTINCT month FROM subscriptions WHERE student_id=? AND status!='cancelled' AND COALESCE(kind,'month')='month' ORDER BY month",(student_id,))]
+        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
+            months+= [r[0] for r in con.execute("SELECT DISTINCT month FROM erp_history_subscriptions WHERE student_id=? ORDER BY month",(student_id,))]
         new_id=tasks.schedule_renewal(con,student_id)
         new=con.execute("SELECT id,kind,title,due_at,status FROM tasks WHERE id=?",(new_id,)).fetchone() if new_id else None
         old_after=con.execute('SELECT status FROM tasks WHERE id=?',(old_task_id,)).fetchone()
