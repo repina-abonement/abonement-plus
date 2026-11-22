@@ -11,7 +11,7 @@ def main():
     u={'id':one,'name':'one','role':'operator'};v={'id':two,'name':'two','role':'operator'}
     sid=sv.create_student(c,{'name':'Тест Клиент','parent_name':'Анна','phone':'+79000000441','funnel':'members'},u)
     today=date.today().isoformat();tomorrow=(date.today()+timedelta(days=1)).isoformat()
-    a=tasks.add_client_task(c,sid,{'title':'Обычная','due':today},u)
+    a=tasks.add_client_task(c,sid,{'title':'Обычная','due':today,'note':'Подробный контекст задачи для другого администратора'},u)
     b=tasks.add_client_task(c,sid,{'title':'Приоритет','due':today,'priority':True},u)
     later=tasks.add_client_task(c,sid,{'title':'Завтра','due':tomorrow,'priority':True},u)
     personal=tasks.add_task(c,'plan',None,today+'T12:00',title='Личное',assignee=one)
@@ -27,6 +27,7 @@ def main():
     mine=tasks.my_tasks(c,v)['groups'];assert {a,b}.issubset({t['id'] for t in mine['today']})
     assert personal not in {t['id'] for x in mine.values() for t in x}
     assert tasks.for_student(c,sid)['open'][0]['id']==b
+    assert tuple(c.execute('SELECT title,note FROM tasks WHERE id=?',(a,)).fetchone())==('Обычная','Подробный контекст задачи для другого администратора')
     # Старый исполнитель-тренер не скрывает клиентскую задачу от администраторов.
     c.execute('UPDATE tasks SET assignee_id=? WHERE id=?',(coach,a))
     assert a in [t['id'] for col in tasks.erp_board(c,'today',v)['columns'] for t in col['cards']]

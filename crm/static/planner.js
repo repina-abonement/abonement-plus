@@ -17,7 +17,7 @@ async function openTaskForm(box, done, preset = {}) {
   if(lockedTarget&&!target){box.innerHTML='<p class="need-err">Эта доска недоступна для назначения. Обновите страницу и выберите планер заново</p>';return}
 
   box.innerHTML = `<div class="sub-form task-form">${lockedTarget?`<div class="planner-form-target"><b>Новая задача</b><div>Кому: ${esc(target.name)}</div><input type="hidden" data-ta value="${targetId}"></div>`:''}
-    <div class="field"><label>Что сделать</label><input data-tt placeholder="Например: переписать оферту" value="${esc(preset.title || "")}"></div>
+    <div class="field"><label>Название задачи</label><input data-tt maxlength="200" placeholder="Коротко: что нужно сделать" value="${esc(preset.title || "")}"><small class="muted">Короткое название действия. Подробности укажите ниже.</small></div>
     <div class="row" style="flex-wrap:wrap;align-items:flex-end">
       ${p.can_manage && !lockedTarget ? `<div class="field"><label>Кому</label><select data-ta>${staff.map((u) => `<option value="${u.id}" ${+u.id === targetId ? "selected" : ""}>${esc(u.name)}${u.id === S.user.id ? " (себе)" : ""}</option>`).join("")}</select></div>` : ""}
       <div class="field" style="flex:0 0 150px"><label>Когда</label><input type="date" data-td value="${preset.date || S.meta.today}"></div>
@@ -27,7 +27,7 @@ async function openTaskForm(box, done, preset = {}) {
     </div>
     <div data-twd hidden class="chips" style="margin:-2px 0 8px">${WD_SHORT.map((w, i) => `<button type="button" class="chip day" data-twdi="${i}">${w}</button>`).join("")}</div>
     <div class="field" data-shift-field><label>Смена</label><select data-task-shift>${planShiftOptions(preset.shift||'common')}</select><small class="muted">Утренняя и основная смены отдельно по понедельникам и средам. В другие дни задача выполняется один раз.</small></div>
-    <div class="field"><label>Подробности</label><textarea data-tn rows="2" placeholder="Необязательно"></textarea></div>
+    <div class="field"><label>Подробное описание задачи</label><textarea data-tn rows="4" maxlength="1000" placeholder="Контекст, условия выполнения и ожидаемый результат"></textarea><small class="muted">Вся информация, которая понадобится исполнителю.</small></div>
     <div class="field"><label>Подзадачи (каждая с новой строки)</label><textarea data-new-subtasks rows="3" placeholder="Проверить кассу&#10;Проверить уборку"></textarea><small class="muted">У каждого дня и каждой смены будут свои галочки</small></div>
     <div class="row" style="align-items:center;flex-wrap:wrap"><label class="check grow"><input type="checkbox" data-tp> 🔥 Важно</label>
       <button class="btn" data-tcancel style="flex:0">Отмена</button>

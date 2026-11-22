@@ -141,12 +141,12 @@ function openTaskEdit(t, onDone, focus) {
   wrap.className = "need-wrap";
   wrap.innerHTML = `<form class="need-card task-copyable"><h3>${t.icon || "✅"} Задача</h3>
     ${t.student ? `<div class="small muted" style="margin-bottom:8px">${esc(displayChildName(t.student.name))}${t.student.family ? ` · семья ${esc(t.student.family)}` : ""}</div>` : ""}
-    <div class="field"><label>Что сделать</label><input name="title" value="${esc(t.title)}" required maxlength="200"></div>
+    <div class="field"><label>Название задачи</label><input name="title" value="${esc(t.title)}" required maxlength="200" placeholder="Коротко: что нужно сделать"><small class="muted">Короткое название действия, без подробного объяснения.</small></div>
     <div class="row"><div class="field"><label>Срок</label><input name="due_at" type="${client?'date':'datetime-local'}" value="${esc((t.due_at || "").slice(0, client?10:16))}" required></div>
       ${!client?`<div class="field"><label>Исполнитель</label><select name="assignee_id">${staff.map((u) => `<option value="${u.id}" ${u.id === t.assignee_id ? "selected" : ""}>${esc(u.name)} (${TASK_ROLE[u.role] || u.role})</option>`).join("")}
         ${t.assignee_id && !staff.some((u) => u.id === t.assignee_id) ? `<option value="" selected disabled>${esc(t.assignee || "Участник команды в архиве")}: выберите нового</option>` : ""}</select></div>`:""}</div>
     ${client?`<label class="check task-priority-control"><input type="checkbox" name="priority" ${t.priority?"checked":""}> 🔥 Приоритет — первой в колонке на этот день</label><p class="small muted">Общая задача для всех администраторов.</p>`:""}
-    <div class="field"><label>Заметка</label><textarea name="note" rows="2" maxlength="1000" placeholder="Подробности задачи">${esc(t.note || "")}</textarea></div>
+    <div class="field"><label>Подробное описание задачи</label><textarea name="note" rows="4" maxlength="1000" placeholder="Контекст, с кем связаться, что уточнить и какой результат нужен">${esc(t.note || "")}</textarea><small class="muted">Здесь хранится вся информация, необходимая для выполнения задачи.</small></div>
     <div class="need-err small"></div>
     <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap"><button class="btn primary" style="flex:1">Сохранить</button>
       ${t.kind === "rebook" ? `<button type="button" class="btn" data-rebook="${t.id}" data-tclose>Итог звонка</button>` : t.erp_outcomes?.length?'':`<button type="button" class="btn" data-tfinish>Выполнено</button>`}
@@ -217,7 +217,8 @@ function wireCardTasks(root, reload, sid) {
     const staff = ((S.meta && S.meta.staff) || []).slice().sort((a, b) => (a.role === "coach") - (b.role === "coach") || a.name.localeCompare(b.name));
     const soon = new Date(Date.now() + 3600e3 - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
     box.innerHTML = `<div class="sub-form" style="margin-top:8px">
-      <div class="field"><label>Что сделать</label><input data-ctt placeholder="Например: перезвонить после 18:00"></div>
+      <div class="field"><label>Название задачи</label><input data-ctt maxlength="200" placeholder="Коротко: перезвонить клиенту"></div>
+      <div class="field"><label>Подробное описание задачи</label><textarea data-ctn rows="4" maxlength="1000" placeholder="Кому позвонить, что уточнить, важный контекст и ожидаемый результат"></textarea></div>
       <div class="field"><label>Дата</label><input type="date" data-ctd value="${S.meta.today}"></div>
       <label class="check task-priority-control"><input type="checkbox" data-ctp> 🔥 Приоритет — первой в колонке на этот день</label>
       <p class="small muted">Задачу видят все администраторы.</p>
@@ -228,7 +229,7 @@ function wireCardTasks(root, reload, sid) {
     box.querySelector("[data-cts]").onclick = async () => {
       const title = box.querySelector("[data-ctt]").value.trim();
       if (!title) return toast("Напишите, что нужно сделать", true);
-      try { await api("POST", `/api/students/${sid}/tasks`, { title, due: box.querySelector("[data-ctd]").value, priority: box.querySelector("[data-ctp]").checked }); toast("Задача поставлена"); reload(); }
+      try { await api("POST", `/api/students/${sid}/tasks`, { title, due: box.querySelector("[data-ctd]").value, priority: box.querySelector("[data-ctp]").checked,note:box.querySelector("[data-ctn]").value }); toast("Задача поставлена"); reload(); }
       catch (e) { fail(e); }
     };
   };
@@ -436,7 +437,7 @@ function renderNeboDashboard(page, d, coachId, viewBar = "") {
 /* Общая задача по клиенту: личные поручения создаются отдельно в Планере. */
 function openClientTaskForm(box,onDone) {
   if(box.innerHTML){box.innerHTML='';return}
-  box.innerHTML=`<form class="sub-form client-task-form"><h4>Задача клиенту</h4><div class="field"><label>Клиент</label><input data-client-search autocomplete="off" placeholder="Имя, фамилия или телефон"><div data-client-results></div><div class="small muted" data-client-selected></div></div><div class="field"><label>Что сделать</label><input name="title" maxlength="200" required></div><div class="field"><label>Дата</label><input name="due" type="date" value="${S.meta.today}" required></div><label class="check task-priority-control"><input name="priority" type="checkbox"> 🔥 Приоритет — первой в колонке на этот день</label><div class="field"><label>Заметка</label><textarea name="note" rows="3" maxlength="1000"></textarea></div><p class="small muted">Задачу видят все администраторы.</p><div class="need-err small"></div><div class="sc-actions"><button class="btn primary">Поставить задачу</button><button type="button" class="btn" data-client-cancel>Отмена</button></div></form>`;
+  box.innerHTML=`<form class="sub-form client-task-form"><h4>Задача клиенту</h4><div class="field"><label>Клиент</label><input data-client-search autocomplete="off" placeholder="Имя, фамилия или телефон"><div data-client-results></div><div class="small muted" data-client-selected></div></div><div class="field"><label>Название задачи</label><input name="title" maxlength="200" required placeholder="Коротко: что нужно сделать"><small class="muted">Только название действия. Все подробности укажите ниже.</small></div><div class="field"><label>Дата</label><input name="due" type="date" value="${S.meta.today}" required></div><label class="check task-priority-control"><input name="priority" type="checkbox"> 🔥 Приоритет — первой в колонке на этот день</label><div class="field"><label>Подробное описание задачи</label><textarea name="note" rows="4" maxlength="1000" placeholder="Контекст, с кем связаться, что уточнить и какой результат нужен"></textarea><small class="muted">Максимально подробно, чтобы другой администратор мог выполнить задачу без дополнительных вопросов.</small></div><p class="small muted">Задачу видят все администраторы.</p><div class="need-err small"></div><div class="sc-actions"><button class="btn primary">Поставить задачу</button><button type="button" class="btn" data-client-cancel>Отмена</button></div></form>`;
   const form=box.querySelector('form'),input=form.querySelector('[data-client-search]'),results=form.querySelector('[data-client-results]'),selected=form.querySelector('[data-client-selected]');let sid=null,timer,version=0;
   form.querySelector('[data-client-cancel]').onclick=()=>{box.innerHTML=''};
   input.oninput=()=>{sid=null;selected.textContent='';clearTimeout(timer);const request=++version,q=input.value.trim();results.innerHTML='';if(q.length<2)return;timer=setTimeout(async()=>{try{const list=await api('GET','/api/students?q='+encodeURIComponent(q));if(request!==version||!form.isConnected)return;results.innerHTML=list.length?list.slice(0,15).map(s=>`<button type="button" class="client-task-choice" data-client-id="${s.id}">${esc(displayChildName(s.name))}${s.parent?` · ${esc(s.parent)}`:''}</button>`).join(''):'<div class="small muted">Клиент не найден</div>';results.querySelectorAll('[data-client-id]').forEach(b=>b.onclick=()=>{sid=+b.dataset.clientId;input.value=b.textContent;selected.textContent='Клиент выбран';results.innerHTML='';version++})}catch(e){if(form.isConnected)form.querySelector('.need-err').textContent=e.message}},200)};
