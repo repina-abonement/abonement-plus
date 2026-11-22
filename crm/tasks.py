@@ -930,7 +930,7 @@ def for_student(con, sid: int) -> dict:
     return {"open": [_task_out(con, r) for r in con.execute(q + "substr(due_at,1,10),priority DESC,due_at,id", (sid, fam, "open"))], "done": []}  # выполненные не показываем
 
 
-def complete(con, tid: int, user: dict, result: str = "") -> None:
+def complete(con, tid: int, user: dict, result: str = "", comment: str = "") -> None:
     t = con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
     if not t:
         raise comms.CommsError("Задача не найдена")
@@ -954,19 +954,23 @@ def complete(con, tid: int, user: dict, result: str = "") -> None:
     from . import erpworkflow
     choices=erpworkflow.options(t)
     outcome=result.strip()
+    transition_comment=comment.strip()
     if choices:
         if outcome not in choices:raise comms.CommsError('Выберите результат задачи из списка ERP')
+        if not transition_comment:raise comms.CommsError('Напишите комментарий к изменению статуса')
+        if len(transition_comment)>1000:raise comms.CommsError('Комментарий не должен быть длиннее 1000 символов')
         if outcome!='Закрыть задачу':
             kind=erpworkflow.next_kind(outcome,t)
             add_task(con,kind,t['student_id'],erpworkflow.due_at(con,outcome,t['student_id']),
                      title=outcome,source='erp_rule',assignee=t['assignee_id'],
-                     auto_key=f"erp-rule:{tid}:{outcome}",note=t['note'] or '')
+                     auto_key=f"erp-rule:{tid}:{outcome}",note=transition_comment)
     con.execute("UPDATE tasks SET status='done', done_at=?, done_by=?, result=? WHERE id=?",
-                (_iso(_now()), user.get("name", ""), result.strip(), tid))
+                (_iso(_now()), user.get("name", ""), (outcome + (": " + transition_comment if choices else "")), tid))
     if t["student_id"]:
         con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
                     (t["student_id"], _iso(_now()), user.get("name", ""), "task",
-                     f"Задача «{t['title']}» выполнена" + (f": {result.strip()}" if result.strip() else "")))
+                     (f"Задача «{t['title']}» выполнена. Следующий шаг ERP: «{outcome}». Комментарий: {transition_comment}" if choices else
+                      f"Задача «{t['title']}» выполнена" + (f": {outcome}" if outcome else ""))))
         if t["kind"] != "request_data":
             con.execute("UPDATE students SET priority=0 WHERE id=?", (t["student_id"],))
         if t["kind"] in ("how_was", "no_show"):  # связались после пробного — карточка больше не горит

@@ -6,7 +6,15 @@ const AUTO_LABEL = { day_before: "за день", "2h_before": "за 2 часа"
 
 function erpOutcomePicker(t,hidden=true,prefix='') {
   if(!t.erp_outcomes?.length)return `<div class="task-done" ${hidden?'hidden':''}><input placeholder="Итог: дозвонилась, подтвердили…" data-${prefix}result><button type="button" class="btn sm primary" ${prefix?'data-tok':'data-finish'}>Готово</button></div>`;
-  return `<div class="task-done erp-outcome-picker" ${hidden?'hidden':''}><div class="small"><b>Выберите следующий шаг по цепочке ERP</b></div>${t.erp_outcomes.map((outcome,index)=>`<button type="button" class="erp-outcome-choice" data-${prefix}erp-outcome="${index}"><strong>${esc(outcome)}</strong><small>${outcome==='Закрыть задачу'?'Текущая задача закроется без следующей':`Будет создана следующая задача «${esc(outcome)}»`}</small></button>`).join('')}</div>`;
+  return `<div class="task-done erp-outcome-picker" ${hidden?'hidden':''}><div class="small"><b>Выберите следующий шаг по цепочке ERP</b></div>${t.erp_outcomes.map((outcome,index)=>`<button type="button" class="erp-outcome-choice" data-${prefix}erp-outcome="${index}" aria-pressed="false"><strong>${esc(outcome)}</strong><small>${outcome==='Закрыть задачу'?'Текущая задача закроется без следующей':`Будет создана следующая задача «${esc(outcome)}»`}</small></button>`).join('')}<div class="erp-transition-comment" data-${prefix}erp-comment-box hidden><label><b>Комментарий к изменению статуса</b><textarea rows="3" maxlength="1000" data-${prefix}erp-comment placeholder="Что произошло и почему выбран этот следующий шаг" required></textarea></label><button type="button" class="btn sm primary" data-${prefix}erp-confirm>Подтвердить переход</button><div class="small need-err" data-${prefix}erp-error></div></div></div>`;
+}
+
+function wireErpOutcome(root,t,id,prefix,onDone) {
+  const choices=[...root.querySelectorAll(`[data-${prefix}erp-outcome]`)],box=root.querySelector(`[data-${prefix}erp-comment-box]`),comment=root.querySelector(`[data-${prefix}erp-comment]`),confirmButton=root.querySelector(`[data-${prefix}erp-confirm]`),error=root.querySelector(`[data-${prefix}erp-error]`);
+  if(!choices.length||!box||!comment||!confirmButton)return;
+  let selected=-1;
+  choices.forEach(button=>button.onclick=()=>{selected=+button.dataset[`${prefix}erpOutcome`];choices.forEach(x=>{const active=x===button;x.classList.toggle('selected',active);x.setAttribute('aria-pressed',active?'true':'false')});box.hidden=false;error.textContent='';comment.focus()});
+  confirmButton.onclick=async()=>{const note=comment.value.trim();if(selected<0){error.textContent='Выберите следующий шаг';return}if(!note){error.textContent='Напишите комментарий к изменению статуса';comment.focus();return}confirmButton.disabled=true;try{await api('POST',`/api/tasks/${id}/done`,{result:t.erp_outcomes[selected],comment:note});toast(t.erp_outcomes[selected]==='Закрыть задачу'?'Задача закрыта':'Следующий шаг по цепочке создан');onDone&&onDone()}catch(e){confirmButton.disabled=false;error.textContent=e.message;fail(e)}};
 }
 
 function taskRow(t, options = {}) {
@@ -73,7 +81,7 @@ function wireTasks(root) {
     };
     if(row.querySelector("[data-finish]"))row.querySelector("[data-finish]").onclick = finish;
     if(row.querySelector("[data-result]"))row.querySelector("[data-result]").onkeydown = (e) => { if (e.key === "Enter") finish(); };
-    row.querySelectorAll('[data-erp-outcome]').forEach(button=>button.onclick=async()=>{button.disabled=true;try{await api('POST',`/api/tasks/${id}/done`,{result:S.taskById[id].erp_outcomes[+button.dataset.erpOutcome]});toast('Следующий шаг создан');render()}catch(e){button.disabled=false;fail(e)}});
+    wireErpOutcome(row,S.taskById[id],id,'',render);
     const dl = row.querySelector("[data-dial]");
     if (dl) dl.onclick = () => dial(dl.dataset.dial);
     const op = row.querySelector("[data-open]");
@@ -157,7 +165,7 @@ function openTaskEdit(t, onDone, focus) {
     try { await api("POST", `/api/tasks/${t.id}/done`, { result: wrap.querySelector("[data-tresult]").value }); toast("Задача выполнена"); close(); onDone && onDone(); }
     catch (e) { wrap.querySelector(".need-err").textContent = e.message; }
   };
-  wrap.querySelectorAll('[data-terp-outcome]').forEach(button=>button.onclick=async()=>{button.disabled=true;try{await api('POST',`/api/tasks/${t.id}/done`,{result:t.erp_outcomes[+button.dataset.terpOutcome]});toast('Следующий шаг по цепочке создан');close();onDone&&onDone()}catch(e){button.disabled=false;wrap.querySelector('.need-err').textContent=e.message}});
+  wireErpOutcome(wrap,t,t.id,'t',()=>{close();onDone&&onDone()});
   f.onsubmit = async (e) => {
     e.preventDefault();
     const body = { title: f.elements.title.value, due_at: f.elements.due_at.value, note: f.elements.note.value };

@@ -9,6 +9,9 @@ assert(html.includes('Выберите следующий шаг по цепоч
 assert(html.includes('data-terp-outcome="0"'));
 assert(html.includes('Будет создана следующая задача «Новый лид (ндз)»'));
 assert(html.includes('Текущая задача закроется без следующей'));
+assert(html.includes('Комментарий к изменению статуса'));
+assert(html.includes('data-terp-comment'));
+assert(html.includes('data-terp-confirm'));
 assert(!html.includes('<input'));
 const ordinary=context.erpOutcomePicker({erp_outcomes:[]},true,'t');
 assert(ordinary.includes('data-tresult'));assert(ordinary.includes('data-tok'));

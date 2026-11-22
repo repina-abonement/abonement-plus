@@ -32,14 +32,14 @@ class ErpWorkflowTest(unittest.TestCase):
             "Новый лид (ндз)", "Новый лид (думают)",
             "Напоминание о ПУ (звонок)", "Закрыть задачу",
         ])
-        tasks.complete(self.con, tid, self.user, "Новый лид (ндз)")
+        tasks.complete(self.con, tid, self.user, "Новый лид (ндз)", "Не дозвонились, повторить звонок")
         nxt = self.con.execute(
             "SELECT kind,title,source FROM tasks WHERE student_id=? AND status='open'", (self.sid,)
         ).fetchall()
         self.assertEqual([tuple(x) for x in nxt], [("no_answer", "Новый лид (ндз)", "erp_rule")])
         self.assertEqual(self.con.execute("SELECT stage FROM students WHERE id=?", (self.sid,)).fetchone()[0], before)
         with self.assertRaises(comms.CommsError):
-            tasks.complete(self.con, tid, self.user, "Новый лид (ндз)")
+            tasks.complete(self.con, tid, self.user, "Новый лид (ндз)", "Повтор")
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM tasks WHERE student_id=? AND status='open'", (self.sid,)).fetchone()[0], 1)
 
     def test_invalid_outcome_leaves_task_open(self):
@@ -50,14 +50,14 @@ class ErpWorkflowTest(unittest.TestCase):
 
     def test_two_how_was_templates_stay_distinct(self):
         sms = self.add("Напоминание о ПУ (смс)", "trial_confirm")
-        tasks.complete(self.con, sms, self.user, "Как прошло ПУ?")
+        tasks.complete(self.con, sms, self.user, "Как прошло ПУ?", "Пробное завершилось, уточнить впечатления")
         sms_task = self.con.execute("SELECT * FROM tasks WHERE kind='erp_how_was_sms'").fetchone()
         self.assertEqual(tasks._task_out(self.con, sms_task)["erp_outcomes"], [
             "Проверить продление", "Почему не купили", "Нет отметки о ПУ", "Не пришли на ПУ",
         ])
 
         today = self.add("Напоминание о сегодняшнем ПУ (звонок и смс)", "trial_today")
-        tasks.complete(self.con, today, self.user, "Как прошло ПУ?")
+        tasks.complete(self.con, today, self.user, "Как прошло ПУ?", "Пробное завершилось, уточнить впечатления")
         today_task = self.con.execute("SELECT * FROM tasks WHERE kind='erp_how_was_today'").fetchone()
         self.assertEqual(tasks._task_out(self.con, today_task)["erp_outcomes"], [
             "Нет отметки о ПУ", "Не пришли на ПУ", "Проверить продление", "Почему не купили",
@@ -72,9 +72,22 @@ class ErpWorkflowTest(unittest.TestCase):
     def test_trial_call_uses_trial_time_minus_23_59(self):
         self.con.execute("UPDATE students SET trial_at='2026-11-25T18:00' WHERE id=?", (self.sid,))
         tid = self.add("Новый лид", "call_lead")
-        tasks.complete(self.con, tid, self.user, "Напоминание о ПУ (звонок)")
+        tasks.complete(self.con, tid, self.user, "Напоминание о ПУ (звонок)", "Записались на пробное")
         due = self.con.execute("SELECT due_at FROM tasks WHERE student_id=? AND status='open'", (self.sid,)).fetchone()[0]
         self.assertEqual(due, "2026-11-24T18:01")
+
+    def test_erp_transition_requires_and_preserves_comment(self):
+        tid = self.add("Новый лид", "call_lead")
+        with self.assertRaisesRegex(comms.CommsError, "комментарий"):
+            tasks.complete(self.con, tid, self.user, "Новый лид (думают)")
+        self.assertEqual(self.con.execute("SELECT status FROM tasks WHERE id=?", (tid,)).fetchone()[0], "open")
+        tasks.complete(self.con, tid, self.user, "Новый лид (думают)", "Мама обсудит расписание и ответит завтра")
+        current = self.con.execute("SELECT result FROM tasks WHERE id=?", (tid,)).fetchone()[0]
+        following = self.con.execute("SELECT title,note FROM tasks WHERE student_id=? AND status='open'", (self.sid,)).fetchone()
+        history = self.con.execute("SELECT text FROM history WHERE student_id=? ORDER BY id DESC", (self.sid,)).fetchone()[0]
+        self.assertIn("Мама обсудит расписание", current)
+        self.assertEqual(tuple(following), ("Новый лид (думают)", "Мама обсудит расписание и ответит завтра"))
+        self.assertIn("Комментарий: Мама обсудит расписание", history)
 
 
 if __name__ == "__main__":
