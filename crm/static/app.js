@@ -2204,7 +2204,6 @@ async function openStudent(id, options = {}) {
     <div data-client-stage></div>
     <h3>Семья ${esc(d.family.name)}</h3>
     <div class="field"><label>Заметка для персонала (видна в шапке карточки)</label><textarea id="fam-note" rows="2" placeholder="Например: аллергия, звонить только маме">${esc(d.family.note || "")}</textarea></div>
-    ${consentHtml(d.family)}
     <dl class="sc-family-contacts">${d.parents.map((p) => `<div class="sc-contact-line"><dt>${esc(p.name)}</dt><dd>${p.phone ? `<button class="linkish" data-copy-phone="${esc(p.phone)}" title="Скопировать номер">${esc(p.phone)}</button>` : `<span class="muted">Телефон не указан</span>`}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}</dd></div>`).join("")}</dl>
     ${d.siblings.length ? `<div style="margin-top:10px" class="chips">${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join("")}</div>` : ""}
     <button class="btn sm" style="margin-top:10px" id="add-sibling">+ Брат или сестра</button>
@@ -2283,7 +2282,6 @@ async function openStudent(id, options = {}) {
     b.replaceWith(sel); sel.focus();
     sel.onchange = async () => { try { await api("PATCH", `/api/parents/${b.dataset.rel}/relation`, { relation: sel.value }); toast("Сохранено"); reload(); } catch (e) { fail(e); } };
   }));
-  wireConsent(d.family, reload);
   body.querySelectorAll(".sc-head [data-dial]").forEach((b) => (b.onclick = () => dial(b.dataset.dial)));
   const profile=(add=false,focus='name')=>{if(full)openClientProfile(d,body.querySelector('#sc-profile-edit'),reload,add,focus)};
   body.querySelectorAll('[data-profile-edit]').forEach(b=>b.onclick=()=>profile(false,b.dataset.profileEdit));
