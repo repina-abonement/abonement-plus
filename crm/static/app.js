@@ -1422,29 +1422,10 @@ async function renderWorkdesk(page) {
           </div>
         </div>`).join("")}</div>${u.length > 3 ? `<button class="btn sm ghost now-more" id="hot-more">${S.hotAll ? "Свернуть" : `Ещё ${u.length - 3}`}</button>` : ""}` : `<div class="muted small">Пропущенных звонков, новых заявок и непрочитанных сообщений нет. Можно выдохнуть ⚽</div>`}
     </section>`;
-  page.innerHTML = `
-    ${bar}
-    <div class="desk-hello">
-      <div class="grow"><h2>${S.viewAs ? `Рабочий стол: ${esc(S.viewAs.name)}` : `${hello}, ${esc(firstName)}`}</h2>
-        <div class="muted small">${esc(dateTxt)}${u.length || tiles.length ? "" : " · всё спокойно ⚽"}</div>
-        ${S.viewAs ? "" : `<div style="margin-top:8px">${envelopeButton()}</div>`}</div>
-      ${tiles.length || reds ? `<div class="dtiles">${reds ? `<button class="dtile red" data-jump="dw-hot"><span>🔥</span><b>${reds}</b><small>Горит</small></button>` : ""}${tiles.join("")}</div>` : ""}
-    </div>
-    ${(d.reviews || []).map((r) => `<div class="rv-alert"><span class="rv-star">⭐</span>
-      <div class="grow"><b>Новый отзыв на ${esc(r.label)}</b><div class="small">${esc(r.subject)} · пришёл ${esc(dtShort(r.created_at))}</div></div>
-      <a class="btn sm" href="${esc(r.link)}" target="_blank" rel="noopener">Открыть отзывы</a>
-      <button class="btn sm primary" data-rvclose="${r.id}">Ответили ✓</button></div>`).join("")}
-    <div class="desk">
-      <div class="desk-main">
-        ${who === "offline" ? "" : refundRequestsHtml(d.refund_requests||[],true)}
-        ${who === "offline" ? `<section class="section"><h3>Сегодня на смене</h3><p class="muted small">Здесь только ваши дела. Общие клиентские воронки и контроль старшего администратора не показываются.</p></section>` : `
-        ${hot}
-        ${pipelineHub}`}
-      </div>
-      <div class="desk-side">${widgets.filter(dwShown).map((k) => `<div class="dw" id="dw-${k}">${W[k].html}</div>`).join("")}
-        ${widgets.some((k) => !dwShown(k)) ? `<section class="dw-folded"><div class="dwf-title small muted">Ещё на столе: сейчас там пусто или не срочно</div>${widgets.filter((k) => !dwShown(k)).map((k) => `<details class="dwf" data-dwk="${k}" ${S.dwOpen[k] ? "open" : ""}>
-          <summary><span class="dwf-ic">${W[k].icon}</span><span class="grow">${W[k].label}</span><span class="dwf-chev">›</span></summary><div class="dw" id="dw-${k}">${W[k].html}</div></details>`).join("")}</section>` : ""}</div>
-    </div>`;
+  // Временно оставляем на администраторском рабочем столе только единый центр
+  // клиентских воронок. Остальные готовые виджеты не удаляем: они сохранены в
+  // коде и очереди разработки до отдельного решения по составу нового стола.
+  page.innerHTML = pipelineHub;
   page.querySelectorAll("[data-rvclose]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/reviews/${b.dataset.rvclose}/close`, {}); render(); } catch (e) { fail(e); } }));
   page.querySelectorAll("[data-new-card]").forEach(b=>b.onclick=()=>openStudent(+b.dataset.newCard));
   page.querySelectorAll("[data-fresh-lead]").forEach(b=>b.onclick=()=>openStudent(+b.dataset.freshLead));

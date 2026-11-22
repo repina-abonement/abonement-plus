@@ -62,6 +62,15 @@ def test_admin_funnels_share_one_readable_pipeline_hub():
     assert "flex-basis: 82vw" in styles
 
 
+def test_admin_workdesk_temporarily_renders_only_the_pipeline_hub():
+    app = (ROOT / "crm/static/app.js").read_text(encoding="utf-8")
+
+    assert "page.innerHTML = pipelineHub;" in app
+    rendered_tail = app.split("page.innerHTML = pipelineHub;", 1)[1]
+    assert 'class="desk-hello"' not in rendered_tail
+    assert 'class="desk-side"' not in rendered_tail
+
+
 def test_new_application_is_a_prominent_action_until_client_status_changes():
     app = (ROOT / "crm/static/app.js").read_text(encoding="utf-8")
     styles = (ROOT / "crm/static/style.css").read_text(encoding="utf-8")
