@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS erp_history_planned_lessons (
  UNIQUE(source_subscription_id,lesson_date,lesson_time));
 """
 PILOT_KEYS = {
+    "f7533a86fd636507e83293edac782e09df1f8cf9a89671b3d99186f94658c9fd",
+    "f78480f2a11791f7de661cf39becbc730a431b89406160fa4ef711880cf0b5af",
     "41d57dc88afea471725ed1ca23bdd64bdc7e1ea9d6c43723eeb711849c5983db",
     "7aa795eca178b33c3d544c1e04ad6efa2259cb16a79ed644beefb4eef29fa2fa",
     "ee6da7dda69961ed5bd596b359482421b6d73fbbcda44131ca39c278f89af499",
