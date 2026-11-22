@@ -1718,6 +1718,32 @@ async function renewInvoicePaymentLink(studentId,subscriptionId,purpose='') {
   await validatePaymentLinkForSharing(link,studentId,subscriptionId,true);return link;
 }
 
+// The prior month's contract is the source of the default, including imported ERP plans.
+function priorOfpChoice(subscriptions, month, arenaId, options, groups) {
+  const [year, number] = month.split('-').map(Number);
+  const previous = new Date(Date.UTC(year, number - 2, 1)).toISOString().slice(0, 7);
+  const records = subscriptions.filter(s => s.month === previous && s.kind !== 'single' && s.status !== 'cancelled');
+  if (!records.some(s => s.group_id === arenaId)) return null;
+  const ids = new Set();
+  for (const sub of records) {
+    if (sub.group_id !== arenaId && !sub.history_import) continue;
+    const schedule = JSON.parse(sub.lesson_schedule || '[]');
+    const selection = JSON.parse(sub.program_selection || '{}') || {};
+    const candidates = sub.history_import ? [sub.group_id] : schedule.length
+      ? schedule.map(part => part.group_id) : [selection.ofp_group_id];
+    for (const id of candidates) {
+      const exact = options.find(g => g.id === id);
+      if (exact) { ids.add(exact.id); continue; }
+      const old = groups.find(g => g.id === id);
+      if (!old || !(old.lesson_kind === 'ofp' || /ОФП/i.test(old.name))) continue;
+      const matches = groups.filter(g => options.some(o => o.id === g.id) &&
+        g.branch_id === old.branch_id && g.weekdays === old.weekdays && g.time === old.time);
+      if (matches.length === 1) ids.add(matches[0].id);
+    }
+  }
+  return ids.size === 1 ? options.find(o => ids.has(o.id)) : null;
+}
+
 async function openSell(d, reload) {
   if (!(await ensureRequired(d.student.id,'sale'))) return;
   const id=d.student.id;
@@ -1745,7 +1771,7 @@ async function openSell(d, reload) {
     <div class="row"><div class="field" id="sl-month-field"><label>Месяц</label><select id="sl-month">${months.map(m=>`<option value="${m}" ${m===d.next_month?'selected':''}>${monthLabel(m)}</option>`).join('')}</select></div><div class="field"><label>Группа</label><select id="sl-en">${choices.map(e=>`<option value="${e.group_id}" ${e.group_id===preferred.group_id?'selected':''}>${esc(e.group_name)}${e.new_group&&ens.length?' · другая группа':''}</option>`).join('')}</select></div></div>
     <div class="row"><div class="field" id="sl-tar-field"><label>Тариф</label><select id="sl-tar"></select></div><div class="field" id="sl-disc-field"><label>Скидка</label><select id="sl-disc"><option value="">По правилам</option>${(d.discounts||[]).map(x=>`<option value="${x.id}">${esc(x.name)}, ${x.percent}%</option>`).join('')}</select><small class="muted">Ручной выбор заменяет автоматическую скидку · «Многодетная семья» — только вручную</small></div></div>
     <div class="small muted" id="sl-admission" hidden>Допуск в сборную — по решению тренера. Разовых занятий нет.</div>
-    <div class="field" id="sl-ofp-box" hidden><label>День ОФП</label><select id="sl-ofp"></select></div>
+    <div class="field" id="sl-ofp-box" hidden><label for="sl-ofp">День ОФП</label><select id="sl-ofp" aria-describedby="sl-ofp-hint"></select><small id="sl-ofp-hint" class="muted"></small></div>
     <div class="field" id="sl-group-action-box" hidden><label>Как изменить группу с начала месяца</label><select id="sl-group-action"><option value="transfer">Перевести из прежней группы</option><option value="add">Добавить вторую, сохранить прежнюю</option></select><small class="muted">Изменение сохранится при оформлении.</small></div>
     <div class="field"><label>Причина исключения занятий (кроме дат до пробного)</label><input id="sl-exclusion-reason" maxlength="1000" placeholder="Например, согласованный отпуск"></div>
     <label class="sale-credit" id="sl-credit-box" hidden><input type="checkbox" id="sl-credit"> Клиент запросил перерасчёт пропусков прошлого месяца <span class="small muted" id="sl-credit-info"></span></label>
@@ -1775,7 +1801,14 @@ async function openSell(d, reload) {
     const last=previous.find(s=>s.enrollment_id===en().id&&s.month<$('#sl-month').value);
     $('#sl-tar').innerHTML=en().program_id?'<option value="arena_only">Только Арктика</option><option value="pkg">Арктика + ОФП</option>':en().fixed_only?'<option value="fixed">Негибкий</option>':'<option value="fixed">Негибкий</option><option value="flex">Гибкий</option>';
     $('#sl-tar').value=en().fixed_only?'fixed':en().program_id?effective?.tariff||last?.tariff||'arena_only':last?.tariff||en().tariff||'fixed';
-    $('#sl-ofp').innerHTML=(p?.ofp_groups||[]).map(g=>`<option value="${g.id}" ${g.id===effective?.ofp_group_id?'selected':''}>${esc(g.name)}</option>`).join('');syncFields();
+    const options=p?.ofp_groups||[];
+    const prior=priorOfpChoice(d.subscriptions,$('#sl-month').value,en().group_id,options,S.meta.groups||[]);
+    const scheduled=plan?.next && $('#sl-month').value>=plan.next.from;
+    if(prior && !scheduled && !en().fixed_only) $('#sl-tar').value='pkg';
+    const selected=scheduled ? effective?.ofp_group_id : prior?.id||effective?.ofp_group_id;
+    $('#sl-ofp').innerHTML=options.map(g=>`<option value="${g.id}" ${g.id===selected?'selected':''}>${esc(g.name)}</option>`).join('');
+    $('#sl-ofp-hint').textContent=prior ? `В прошлом месяце: ${prior.name}. День можно изменить` : 'Выберите день ОФП на этот месяц';
+    syncFields();
   };
   const quote=async(preserveCalendar=false)=>{
     const request=++version;shareVersion++;busy(true);existing=null;balancePreview=null;$('#sl-balance-preview').textContent='Считаю…';$('#sl-res').innerHTML='';if(preserveCalendar!==true||!$('#sl-calendar'))$('#sl-q').innerHTML='Считаю…';
@@ -1894,7 +1927,7 @@ async function openSell(d, reload) {
       await showSaleLink(order,r.id,l);
     }catch(e){fail(e);if(isCurrent()){lock(!!savedInvoice);busy(false)}}finally{linkBusy=false}
   };
-  recommend();pastGroupSearch($('#sl-en'));pastGroupSearch($('#sl-ofp'));quote();box.scrollIntoView({block:'start',behavior:'smooth'});
+  recommend();pastGroupSearch($('#sl-en'));quote();box.scrollIntoView({block:'start',behavior:'smooth'});
 }
 
 async function copyTextWithNotice(text, notice='Текст скопирован') {
