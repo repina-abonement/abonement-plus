@@ -89,6 +89,20 @@ class ErpWorkflowTest(unittest.TestCase):
         self.assertEqual(tuple(following), ("Новый лид (думают)", "Мама обсудит расписание и ответит завтра"))
         self.assertIn("Комментарий: Мама обсудит расписание", history)
 
+    def test_selected_next_task_date_is_applied_in_same_transition(self):
+        tid = self.add("Новый лид", "call_lead")
+        tasks.complete(self.con, tid, self.user, "Новый лид (ндз)", "Перезвонить завтра", "2026-11-23")
+        following = self.con.execute("SELECT title,due_at FROM tasks WHERE student_id=? AND status='open'", (self.sid,)).fetchone()
+        self.assertEqual(tuple(following), ("Новый лид (ндз)", "2026-11-23T23:59"))
+        history = self.con.execute("SELECT text FROM history WHERE student_id=? ORDER BY id DESC", (self.sid,)).fetchone()[0]
+        self.assertIn("Срок следующей задачи: 23.11.2026", history)
+
+    def test_explicit_empty_next_date_is_rejected_before_closing(self):
+        tid = self.add("Новый лид", "call_lead")
+        with self.assertRaisesRegex(comms.CommsError, "дату следующей задачи"):
+            tasks.complete(self.con, tid, self.user, "Новый лид (ндз)", "Перезвонить", "")
+        self.assertEqual(self.con.execute("SELECT status FROM tasks WHERE id=?", (tid,)).fetchone()[0], "open")
+
 
 if __name__ == "__main__":
     unittest.main()

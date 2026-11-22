@@ -697,6 +697,8 @@ def _task_out(con, r) -> dict:
     d["assignee"] = a[0] if a else ""
     from . import erpworkflow
     d["erp_outcomes"] = erpworkflow.options(d)
+    d["erp_due_dates"] = {outcome: erpworkflow.due_at(con, outcome, d.get("student_id")).date().isoformat()
+                          for outcome in d["erp_outcomes"] if outcome != "Закрыть задачу"}
     return d
 
 
@@ -930,7 +932,7 @@ def for_student(con, sid: int) -> dict:
     return {"open": [_task_out(con, r) for r in con.execute(q + "substr(due_at,1,10),priority DESC,due_at,id", (sid, fam, "open"))], "done": []}  # выполненные не показываем
 
 
-def complete(con, tid: int, user: dict, result: str = "", comment: str = "") -> None:
+def complete(con, tid: int, user: dict, result: str = "", comment: str = "", next_due: str | None = None) -> None:
     t = con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
     if not t:
         raise comms.CommsError("Задача не найдена")
@@ -955,13 +957,21 @@ def complete(con, tid: int, user: dict, result: str = "", comment: str = "") -> 
     choices=erpworkflow.options(t)
     outcome=result.strip()
     transition_comment=comment.strip()
+    transition_due = None
     if choices:
         if outcome not in choices:raise comms.CommsError('Выберите результат задачи из списка ERP')
         if not transition_comment:raise comms.CommsError('Напишите комментарий к изменению статуса')
         if len(transition_comment)>1000:raise comms.CommsError('Комментарий не должен быть длиннее 1000 символов')
         if outcome!='Закрыть задачу':
+            if next_due is None:
+                transition_due = erpworkflow.due_at(con,outcome,t['student_id'])
+            else:
+                try:
+                    transition_due = datetime.combine(date.fromisoformat(str(next_due)[:10]), datetime.max.time()).replace(second=0,microsecond=0)
+                except (TypeError,ValueError):
+                    raise comms.CommsError('Выберите дату следующей задачи') from None
             kind=erpworkflow.next_kind(outcome,t)
-            add_task(con,kind,t['student_id'],erpworkflow.due_at(con,outcome,t['student_id']),
+            add_task(con,kind,t['student_id'],transition_due,
                      title=outcome,source='erp_rule',assignee=t['assignee_id'],
                      auto_key=f"erp-rule:{tid}:{outcome}",note=transition_comment)
     con.execute("UPDATE tasks SET status='done', done_at=?, done_by=?, result=? WHERE id=?",
@@ -969,7 +979,8 @@ def complete(con, tid: int, user: dict, result: str = "", comment: str = "") -> 
     if t["student_id"]:
         con.execute("INSERT INTO history(student_id, ts, user_name, kind, text) VALUES (?,?,?,?,?)",
                     (t["student_id"], _iso(_now()), user.get("name", ""), "task",
-                     (f"Задача «{t['title']}» выполнена. Следующий шаг ERP: «{outcome}». Комментарий: {transition_comment}" if choices else
+                     (f"Задача «{t['title']}» выполнена. Следующий шаг ERP: «{outcome}». Комментарий: {transition_comment}" +
+                      (f". Срок следующей задачи: {transition_due:%d.%m.%Y}" if transition_due else "") if choices else
                       f"Задача «{t['title']}» выполнена" + (f": {outcome}" if outcome else ""))))
         if t["kind"] != "request_data":
             con.execute("UPDATE students SET priority=0 WHERE id=?", (t["student_id"],))

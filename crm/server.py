@@ -1151,7 +1151,8 @@ def task_done(con, h, user, body, q, tid):
         raise ApiError("Это не ваша задача Планера", 403)
     if user["role"] == "coach" and (not t or t["assignee_id"] != user["id"]):
         raise ApiError("Это не ваша задача", 403)
-    cx(tasks.complete, con, int(tid), user, body.get("result") or "", body.get("comment") or "")
+    cx(tasks.complete, con, int(tid), user, body.get("result") or "", body.get("comment") or "",
+       body.get("next_due") if "next_due" in body else None)
     return {"ok": True}
 
 
