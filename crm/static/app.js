@@ -761,7 +761,7 @@ async function renderDashboard(page) {
     const ms = dashboardMonths();
     page.innerHTML = `<div class="dash-filters">
       <select id="dash-month">${ms.map((x) => `<option value="${x}" ${x === S.dashMonth ? "selected" : ""}>${monthLabel(x)}</option>`).join("")}</select>
-      ${S.dashTab === "sources" || S.dashTab === "program" ? "" : `<select id="dash-branch"><option value="">Все филиалы</option>${S.meta.branches.map((b) => `<option value="${b.id}" ${String(b.id) === String(S.dashBranch) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>`}
+      ${S.dashTab === "sources" || S.dashTab === "program" ? "" : `<select id="dash-branch" data-search-select="off"><option value="">Все филиалы</option>${S.meta.branches.map((b) => `<option value="${b.id}" ${String(b.id) === String(S.dashBranch) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>`}
       </div>${anTabsHtml()}<div id="an-box"></div>`;
     $("#dash-month").onchange = (e) => { S.dashMonth = e.target.value; render(); };
     if ($("#dash-branch")) $("#dash-branch").onchange = (e) => { S.dashBranch = e.target.value; render(); };
@@ -777,8 +777,8 @@ async function renderDashboard(page) {
   page.innerHTML = `
     <div class="dash-filters">
       <select id="dash-month">${months.map((x) => `<option value="${x}" ${x === S.dashMonth ? "selected" : ""}>${monthLabel(x)}</option>`).join("")}</select>
-      <select id="dash-branch"><option value="">Все филиалы</option>${S.meta.branches.map((b) => `<option value="${b.id}" ${String(b.id) === String(S.dashBranch) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>
-      <select id="dash-group" aria-label="Группа"><option value="">Все группы</option>${dashGroups.map(g=>`<option value="${g.id}" ${String(g.id)===String(S.dashGroup)?'selected':''}>${esc(g.name)}</option>`).join('')}</select>
+      <select id="dash-branch" data-search-select="off"><option value="">Все филиалы</option>${S.meta.branches.map((b) => `<option value="${b.id}" ${String(b.id) === String(S.dashBranch) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>
+      <select id="dash-group" data-search-select="off" aria-label="Группа"><option value="">Все группы</option>${dashGroups.map(g=>`<option value="${g.id}" ${String(g.id)===String(S.dashGroup)?'selected':''}>${esc(g.name)}</option>`).join('')}</select>
     </div>
     ${anTabsHtml()}
 

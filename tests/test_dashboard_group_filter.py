@@ -33,3 +33,8 @@ class DashboardGroupFilterTest(unittest.TestCase):
         other=self.con.execute("INSERT INTO branches(name) VALUES ('Other')").lastrowid
         with self.assertRaises(sv.ApiError):sv.dashboard(self.con,'2026-11',other,self.a)
         with self.assertRaises(sv.ApiError):sv.dashboard(self.con,'2026-11',group_id=99999)
+
+    def test_dashboard_filters_stay_native_selects(self):
+        source=(Path(__file__).resolve().parents[1]/'crm'/'static'/'app.js').read_text()
+        self.assertEqual(source.count('id="dash-branch" data-search-select="off"'),2)
+        self.assertIn('id="dash-group" data-search-select="off"',source)
