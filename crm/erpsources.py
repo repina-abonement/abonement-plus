@@ -26,7 +26,7 @@ def plan(con, text):
         if kind not in ('lead', 'student') or not erp_id.isascii() or not erp_id.isdigit():
             issues.append(f'Строка {line}: неверный тип или ID ERP')
             continue
-        pairs[kind, erp_id].add((channel, name))
+        pairs[kind, erp_id].add(sources.canonical_source(channel, name))
     if not pairs:
         raise ApiError('Нет строк с ID клиентов ERP')
 
@@ -55,7 +55,7 @@ def plan(con, text):
         if len(values) != 1:
             issues.append(f'CRM {sid}: в ERP указаны разные значения')
             continue
-        channel, name = next(iter(values))
+        channel, name = sources.canonical_source(*next(iter(values)))
         if not name or name == '-':
             empty += 1
             continue

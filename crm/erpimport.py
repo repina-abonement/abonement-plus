@@ -1072,7 +1072,7 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
         ev = (ev if len(ev) > 10 else (ev + "T10:00" if ev else "")) or created
         stage_at = min(ev, nowi)
         tariff = "flex" if "гибк" in _norm(rec.get("tariff", "")) else "fixed"
-        src = (rec.get("source") or "").strip()
+        src_channel, src = _src.canonical_source("Другое", (rec.get("source") or "").strip())
         sid = con.execute("""INSERT INTO students(family_id, name, birth, group_id, tariff, funnel, stage, stage_changed_at, trial_at,
                              source, created_at, erp_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                           (fid, name, parse_date(rec.get("birth", "")) or "", gid, tariff, funnel, stage, stage_at, trial,
@@ -1081,7 +1081,7 @@ def run(con, user: dict, rkn_confirmed: bool, backup_path: str = "", now: dateti
         con.execute("UPDATE students SET erp_status=? WHERE id=?", ((rec.get("status") or "").strip(), sid))
         if src:
             try:
-                sid_src = _src.find_or_create(con, src) if hasattr(_src, "find_or_create") else None
+                sid_src = _src.ensure_source(con, src_channel, src)
                 if sid_src:
                     con.execute("UPDATE students SET source_id=? WHERE id=?", (sid_src, sid))
             except Exception:  # noqa: BLE001

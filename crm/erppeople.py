@@ -1,7 +1,7 @@
 """Import visitor statuses and lead cards from selected ERP registers."""
 from collections import Counter, defaultdict
 
-from . import erpfull, erpimport as ei, services as sv
+from . import erpfull, erpimport as ei, services as sv, sources
 from .db import normalize_phone
 
 
@@ -21,6 +21,7 @@ def _profile_preview(con, sid, rec):
     """Describe safe profile enrichment without changing an existing card."""
     from .smart import guess_relation
     source = {key: _clean(rec.get(key)) for key, _ in PROFILE_FIELDS}
+    _channel, source["source"] = sources.canonical_source("Другое", source["source"])
     source["child_name"] = _clean(ei._split_name(rec))
     source["birth"] = (erpfull._date(rec.get("birth", "")) or "")[:10]
     source["phone"] = _clean(rec.get("phone"))
@@ -62,7 +63,9 @@ def _apply_profile(con, sid, rec, user):
     if source["birth"] and not student["birth"]:
         con.execute("UPDATE students SET birth=? WHERE id=?", (source["birth"], sid))
     if source["source"] and not student["source"]:
-        con.execute("UPDATE students SET source=? WHERE id=?", (source["source"], sid))
+        channel, name = sources.canonical_source("Другое", source["source"])
+        source_id = sources.ensure_source(con, channel, name)
+        con.execute("UPDATE students SET source=?,source_id=? WHERE id=?", (name, source_id, sid))
     parent_row = con.execute("SELECT * FROM parents WHERE family_id=? ORDER BY is_primary DESC,id LIMIT 1", (student["family_id"],)).fetchone()
     if not parent_row:
         con.execute("""INSERT INTO parents(family_id,name,phone,phone_norm,email,relation,is_primary)
@@ -179,11 +182,14 @@ def transfer(con, visitors, leads, user, token=None):
                 family = con.execute("INSERT INTO families(name) VALUES (?)", (parent,)).lastrowid
                 con.execute("INSERT INTO parents(family_id,name,phone,phone_norm) VALUES (?,?,?,?)",
                             (family, parent, phone, normalized))
+            source_channel, source_name = sources.canonical_source("Другое", rec.get("source", ""))
             sid = sv.create_student(con, {
                 "name": ei._split_name(rec) or ei.NO_NAME, "family_id": family,
                 "birth": (erpfull._date(rec.get("birth", "")) or "")[:10],
-                "source": rec.get("source", ""),
+                "source": source_name,
             }, user)
+            if source_name:
+                con.execute("UPDATE students SET source_id=? WHERE id=?", (sources.ensure_source(con, source_channel, source_name), sid))
             created = erpfull._date(rec.get("created", ""))
             if created:
                 con.execute("UPDATE students SET created_at=? WHERE id=?", (created, sid))
