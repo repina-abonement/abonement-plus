@@ -33,6 +33,19 @@ USER_STATUSES = (
 )
 
 
+def confirmed_monthly_months(con, sid: int) -> list[str]:
+    """Months with confirmed service entitlement, without inventing a CRM sale/payment."""
+    months = {r[0] for r in con.execute(
+        """SELECT month FROM subscriptions WHERE student_id=? AND status='paid'
+           AND COALESCE(kind,'month')='month'""", (sid,)
+    )}
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
+        months.update(r[0] for r in con.execute(
+            "SELECT DISTINCT month FROM erp_history_subscriptions WHERE student_id=?", (sid,)
+        ))
+    return sorted(months)
+
+
 def calculate(con, student, on: date | None = None) -> str:
     on = on or date.today()
     cur, prev = logic.month_of(on), logic.shift_month(logic.month_of(on), -1)
@@ -43,7 +56,7 @@ def calculate(con, student, on: date | None = None) -> str:
         """SELECT month,COALESCE(kind,'month') FROM subscriptions
            WHERE student_id=? AND status='paid' ORDER BY month""", (sid,)
     )]
-    monthly = [month for month, kind in paid if kind == "month"]
+    monthly = confirmed_monthly_months(con, sid)
     singles = [month for month, kind in paid if kind == "single"]
 
     if monthly:
@@ -84,17 +97,12 @@ def sync_one(con, sid: int, on: date | None = None, *, log: bool = True) -> str:
     if not row:
         return ""
     month = logic.month_of(on or date.today())
-    objective_paid = con.execute(
-        """SELECT 1 FROM subscriptions WHERE student_id=? AND status='paid'
-           AND COALESCE(kind,'month')='month' AND month>=? LIMIT 1""", (sid, month)
-    ).fetchone()
+    monthly = confirmed_monthly_months(con, sid)
+    objective_paid = any(value >= month for value in monthly)
     if (row["erp_id"] or "").strip() and not objective_paid:
         return row["erp_status"] or ""
     value = calculate(con, row, on)
-    has_current = con.execute(
-        """SELECT 1 FROM subscriptions WHERE student_id=? AND status='paid'
-           AND COALESCE(kind,'month')='month' AND month=? LIMIT 1""", (sid, month)
-    ).fetchone()
+    has_current = month in monthly
     if has_current and (row["funnel"] != "members" or row["stage"] != "active"):
         con.execute("UPDATE students SET funnel='members',stage='active',priority=0 WHERE id=?", (sid,))
         con.execute("""UPDATE tasks SET status='cancelled',done_at=datetime('now'),result='Отменена: есть оплаченный абонемент'

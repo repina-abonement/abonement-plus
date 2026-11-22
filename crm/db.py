@@ -325,6 +325,7 @@ def init_db(con: sqlite3.Connection):
     targetedkononenkotask.reconcile_profile(con)
     from . import targetedminibaevtask
     targetedminibaevtask.apply(con)
+    targetedminibaevtask.reconcile_profile(con)
     from . import targetedmillertask
     targetedmillertask.apply(con)
     from . import lifecycle, channels

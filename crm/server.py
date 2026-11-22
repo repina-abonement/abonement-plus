@@ -1976,6 +1976,12 @@ def minibaev_task_report(con,h,user,body,q):
     return targetedminibaevtask.report(con)
 
 
+@route("GET", "/api/maintenance/minibaev-profile-report", role="admin")
+def minibaev_profile_report(con,h,user,body,q):
+    from . import targetedminibaevtask
+    return targetedminibaevtask.profile_report(con)
+
+
 @route("GET", "/api/maintenance/miller-task-report", role="admin")
 def miller_task_report(con,h,user,body,q):
     from . import targetedmillertask

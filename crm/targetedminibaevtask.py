@@ -1,10 +1,12 @@
 """Narrow production task repair for Damir Minibaev requested on 2026-11-22."""
 import json
+from datetime import date
 
-from . import money, tasks
+from . import erpstatus, logic, money, tasks
 
 
 KEY = "targeted_minibaev_december_task_20261122"
+PROFILE_KEY = "targeted_minibaev_profile_reconcile_20261122_v2"
 STUDENT_ID = 4
 ERP_ID = "64928"
 OLD_TASK_ID = 4642
@@ -91,4 +93,34 @@ def apply(con):
 
 def report(con):
     row = con.execute("SELECT value FROM settings WHERE key=?", (KEY,)).fetchone()
+    return json.loads(row[0]) if row else {"state": "pending", "student_id": STUDENT_ID}
+
+
+def reconcile_profile(con, on: date | None = None):
+    previous = con.execute("SELECT value FROM settings WHERE key=?", (PROFILE_KEY,)).fetchone()
+    if previous:
+        return json.loads(previous[0])
+    on = on or date.today()
+    student = con.execute("SELECT id,name,erp_id FROM students WHERE id=?", (STUDENT_ID,)).fetchone()
+    identity_ok = bool(student and " ".join(student["name"].casefold().split()) in NAMES
+                       and str(student["erp_id"] or "") == ERP_ID)
+    cur = logic.month_of(on)
+    months = erpstatus.confirmed_monthly_months(con, STUDENT_ID)
+    if not identity_ok:
+        result = {"state": "identity_mismatch", "student_id": STUDENT_ID, "erp_id": ERP_ID}
+    elif cur not in months:
+        result = {"state": "not_applied", "reason": "no_confirmed_current_subscription", "confirmed_months": months}
+    else:
+        status = erpstatus.sync_one(con, STUDENT_ID, on)
+        current = con.execute("SELECT erp_status,funnel,stage FROM students WHERE id=?", (STUDENT_ID,)).fetchone()
+        open_tasks = [dict(r) for r in con.execute("SELECT id,kind,title,due_at,status FROM tasks WHERE student_id=? AND status='open' ORDER BY id", (STUDENT_ID,))]
+        result = {"state": "complete", "student_id": STUDENT_ID, "erp_id": ERP_ID,
+                  "confirmed_months": months, "status": status, "funnel": current["funnel"],
+                  "stage": current["stage"], "open_tasks": open_tasks}
+    con.execute("INSERT INTO settings(key,value) VALUES (?,?)", (PROFILE_KEY, json.dumps(result, ensure_ascii=False)))
+    return result
+
+
+def profile_report(con):
+    row = con.execute("SELECT value FROM settings WHERE key=?", (PROFILE_KEY,)).fetchone()
     return json.loads(row[0]) if row else {"state": "pending", "student_id": STUDENT_ID}

@@ -42,6 +42,16 @@ class TargetedMinibaevTaskTest(unittest.TestCase):
         self.assertEqual(report["open_task"]["kind"], "payment_check")
         self.assertEqual(report["open_renewal_or_payment_count"], 1)
 
+    def test_profile_reconcile_cancels_lead_and_keeps_renewal(self):
+        task_report = targetedminibaevtask.apply(self.con)
+        self.con.execute("DELETE FROM settings WHERE key=?", (targetedminibaevtask.PROFILE_KEY,))
+        profile = targetedminibaevtask.reconcile_profile(self.con, __import__('datetime').date(2026,11,22))
+        self.assertEqual(profile["state"], "complete")
+        self.assertEqual((profile["status"], profile["funnel"], profile["stage"]),
+                         ("Новый оплативший посетитель", "members", "active"))
+        self.assertEqual([(t["id"],t["kind"],t["status"]) for t in profile["open_tasks"]],
+                         [(task_report["open_task"]["id"], "renew", "open")])
+
 
 if __name__ == "__main__":
     unittest.main()

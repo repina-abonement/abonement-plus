@@ -5,7 +5,7 @@ from datetime import date
 from . import erpstatus, logic, money, tasks
 
 KEY = "targeted_kononenko_december_task_20261122"
-PROFILE_KEY = "targeted_kononenko_profile_reconcile_20261122_v2"
+PROFILE_KEY = "targeted_kononenko_profile_reconcile_20261122_v3"
 
 
 def apply(con):
@@ -56,8 +56,7 @@ def reconcile_profile(con, on: date | None = None):
     identity_ok = bool(student and " ".join(student["name"].casefold().split()) in {"иван кононенко", "кононенко иван"}
                        and str(student["erp_id"] or "") == "92421")
     cur, nxt = logic.month_of(on), logic.shift_month(logic.month_of(on), 1)
-    paid_months = [r[0] for r in con.execute("""SELECT DISTINCT month FROM subscriptions WHERE student_id=2
-        AND status='paid' AND COALESCE(kind,'month')='month' AND month IN (?,?) ORDER BY month""", (cur, nxt))]
+    paid_months = [month for month in erpstatus.confirmed_monthly_months(con, 2) if month in (cur, nxt)]
     if not identity_ok:
         result = {"state": "identity_mismatch", "student_id": 2}
     elif paid_months != [cur, nxt]:

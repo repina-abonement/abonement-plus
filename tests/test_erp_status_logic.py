@@ -82,6 +82,19 @@ class ErpStatusLogicTest(unittest.TestCase):
         self.assertEqual(tuple(student), ("members", "active", "Постоянный посетитель"))
         self.assertEqual(self.con.execute("SELECT status FROM tasks WHERE student_id=?", (sid,)).fetchone()[0], "cancelled")
 
+    def test_confirmed_erp_history_changes_status_without_sale_or_payment(self):
+        sid = self.child()
+        branch = self.con.execute("INSERT INTO branches(name) VALUES ('History branch')").lastrowid
+        group = self.con.execute("INSERT INTO groups(branch_id,name,weekdays) VALUES (?,'History group','5')", (branch,)).lastrowid
+        self.con.execute("UPDATE students SET erp_id='64928',erp_status='Новый лид' WHERE id=?", (sid,))
+        self.con.execute("""INSERT INTO erp_history_subscriptions
+            (source_id,student_id,group_id,month,valid_from,valid_until,lessons,source_payload,imported_at,imported_by)
+            VALUES ('history-sub',?,?, '2026-11','2026-11-01','2026-11-30',4,'{}','2026-11-22','test')""", (sid, group))
+        self.assertEqual(self.status(sid), "Новый оплативший посетитель")
+        self.assertEqual(self.con.execute("SELECT funnel FROM students WHERE id=?", (sid,)).fetchone()[0], "members")
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM subscriptions WHERE student_id=?", (sid,)).fetchone()[0], 0)
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM payments WHERE student_id=?", (sid,)).fetchone()[0], 0)
+
     def test_targeted_kononenko_reconcile_keeps_renewal_task(self):
         self.child()
         sid = self.child()
