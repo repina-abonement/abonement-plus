@@ -1048,8 +1048,9 @@ WZ_ROUTE = {
     "wazzup_max": ("max", "wazzup_max_channel", "MAX"),
 }
 
-# Единый бизнес-приоритет каналов: MAX → Telegram → WhatsApp.
-CHANNEL_PRIORITY = {"wazzup_max": 0, "max": 0, "wazzup_telegram": 1, "telegram": 2, "whatsapp": 3}
+# Существующую переписку Telegram обязательно продолжаем в Telegram.
+# Приоритет MAX → Telegram → WhatsApp применяется отдельно, только к новому контакту.
+CHANNEL_PRIORITY = {"wazzup_telegram": 0, "telegram": 1, "wazzup_max": 2, "max": 2, "whatsapp": 3}
 
 
 def channel_priority(channel: str) -> int:
@@ -1591,7 +1592,7 @@ def preferred_telegram_reply(con,current,conversations):
 
 
 def preferred_reply(con, current, conversations):
-    """Best channel for the same proven recipient, using MAX → Telegram → WhatsApp."""
+    """Keep an existing Telegram dialogue; only compare other proven channels after it."""
     candidates = [c for c in conversations if c.get("channel") != "tg_archive" and same_reply_contact(current, c)]
     if not candidates:
         return current["id"]

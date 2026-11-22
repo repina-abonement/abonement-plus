@@ -275,7 +275,7 @@ def render_template(con, key: str, s: dict, channel: str = "") -> str:
 
 
 def best_conversation(con, family_id: int) -> int | None:
-    """Куда писать семье: MAX → Telegram → WhatsApp для основного родителя.
+    """Куда писать семье: сохраняем Telegram; для нового контакта MAX → Telegram → WhatsApp.
     Выдуманным (тестовым) семьям не пишем никогда: их случайные номера могут оказаться чужими."""
     fam = con.execute("SELECT * FROM families WHERE id=?", (family_id or 0,)).fetchone()
     if not fam or ("fake" in fam.keys() and fam["fake"]):
@@ -285,14 +285,14 @@ def best_conversation(con, family_id: int) -> int | None:
         username=(primary['messenger'] or '').strip().lstrip('@').casefold()
         r=con.execute("""SELECT id FROM conversations WHERE family_id=? AND external_id NOT LIKE 'demo-%'
             AND ((phone_norm!='' AND phone_norm=?) OR (username!='' AND lower(ltrim(username,'@'))=?))
-            ORDER BY CASE channel WHEN 'wazzup_max' THEN 0 WHEN 'max' THEN 0
-                                  WHEN 'wazzup_telegram' THEN 1 WHEN 'telegram' THEN 1
+            ORDER BY CASE channel WHEN 'wazzup_telegram' THEN 0 WHEN 'telegram' THEN 0
+                                  WHEN 'wazzup_max' THEN 1 WHEN 'max' THEN 1
                                   WHEN 'whatsapp' THEN 2 ELSE 99 END,
                      last_at IS NULL,last_at DESC LIMIT 1""",(family_id,primary['phone_norm'],username)).fetchone()
     else:
         r = con.execute("""SELECT id FROM conversations WHERE family_id=? AND external_id NOT LIKE 'demo-%'
-                       ORDER BY CASE channel WHEN 'wazzup_max' THEN 0 WHEN 'max' THEN 0
-                                             WHEN 'wazzup_telegram' THEN 1 WHEN 'telegram' THEN 1
+                       ORDER BY CASE channel WHEN 'wazzup_telegram' THEN 0 WHEN 'telegram' THEN 0
+                                             WHEN 'wazzup_max' THEN 1 WHEN 'max' THEN 1
                                              WHEN 'whatsapp' THEN 2 ELSE 99 END,
                                 last_at IS NULL, last_at DESC LIMIT 1""", (family_id,)).fetchone()
     if r:
