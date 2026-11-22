@@ -339,7 +339,7 @@ function clientChannelPriority(channel) {
 }
 function preferredFamilyTarget(conversations,targets,primary,status) {
   // Уже начатую Telegram-переписку продолжаем там же; MAX первый только для нового контакта.
-  const existing=conversations.filter(c=>!['tg_archive','telegram'].includes(c.channel)&&targets.some(t=>t.v==='c'+c.id));
+  const existing=conversations.filter(c=>c.established&&!['tg_archive','telegram'].includes(c.channel)&&targets.some(t=>t.v==='c'+c.id));
   existing.sort((a,b)=>clientChannelPriority(a.channel)-clientChannelPriority(b.channel)||(b.last_at||'').localeCompare(a.last_at||'')||b.id-a.id);
   if(existing.length)return 'c'+existing[0].id;
   if(!primary)return targets.length===1?targets[0].v:'';
@@ -412,11 +412,15 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     .forEach((p) => targets.push({ v: "t" + p.id, t: `Telegram через Wazzup · ${p.name} (новый чат)` }));
   if (st.wazzup_max) parents.filter(p => p.phone && !d.conversations.some(c => c.channel === "wazzup_max" && c.phone_norm && p.phone.replace(/\D/g, "").endsWith(c.phone_norm.slice(1))))
     .forEach(p => targets.push({v:"m" + p.id,t:`MAX · ${p.name} (новый чат)`}));
+  const targetDisplayPriority=target=>target.channel?({wazzup_max:0,max:0,wazzup_telegram:1,telegram:1,whatsapp:2}[target.channel]??3):({m:0,t:1,w:2}[target.v[0]]??3);
+  targets.sort((a,b)=>targetDisplayPriority(a)-targetDisplayPriority(b));
   S.familySendTargets = S.familySendTargets || {};
   const primary=parents.find(p=>p.is_primary);
   const targetKey = `${S.user.id}:${familyId}:${primary?.id||0}`;
   const primaryTarget=preferredFamilyTarget(d.conversations,targets,primary,st);
-  const selectedTarget = targets.some(x => x.v === S.familySendTargets[targetKey]) ? S.familySendTargets[targetKey] : primaryTarget;
+  const savedTarget=S.familySendTargets[targetKey],savedConversation=savedTarget?.[0]==='c'?d.conversations.find(c=>c.id===+savedTarget.slice(1)):null;
+  const savedIsUsable=targets.some(x=>x.v===savedTarget)&&(!savedConversation||savedConversation.established);
+  const selectedTarget = savedIsUsable ? savedTarget : primaryTarget;
   const oq = d.conversations.filter((c) => c.open_q);
   box.innerHTML = `
     <div class="family-chat-header"><h3>Переписка</h3><details class="family-contacts"><summary>Контакты</summary><div class="family-contact-list">${parents.filter(p=>p.phone).map(p=>`<button class="btn sm" data-dial="${esc(p.phone)}">📞 ${esc(p.name)}${p.relation?` · ${esc(p.relation)}`:''}<span>${esc(p.phone)}</span></button>`).join('')||'<span class="small muted">Телефон не указан</span>'}</div></details></div>

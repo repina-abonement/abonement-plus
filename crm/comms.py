@@ -798,6 +798,8 @@ def wz_call(con, method: str, path: str, data=None, key: str | None = None):
         if "cannot found contact by phone" in (reason + " " + detail).lower():
             label = "MAX" if isinstance(data, dict) and data.get("chatType") == "max" else "Мессенджер"
             hint = label + " не нашёл контакт по этому номеру. Проверьте номер или попросите клиента написать первым"
+        if "POST_MESSAGE_ERROR" in reason and isinstance(data, dict) and data.get("chatType") == "whatsapp":
+            hint = "WhatsApp отклонил сообщение. Если клиент ещё не писал школе, сначала свяжитесь через MAX или Telegram; свободный текст в новый WhatsApp-чат может быть запрещён провайдером"
         request_id = str(js.get("requestId") or "") if isinstance(js, dict) else ""
         request_id = request_id if re.fullmatch(r"[a-zA-Z0-9-]{8,64}", request_id) else ""
         raise CommsError(" · ".join(x for x in (hint, "Wazzup: " + reason, detail if detail != reason else "", "requestId=" + request_id if request_id else "") if x))
@@ -1585,6 +1587,8 @@ def _conv_out(con, r, pref=None, identity_cache=None) -> dict:
     d['muted']=bool((pref or {}).get('muted'))
     d['archived']=chatinbox.archived(con,d,pref or {})
     d["demo"] = d["external_id"].startswith("demo-")
+    d["established"] = bool(con.execute(
+        "SELECT 1 FROM messages WHERE conversation_id=? AND status!='error' LIMIT 1", (d["id"],)).fetchone())
     return d
 
 

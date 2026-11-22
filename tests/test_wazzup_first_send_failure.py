@@ -61,3 +61,17 @@ class FirstSendFailureTest(WazzupTest):
         self.assertTrue(second['already_sent'])
         self.assertEqual(provider.call_count,1)
         self.assertEqual(self.con.execute("SELECT count(*) FROM messages WHERE external_id='one-provider-message'").fetchone()[0],1)
+
+    def test_failed_only_chat_is_not_treated_as_established(self):
+        comms.put(self.con,'wazzup_channel','test-wa')
+        cid=comms.start_whatsapp(self.con,'79000000111')
+        comms.add_message(self.con,cid,'out','Failed only',status='error',error='Synthetic')
+        self.assertFalse(comms._conv_out(self.con,self.con.execute('SELECT * FROM conversations WHERE id=?',(cid,)).fetchone())['established'])
+        comms.add_message(self.con,cid,'in','Real reply',external_id='real-incoming')
+        self.assertTrue(comms._conv_out(self.con,self.con.execute('SELECT * FROM conversations WHERE id=?',(cid,)).fetchone())['established'])
+
+    def test_whatsapp_provider_error_explains_first_contact_restriction(self):
+        with patch.object(comms,'http',return_value=(400,{'error':'POST_MESSAGE_ERROR','description':'Can not send message','requestId':'synthetic123456'})):
+            with self.assertRaises(comms.CommsError) as caught:
+                comms.wz_call(self.con,'POST','message',{'chatType':'whatsapp','chatId':'79000000111','text':'Synthetic'},key='not-a-secret')
+        self.assertIn('сначала свяжитесь через MAX или Telegram',str(caught.exception))
