@@ -677,17 +677,19 @@ def new_cards_today(con, ref=None):
             continue
         if created.tzinfo is not None:
             created=created.astimezone(tz)
-        if created.date()!=day:
+        has_subscription=con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND status!='cancelled'
+            AND COALESCE(kind,'month')='month' AND month>=? LIMIT 1""",(row['id'],logic.month_of(day))).fetchone()
+        pending = row['stage']=='lead' and not row['erp_id'] and not has_subscription and con.execute(
+            "SELECT 1 FROM tasks WHERE student_id=? AND kind='call_lead' AND status='open' LIMIT 1",(row['id'],)).fetchone()
+        # Красная очередь включает все необработанные заявки, даже если они поступили раньше.
+        # Обычные карточки после обработки показываем здесь только в день создания.
+        if created.date()!=day and not pending:
             continue
         card=card_summary(con,dict(row),settings(con))
         card['created_at']=row['created_at']
-        # This daily funnel follows the current client stage. Completing a task
-        # alone must not hide a card that is still a new lead.
-        has_subscription=con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND status!='cancelled'
-            AND COALESCE(kind,'month')='month' AND month>=? LIMIT 1""",(row['id'],logic.month_of(day))).fetchone()
         # Исторические карточки, созданные сегодняшним импортом ERP, не являются
         # свежими заявками с сайта или ручным вводом промоутера.
-        card['needs_processing']=card['stage']=='lead' and not row['erp_id'] and not has_subscription
+        card['needs_processing']=bool(pending)
         cards.append(card)
     return {'date':day.isoformat(),'cards':cards}
 

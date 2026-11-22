@@ -50,13 +50,22 @@ class NewClientTest(unittest.TestCase):
         self.assertEqual(card['source'],'Промоутер: Иван Ивакин')
         self.con.execute("UPDATE tasks SET status='done' WHERE student_id=? AND kind='call_lead'",(sid,))
         card=next(x for x in sv.new_cards_today(self.con)['cards'] if x['id']==sid)
-        self.assertTrue(card['needs_processing'])
+        self.assertFalse(card['needs_processing'])
         self.con.execute("UPDATE students SET stage='no_answer' WHERE id=?",(sid,))
         card=next(x for x in sv.new_cards_today(self.con)['cards'] if x['id']==sid)
         self.assertFalse(card['needs_processing'])
         self.con.execute("UPDATE students SET stage='lead',erp_id='historical-erp' WHERE id=?",(sid,))
         card=next(x for x in sv.new_cards_today(self.con)['cards'] if x['id']==sid)
         self.assertFalse(card['needs_processing'])
+
+    def test_unprocessed_application_from_previous_day_remains_in_queue(self):
+        sid=sv.create_new_lead(self.con,{**self.data,'source':'Промоутер: Иван Ивакин'},self.user)
+        self.con.execute("UPDATE students SET created_at='2026-11-20T12:00' WHERE id=?",(sid,))
+        ref=datetime.fromisoformat('2026-11-22T12:00:00+03:00')
+        card=next(x for x in sv.new_cards_today(self.con,ref)['cards'] if x['id']==sid)
+        self.assertTrue(card['needs_processing'])
+        self.con.execute("UPDATE tasks SET status='done' WHERE student_id=? AND kind='call_lead'",(sid,))
+        self.assertNotIn(sid,[x['id'] for x in sv.new_cards_today(self.con,ref)['cards']])
 
     def test_today_list_uses_creation_not_stage_change_and_moscow(self):
         sid=sv.create_student(self.con,self.data,self.user)

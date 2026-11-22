@@ -75,7 +75,11 @@ def main():
                 (sid4, at(0, "15:30"), "life", at(0, "11:00")))
     cols = {c["title"]: [t["student"]["name"] for t in c["cards"]] for c in tasks.erp_board(con, "today")["columns"]}
     check("Свежая Заявка" in cols.get("Новая заявка", []) and "Новенький Лидов" not in cols.get("Новая заявка", []),
-          "«Новая заявка» содержит только сегодняшнюю карточку на первом этапе")
+          "«Новая заявка» содержит необработанную карточку на первом этапе")
+    con.execute("UPDATE students SET created_at=? WHERE id=?", (at(-3, "11:00"), sid4))
+    cols = {c["title"]: [t["student"]["name"] for t in c["cards"]] for c in tasks.erp_board(con, "today")["columns"]}
+    check("Свежая Заявка" in cols.get("Новая заявка", []),
+          "Необработанная заявка остаётся в воронке в следующие дни")
     con.execute("UPDATE students SET erp_id='historical-import' WHERE id=?", (sid4,))
     cols = {c["title"]: [t["student"]["name"] for t in c["cards"]] for c in tasks.erp_board(con, "today")["columns"]}
     check("Свежая Заявка" not in cols.get("Новая заявка", []) and "Свежая Заявка" in cols.get("Необработанные ранее", []),

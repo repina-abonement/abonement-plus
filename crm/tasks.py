@@ -783,18 +783,10 @@ NEW_LEAD_KINDS = ("call_lead", "no_answer", "revive", "reinvite")
 def _erp_col(t: dict) -> tuple[str, str]:
     kind, title = t["kind"], (t.get("title") or "").strip()
     st = t.get("student") or {}
-    # «Новая заявка» — не синоним любого старого статуса «Новый лид».
-    # Здесь только карточка, созданная сегодня и ещё не сдвинутая с первого этапа.
+    # «Новая заявка» — очередь ещё не обработанных заявок, а не только сегодняшних.
+    # Вчерашняя заявка остаётся здесь, пока карточку не сдвинули с первого этапа.
     if kind in NEW_LEAD_KINDS and st.get("funnel") == "sales" and not st.get("trial_at"):
-        from zoneinfo import ZoneInfo
-        try:
-            created = datetime.fromisoformat(st.get("created_at") or "")
-            if created.tzinfo is not None:
-                created = created.astimezone(ZoneInfo("Europe/Moscow"))
-            created_today = created.date() == datetime.now(ZoneInfo("Europe/Moscow")).date()
-        except (TypeError, ValueError):
-            created_today = False
-        if st.get("stage") == "lead" and created_today and not st.get("erp_id"):
+        if st.get("stage") == "lead" and kind == "call_lead" and not st.get("erp_id"):
             return "new_application", "Новая заявка"
         return "old_unprocessed_lead", "Необработанные ранее"
     for k, name in ERP_COLUMNS:

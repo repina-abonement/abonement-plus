@@ -34,7 +34,7 @@ def test_new_application_is_a_prominent_action_until_client_status_changes():
     styles = (ROOT / "crm/static/style.css").read_text(encoding="utf-8")
 
     assert "<h3>Новая заявка</h3>" in app
-    assert "которые появились в CRM сегодня" in app
+    assert "остаются здесь до первой обработки" in app
     assert "x.needs_processing" in app
     assert 'data-fresh-lead="${lead.id}"' in app
     assert 'Источник: ${esc(lead.source || "не указан")}' in app
