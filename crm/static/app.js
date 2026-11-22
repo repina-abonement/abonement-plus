@@ -2160,8 +2160,6 @@ async function openStudent(id, options = {}) {
     ${d.family.note ? `<div class="sc-staff-note" ${full?'data-profile-note tabindex="0" role="button" title="Изменить заметку"':''}><b>Заметка для команды</b><div>${esc(d.family.note)}</div></div>` : ""}
     ${alerts ? `<div class="sc-alerts">${alerts}</div>` : ""}
     ${d.next_step && !(d.next_step.action === "task" && d.tasks?.open?.length) ? `<div class="next-step"><span><b>Задача:</b> ${esc(d.next_step.text)}</span><button class="btn sm primary" id="ns-go">${NEXT_GO[d.next_step.action] || "Сделать"}</button></div>` : ""}
-    ${!isMember && d.stage_tip ? `<details class="stage-tip" ${S.tipsOpen === true ? "open" : ""}><summary>💡 Подсказка на этапе «${esc(d.stage_label)}»</summary>
-      <div><b>Что сказать.</b> ${esc(d.stage_tip.say)}</div><div style="margin-top:4px"><b>Чтобы перейти дальше:</b> ${esc(d.stage_tip.next)}</div></details>` : ""}
     <div class="sc-header-tools" role="toolbar" aria-label="Действия клиента">
       <button type="button" class="btn sc-tool" id="act-trial" title="Записать на пробное" aria-label="Записать на пробное">ПУ</button>
       ${saleFull?`<button type="button" class="btn sc-tool primary" id="act-sell" title="Продать абонемент или разовое занятие" aria-label="Продать абонемент или разовое занятие"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l3 12h11l2-8H6M9 20h.01M18 20h.01"/></svg></button>`:''}
@@ -2315,7 +2313,6 @@ async function openStudent(id, options = {}) {
     if (!confirm("Остановить автоцепочку для этого клиента? Больше сообщений по ней не уйдёт")) return;
     try { await api("POST", `/api/chain-runs/${b.dataset.chstop}/stop`, {}); toast("Цепочка остановлена"); reload(); } catch (e) { fail(e); }
   }));
-  const tip = body.querySelector(".stage-tip"); if (tip) tip.addEventListener("toggle", () => { S.tipsOpen = tip.open; });
   if ($("#ns-go")) $("#ns-go").onclick = () => {
     const a = d.next_step.action, click = (sel) => { const b = body.querySelector(sel); if (b) { b.click(); return true; } return false; };
     if (a === "reply") { scTab("feed"); const t = $("#cm-text"); if (t) { t.scrollIntoView({ block: "center", behavior: "smooth" }); t.focus(); } }
