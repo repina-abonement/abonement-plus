@@ -2143,7 +2143,7 @@ async function openStudent(id, options = {}) {
     clientUnpaidAlertsHtml(d),
 
 
-    !s.birth ? `<span class="pill yellow">Нет даты рождения</span>` : "",
+    !s.birth ? `<span class="pill yellow">${s.reported_age != null ? `Возраст: ${esc(reportedAgeText(s))}; дата рождения не указана` : "Нет даты рождения"}</span>` : "",
     ...d.enrollments.filter((e) => e.age_warn).map((e) => `<span class="pill red">⚠️ ${esc(e.group_name)}: ${esc(e.age_warn)}</span>`),
     d.trial_age_warn ? `<span class="pill red">⚠️ Пробное ${esc(d.trial_age_warn)}</span>` : "",
     ...(d.chains || []).map((r) => `<span class="pill chain-pill">🔁 Автоцепочка «${esc(r.title)}»: отправлено ${r.step} из ${r.total} <button class="chip-x" data-chstop="${r.id}" title="Остановить цепочку">×</button></span>`),
@@ -2151,7 +2151,7 @@ async function openStudent(id, options = {}) {
   const html = `
   <div class="sc-head">
     <div class="sc-title"><h2>${full?`<button type="button" class="profile-text-edit" data-profile-edit="name" title="Изменить имя">${esc(displayChildName(s.name))}</button>`:esc(displayChildName(s.name))}</h2></div>
-    <div class="sc-status" ${full?'data-profile-open tabindex="0" role="button" title="Изменить данные клиента"':''}>${s.birth?esc(ageText(s.birth))+' · ':''}${esc((s.erp_status||'').trim()||'Статус ERP не перенесён')}${s.archived?' · в архиве':''}</div>
+    <div class="sc-status" ${full?'data-profile-open tabindex="0" role="button" title="Изменить данные клиента"':''}>${s.birth?esc(ageText(s.birth))+' · ':reportedAgeText(s)?esc(reportedAgeText(s))+' · ':''}${esc((s.erp_status||'').trim()||'Статус ERP не перенесён')}${s.archived?' · в архиве':''}</div>
     ${d.siblings.length ? `<div class="chips sc-kids"><span class="chip on">${esc(displayChildName(s.name))}</span>${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join("")}</div>` : ""}
     <div class="sc-meta" ${full?'data-head-group tabindex="0" role="button" title="Изменить группу"':''}>${isMember ? (regular.length ? regular.map((e) => `<span class="pill">${esc(e.group_name)}</span>`).join(" ") : `<span class="muted small">Группа не выбрана</span>`)
       : `${s.trial_at ? `<span class="pill">Пробное ${dtShort(s.trial_at)}</span>` : ""}`}</div>
@@ -2191,7 +2191,7 @@ async function openStudent(id, options = {}) {
 
   <div class="section" data-sc="family" data-title="Данные ребёнка и семьи">
     <h3>Данные ребёнка</h3>
-    <div class="row"><div class="field"><label>Имя и фамилия</label><div>${esc(displayChildName(s.name))}</div></div><div class="field"><label>Дата рождения</label><div>${s.birth?esc(s.birth.slice(0,10).split('-').reverse().join('.')):'Не указана'}</div></div></div>
+    <div class="row"><div class="field"><label>Имя и фамилия</label><div>${esc(displayChildName(s.name))}</div></div><div class="field"><label>Дата рождения</label><div>${s.birth?esc(s.birth.slice(0,10).split('-').reverse().join('.')):'Не указана'}</div></div>${reportedAgeText(s)?`<div class="field"><label>Возраст</label><div><b>${esc(reportedAgeText(s))}</b></div></div>`:''}</div>
     <div class="field"><label>Рекламный источник</label>${sourceSelect("f-source", s.source_id, s.source)}</div>
     <div data-client-stage></div>
     <h3>Семья ${esc(d.family.name)}</h3>
@@ -2462,6 +2462,13 @@ async function renderCoachKids(page) {
 
 function ageText(birth) {
   return ageYM(birth);
+}
+
+function reportedAgeText(student) {
+  const age = Number(student?.reported_age);
+  return !student?.birth && Number.isInteger(age) && age >= 0 && age <= 17
+    ? `${age} ${plural(age, "год", "года", "лет")} · со слов промоутера`
+    : "";
 }
 
 function isoDate(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }

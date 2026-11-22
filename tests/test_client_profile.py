@@ -28,6 +28,20 @@ class ProfileTest(unittest.TestCase):
         self.assertEqual(sv.get_student_row(self.con,self.sid)['erp_status'],'Постоянный посетитель')
         self.assertEqual(sv.get_student_row(self.con,self.sid)['name'],'Матвей')
 
+    def test_promoter_reported_age_is_exposed_without_inventing_birth_date(self):
+        sv.log(self.con,self.sid,'Переделкино, 21.11.2026. Возраст ребёнка со слов промоутера: 10',self.user)
+        for n in range(101):
+            sv.log(self.con,self.sid,f'Обычная запись {n}',self.user)
+        detail=sv.student_detail(self.con,self.sid)
+        self.assertEqual(detail['student']['reported_age'],10)
+        self.assertEqual(detail['student']['reported_age_source'],'promoter')
+        self.assertEqual(detail['student']['birth'],'')
+
+    def test_unlabelled_age_comment_is_not_treated_as_profile_age(self):
+        sv.log(self.con,self.sid,'Кажется, ребёнку около 10 лет',self.user)
+        detail=sv.student_detail(self.con,self.sid)
+        self.assertNotIn('reported_age',detail['student'])
+
     def test_reject_foreign_contact_and_roll_back(self):
         other=sv.create_student(self.con,{'name':'Другой','parent_name':'Мария','phone':'+79001119988'},self.user)
         pid=self.con.execute('SELECT id FROM parents WHERE family_id=(SELECT family_id FROM students WHERE id=?)',(other,)).fetchone()[0]

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, timedelta
 
 from . import logic
@@ -566,7 +567,9 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
         message=f"Выставлен счёт на {details}"
     log(con,sid,message,user,'payment')
     from . import tasks
-    tasks.schedule_renewal(con, sid)
+    task_id = tasks.sync_subscription_payment_tasks(con, sid)
+    if not task_id and (current_balance["payable"] == 0 or ym <= logic.month_of(today())):
+        tasks.schedule_renewal(con, sid)
     return {"id":sub_id,"quote":q,"due":current_balance['payable'],"payable":current_balance['payable'],"balance_preview":current_balance}
 
 
@@ -1002,6 +1005,20 @@ def student_detail(con, sid: int) -> dict:
                 sub['calculation_reason']='Клиент пришёл на ПУ внутри месяца ('+date.fromisoformat(trial_day).strftime('%d.%m.%Y')+'). Абонемент рассчитан на занятия после ПУ'
     hist = _rows(con.execute("SELECT ts, user_name, kind, text FROM history WHERE student_id=? AND NOT EXISTS (SELECT 1 FROM erp_full_history_corrections c WHERE c.history_id=history.id AND c.assigned_student_id IS NULL) ORDER BY id DESC LIMIT 100",
                              (sid,)))
+    # A promoter may only know the child's age, not the exact date of birth.
+    # Keep that provenance explicit: never manufacture a birth date, and only
+    # recognise the labelled phrase used by the promoter intake flow.
+    if not s["birth"]:
+        promoter_age_rows = con.execute(
+            "SELECT text FROM history WHERE student_id=? AND lower(text) LIKE '%промоутера%' ORDER BY id DESC",
+            (sid,),
+        )
+        for row in promoter_age_rows:
+            match = re.search(r"возраст\s+реб[её]нка\s+со\s+слов\s+промоутера\s*:\s*(\d{1,2})(?!\d)", row["text"] or "", re.IGNORECASE)
+            if match and 0 <= int(match.group(1)) <= 17:
+                s["reported_age"] = int(match.group(1))
+                s["reported_age_source"] = "promoter"
+                break
     from .historyview import present as present_history
     hist=[present_history(row) for row in hist]
     stage_label = SALES_LABELS.get(s["stage"], s["stage"])

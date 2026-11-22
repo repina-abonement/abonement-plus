@@ -318,6 +318,8 @@ def init_db(con: sqlite3.Connection):
     tasks.init(con)
     from . import targetedtaskfix
     targetedtaskfix.apply(con)
+    from . import targetedrenewalpayment
+    targetedrenewalpayment.apply(con)
     from . import lifecycle, channels
     lifecycle.init(con)
     channels.init(con)

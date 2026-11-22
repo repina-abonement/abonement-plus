@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import calendar
 from datetime import date, datetime, timedelta
 
 from . import comms, trialscripts
@@ -250,6 +251,78 @@ def schedule_renewal(con, student_id: int) -> int | None:
         tid = add_task(con, 'renew', student_id, due, title='Проверить продление',
                        auto_key=key, source='subscription',note=note)
         con.execute("UPDATE tasks SET assignee_id=NULL WHERE id=?", (tid,))
+    return tid
+
+
+def invoice_payment_plan(con, student_id: int) -> dict | None:
+    """Earliest unpaid future monthly invoice and its payment deadline."""
+    from . import logic, money
+    current = logic.month_of(date.today())
+    covered = money.balance(con, student_id)["covered"]
+    rows = []
+    for sub in con.execute("""SELECT id,month,price FROM subscriptions
+            WHERE student_id=? AND status!='cancelled' AND COALESCE(kind,'month')='month'
+              AND month>? ORDER BY month,id""", (student_id, current)):
+        remaining = max(0, sub["price"] - covered.get(sub["id"], 0))
+        if remaining:
+            rows.append((sub, remaining))
+    if not rows:
+        return None
+    month = rows[0][0]["month"]
+    chosen = [(sub, remaining) for sub, remaining in rows if sub["month"] == month]
+    deadline_month = logic.shift_month(month, -1)
+    year, mon = map(int, deadline_month.split("-"))
+    configured = int((con.execute("SELECT value FROM settings WHERE key='renewal_deadline_day'").fetchone() or ["25"])[0] or 25)
+    day = min(configured, calendar.monthrange(year, mon)[1])
+    remaining = sum(value for _, value in chosen)
+    invoice_ids = [sub["id"] for sub, _ in chosen]
+    return {
+        "month": month,
+        "due": f"{year:04d}-{mon:02d}-{day:02d}T23:59",
+        "remaining": remaining,
+        "invoice_ids": invoice_ids,
+        "note": f"Счёт {'№' if len(invoice_ids) == 1 else '№№'}{', '.join(map(str, invoice_ids))} на {logic.month_label(month)}. Осталось оплатить {remaining} ₽",
+    }
+
+
+def sync_subscription_payment_tasks(con, student_id: int) -> int | None:
+    """Move renewal -> invoice payment control -> next renewal, idempotently."""
+    plan = invoice_payment_plan(con, student_id)
+    key = f"subscription-payment:{student_id}"
+    payment_rows = con.execute("""SELECT * FROM tasks WHERE student_id=? AND
+        (auto_key=? OR (status='open' AND trim(title)='Проверить оплату абонемента'))
+        ORDER BY CASE WHEN auto_key=? THEN 0 ELSE 1 END,id""", (student_id, key, key)).fetchall()
+    if not plan:
+        keyed = [task for task in payment_rows if task["auto_key"] == key]
+        if not keyed:
+            return None
+        for task in keyed:
+            if task["status"] == "open":
+                con.execute("""UPDATE tasks SET status='done',done_at=?,done_by='CRM',
+                    result='Счёт полностью оплачен' WHERE id=?""", (_iso(_now()), task["id"]))
+        return schedule_renewal(con, student_id)
+
+    primary = payment_rows[0] if payment_rows else None
+    for duplicate in payment_rows[1:]:
+        if duplicate["status"] == "open":
+            con.execute("UPDATE tasks SET status='cancelled',done_at=?,result='Дубликат контроля оплаты' WHERE id=?",
+                        (_iso(_now()), duplicate["id"]))
+    # The invoice replaces the preceding renewal check, but not unrelated manual work.
+    for task in con.execute("SELECT * FROM tasks WHERE student_id=? AND status='open'", (student_id,)).fetchall():
+        if primary and task["id"] == primary["id"]:
+            continue
+        if task["kind"] == "renew" or task["title"].strip().casefold() == "проверить продление":
+            con.execute("""UPDATE tasks SET status='cancelled',done_at=?,
+                result='Счёт выставлен: ожидаем оплату' WHERE id=?""", (_iso(_now()), task["id"]))
+    if primary:
+        tid = primary["id"]
+        con.execute("""UPDATE tasks SET kind='payment_check',title='Проверить оплату абонемента',
+            due_at=?,status='open',done_at=NULL,done_by='',result='',note=?,auto_key=? WHERE id=?""",
+            (plan["due"], plan["note"], key, tid))
+    else:
+        tid = add_task(con, "payment_check", student_id, plan["due"], title="Проверить оплату абонемента",
+                       auto_key=key, source="subscription", note=plan["note"])
+    con.execute("UPDATE tasks SET assignee_id=NULL WHERE id=?", (tid,))
     return tid
 
 

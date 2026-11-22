@@ -125,6 +125,8 @@ def reconcile(con, sid: int) -> None:
         nodeadline.auto_exit(con, sid, "оплатил")
     from . import erpstatus
     erpstatus.sync_one(con, sid)
+    from . import tasks
+    tasks.sync_subscription_payment_tasks(con, sid)
 
 
 def obligations(con,sid):

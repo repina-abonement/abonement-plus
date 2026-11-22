@@ -1950,6 +1950,12 @@ def fiscal_source_status(con,h,user,body,q):
     return paykeepercheck.source_status(con)
 
 
+@route("GET", "/api/maintenance/renewal-payment-report", role="admin")
+def renewal_payment_report(con,h,user,body,q):
+    from . import targetedrenewalpayment
+    return targetedrenewalpayment.report(con)
+
+
 @route("GET", "/api/incoming-control", role="admin")
 def incoming_control_view(con,h,user,body,q):
     from . import incomingcontrol
