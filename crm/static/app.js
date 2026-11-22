@@ -1068,8 +1068,8 @@ async function renderErp(box) {
   if (typeof erpHistorySetup === "function") erpHistorySetup(box);
   try { erpPeopleSetup(box, d); } catch (error) { fail(error); }
   try { erpTaskTransferSetup(box,d); } catch (error) { fail(error); }
+  try { erpFullSetup(box, d); } catch (error) { fail(error); }
   if (done) {
-    try { erpFullSetup(box, d); } catch (error) { fail(error); }
     erpOrganizeTools(box);
     erpWireFiles(box, d);
     api("GET", "/api/erp/reinvite-old").then((r) => {
