@@ -39,6 +39,7 @@ PILOT_KEYS = {
     "e096e0e682db8cb70845d2d6fe84476b0ca8ba0cefe4e8beff3340bf6a3df7be",
     "f866bad935d3d87f73f94421f1d2412a3d1417bedf450cf4c52210385ff82c25",
     "6d63ff26d801c60d5698cb7a7f032b4091d914836f038467027e2ffd169d09bd",
+    "9cfc5e4d13bf8c5db09ee7ca25231c122bc9739216ba27e57c11847358e0ab0e",
 }
 PILOT_CONTRACTS = {
     ("84894", "2026-11"): {
@@ -128,6 +129,15 @@ def _visit_source(item, erp_student_id=""):
                     str(item.get("date") or ""), str(item.get("time") or ""), _norm(item.get("type"))]
         visit_id = hashlib.sha256(_json(identity).encode()).hexdigest()
         return f"telegram:{message}:visit:{visit_id}", "telegram", source_ref
+    # A manager-confirmed absence is first-party CRM evidence, not an ERP
+    # attendance record.  Keep its namespace explicit and derive a stable key
+    # from the exact approved fact so repeated imports remain idempotent.
+    if str(erp_student_id) == "64928" and str(item.get("source_type") or "").strip() == "manager_confirmation":
+        identity = [str(erp_student_id), str(item.get("erp_subscription_id") or ""),
+                    str(item.get("date") or ""), str(item.get("time") or ""),
+                    _norm(item.get("type")), _norm(item.get("status")), _norm(item.get("note"))]
+        source_id = hashlib.sha256(_json(identity).encode()).hexdigest()
+        return f"manager-confirmation:{source_id}", "manager_confirmation", str(item.get("note") or "")
     return "", "", ""
 
 
@@ -156,6 +166,43 @@ def _legacy_visit(con, table, item, student_id, group_id, kind, status):
 
 
 def _pilot_contract_issue(row, erp_id, month):
+    if (erp_id, month) == ("64928", "2026-11"):
+        subs = _subscriptions(row)
+        if {str(x.get("erp_id") or "") for x in subs} != {"825124", "825123"}:
+            return "Абонементы не совпадают с разрешённым точечным предпросмотром Минибаева"
+        if not row.get("partial_attendance"):
+            return "Для Минибаева требуется раздельный план и подтверждённые отметки"
+        if sum(len(_planned_lessons(row, sub)) for sub in subs) != 13:
+            return "В точечном плане Минибаева должно быть 13 занятий"
+        saturday = next((x for x in subs if str(x.get("erp_id")) == "825123"), {})
+        saturday_plan = _planned_lessons(row, saturday)
+        if len(saturday_plan) != 4 or any(
+                str(x.get("time") or "") != "17:00" or
+                not re.fullmatch(r"2026-11-\d{2}", str(x.get("date") or "")) or
+                date.fromisoformat(str(x.get("date"))).weekday() != 5 for x in saturday_plan):
+            return "Абонемент 825123 должен содержать четыре субботы в 17:00"
+        visits = row.get("attendance") or []
+        if len(visits) != 5:
+            return "У Минибаева должно быть ровно пять фактических отметок"
+        manager = [x for x in visits if str(x.get("source_type") or "") == "manager_confirmation"]
+        if len(manager) != 1 or str(manager[0].get("date")) != "2026-11-14" or \
+                _norm(manager[0].get("status")) != "не был" or _norm(manager[0].get("note")) != "пропуск по указанию руководителя турнир в небе" or \
+                manager[0].get("erp_attendance_id") or manager[0].get("source_message_id"):
+            return "Пропуск 14 ноября должен быть подтверждением руководителя с причиной «турнир», без ID отметки ERP"
+        expected = {
+            ("2026-11-05", "20:30", "subscription", "825123", "present"),
+            ("2026-11-10", "18:30", "subscription", "825124", "present"),
+            ("2026-11-12", "20:30", "makeup", "825123", "present"),
+            ("2026-11-15", "19:30", "subscription", "825124", "present"),
+            ("2026-11-14", "17:00", "subscription", "825123", "absent"),
+        }
+        actual = {(str(x.get("date") or ""), str(x.get("time") or ""),
+                   "makeup" if _norm(x.get("type")) == "отработка" else "subscription",
+                   str(x.get("erp_subscription_id") or ""),
+                   "present" if _norm(x.get("status")) in ("был", "присутствовал", "present") else "absent") for x in visits}
+        if actual != expected:
+            return "Фактические отметки Минибаева не совпадают с подтверждённым ноябрьским набором"
+        return ""
     if (erp_id, month) == ("92421", "2026-11"):
         subs = _subscriptions(row)
         if {str(x.get("erp_id") or "") for x in subs} != {"825986", "825983"}:
@@ -367,7 +414,12 @@ def preview(con, payload, period=None, student_ids=None, unassigned_visit_ids=No
                         "branch": group[3] if group else None, "state": state, "reason": reason}
                 planned.append((item, plan)); child["planned"].append(plan)
                 result["existing" if state == "already_exists" else "added" if state == "add" else "review"] += 1
-            main_groups = {x["group_id"] for x in attached if x["group_id"]} | {x[1]["group_id"] for x in planned if x[1]["group_id"]}
+            planned_groups = {x[1]["group_id"] for x in planned if x[1]["group_id"]}
+            attached_groups = {x["group_id"] for x in attached if x["group_id"]}
+            # With an explicit complete plan, the subscription's home group is
+            # determined by that plan. A confirmed visit may legitimately be
+            # in another group (for example a normal visit on a different day).
+            main_groups = planned_groups if len(planned_groups) == 1 else planned_groups | attached_groups
             existing_sub = con.execute("SELECT * FROM erp_history_subscriptions WHERE source_id=?", (subid,)).fetchone() if subid else None
             group_id = next(iter(main_groups)) if len(main_groups) == 1 else None
             lessons = int(sub.get("lesson_count") or 0)
@@ -391,6 +443,8 @@ def preview(con, payload, period=None, student_ids=None, unassigned_visit_ids=No
                 child["issues"].append("Точечный перенос Кононенко разрешён только в CRM 2")
             if mapped_groups != {"825986": 31, "825983": 34}:
                 child["issues"].append("Абонементы Кононенко должны вести только в группы CRM 31 и 34")
+        if (erp_id, month) == ("64928", "2026-11") and (not student or student["id"] != 4):
+            child["issues"].append("Точечный перенос Минибаева разрешён только в CRM 4")
         if not child["subscriptions"]: child["issues"].append("В источнике нет абонементов")
         if child["issues"] or any(x["state"] == "review" for x in child["subscriptions"]) or any(x["state"] == "review" for x in child["planned"]) or any(x["state"] == "review" for x in child["visits"]): result["can_apply"] = False
         result["children"].append(child)

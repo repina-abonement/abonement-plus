@@ -1,0 +1,33 @@
+{
+  "child": "Дамир Минибаев",
+  "erp_student_id": 64928,
+  "month": "2026-11",
+  "partial_attendance": true,
+  "subscriptions": [
+    {"erp_id": 825124, "group": "Арктика, сборная", "valid_from": "2026-11-01", "valid_until": "2026-11-29", "lesson_count": 9, "price": 13500},
+    {"erp_id": 825123, "group": "ТЦ «Небо» · Сб 17:00 · Возраст не указан · ОФП", "valid_from": "2026-11-07", "valid_until": "2026-11-28", "lesson_count": 4, "price": 4800}
+  ],
+  "planned_lessons": [
+    {"date":"2026-11-01","erp_subscription_id":825124,"time":"19:30","group":"Арктика, сборная"},
+    {"date":"2026-11-03","erp_subscription_id":825124,"time":"18:30","group":"Арктика, сборная"},
+    {"date":"2026-11-07","erp_subscription_id":825123,"time":"17:00","group":"ТЦ «Небо» · Сб 17:00 · Возраст не указан · ОФП"},
+    {"date":"2026-11-08","erp_subscription_id":825124,"time":"19:30","group":"Арктика, сборная"},
+    {"date":"2026-11-10","erp_subscription_id":825124,"time":"18:30","group":"Арктика, сборная"},
+    {"date":"2026-11-14","erp_subscription_id":825123,"time":"17:00","group":"ТЦ «Небо» · Сб 17:00 · Возраст не указан · ОФП"},
+    {"date":"2026-11-15","erp_subscription_id":825124,"time":"19:30","group":"Арктика, сборная"},
+    {"date":"2026-11-17","erp_subscription_id":825124,"time":"18:30","group":"Арктика, сборная"},
+    {"date":"2026-11-21","erp_subscription_id":825123,"time":"17:00","group":"ТЦ «Небо» · Сб 17:00 · Возраст не указан · ОФП"},
+    {"date":"2026-11-22","erp_subscription_id":825124,"time":"19:30","group":"Арктика, сборная"},
+    {"date":"2026-11-24","erp_subscription_id":825124,"time":"18:30","group":"Арктика, сборная"},
+    {"date":"2026-11-28","erp_subscription_id":825123,"time":"17:00","group":"ТЦ «Небо» · Сб 17:00 · Возраст не указан · ОФП"},
+    {"date":"2026-11-29","erp_subscription_id":825124,"time":"19:30","group":"Арктика, сборная"}
+  ],
+  "attendance": [
+    {"date":"2026-11-05","time":"20:30","group":"ТЦ «Небо» · Чт 20:30 · Возраст не указан · ОФП","erp_subscription_id":825123,"type":"Абонемент","status":"был","source_chat_id":"-1001602433070","source_message_id":"26693","source_message_url":"https://t.me/c/1602433070/26693"},
+    {"date":"2026-11-10","time":"18:30","group":"Арктика, сборная","erp_subscription_id":825124,"type":"Абонемент","status":"был","source_chat_id":"-1001602433070","source_message_id":"26810","source_message_url":"https://t.me/c/1602433070/26810"},
+    {"date":"2026-11-12","time":"20:30","group":"ТЦ «Небо» · Чт 20:30 · Возраст не указан · ОФП","erp_subscription_id":825123,"type":"Отработка","status":"был","source_chat_id":"-1001602433070","source_message_id":"26908","source_message_url":"https://t.me/c/1602433070/26908"},
+    {"date":"2026-11-15","time":"19:30","group":"Арктика, сборная","erp_subscription_id":825124,"type":"Абонемент","status":"был","source_chat_id":"-1001602433070","source_message_id":"27065","source_message_url":"https://t.me/c/1602433070/27065"},
+    {"date":"2026-11-14","time":"17:00","group":"ТЦ «Небо» · Сб 17:00 · Возраст не указан · ОФП","erp_subscription_id":825123,"type":"Абонемент","status":"не был","source_type":"manager_confirmation","note":"Пропуск по указанию руководителя. Турнир в Небе"}
+  ],
+  "child_profile": {"name":"Дамир Минибаев","birth":"2020-05-05","parent_phone":"+79039023232"}
+}
