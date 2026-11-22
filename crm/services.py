@@ -685,7 +685,9 @@ def new_cards_today(con, ref=None):
         # alone must not hide a card that is still a new lead.
         has_subscription=con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND status!='cancelled'
             AND COALESCE(kind,'month')='month' AND month>=? LIMIT 1""",(row['id'],logic.month_of(day))).fetchone()
-        card['needs_processing']=card['stage']=='lead' and not has_subscription
+        # Исторические карточки, созданные сегодняшним импортом ERP, не являются
+        # свежими заявками с сайта или ручным вводом промоутера.
+        card['needs_processing']=card['stage']=='lead' and not row['erp_id'] and not has_subscription
         cards.append(card)
     return {'date':day.isoformat(),'cards':cards}
 

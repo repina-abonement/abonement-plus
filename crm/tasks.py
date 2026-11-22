@@ -593,7 +593,7 @@ def _task_out(con, r) -> dict:
     d["manual"] = d["kind"] in MANUAL_KINDS
     d["client_task"] = bool(d.get("student_id") or d.get("family_id"))
     if d["student_id"]:
-        s = con.execute("""SELECT s.id, s.name, s.trial_at, s.trial_came, s.stage, s.funnel, s.converted_at, s.family_id, f.name AS family,
+        s = con.execute("""SELECT s.id, s.name, s.trial_at, s.trial_came, s.stage, s.funnel, s.converted_at, s.created_at, s.erp_id, s.family_id, f.name AS family,
                            (SELECT p.phone FROM parents p WHERE p.family_id=s.family_id ORDER BY p.is_primary DESC,p.id LIMIT 1) AS phone,
                            (SELECT p.name FROM parents p WHERE p.family_id=s.family_id ORDER BY p.is_primary DESC,p.id LIMIT 1) AS parent
                            FROM students s JOIN families f ON f.id=s.family_id WHERE s.id=?""", (d["student_id"],)).fetchone()
@@ -747,7 +747,8 @@ def manual_board(con, user: dict, scope: str = "mine") -> dict:
 # ручные в «Ручных»: ни одна задача не теряется
 ERP_COLUMNS = [
     ("unpaid_visit", "Был на занятии без оплаты"),  # красная, первая (Юлия, 04.11)
-    ("new_lead", "Новый лид"),
+    ("new_application", "Новая заявка"),
+    ("old_unprocessed_lead", "Необработанные ранее"),
     ("trial_confirm", "Напоминание о ПУ (звонок)"),
     ("trial_today", "Напоминание о сегодняшнем ПУ (звонок и смс)"),
     ("not_marked", "Нет отметки о ПУ"),
@@ -771,9 +772,20 @@ NEW_LEAD_KINDS = ("call_lead", "no_answer", "revive", "reinvite")
 def _erp_col(t: dict) -> tuple[str, str]:
     kind, title = t["kind"], (t.get("title") or "").strip()
     st = t.get("student") or {}
-    # Юлия, 04.11: лид, который ни разу не был на пробном, это «Новый лид» (и задача, и колонка)
-    if kind in NEW_LEAD_KINDS and st.get("funnel") == "sales" and not st.get("trial_at") and st.get("stage") in ("lead", "no_answer", "later"):
-        return "new_lead", "Новый лид"
+    # «Новая заявка» — не синоним любого старого статуса «Новый лид».
+    # Здесь только карточка, созданная сегодня и ещё не сдвинутая с первого этапа.
+    if kind in NEW_LEAD_KINDS and st.get("funnel") == "sales" and not st.get("trial_at"):
+        from zoneinfo import ZoneInfo
+        try:
+            created = datetime.fromisoformat(st.get("created_at") or "")
+            if created.tzinfo is not None:
+                created = created.astimezone(ZoneInfo("Europe/Moscow"))
+            created_today = created.date() == datetime.now(ZoneInfo("Europe/Moscow")).date()
+        except (TypeError, ValueError):
+            created_today = False
+        if st.get("stage") == "lead" and created_today and not st.get("erp_id"):
+            return "new_application", "Новая заявка"
+        return "old_unprocessed_lead", "Необработанные ранее"
     for k, name in ERP_COLUMNS:
         if kind == k:
             return k, name

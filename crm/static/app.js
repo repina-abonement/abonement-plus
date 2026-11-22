@@ -1365,9 +1365,9 @@ async function renderWorkdesk(page) {
   const dateTxt = new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" }).replace(/^./, (c) => c.toUpperCase());
   const freshLeads = (d.new_cards_today?.cards || []).filter((x) => x.needs_processing);
   const processedNewCards = (d.new_cards_today?.cards || []).filter((x) => !x.needs_processing);
-  const freshLeadAlert = who === "offline" || !freshLeads.length ? "" : `<section class="fresh-leads-alert" aria-label="Новые лиды, созданные сегодня">
-    <div class="fresh-leads-head"><span class="fresh-leads-icon">🔥</span><div class="grow"><h3>Новые лиды сегодня — обработать</h3><p>Отдельная воронка клиентов со статусом «Новый лид», появившихся в CRM сегодня.</p></div><span class="count">${freshLeads.length}</span></div>
-    <div class="fresh-leads-status"><div class="fresh-leads-status-head"><b>Новый лид</b><span>${freshLeads.length}</span></div>
+  const freshLeadAlert = who === "offline" || !freshLeads.length ? "" : `<section class="fresh-leads-alert" aria-label="Новые заявки, созданные сегодня">
+    <div class="fresh-leads-head"><span class="fresh-leads-icon">🔥</span><div class="grow"><h3>Новая заявка</h3><p>Только клиенты со статусом «Новый лид», которые появились в CRM сегодня — с заявки или внесены вручную.</p></div><span class="count">${freshLeads.length}</span></div>
+    <div class="fresh-leads-status"><div class="fresh-leads-status-head"><b>Новая заявка</b><span>${freshLeads.length}</span></div>
       <div class="fresh-leads-list">${freshLeads.map((lead) => `<button type="button" class="fresh-lead-card" data-fresh-lead="${lead.id}"><b>${esc(lead.name)}</b><span>${esc(lead.parent || "Родитель не указан")}${lead.phone ? ` · ${esc(lead.phone)}` : ""}</span><em>Источник: ${esc(lead.source || "не указан")}</em><strong>Открыть и обработать →</strong></button>`).join("")}</div></div></section>`;
   const hot = `<section class="now ${u.length ? "" : "calm"}" id="dw-hot">
       <div class="now-head"><h3>${u.length ? (reds ? `🔥 Горит прямо сейчас: ${reds}` : "Ждут ответа") : "Всё обработано"}</h3>

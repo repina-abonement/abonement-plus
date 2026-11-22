@@ -31,14 +31,14 @@ def main():
 
     d = tasks.erp_board(con, "today")
     titles = [c["title"] for c in d["columns"]]
-    check(titles == ["Напоминание о пробном занятии", "Как прошло пробное", "Думает", "Проверить продление", "Странный статус", "Ручные"],
+    check(titles == ["Напоминание о ПУ (звонок)", "Как прошло ПУ?", "Думает", "Проверить продление", "Странный статус", "Ручные"],
           "Колонки ERP и согласованная проверка продления, неизвестный статус ERP отдельно, затем Ручные: " + str(titles))
     check(d["counts"] == {"overdue": 1, "today": 7, "tomorrow": 1}, "Просрочено, Сегодня, Завтра считаются отдельно: " + str(d["counts"]))
     check(any(t["title"] == "Тренеру" for c in d["columns"] for t in c["cards"]), "Клиентская задача видна всем администраторам независимо от старого исполнителя")
     check(not any(t["title"] == "План офлайн-администраторов" for c in d["columns"] for t in c["cards"]),
           "Общий Планер офлайн-администраторов не дублируется на рабочем столе руководителя")
     check([c["title"] for c in tasks.erp_board(con, "overdue")["columns"]] == ["Почему не купили"], "Просроченные отдельно")
-    check([c["title"] for c in tasks.erp_board(con, "tomorrow")["columns"]] == ["Напоминание о сегодняшнем ПУ"], "Завтрашние отдельно")
+    check([c["title"] for c in tasks.erp_board(con, "tomorrow")["columns"]] == ["Напоминание о сегодняшнем ПУ (звонок и смс)"], "Завтрашние отдельно")
     # «Приглашение на ПУ повторно» (04.11): дата обязательна, задача в этот день, старые задачи по пробному закрываются
     sid2 = sv.create_student(con, {"name": "Елисей Тестов", "parent_name": "Анастасия", "phone": "+7 900 100-00-02", "funnel": "sales"}, U)
     con.execute("UPDATE students SET stage='how_was', trial_at=? WHERE id=?", (at(-60, "18:00"), sid2))
@@ -62,12 +62,24 @@ def main():
     check([c["title"] for c in tasks.erp_board(con, "tomorrow")["columns"]][-1] == "Приглашение на ПУ повторно",
           "Задача на выбранный день в колонке «Приглашение на ПУ повторно»")
     sid3 = sv.create_student(con, {"name": "Новенький Лидов", "parent_name": "Мама", "phone": "+7 900 100-00-03", "funnel": "sales"}, U)
+    con.execute("UPDATE students SET created_at=? WHERE id=?", (at(0, "10:00"), sid3))
     con.execute("INSERT INTO tasks(kind,title,student_id,due_at,source,created_at) VALUES ('no_answer','Недозвон: позвонить ещё раз',?,?,?,?)",
                 (sid3, at(0, "15:00"), "life", at(-1)))
     con.execute("UPDATE students SET stage='no_answer' WHERE id=?", (sid3,))
     cols = {c["title"]: [t["student"]["name"] for t in c["cards"]] for c in tasks.erp_board(con, "today")["columns"]}
-    check("Новенький Лидов" in cols.get("Новый лид", []) and list(cols)[0] == "Новый лид",
-          "Лид без пробного: задача в колонке «Новый лид», первой слева")
+    check("Новенький Лидов" in cols.get("Необработанные ранее", []) and "Новая заявка" not in cols,
+          "После недозвона карточка больше не считается новой заявкой")
+    sid4 = sv.create_student(con, {"name": "Свежая Заявка", "parent_name": "Мама", "phone": "+7 900 100-00-04", "funnel": "sales"}, U)
+    con.execute("UPDATE students SET created_at=?,stage='lead' WHERE id=?", (at(0, "11:00"), sid4))
+    con.execute("INSERT INTO tasks(kind,title,student_id,due_at,source,created_at) VALUES ('call_lead','Новый лид',?,?,?,?)",
+                (sid4, at(0, "15:30"), "life", at(0, "11:00")))
+    cols = {c["title"]: [t["student"]["name"] for t in c["cards"]] for c in tasks.erp_board(con, "today")["columns"]}
+    check("Свежая Заявка" in cols.get("Новая заявка", []) and "Новенький Лидов" not in cols.get("Новая заявка", []),
+          "«Новая заявка» содержит только сегодняшнюю карточку на первом этапе")
+    con.execute("UPDATE students SET erp_id='historical-import' WHERE id=?", (sid4,))
+    cols = {c["title"]: [t["student"]["name"] for t in c["cards"]] for c in tasks.erp_board(con, "today")["columns"]}
+    check("Свежая Заявка" not in cols.get("Новая заявка", []) and "Свежая Заявка" in cols.get("Необработанные ранее", []),
+          "Сегодняшняя загрузка исторической ERP-карточки не считается новой заявкой")
     print("Все проверки задач как в ERP пройдены")
 
 

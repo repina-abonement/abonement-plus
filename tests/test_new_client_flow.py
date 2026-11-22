@@ -54,6 +54,9 @@ class NewClientTest(unittest.TestCase):
         self.con.execute("UPDATE students SET stage='no_answer' WHERE id=?",(sid,))
         card=next(x for x in sv.new_cards_today(self.con)['cards'] if x['id']==sid)
         self.assertFalse(card['needs_processing'])
+        self.con.execute("UPDATE students SET stage='lead',erp_id='historical-erp' WHERE id=?",(sid,))
+        card=next(x for x in sv.new_cards_today(self.con)['cards'] if x['id']==sid)
+        self.assertFalse(card['needs_processing'])
 
     def test_today_list_uses_creation_not_stage_change_and_moscow(self):
         sid=sv.create_student(self.con,self.data,self.user)
