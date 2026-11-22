@@ -4,7 +4,7 @@ import tempfile
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
-from crm import db, services as sv, program, schedule, smart
+from crm import db, services as sv, program, schedule, smart, money
 from crm.services import ApiError
 
 
@@ -48,6 +48,23 @@ def main():
     sat=schedule.save_group(con,{'name':'ОФП Сб','branch_id':br,'weekdays':[5]})
     con.execute("UPDATE groups SET program_id=?,lesson_kind='arena' WHERE id=?",(pid,arena))
     con.execute("UPDATE groups SET program_id=?,lesson_kind='ofp' WHERE id IN (?,?)",(pid,thu,sat))
+    # Two November purchases in different programs, each with its own calendar.
+    sid4,eid4=kid('+79000000104')
+    bundle=sv.create_invoice(con,sid4,'2026-11',user,eid4,group_id=old,tariff='fixed',
+                             excluded_dates=['2026-11-03','2026-11-10','2026-11-17','2026-11-24'])
+    money.pay_subscription(con,bundle['id'],'paykeeper_manual',user,paid_at='2026-11-10')
+    selected=dict(group_id=arena,tariff='arena_only',excluded_dates=[
+        '2026-11-03','2026-11-10','2026-11-17','2026-11-24'])
+    try:sv.create_invoice(con,sid4,'2026-11',user,eid4,group_action='transfer',**selected)
+    except ApiError:pass
+    else:raise AssertionError('Cross-program transfer allowed')
+    second=sv.create_invoice(con,sid4,'2026-11',user,eid4,group_action='add',**selected)
+    money.pay_subscription(con,second['id'],'paykeeper_manual',user,paid_at='2026-11-10')
+    assert set((e['group_id'] for e in sv.enrollments_of(con,sid4)))=={old,arena}
+    payments=con.execute('SELECT subscription_id,amount FROM payments WHERE student_id=?',(sid4,))
+    assert dict(payments)=={bundle['id']:5400,second['id']:8500}
+    assert sid4 in [r['id'] for r in sv.journal(con,arena,'2026-11-08',paid_only=True)['rows']]
+    assert sid4 not in [r['id'] for r in sv.journal(con,arena,'2026-11-03',paid_only=True,include_unpaid_marks=False)['rows']]
     sid3=sv.create_student(con,{'name':'Пётр Примеров','parent_name':'Анна','phone':'+79000000103','funnel':'members'},user)
     program.set_plan(con,sid3,pid,'arena_only',None,user)
     ae=sv.enrollments_of(con,sid3)[0]['id']

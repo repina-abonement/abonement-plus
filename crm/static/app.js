@@ -1730,7 +1730,7 @@ async function openSell(d, reload) {
   const ens=d.enrollments.filter(e=>e.lesson_kind!=='ofp');
   const previous=(d.subscriptions||[]).filter(s=>s.status!=='cancelled'&&s.kind!=='single'&&s.month<d.next_month&&(!ens.length||ens.some(e=>e.id===s.enrollment_id))).sort((a,b)=>Number(b.status==='paid')-Number(a.status==='paid')||b.month.localeCompare(a.month)||b.id-a.id);
   const preferred=ens.find(e=>e.id===previous[0]?.enrollment_id)||ens.find(e=>e.group_id===d.student.group_id)||ens[0]||{id:null,tariff:previous[0]?.tariff||d.student.tariff||'fixed',group_id:previous[0]?.group_id,program_id:(S.meta.groups||[]).find(g=>g.id===previous[0]?.group_id)?.program_id};
-  const choices=(S.meta.groups||[]).filter(g=>!g.is_makeup&&g.lesson_kind!=='ofp'&&(!ens.length||(g.program_id||null)===(preferred.program_id||null)||ens.some(e=>e.group_id===g.id))).map(g=>{
+  const choices=(S.meta.groups||[]).filter(g=>!g.is_makeup&&g.lesson_kind!=='ofp').map(g=>{
     const own=ens.find(e=>e.group_id===g.id);
     return {...preferred,...own,id:own?.id||preferred.id,group_id:g.id,group_name:g.name,program_id:g.program_id,lesson_kind:g.lesson_kind,fixed_only:g.fixed_only,new_group:!own};
   });
@@ -1767,14 +1767,17 @@ async function openSell(d, reload) {
     if(en().fixed_only&&!existing){$('#sl-tar').value='fixed';$('#sl-tar').disabled=true}
     $('#sl-admission').hidden=!en().program_id;
     $('#sl-ofp-box').hidden=single()||!en().program_id||$('#sl-tar').value!=='pkg';
+    const separateProgram=en().new_group&&ens.length&&(en().program_id||null)!==(preferred.program_id||null);
+    $('#sl-group-action option[value=transfer]').disabled=!!separateProgram;
+    if(separateProgram)$('#sl-group-action').value='add';
     $('#sl-group-action-box').hidden=single()||!en().new_group||!ens.length;
   };
   const recommend=()=>{
     const p=(d.program?.programs||[]).find(p=>p.id===en().program_id),plan=p?.plan;
     const effective=plan?.next&&$('#sl-month').value>=plan.next.from?plan.next:plan;
-    const last=previous.find(s=>s.enrollment_id===en().id&&s.month<$('#sl-month').value);
+    const last=previous.find(s=>s.enrollment_id===en().id&&s.month<$('#sl-month').value&&(!en().new_group||(en().program_id||null)===(preferred.program_id||null)));
     $('#sl-tar').innerHTML=en().program_id?'<option value="arena_only">Только Арктика</option><option value="pkg">Арктика + ОФП</option>':en().fixed_only?'<option value="fixed">Негибкий</option>':'<option value="fixed">Негибкий</option><option value="flex">Гибкий</option>';
-    $('#sl-tar').value=en().fixed_only?'fixed':en().program_id?effective?.tariff||last?.tariff||'arena_only':last?.tariff||en().tariff||'fixed';
+    $('#sl-tar').value=en().fixed_only?'fixed':en().program_id?effective?.tariff||last?.tariff||'arena_only':last?.tariff||(en().tariff==='flex'?'flex':'fixed');
     $('#sl-ofp').innerHTML=(p?.ofp_groups||[]).map(g=>`<option value="${g.id}" ${g.id===effective?.ofp_group_id?'selected':''}>${esc(g.name)}</option>`).join('');syncFields();
   };
   const quote=async(preserveCalendar=false)=>{

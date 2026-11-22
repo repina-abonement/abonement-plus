@@ -293,10 +293,8 @@ def sale_enrollment(con, sid, enrollment_id, group_id=None):
         WHERE g.id=? AND g.active=1 AND b.active=1 AND g.is_makeup=0 AND g.lesson_kind!='ofp'""", (int(group_id),)).fetchone()
     if not g:
         raise ApiError("Выберите действующую группу для абонемента")
-    if source and (g["program_id"] or None) != (source["program_id"] or None):
-        raise ApiError("Переход между обычной группой и сборной оформляется отдельно")
     return dict(source or {}, id=None, student_id=sid, group_id=g["id"], group_name=g["name"], group_weekdays=g["weekdays"],
-                weekdays="", group_age=g["age"], branch_name=g["branch"], source_id=source["id"] if source else None,
+                weekdays="", group_age=g["age"], branch_name=g["branch"], source_id=source["id"] if source else None, source_program_id=source.get("program_id") if source else None,
                 program_id=g["program_id"], lesson_kind=g["lesson_kind"], tariff=(source or {}).get("tariff") or "fixed")
 
 
@@ -455,8 +453,13 @@ def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id
         if e["id"] is None:
             if group_action not in ("transfer", "add"):
                 raise ApiError("Выберите: перевести в новую группу или добавить вторую")
-            if e.get("source_id") is None:
+            cross_program = e.get("source_id") and e.get("program_id") != e.get("source_program_id")
+            if cross_program and group_action != "add":
+                raise ApiError("Чтобы сохранить обе группы, выберите добавление второй группы")
+            if e.get("source_id") is None or group_action == "add":
                 if e.get("program_id"):
+                    if program.plan_of(con, sid, e["program_id"]):
+                        raise ApiError("У клиента уже есть действующая группа этой сборной")
                     program.set_plan(con,sid,e["program_id"],q["tariff"],q["program"].get("ofp_group_id"),user)
                     eid=program.plan_of(con,sid,e["program_id"])["enrollment_id"]
                     con.execute("UPDATE enrollments SET group_id=?,start_date=? WHERE id=?",(e["group_id"],ym+"-01",eid))
@@ -472,11 +475,6 @@ def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id
                 eid = transfer.apply(con, e["source_id"], e["group_id"], ym + "-01", user)["enrollment_id"]
                 con.execute("UPDATE enrollments SET tariff=? WHERE id=?", (q["tariff"], eid))
                 sync_primary(con, sid)
-            else:
-                if e.get("program_id"):
-                    raise ApiError("Вторая группа сборной оформляется отдельно")
-                eid = add_enrollment(con, sid, e["group_id"], None, q["tariff"], user)
-                con.execute("UPDATE enrollments SET start_date=? WHERE id=?", (ym + "-01", eid))
         else:
             eid = e["id"]
         if q.get("program") and tariff is not None:
