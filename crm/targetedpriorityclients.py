@@ -27,7 +27,6 @@ CLIENTS = {
     "bachurin": "Владислав Бачурин",
 }
 
-
 def _event(client, message_id, at, chat, note):
     return {
         "source_id": f"telegram:{message_id}:{client}",
@@ -94,12 +93,63 @@ def _save(con, report):
     return report
 
 
+def ensure_attendance_control(con):
+    ids = {}
+    for key, name in CLIENTS.items():
+        rows = con.execute("SELECT id FROM students WHERE archived=0 AND trim(name) IN (?,?)",
+                           (name, " ".join(reversed(name.split())))).fetchall()
+        if len(rows) == 1:
+            ids[key] = rows[0]["id"]
+    inserted = 0
+    # Only a trainer note containing both an explicit lesson date and time is
+    # safe to turn into a mark automatically.  Notes without a time remain
+    # evidence in chronology and are covered by the manual audit task below.
+    import re
+    for event in _events():
+        if event.get("source_chat") != "ТРЕНЕРЫ":
+            continue
+        date_match = re.search(r"\b(\d{2})\.(\d{2})\b", event.get("note", ""))
+        time_match = re.search(r"\b(\d{2}:\d{2})\b", event.get("note", ""))
+        if not date_match or not time_match:
+            continue
+        client = event["source_id"].rsplit(":", 1)[-1]
+        sid = ids.get(client)
+        if not sid:
+            continue
+        day = f"2026-{date_match.group(2)}-{date_match.group(1)}"; tm = time_match.group(1)
+        kind = "makeup" if "отработ" in event.get("note", "").casefold() else "subscription"
+        group = event.get("note", "").removeprefix("Тренеры: присутствовал ")
+        message_id = event["source_id"].split(":", 2)[1]
+        exists = con.execute(
+            "SELECT 1 FROM erp_history_visits WHERE student_id=? AND visit_date=? AND visit_time=?", (sid, day, tm)).fetchone() or con.execute(
+            "SELECT 1 FROM erp_history_unassigned_visits WHERE student_id=? AND visit_date=? AND visit_time=?", (sid, day, tm)).fetchone()
+        if exists:
+            continue
+        source_id = f"priority-trainers:{message_id}:{client}:{day}:{tm}"
+        payload = json.dumps({"source": "ТРЕНЕРЫ", "message_id": message_id, "confirmed": True}, ensure_ascii=False)
+        con.execute("""INSERT OR IGNORE INTO erp_history_unassigned_visits
+            (source_id,source_subscription_id,student_id,visit_date,visit_time,kind,status,source_group,source_payload,imported_at,imported_by)
+            VALUES (?,NULL,?,?,?,?,?,?,?,?,?)""",
+            (source_id, sid, day, tm, kind, "present", group, payload, "2026-11-23T20:00:00", "Перенос ТРЕНЕРЫ"))
+        inserted += con.execute("SELECT changes()").fetchone()[0]
+    audit_tasks = {}
+    for key, sid in ids.items():
+        audit_tasks[key] = tasks.add_task(
+            con, "manual", sid, "2026-11-24T23:59",
+            auto_key=f"priority-clients:attendance-audit:{key}:2026-11-01-22",
+            title="Сверить и проставить все посещения 01–22.11",
+            note="Сопоставить план каждого ноябрьского абонемента с отчётами ТРЕНЕРЫ. Подтверждённые отметки уже внесены. По каждой оставшейся дате проставить «был»/«не был»; если отчёта нет — уточнить у тренера, не угадывать",
+            source="manual")
+    return {"student_ids": ids, "inserted_marks": inserted, "task_ids": audit_tasks}
+
+
 def apply(con):
     previous = con.execute("SELECT value FROM settings WHERE key=?", (KEY,)).fetchone()
     if previous:
         try:
             saved = json.loads(previous[0])
             if saved.get("state") == "complete":
+                ensure_attendance_control(con)
                 return saved
         except (TypeError, ValueError):
             pass
@@ -139,12 +189,14 @@ def apply(con):
             note="СЗ 23.11: Арктика + ОФП, три раза в неделю, 20 400 ₽ через PayKeeper; сотрудник прямо указал, что абонемент не появился в CRM. Перед оформлением проверить существующие декабрьские строки и не создавать дубль оплаты",
             source="manual")
     complete = not result["errors"] and not result["unmatched"] and not result["ambiguous"] and not unresolved
+    attendance_control = ensure_attendance_control(con)
     return _save(con, {
         "state": "complete" if complete else "verification_failed",
         "events": {key: len(value) for key, value in result.items()},
         "student_ids": ids,
         "unresolved": unresolved,
         "task_ids": task_ids,
+        "attendance_control": attendance_control,
     })
 
 

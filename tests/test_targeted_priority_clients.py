@@ -27,6 +27,11 @@ class PriorityClientFactsTest(unittest.TestCase):
         self.assertEqual(len(targetedpriorityclients._events()), self.con.execute(
             "SELECT count(*) FROM chat_day_transfer_events WHERE source_id LIKE 'telegram:%'").fetchone()[0])
         self.assertEqual(1, self.con.execute("SELECT count(*) FROM tasks WHERE auto_key='priority-clients:sharipov-december-sale-2026-11-23'").fetchone()[0])
+        self.assertEqual(5, self.con.execute("SELECT count(*) FROM erp_history_unassigned_visits WHERE source_id LIKE 'priority-trainers:%'").fetchone()[0])
+        self.assertEqual(9, self.con.execute("SELECT count(*) FROM tasks WHERE auto_key LIKE 'priority-clients:attendance-audit:%'").fetchone()[0])
+        targetedpriorityclients.ensure_attendance_control(self.con)
+        self.assertEqual(5, self.con.execute("SELECT count(*) FROM erp_history_unassigned_visits WHERE source_id LIKE 'priority-trainers:%'").fetchone()[0])
+        self.assertEqual(9, self.con.execute("SELECT count(*) FROM tasks WHERE auto_key LIKE 'priority-clients:attendance-audit:%'").fetchone()[0])
 
 
 if __name__ == "__main__":
