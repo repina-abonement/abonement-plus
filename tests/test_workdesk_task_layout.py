@@ -44,6 +44,15 @@ def test_workdesk_task_cards_keep_primary_actions_and_context():
     assert 'assignee_id' not in move and 'erpOutcomePicker' not in move and 'priority' not in move
 
 
+def test_plain_workdesk_done_does_not_open_optional_result_prompt():
+    script = (ROOT / "crm/static/erptasks.js").read_text(encoding="utf-8")
+    manual = (ROOT / "crm/static/tasks.js").read_text(encoding="utf-8")
+
+    assert 'Итог (необязательно): дозвонилась, подтвердили' not in script
+    assert 'api("POST", `/api/tasks/${t.id}/done`, { result:"" })' in script
+    assert 'prompt("Итог (необязательно)", "")' not in manual
+
+
 def test_workdesk_retries_a_temporary_server_or_network_failure():
     app = (ROOT / "crm/static/app.js").read_text(encoding="utf-8")
 

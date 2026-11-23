@@ -125,9 +125,8 @@ async function renderManualBoard(page) {
     if (["admin", "operator"].includes(S.user.role)) openTaskEdit(S.taskById[el.dataset.mt], render);
   }));
   page.querySelectorAll("[data-mtdone]").forEach((b) => (b.onclick = async () => {
-    const result = prompt("Итог (необязательно)", "");
-    if (result === null) return;
-    try { await api("POST", `/api/tasks/${b.dataset.mtdone}/done`, { result }); toast("Задача выполнена"); render(); } catch (e) { fail(e); }
+    b.disabled=true;
+    try { await api("POST", `/api/tasks/${b.dataset.mtdone}/done`, { result:"" }); toast("Задача выполнена"); render(); } catch (e) { b.disabled=false;fail(e); }
   }));
 }
 
