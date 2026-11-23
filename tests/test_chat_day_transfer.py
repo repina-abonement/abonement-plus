@@ -124,3 +124,31 @@ def test_confirmed_paid_sale_does_not_leave_manual_renewal_duplicate():
     assert len(result['applied'])==1 and not result['errors']
     assert not con.execute("SELECT 1 FROM tasks WHERE student_id=? AND auto_key='chat-day:sz:22891:микаладзе-леон' AND status='open'",(sid,)).fetchone()
 
+
+def test_confirmed_care_chat_sale_creates_two_subscriptions_and_one_payment():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'masterdeev.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    branch=schedule.save_branch(con,{'name':'ТЦ «Небо»'})
+    group=schedule.save_group(con,{'name':'Небо Ср Вс 17:45','branch_id':branch,'weekdays':[2,6],'time':'17:45','age':'4–5'})
+    sid=services.create_student(con,{'name':'Мастердеев Денис','birth':'2022-03-04','parent_name':'Наталья','phone':'+7 985 952-37-65'},user)
+    con.execute("UPDATE students SET group_id=?,trial_group_id=?,trial_at='2026-11-22T17:45',trial_came=1 WHERE id=?",(group,group,sid))
+    event={'source_id':'sz:22890:subscription-sale','source_chat':'Служба заботы','source_at':'2026-11-22T20:30:00',
+        'student_name':'Мастердеев Денис','event_kind':'subscription_sale','sale_date':'2026-11-22','paid_at':'2026-11-22T20:30:00',
+        'lesson_time':'17:45','weekdays':[2,6],'tariff':'fixed','discount_percent':20,'amount':11880,'payment_method':'card_branch',
+        'components':[
+            {'month':'2026-11','price':2160,'dates':['2026-11-25','2026-11-29'],'dates_reason':'Подтверждено СЗ'},
+            {'month':'2026-12','price':9720,'dates':['2026-12-02','2026-12-06','2026-12-09','2026-12-13','2026-12-16','2026-12-20','2026-12-23','2026-12-27','2026-12-30'],'dates_reason':'Подтверждено СЗ'}],
+        'note':'Оплачен абонемент за ноябрь и декабрь, группа Ср/Вс 17:45, 11880 ₽ картой в филиале'}
+    first=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(first['applied'])==1 and not first['errors']
+    subs=con.execute("SELECT month,price,status,lessons FROM subscriptions WHERE student_id=? ORDER BY month",(sid,)).fetchall()
+    assert [(x['month'],x['price'],x['status'],x['lessons']) for x in subs]==[
+        ('2026-11',2160,'paid',2),('2026-12',9720,'paid',9)]
+    payment=con.execute("SELECT amount,method FROM payments WHERE student_id=? AND cancelled=0",(sid,)).fetchall()
+    assert [(x['amount'],x['method']) for x in payment]==[(11880,'card_branch')]
+    assert con.execute("SELECT COUNT(*) FROM invoice_payment_targets WHERE payment_id=(SELECT id FROM payments WHERE student_id=?)",(sid,)).fetchone()[0]==2
+    second=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(second['already'])==1
+    assert con.execute("SELECT COUNT(*) FROM subscriptions WHERE student_id=?",(sid,)).fetchone()[0]==2
+    assert con.execute("SELECT COUNT(*) FROM payments WHERE student_id=?",(sid,)).fetchone()[0]==1
+

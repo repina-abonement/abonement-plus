@@ -30,11 +30,12 @@ def init(con):
     # real trial booking. This is deliberately idempotent on every startup.
     con.execute("""UPDATE students SET priority=0 WHERE priority=1 AND trial_at IS NOT NULL
         AND substr(trial_at,1,10)>=?""",(sv.today().isoformat(),))
-    for row in con.execute("SELECT student_id,payload,event_kind FROM chat_day_transfer_events WHERE event_kind IN ('trial_booking','single_sale','trial_result')").fetchall():
+    for row in con.execute("SELECT student_id,payload,event_kind FROM chat_day_transfer_events WHERE event_kind IN ('trial_booking','single_sale','subscription_sale','trial_result')").fetchall():
         try:
             event=json.loads(row['payload'])
             _reconcile_trial_booking(con,row['student_id'],event)
             _reconcile_single_sale(con,row['student_id'],event)
+            _reconcile_subscription_sale(con,row['student_id'],event,{'id':0,'role':'admin','name':'CRM'})
             _reconcile_trial_outcome(con,row['student_id'],event)
             _reconcile_confirmed_sale(con,row['student_id'],event)
         except (TypeError,ValueError,KeyError):continue
@@ -94,6 +95,69 @@ def _reconcile_single_sale(con,sid,event):
     return True
 
 
+def _reconcile_subscription_sale(con,sid,event,user):
+    """Create the exact subscriptions and one payment stated in the care chat."""
+    if event.get('event_kind')!='subscription_sale':return None
+    from . import historyentry, money
+    components=event.get('components')
+    if not isinstance(components,list) or not components:raise sv.ApiError('В продаже не указаны месяцы и даты занятий')
+    student=con.execute('SELECT group_id,trial_group_id FROM students WHERE id=?',(sid,)).fetchone()
+    gid=int(event.get('group_id') or student['trial_group_id'] or student['group_id'] or 0)
+    group=con.execute('SELECT weekdays,time FROM groups WHERE id=? AND active=1 AND is_makeup=0',(gid,)).fetchone()
+    if not group:raise sv.ApiError('Не определена действующая группа подтверждённой продажи')
+    if event.get('lesson_time') and group['time']!=event['lesson_time']:
+        raise sv.ApiError('В карточке выбрана группа с другим временем занятия')
+    if event.get('weekdays') is not None:
+        actual={int(x) for x in re.findall(r'\d',str(group['weekdays'] or ''))}
+        if actual!={int(x) for x in event['weekdays']}:
+            raise sv.ApiError('В карточке выбрана группа с другими днями занятий')
+    paid_at=str(event.get('paid_at') or event.get('source_at') or '')[:19]
+    sale_day=str(event.get('sale_date') or paid_at)[:10]
+    method=str(event.get('payment_method') or '')
+    total=int(event.get('amount') or 0)
+    if not total or not method:raise sv.ApiError('В подтверждённой продаже не указаны сумма или способ оплаты')
+    discount_id=None
+    if event.get('discount_percent'):
+        discount=con.execute("SELECT id,percent FROM discounts WHERE rule='first_on_trial_day' AND active=1 ORDER BY id LIMIT 1").fetchone()
+        if not discount or int(discount['percent'])!=int(event['discount_percent']):
+            raise sv.ApiError('Подтверждённая скидка не совпадает с действующим правилом CRM')
+        discount_id=discount['id']
+    created=[];parts=[]
+    for item in components:
+        month=str(item.get('month') or '')
+        price=int(item.get('price') or 0)
+        dates=[str(x) for x in item.get('dates') or []]
+        existing=con.execute("""SELECT s.id,s.price,s.status FROM subscriptions s
+            LEFT JOIN enrollments e ON e.id=s.enrollment_id
+            WHERE s.student_id=? AND s.month=? AND s.status!='cancelled'
+              AND (e.group_id=? OR s.enrollment_id IS NULL) ORDER BY s.id LIMIT 1""",(sid,month,gid)).fetchone()
+        if existing:
+            if existing['price']!=price:raise sv.ApiError('Стоимость уже созданного абонемента не совпадает с подтверждённой продажей')
+            subid=existing['id']
+        else:
+            recorded=historyentry.record(con,sid,{
+                'request_id':f"chat-sale:{event.get('source_id')}:{month}",
+                'record_trial':False,'sold':True,'sale_date':sale_day,'paid_date':sale_day,
+                'month':month,'group_id':gid,'tariff':str(event.get('tariff') or 'fixed'),
+                'price':price,'amount':0,'method':'','expected_balance':max(0,money.balance(con,sid)['deposit']),
+                'discount_id':discount_id,
+                'lessons':[{'group_id':gid,'date':day} for day in dates],
+                'dates_reason':str(item.get('dates_reason') or 'Состав занятий подтверждён сообщением СЗ')
+            },user)
+            subid=recorded['subscription_id'];created.append(subid)
+        parts.append({'subscription_id':subid,'amount':price})
+    if sum(x['amount'] for x in parts)!=total:raise sv.ApiError('Сумма по месяцам не равна подтверждённой оплате')
+    covered=money.balance(con,sid)['covered']
+    if not all(covered.get(x['subscription_id'],0)>=x['amount'] for x in parts):
+        duplicate=con.execute("""SELECT id FROM payments WHERE student_id=? AND amount=? AND method=?
+            AND substr(paid_at,1,10)=? AND cancelled=0""",(sid,total,method,sale_day)).fetchone()
+        if duplicate:raise sv.ApiError('Такая оплата уже есть, но не распределена по подтверждённым абонементам')
+        money.add_payment(con,sid,total,method,user,paid_at=paid_at,invoice_parts=parts,
+                          comment='Продажа подтверждена СЗ, сообщение '+str(event.get('source_id') or ''))
+    tasks.schedule_renewal(con,sid)
+    return {'subscription_ids':[x['subscription_id'] for x in parts],'created':created,'amount':total}
+
+
 def _reconcile_trial_outcome(con,sid,event):
     """Turn an already known 'grow up and return later' answer into the right stage and one task."""
     if event.get('event_kind')!='trial_result':return False
@@ -137,7 +201,7 @@ def _reconcile_trial_outcome(con,sid,event):
 
 
 def _reconcile_confirmed_sale(con,sid,event):
-    """A chat sale is a fact, but financial rows are never invented by this importer."""
+    """Once a confirmed sale is present, keep only the automatic renewal chain."""
     if event.get('event_kind')!='trial_result':return False
     note=str(event.get('note') or '')
     if event.get('outcome')!='purchased' and not re.search(r'ПРОДАЖА НОЯ\+ДЕК|\bКупил\b',note,re.I):return False
@@ -154,9 +218,6 @@ def _reconcile_confirmed_sale(con,sid,event):
         from . import erpstatus
         erpstatus.sync_one(con,sid)
         return True
-    con.execute("""UPDATE tasks SET title='Проверить оформление подтверждённой продажи',due_at=?,note=?
-        WHERE student_id=? AND status='open' AND kind='manual' AND auto_key=?""",
-        (sv.today().isoformat()+'T23:59',note,sid,source))
     return False
 
 
@@ -187,6 +248,7 @@ def apply(con,data,user):
             note=str(event.get('note') or '').strip()
             if not note:raise sv.ApiError('Пустое описание события')
             single_sale=None
+            subscription_sale=None
             if event.get('event_kind')=='single_sale':
                 from . import money, singles
                 day=str(event.get('event_date') or '')[:10]
@@ -208,6 +270,8 @@ def apply(con,data,user):
                 singles.sync_paid_tasks(con,datetime.now(),sid)
                 _reconcile_single_sale(con,sid,event)
                 single_sale={'subscription_id':subid,'date':day,'group_id':gid}
+            if event.get('event_kind')=='subscription_sale':
+                subscription_sale=_reconcile_subscription_sale(con,sid,event,user)
             con.execute('INSERT INTO history(student_id,ts,user_name,kind,text) VALUES (?,?,?,?,?)',(sid,at,'Перенос СЗ','chat_transfer',note))
             marked=False
             if event.get('event_kind')=='trial_result' and isinstance(event.get('came'),bool):
@@ -229,7 +293,7 @@ def apply(con,data,user):
             con.execute('INSERT INTO chat_day_transfer_events VALUES (?,?,?,?,?,?,?,?)',(source,sid,str(event.get('source_chat') or ''),at,str(event.get('event_kind') or 'note'),json.dumps(event,ensure_ascii=False),sv.now_iso(),user.get('name','')))
             tasks.ensure_client_task_coverage(con)
             con.execute('RELEASE chat_day_event')
-            result['applied'].append({'source_id':source,'student_id':sid,'name':matches[0]['name'],'trial_marked':marked,'single_sale':single_sale,'added':note,'tasks':_current_tasks(con,sid)})
+            result['applied'].append({'source_id':source,'student_id':sid,'name':matches[0]['name'],'trial_marked':marked,'single_sale':single_sale,'subscription_sale':subscription_sale,'added':note,'tasks':_current_tasks(con,sid)})
         except BaseException as error:
             con.execute('ROLLBACK TO chat_day_event');con.execute('RELEASE chat_day_event')
             result['errors'].append({'source_id':source,'name':event.get('student_name'),'error':str(error)})
