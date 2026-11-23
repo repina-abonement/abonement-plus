@@ -1427,8 +1427,6 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .pipeline-panel-title .count { min-width: 25px; padding: 2px 7px; border-radius: 999px; background: var(--surface); color: var(--ink-2); text-align: center; font-size: 12px; font-weight: 800; }
 .pipeline-panel .board { margin: 0; min-height: 120px; }
 .pipeline-panel .col { min-height: 110px; max-height: min(68vh,620px); border: 1px solid color-mix(in srgb,var(--line) 80%,transparent); }
-.pipeline-panel .fresh-leads-alert { margin-bottom: 14px; box-shadow: none; }
-.pipeline-panel .new-cards-today { margin: 0; padding: 14px; border-radius: 14px; }
 .pipeline-note { margin: 0 0 12px; padding: 9px 11px; border-radius: 10px; background: var(--surface); color: var(--ink-2); font-size: 13px; }
 .pipeline-empty { padding: 42px 20px; border: 1px dashed var(--line); border-radius: 14px; color: var(--ink-2); text-align: center; }
 .board-card-preview{position:fixed;z-index:1200;max-height:min(70vh,480px);overflow:auto;padding:15px 16px;border:1px solid var(--line);border-radius:14px;background:var(--surface);box-shadow:0 16px 42px rgba(28,45,34,.18);color:var(--ink);line-height:1.45}
@@ -1818,11 +1816,6 @@ textarea.nav-q { height:40px; min-height:40px; max-height:40px; resize:none; ove
 .et-funnel-layout .et-card-context{display:block}.et-funnel-layout .et-name{margin-top:4px}
 .et-funnel-layout .et-act .btn:first-child{flex:1}
 @media(max-width:700px){.et-funnel-layout .et-col{flex-basis:84vw}}
-.fresh-leads-alert{margin:0 0 14px;padding:18px 20px;border:2px solid #e34a3b;border-radius:18px;background:#fff3f1;box-shadow:0 8px 24px rgba(180,49,36,.12)}
-.fresh-leads-head{display:flex;align-items:center;gap:12px}.fresh-leads-icon{font-size:28px}.fresh-leads-head h3{margin:0;color:#a92d24;font-size:20px}.fresh-leads-head p{margin:3px 0 0;color:#733b36}.fresh-leads-head .count{background:#d9382c;color:#fff}
-.fresh-leads-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:9px;margin-top:14px}.fresh-lead-card{display:grid;gap:3px;padding:13px 14px;border:1px solid #efb2ac;border-radius:12px;background:#fff;text-align:left;color:var(--ink);cursor:pointer;font:inherit}.fresh-lead-card:hover{border-color:#d9382c;box-shadow:0 4px 14px rgba(180,49,36,.12)}.fresh-lead-card span{color:var(--ink-2);font-size:13px}.fresh-lead-card strong{margin-top:5px;color:#b33128;font-size:13px}
-.fresh-leads-status{margin-top:14px;padding:10px;border-radius:14px;background:#fde4e0}.fresh-leads-status-head{display:flex;justify-content:space-between;align-items:center;padding:2px 4px 8px;color:#9f2c24}.fresh-leads-status-head span{display:inline-grid;place-items:center;min-width:26px;height:26px;padding:0 7px;border-radius:99px;background:#fff;font-weight:800}.fresh-leads-status .fresh-leads-list{margin-top:0}.fresh-lead-card em{color:#7d4b28;font-size:12px;font-style:normal;font-weight:700}
-@media(max-width:600px){.fresh-leads-alert{padding:14px}.fresh-leads-head{align-items:flex-start}.fresh-leads-list{grid-template-columns:1fr}}
 .client-task-form { max-width:680px; }.client-task-choice { display:block; width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); text-align:left; font:inherit; cursor:pointer; margin-top:4px; }.client-task-choice:hover { background:var(--surface-2); }
 
 /* Текст задач можно выделять и копировать, в том числе администраторам. */
@@ -2086,7 +2079,6 @@ html.theme-soft #comms-box .family-chat-feed{background:#182624}html.theme-soft 
 @media(max-width:900px){#inbox-chat-pane .reply-target-current{display:flex;padding:2px 0;border:0;background:none}#inbox-chat-pane .reply-target-caption,#inbox-chat-pane .reply-target-details{display:none}#inbox-chat-pane .reply-target-summary{display:block}}
 .reply-channel-shortcut{width:42px;min-width:42px;height:40px;padding:7px;gap:0}.reply-target-channel{padding:3px;background:transparent}
 
-.new-cards-today{border:2px solid #43b580;background:#edf9f1}.new-cards-list{display:flex;flex-wrap:wrap;gap:10px}.new-cards-list .btn{display:flex;flex-direction:column;align-items:flex-start;gap:5px;background:white}
 
 .message-picker>.chips:first-child>.btn{width:44px;height:44px;padding:6px;font-size:23px;background:var(--surface-2);border:1px solid var(--line);display:inline-flex;align-items:center;justify-content:center}
 

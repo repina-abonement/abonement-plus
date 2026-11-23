@@ -1452,14 +1452,12 @@ async function renderWorkdesk(page) {
   const dateTxt = new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" }).replace(/^./, (c) => c.toUpperCase());
   const freshLeads = (d.new_cards_today?.cards || []).filter((x) => x.needs_processing);
   const processedNewCards = (d.new_cards_today?.cards || []).filter((x) => !x.needs_processing);
-  const freshLeadAlert = who === "offline" || !freshLeads.length ? "" : `<section class="fresh-leads-alert" aria-label="Необработанные новые заявки">
-    <div class="fresh-leads-head"><span class="fresh-leads-icon">🔥</span><div class="grow"><h3>Новая заявка</h3><p>Новые заявки остаются здесь до первой обработки, в том числе если они поступили в предыдущие дни</p></div><span class="count">${freshLeads.length}</span></div>
-    <div class="fresh-leads-status"><div class="fresh-leads-status-head"><b>Новая заявка</b><span>${freshLeads.length}</span></div>
-      <div class="fresh-leads-list">${freshLeads.map((lead) => `<button type="button" class="fresh-lead-card" data-fresh-lead="${lead.id}"><b>${esc(lead.name)}</b><span>${esc(lead.parent || "Родитель не указан")}${lead.phone ? ` · ${esc(lead.phone)}` : ""}</span><em>Источник: ${esc(lead.source || "не указан")}</em><strong>Открыть и обработать →</strong></button>`).join("")}</div></div></section>`;
-  const newCardsPanel = `${freshLeadAlert}${processedNewCards.length ? `<section class="new-cards-today" id="dw-new-cards">
-    <div class="now-head"><h3>Обработанные сегодня</h3><span class="count">${processedNewCards.length}</span></div>
-    <div class="new-cards-list">${processedNewCards.map(k=>`<button type="button" class="btn" data-new-card="${k.id}"><b>${esc(k.name)}</b><span class="small muted">${esc(k.stage==='lead'?'Новый лид':k.trial_at?'Записан на ПУ':'В работе')}</span></button>`).join('')}</div>
-  </section>` : ""}${!freshLeads.length && !processedNewCards.length ? `<div class="pipeline-empty">${S.workdeskDate===S.meta.today?'Сегодня':dShort(S.workdeskDate)} новых карточек нет</div>` : ""}`;
+  const visibleFreshLeads=who==='offline'?[]:freshLeads;
+  const newCardsBoard={funnel:'new',draggable:false,columns:[
+    {key:'new_application',title:'Новая заявка',cards:visibleFreshLeads.map(card=>({...card,color:'red',badge:'Новая заявка',group:card.group||`Источник: ${card.source||'не указан'}`}))},
+    {key:'processed_today',title:'Обработаны сегодня',cards:processedNewCards}
+  ]};
+  const newCardsPanel=`<div id="dw-new-cards">${boardHtml(newCardsBoard)}</div>`;
   const filterBoardForDate = (board) => {
     if (!board || S.workdeskDate === S.meta.today) return board;
     return { ...board, columns: board.columns.map(column => ({ ...column, cards: column.cards.filter(card => {
@@ -1469,7 +1467,7 @@ async function renderWorkdesk(page) {
   };
   const salesForDate=filterBoardForDate(d.board),renewForDate=filterBoardForDate(renew),skipsForDate=filterBoardForDate(skips),paymentsForDate=filterBoardForDate(d.manual_payment_checks);
   const pipelineItems = [
-    { key:"new", icon:"✨", label:"Новые карточки", count:(d.new_cards_today?.cards||[]).length, html:newCardsPanel },
+    { key:"new", icon:"✨", label:"Новые карточки", count:visibleFreshLeads.length+processedNewCards.length, html:newCardsPanel },
     { key:"sales", icon:"🛒", label:"Продажи", count:(salesForDate?.columns||[]).reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-sales">${boardHtml(salesForDate)}</div>` },
     ...(renewForDate ? [{ key:"renew", icon:"🔁", label:"Продления", count:renewForDate.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-renew">${boardHtml(renewForDate)}</div>` }] : []),
     ...(skipsForDate ? [{ key:"skips", icon:"🩹", label:"Пропуски и отработки", count:skipsForDate.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-skips">${skipsForDate.note?`<div class="pipeline-note">${esc(skipsForDate.note)}</div>`:""}${boardHtml(skipsForDate)}</div>` }] : []),
@@ -1502,8 +1500,6 @@ async function renderWorkdesk(page) {
   // коде и очереди разработки до отдельного решения по составу нового стола.
   page.innerHTML = pipelineHub;
   page.querySelectorAll("[data-rvclose]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/reviews/${b.dataset.rvclose}/close`, {}); render(); } catch (e) { fail(e); } }));
-  page.querySelectorAll("[data-new-card]").forEach(b=>b.onclick=()=>openStudent(+b.dataset.newCard));
-  page.querySelectorAll("[data-fresh-lead]").forEach(b=>b.onclick=()=>openStudent(+b.dataset.freshLead));
   const dateInput=page.querySelector("[data-pipeline-date]");
   if(dateInput)dateInput.onchange=()=>{if(!dateInput.value)return;S.workdeskDate=dateInput.value;S.etDay=dateInput.value===S.meta.today?'today':dateInput.value;render()};
   const todayButton=page.querySelector("[data-pipeline-today]");
@@ -1519,6 +1515,7 @@ async function renderWorkdesk(page) {
   page.querySelectorAll(".dwf").forEach((x) => x.addEventListener("toggle", () => { S.dwOpen[x.dataset.dwk] = x.open; }));
   page.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => { const el = document.getElementById(b.dataset.jump); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }));
   if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
+  const newCardsBoardElement=page.querySelector("#dw-new-cards");if(newCardsBoardElement)wireBoard(newCardsBoardElement,"new",newCardsBoard);
   const salesBoard=page.querySelector("#dw-sales");if(salesBoard)wireBoard(salesBoard,"sales",salesForDate);
   const skipsBoard=page.querySelector("#dw-skips");if(skipsForDate&&skipsBoard)wireBoard(skipsBoard,"skips",skipsForDate);
   const renewBoard=page.querySelector("#dw-renew");if(renewForDate&&renewBoard)wireBoard(renewBoard,"members",renewForDate);

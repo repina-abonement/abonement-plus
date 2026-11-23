@@ -92,9 +92,10 @@ def test_new_application_is_a_prominent_action_until_client_status_changes():
     app = (ROOT / "crm/static/app.js").read_text(encoding="utf-8")
     styles = (ROOT / "crm/static/style.css").read_text(encoding="utf-8")
 
-    assert "<h3>Новая заявка</h3>" in app
-    assert "остаются здесь до первой обработки" in app
+    assert "newCardsBoard={funnel:'new'" in app
+    assert "key:'new_application',title:'Новая заявка'" in app
+    assert "key:'processed_today',title:'Обработаны сегодня'" in app
+    assert 'wireBoard(newCardsBoardElement,"new",newCardsBoard)' in app
     assert "x.needs_processing" in app
-    assert 'data-fresh-lead="${lead.id}"' in app
-    assert 'Источник: ${esc(lead.source || "не указан")}' in app
-    assert ".fresh-leads-alert" in styles
+    assert ".fresh-leads-alert" not in styles
+    assert ".fresh-lead-card" not in styles
