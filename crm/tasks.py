@@ -120,6 +120,8 @@ def init(con):
     con.executescript(SCHEMA)
     if "renewal_reason" not in {row[1] for row in con.execute("PRAGMA table_info(tasks)")}:
         con.execute("ALTER TABLE tasks ADD COLUMN renewal_reason TEXT")
+    if "renewal_manual_due_at" not in {row[1] for row in con.execute("PRAGMA table_info(tasks)")}:
+        con.execute("ALTER TABLE tasks ADD COLUMN renewal_manual_due_at TEXT")
     con.execute('''CREATE TABLE IF NOT EXISTS task_text_revisions(
         id INTEGER PRIMARY KEY, task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
         changed_at TEXT NOT NULL, changed_by TEXT NOT NULL DEFAULT '',
@@ -286,8 +288,12 @@ def ensure_subscription_renewal(con, student_id):
         con.execute("""INSERT OR IGNORE INTO tasks(kind,title,student_id,due_at,source,auto_key,created_at)
             VALUES ('renew','Проверить продление',?,?,'subscription',?,?)""", (student_id,plan['due'],key,_iso(_now())))
         existing = con.execute("SELECT * FROM tasks WHERE auto_key=?", (key,)).fetchone()
-    if existing['due_at'] != plan['due']:
-        con.execute("UPDATE tasks SET due_at=? WHERE id=?", (plan['due'],existing['id']))
+    negotiated = existing['renewal_manual_due_at']
+    if negotiated and negotiated[:7] != plan['due'][:7]:
+        negotiated = None
+    due = negotiated or plan['due']
+    if existing['due_at'] != due or existing['renewal_manual_due_at'] != negotiated:
+        con.execute("UPDATE tasks SET due_at=?,renewal_manual_due_at=? WHERE id=?", (due, negotiated, existing['id']))
     if existing['renewal_reason'] != plan['note']:
         update_renewal_reason(con, existing['id'], plan['note'])
     return existing['id']
@@ -864,6 +870,16 @@ def my_tasks(con, user: dict, scope: str = "mine") -> dict:
     return {"groups": groups, "done_today": done_today, "team": team, "scope": scope, "can_manage": boss}
 
 
+def remember_renewal_date(con, task, due):
+    if task["source"] != "subscription" or task["kind"] != "renew":
+        return
+    plan = subscription_renewal_plan(con, task["student_id"])
+    if not plan or due[:7] != plan["due"][:7]:
+        raise ValueError("Выберите дату в месяце последнего абонемента")
+    con.execute("UPDATE tasks SET renewal_manual_due_at=? WHERE id=?",
+                (due if due[:10] != plan["due"][:10] else None, task["id"]))
+
+
 def edit(con, tid: int, data: dict, user: dict) -> dict:
     """Правка открытой задачи из карточки или раздела «Задачи»: что сделать, срок, заметка, исполнитель.
     Передать можно любому действующему участнику команды (в т.ч. тренеру); править могут админы и операторы (проверка в маршруте)."""
@@ -902,6 +918,10 @@ def edit(con, tid: int, data: dict, user: dict) -> dict:
         except ValueError:
             raise comms.CommsError("Неверный срок") from None
         if due != t["due_at"][:16]:
+            try:
+                remember_renewal_date(con, t, due)
+            except ValueError as exc:
+                raise comms.CommsError(str(exc)) from exc
             sets.append("due_at=?"); args.append(due)
             notes.append(f"Задача «{t['title']}»: срок {due[8:10]}.{due[5:7]}" + ("" if client else " "+due[11:16]))
     if "priority" in data:

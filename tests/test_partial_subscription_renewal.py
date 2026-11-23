@@ -15,6 +15,17 @@ class PartialRenewalTest(unittest.TestCase):
     def task(self):
         return self.con.execute("SELECT * FROM tasks WHERE auto_key=?",(f'subscription-renew:{self.sid}',)).fetchone()
 
+    def test_manual_due_survives_refresh_until_next_subscription_month(self):
+        self.sale('2026-11')
+        tid = self.task()['id']
+        tasks.edit(self.con, tid, {'due_at': '2026-11-24'}, self.u)
+        tasks.refresh_subscription_renewals(self.con)
+        self.assertEqual(self.task()['due_at'][:10], '2026-11-24')
+        self.sale('2026-12')
+        tasks.refresh_subscription_renewals(self.con)
+        self.assertEqual(self.task()['due_at'][:10], '2026-12-20')
+        self.assertIsNone(self.task()['renewal_manual_due_at'])
+
     def test_partial_month_twentieth_and_note(self):
         self.sale('2026-11')
         task=self.task()

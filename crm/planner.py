@@ -357,6 +357,11 @@ def move(con, tid: int, user: dict, new_date: str, shift=None):
         if selected!='common' and date.fromisoformat(new_date).weekday() not in (0,2):
             raise PlanError('Две смены доступны по понедельникам и средам')
     if t['assignee_id']==offlineplanner.pool_id(con) and date.fromisoformat(new_date).weekday() not in (0,2):selected='common'
+    from .tasks import remember_renewal_date
+    try:
+        remember_renewal_date(con, t, new_date + 'T' + t['due_at'][11:16])
+    except ValueError as exc:
+        raise PlanError(str(exc)) from exc
     con.execute("UPDATE tasks SET due_at=?,shift=? WHERE id=?", (f"{new_date}T{t['due_at'][11:16]}",selected,tid))
 
 
