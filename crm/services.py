@@ -1026,8 +1026,9 @@ def student_detail(con, sid: int) -> dict:
                 s["reported_age"] = int(match.group(1))
                 s["reported_age_source"] = "promoter"
                 break
-    from .historyview import present as present_history
+    from .historyview import present as present_history,journey as client_journey
     hist=[present_history(row) for row in hist]
+    journey=client_journey(con,s)
     stage_label = SALES_LABELS.get(s["stage"], s["stage"])
     if s["funnel"] == "sales":
         eff, color, _ = effective_sales_stage(s, st, now())
@@ -1042,7 +1043,7 @@ def student_detail(con, sid: int) -> dict:
         "refund_requests": __import__("crm.refundapproval",fromlist=["listing"]).listing(con,sid),
         "subscriptions": subs, "subscription_refunds": __import__("crm.subcancel",fromlist=["listing"]).listing(con,sid), "subscription_cancellations": __import__("crm.subcancel",fromlist=["cancellations"]).cancellations(con,sid), "vacations": vacs,
         "enrollments": [e | {"age_warn": "" if e["program_id"] else logic.age_warning(s["birth"], e["group_age"], e["branch_name"])} for e in enrollments_of(con, sid)],
-        "trial_age_warn": logic.age_warning(s["birth"], grp["age"], _branch_name(con, grp["branch_id"])) if grp and not grp["program_id"] and s["funnel"] == "sales" else "", "makeups": makeups, "history": hist,
+        "trial_age_warn": logic.age_warning(s["birth"], grp["age"], _branch_name(con, grp["branch_id"])) if grp and not grp["program_id"] and s["funnel"] == "sales" else "", "makeups": makeups, "history": hist, "journey": journey,
         "counters": absence_counters(con, sid) if s["funnel"] == "members" else None,
         "balance": balance,
         "trial_hold": __import__("crm.capacity", fromlist=["active_holds"]).active_holds(con, student_id=sid)[:1],

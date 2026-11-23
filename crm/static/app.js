@@ -2161,7 +2161,7 @@ function clientBalanceHtml(d) {
     <h4 class="finance-history-title">История денег</h4>${d.payments.length?`<ul class="pay-list ${d.payments.length>4?'folded':''}">${d.payments.map(p=>`<li class="payment-card ${p.cancelled?'is-cancelled':''}"><div class="finance-card-head"><div><b class="payment-amount ${p.amount<0?'refund':''}">${p.amount<0?'−':'+'}${rub(Math.abs(p.amount))}</b><div class="small muted">${p.method==='refund_pending'?'Зарезервировано для возврата':p.amount<0?'Возврат':'Поступление'} · ${esc(p.method_label||PAY_METHODS[p.method]||p.method)}</div></div><time>${dtShort(p.paid_at)}</time></div>${p.comment?`<div class="payment-comment">${esc(p.comment)}</div>`:''}<div class="small muted">${esc(p.user_name||'')}${p.cancelled?' · отменён':p.confirmed?'':' · ждёт подтверждения'}</div>${S.user.role==='admin'&&!p.cancelled&&!['unknown','refund_pending','refund'].includes(p.method)?`<details class="finance-detail"><summary>Действия с платежом</summary>${p.confirmed?'':`<button class="btn sm" data-pconf="${p.id}">Подтвердить</button>`}<button class="btn sm danger" data-pcancel="${p.id}">Отменить платёж</button></details>`:''}</li>`).join('')}</ul>`:'<p class="muted">Платежей пока нет</p>'}${d.payments.length>4?`<button class="linkish" id="pay-more">Показать всю историю (${d.payments.length})</button>`:''}
     ${d.family_kids.length||d.balance.deposit?`<details class="finance-detail"><summary>Другие операции</summary><div class="sc-actions">${d.family_kids.length?'<button class="btn sm" id="pay-fam">Оплата за семью</button>':''}${d.balance.deposit&&d.family_kids.length?'<button class="btn sm" id="bal-move">Перенести баланс другому ребёнку</button>':''}${d.balance.deposit&&can('payments','view')?'<button class="btn sm" id="bal-refund">Вернуть деньги с баланса</button>':''}</div></details>`:''}`;
 }
-function clientHistoryHtml(rows){
+function clientHistoryHtml(rows,journey=[]){
   const events=rows.filter(row=>!row.technical_only);
   const labels={payment:'Оплата',sale:'Абонемент',stage:'Статус',group:'Группа',task:'Задача',note:'Комментарий',message:'Сообщение',system:'CRM'};
   const editButton = row => S.user.role === "admin" && row.kind === "note" ? `<button type="button" class="btn sm" data-edit-history="${row.id}">Изменить комментарий</button>` : "";
@@ -2175,7 +2175,10 @@ function clientHistoryHtml(rows){
     const when=dateParts(row.ts),author=row.display_author||row.user_name||'CRM';
     return `<tr class="client-history-event"><td data-label="Дата"><time datetime="${esc(row.ts||'')}">${esc(when.date)}</time></td><td data-label="Время">${esc(when.time)}</td><td data-label="Событие"><span class="client-history-kind">${esc(labels[row.kind]||'Событие')}</span></td><td data-label="Комментарий"><div class="client-history-text">${esc(visible||'—')}</div>${long?`<details class="client-history-full"><summary>Показать полностью</summary><div>${esc(text)}</div></details>`:''}${editButton(row)}</td><td data-label="Автор">${esc(author)}</td></tr>`;
   };
-  return `${events.length?`<div class="client-history-table-wrap"><table class="client-history-table"><thead><tr><th>Дата</th><th>Время</th><th>Событие / задача</th><th>Комментарий</th><th>Автор</th></tr></thead><tbody>${events.map(item).join('')}</tbody></table></div>`:'<p class="muted">Рабочих событий пока нет</p>'}`;
+  const journeyRows=journey.map(row=>{const when=dateParts(row.ts);return `<tr class="client-history-event client-journey-event"><td data-label="Дата"><time datetime="${esc(row.ts||'')}">${esc(when.date)}</time></td><td data-label="Время">${esc(when.time)}</td><td data-label="Событие"><span class="client-history-kind">${esc(row.title||'Событие')}</span></td><td data-label="Что произошло"><div class="client-history-text">${esc(row.text||'—')}</div></td><td data-label="Источник">${esc(row.author||'CRM')}</td></tr>`}).join('');
+  const primary=journeyRows?`<div class="client-journey-head"><b>Хронология клиента</b><span>От первого обращения до текущего следующего шага</span></div><div class="client-history-table-wrap"><table class="client-history-table"><thead><tr><th>Дата</th><th>Время</th><th>Этап</th><th>Что произошло</th><th>Источник</th></tr></thead><tbody>${journeyRows}</tbody></table></div>`:'<p class="muted">Хронология пока не заполнена</p>';
+  const details=events.length?`<details class="client-history-details"><summary>Дополнительные записи и комментарии (${events.length})</summary><div class="client-history-table-wrap"><table class="client-history-table"><thead><tr><th>Дата</th><th>Время</th><th>Событие / задача</th><th>Комментарий</th><th>Автор</th></tr></thead><tbody>${events.map(item).join('')}</tbody></table></div></details>`:'';
+  return primary+details;
 }
 async function loadClientPaymentLinks(sid) {
   const box=$('#pay-links');if(!box)return;
@@ -2314,7 +2317,7 @@ async function openStudent(id, options = {}) {
     <h3>История</h3>
     ${isOwner() ? `<button class="btn" id="erp-full-client">Исходные данные ERP</button><div id="erp-full-client-out"></div>` : ''}
     <div class="row" style="margin-bottom:10px"><input id="note" placeholder="Комментарий, итог звонка…"><button class="btn sm" id="note-add" style="flex:0">Добавить</button></div>
-    ${clientHistoryHtml(d.history)}
+    ${clientHistoryHtml(d.history,d.journey)}
   </div>
   <div style="margin-top:14px" data-sc="arch"><button class="btn sm ${s.archived ? "" : "danger"}" id="s-arch">${s.archived ? "Вернуть из архива" : "Перенести в архив"}</button></div>`;
   openDrawer(html, "wide", { keepStudentRequest: true });

@@ -12,7 +12,8 @@ def main():
     assert present({"kind":"note","text":"Выгрузка ERP 123 · Счета"})["technical_only"]
     assert present({"kind":"task","text":"Следующий шаг ERP: закрыть; перенос истории"})["technical_only"]
     assert not present({"kind":"note","text":"Семья сообщила о пропуске"}).get("technical_only")
-    assert "clientHistoryHtml(d.history)" in app
+    assert "clientHistoryHtml(d.history,d.journey)" in app
+    assert "Хронология клиента" in app and "d.journey" in app
     assert 'class="client-history-table"' in app
     for heading in ("Дата", "Время", "Событие / задача", "Комментарий", "Автор"):
         assert heading in app

@@ -1,5 +1,7 @@
-"""Краткое отображение ERP-событий; исходная запись не меняется."""
+"""Понятная клиентская хронология поверх неизменяемого технического журнала."""
+import json
 import re
+from datetime import datetime
 
 _LABELS=re.compile(r'(?:^|\s)(Дата события|Дедлайн|Задача \(END\)|Задача \(NEW\)|Событие|Автор|Исполнитель|Фамилия и имя|Филиал|Группа|Комментарий|ID|№)\s*:\s*',re.I)
 _ERP_ARCHIVE = re.compile(r'^Архив\s+ERP\s+([^·.\n]+)\s*·\s*([^\.\n]+)', re.I)
@@ -43,3 +45,74 @@ def present(row):
     out.update(display_text=summary,technical_text=raw,
                display_author=fields.get('автор') or out.get('user_name',''),technical_only=False)
     return out
+
+
+def _iso(value, fallback=''):
+    raw=str(value or '')[:19]
+    try:return datetime.fromisoformat(raw).isoformat(timespec='minutes')
+    except ValueError:return fallback
+
+
+def journey(con, student):
+    """Return one concise business timeline shared by every client card."""
+    sid=student['id'];rows=[]
+    def add(key,at,title,text,author='CRM'):
+        if at:rows.append({'key':key,'ts':_iso(at),'title':title,'text':text.strip(),'author':author})
+    source=str(student['source'] or '').strip()
+    lead_at=student['created_at']
+    older=con.execute("""SELECT MIN(ts) FROM history WHERE student_id=? AND
+        (lower(text) LIKE '%новый лид%' OR lower(text) LIKE '%промоутер%')""",(sid,)).fetchone()[0]
+    if older and (not lead_at or older<lead_at):lead_at=older
+    if source:
+        promoter=source[len('Промоутер '):] if source.casefold().startswith('промоутер ') else ''
+        genitive={'Иван Ивакин':'Ивана Ивакина','Никита Евсюнин':'Никиты Евсюнина'}.get(promoter,promoter)
+        lead=('Лид от промоутера '+genitive) if promoter else 'Новый лид'
+        add('lead',lead_at,lead,'Источник: '+source)
+    else:add('lead',lead_at,'Новый лид','Карточка клиента создана')
+    trial_at=student['trial_at'] or ''
+    if trial_at:
+        group=con.execute('SELECT name FROM groups WHERE id=?',(student['trial_group_id'] or student['group_id'],)).fetchone()
+        add('trial_booked',trial_at,'Записан на ПУ',('Группа: '+group['name']) if group else 'Пробное занятие')
+    trial_event=None
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_day_transfer_events'").fetchone():
+        for row in con.execute("SELECT source_at,payload FROM chat_day_transfer_events WHERE student_id=? AND event_kind='trial_result' ORDER BY source_at DESC",(sid,)):
+            try:event=json.loads(row['payload'])
+            except (TypeError,ValueError):continue
+            if not trial_at or not event.get('event_date') or str(event['event_date'])[:10]==trial_at[:10]:
+                trial_event=(row,event);break
+    if student['trial_came'] is not None and trial_at:
+        add('trial_attendance',trial_at,'Пришёл на ПУ' if student['trial_came'] else 'Не пришёл на ПУ',
+            'Посещение пробного подтверждено' if student['trial_came'] else 'Отсутствие на пробном подтверждено')
+    if trial_event:
+        row,event=trial_event
+        add('trial_result',str(event.get('event_date'))[:10]+'T'+(trial_at[11:16] if len(trial_at)>=16 else '12:00'),
+            'Результат ПУ',str(event.get('note') or 'Результат пробного зафиксирован'),'Служба заботы')
+    subs=con.execute("""SELECT month,price,created_at,paid_at,status FROM subscriptions
+        WHERE student_id=? AND status!='cancelled' AND COALESCE(kind,'month')='month' ORDER BY month,id""",(sid,)).fetchall()
+    if subs:
+        grouped={}
+        for sub in subs:
+            day=str(sub['paid_at'] or sub['created_at'] or '')[:10]
+            grouped.setdefault(day,[]).append(sub)
+        for day,items in grouped.items():
+            months=', '.join(x['month'][5:7]+'.'+x['month'][:4] for x in items)
+            total=sum(int(x['price'] or 0) for x in items)
+            paid=all(x['status']=='paid' for x in items)
+            payment=con.execute("""SELECT amount,method,paid_at FROM payments WHERE student_id=? AND cancelled=0
+                AND substr(paid_at,1,10)=? ORDER BY id LIMIT 1""",(sid,day)).fetchone() if day else None
+            methods={'card_branch':'картой в филиале','cash':'наличными','sbp':'по СБП','transfer':'переводом',
+                     'paykeeper':'онлайн','sber_qr_branch':'по QR Сбера','tochka_qr_link':'по ссылке Точки'}
+            payment_text=''
+            if payment:
+                payment_text=f" Оплата: {int(payment['amount']):,} ₽, {methods.get(payment['method'],payment['method'])}".replace(',',' ')
+            elif paid:payment_text=' Оплата подтверждена'
+            add('sale:'+day,day+'T23:00','Куплен абонемент' if paid else 'Оформлен абонемент',
+                f'Период: {months}. Стоимость: {total:,} ₽'.replace(',',' ')+'.'+payment_text)
+    task=con.execute("""SELECT title,note,due_at,created_at,kind FROM tasks WHERE student_id=? AND status='open'
+        ORDER BY due_at,priority DESC,id LIMIT 1""",(sid,)).fetchone()
+    if task:
+        detail=task['title']+(('. '+task['note'].strip()) if str(task['note'] or '').strip() else '')
+        detail+=' Срок: '+task['due_at'][8:10]+'.'+task['due_at'][5:7]+'.'+task['due_at'][:4]
+        add('next_step',task['created_at'] or task['due_at'],'Следующий шаг',detail)
+    order={'lead':0,'trial_booked':10,'trial_attendance':20,'trial_result':30,'next_step':90}
+    return sorted(rows,key=lambda row:(row['ts'],order.get(row['key'],50),row['key']))
