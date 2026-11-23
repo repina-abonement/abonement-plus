@@ -66,7 +66,7 @@ const nikitina = context.chatDayPayload([{name:'Служба заботы',messa
   {id:21662,date:'2026-11-16T11:11:14',text:'Оплата Никитина Софья. За ноябрь и декабрь до 14 числа включительно. 15 декабря улетают на месяц. Сумма 10240-00 за 8 занятий. Пришли по рекомендации Решетняк Матвея. Ему нужно сделать за это скидку в будущем. Оплата по qr-коду.'},
 ]},{name:'ТРЕНЕРЫ',messages:[]}], '2026-11-16');
 const sofiaSale=nikitina.events.find(event=>event.event_kind==='subscription_sale');
-if(!sofiaSale||sofiaSale.amount!==10240||sofiaSale.payment_method!=='sbp'||sofiaSale.components.length!==2||sofiaSale.components.flatMap(x=>x.dates).length!==8)throw new Error('Nikitina sale not parsed');
+if(!sofiaSale||sofiaSale.amount!==10240||sofiaSale.payment_method!=='online'||!sofiaSale.payment_method_needs_confirmation||!/Точки.*Сбера/i.test(sofiaSale.clarification_task_title)||sofiaSale.components.length!==2||sofiaSale.components.flatMap(x=>x.dates).length!==8)throw new Error('Nikitina sale not parsed');
 if(!sofiaSale.create_if_missing||sofiaSale.birth!=='2025-03-05'||sofiaSale.phone!=='+79260327334'||!/рекомендации/i.test(sofiaSale.source||''))throw new Error('Nikitina identity or source missing');
 if(!nikitina.events.some(event=>event.event_kind==='trial_result'&&event.outcome==='purchased'))throw new Error('Nikitina trial result not parsed');
 console.log('PASS Nikitina trial, source and split November/December sale');

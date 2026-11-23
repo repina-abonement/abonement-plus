@@ -70,6 +70,14 @@ def _current_tasks(con,sid):
     return [dict(r) for r in con.execute("SELECT id,title,due_at,note FROM tasks WHERE student_id=? AND status='open' ORDER BY due_at,id",(sid,))]
 
 
+def _reconcile_clarification_task(con,sid,event):
+    title=str(event.get('clarification_task_title') or '').strip()
+    if not title:return None
+    due=str(event.get('clarification_task_due') or (sv.today().isoformat()+'T23:59'))[:16]
+    return tasks.add_task(con,'manual',sid,due,auto_key='chat-clarify:'+str(event.get('source_id') or ''),
+                          title=title[:300],note=str(event.get('clarification_task_note') or event.get('note') or '')[:4000],source='manual')
+
+
 def _reconcile_trial_booking(con,sid,event):
     """A confirmed CRM booking supersedes the temporary imported follow-up."""
     if event.get('event_kind')!='trial_booking':return False
@@ -160,6 +168,10 @@ def _reconcile_subscription_sale(con,sid,event,user):
         if duplicate:raise sv.ApiError('Такая оплата уже есть, но не распределена по подтверждённым абонементам')
         money.add_payment(con,sid,total,method,user,paid_at=paid_at,invoice_parts=parts,
                           comment='Продажа подтверждена СЗ, сообщение '+str(event.get('source_id') or ''))
+    if event.get('payment_method_needs_confirmation'):
+        con.execute("""UPDATE payments SET method='online' WHERE student_id=? AND cancelled=0 AND amount=?
+            AND comment=? AND method IN ('sbp','online')""",
+            (sid,total,'Продажа подтверждена СЗ, сообщение '+str(event.get('source_id') or '')))
     tasks.schedule_renewal(con,sid)
     return {'subscription_ids':[x['subscription_id'] for x in parts],'created':created,'amount':total}
 
@@ -256,6 +268,7 @@ def apply(con,data,user):
                 _reconcile_subscription_sale(con,old['student_id'],event,user)
                 _reconcile_trial_outcome(con,old['student_id'],event)
                 _reconcile_confirmed_sale(con,old['student_id'],event)
+                _reconcile_clarification_task(con,old['student_id'],event)
                 con.execute('RELEASE chat_day_existing')
             except Exception as exc:
                 con.execute('ROLLBACK TO chat_day_existing');con.execute('RELEASE chat_day_existing')
@@ -339,6 +352,7 @@ def apply(con,data,user):
             booked=_reconcile_trial_booking(con,sid,event)
             outcome=_reconcile_trial_outcome(con,sid,event)
             sold=_reconcile_confirmed_sale(con,sid,event)
+            _reconcile_clarification_task(con,sid,event)
             if event.get('task_title') and event.get('task_due') and not booked and not outcome and not sold:
                 tasks.add_task(con,'manual',sid,str(event['task_due'])[:16],auto_key='chat-day:'+source,
                                title=str(event['task_title'])[:300],note=str(event.get('task_note') or note)[:4000],source='erp')
