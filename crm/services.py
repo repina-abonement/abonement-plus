@@ -977,6 +977,8 @@ def _refuse(con, s: dict, reason: str, comment: str, user) -> dict:
 
 
 def student_detail(con, sid: int) -> dict:
+    from . import erpstatus
+    erpstatus.sync_one(con, sid, today())
     s = get_student_row(con, sid)
     st = settings(con)
     fam = dict(con.execute("SELECT * FROM families WHERE id=?", (s["family_id"],)).fetchone())
