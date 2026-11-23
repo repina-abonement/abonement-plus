@@ -93,7 +93,7 @@ def test_markov_egorov_and_khvostov_receive_their_real_followup_chains():
     branch=schedule.save_branch(con,{'name':'ТЦ «Небо»'})
     group=schedule.save_group(con,{'name':'Небо Вс','branch_id':branch,'weekdays':[6],'time':'16:45','age':'2–4'})
     cases=[
-        ('Марков Тимофей','2023-04-01','2026-11-22T16:45',True,'Решили подождать до весны, в апреле исполнится 3','later','2027-04-01','Связаться с семьёй весной и предложить подходящую группу'),
+        ('Марков Тимофей','2024-04-23','2026-11-22T16:45',True,'Решили подождать до весны, в апреле исполнится 3','later','2027-03-23','Связаться с семьёй весной и предложить подходящую группу'),
         ('Егоров Артур','2023-10-17','2026-11-22T16:45',False,'Не смог зайти, перезаписаться и пробовать пока не готовы','later','2027-02-21','Пригласить снова на ПУ: ребёнок будет готов'),
         ('Хвостов Александр','2024-08-13','2026-11-23T10:30',False,'ПУ не состоялось, ребёнок не смог отойти от родителей','reinvite','2026-11-30','Предложить адаптационное повторное ПУ с родителем'),
     ]
@@ -106,8 +106,13 @@ def test_markov_egorov_and_khvostov_receive_their_real_followup_chains():
         assert len(result['applied'])==1 and not result['errors']
         student=con.execute('SELECT stage,trial_came FROM students WHERE id=?',(sid,)).fetchone()
         assert student['stage']==('reinvite_pu' if outcome=='reinvite' else 'later') and student['trial_came']==int(came)
-        task=con.execute("SELECT title,due_at FROM tasks WHERE student_id=? AND status='open' AND kind='rebook'",(sid,)).fetchone()
+        task=con.execute("SELECT id,title,due_at FROM tasks WHERE student_id=? AND status='open' AND kind='rebook'",(sid,)).fetchone()
         assert task and task['due_at'][:10]==due and task['title']==title
+        if name=='Марков Тимофей':
+            con.execute("UPDATE tasks SET due_at='2027-04-01T11:00' WHERE id=?",(task['id'],))
+            chatdaytransfer._reconcile_trial_outcome(con,sid,event|{'followup_due':'2027-04-01T11:00'})
+            repaired=con.execute('SELECT due_at FROM tasks WHERE id=?',(task['id'],)).fetchone()
+            assert repaired['due_at'][:10]=='2027-03-23'
 
 
 def test_confirmed_paid_sale_does_not_leave_manual_renewal_duplicate():

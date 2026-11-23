@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import calendar
 from datetime import datetime, timedelta
 
 from . import comms, services as sv, tasks
@@ -166,17 +167,25 @@ def _reconcile_trial_outcome(con,sid,event):
     reinvite=event.get('outcome')=='reinvite'
     if not later and not reinvite:return False
     day=str(event.get('event_date') or '')[:10]
+    student=con.execute('SELECT stage,refusal_reason,birth FROM students WHERE id=?',(sid,)).fetchone()
+    spring=bool(re.search(r'весн|апрел',note,re.I))
     try:
         base=datetime.fromisoformat(day).date()
-        if event.get('followup_due'):due=datetime.fromisoformat(str(event['followup_due'])[:16])
-        elif re.search(r'весн|апрел',note,re.I):due=datetime(base.year+1,4,1,11)
+        if spring and student and student['birth']:
+            born=datetime.fromisoformat(str(student['birth'])[:10]).date()
+            month_index=born.month-1+35
+            year=born.year+month_index//12
+            month=month_index%12+1
+            due=datetime(year,month,min(born.day,calendar.monthrange(year,month)[1]),11)
+        elif event.get('followup_due'):due=datetime.fromisoformat(str(event['followup_due'])[:16])
+        elif spring:due=datetime(base.year+1,3,1,11)
         else:due=datetime.combine(base+timedelta(days=7 if reinvite else 91),datetime.min.time()).replace(hour=11)
     except ValueError:return False
     if event.get('refusal_reason'):reason=str(event['refusal_reason'])
     elif re.search(r'весн|апрел',note,re.I):reason='Ребёнок пока не готов по возрасту, семья хочет вернуться весной'
     elif re.search(r'не смог|не заш[её]л|не готов',note,re.I):reason='Ребёнок пока не готов войти в тренировку, семья не готова повторять попытку сейчас'
     else:reason='Ребёнок пока не готов: занимается в саду, семья изначально не планировала покупку'
-    before=con.execute('SELECT stage,refusal_reason FROM students WHERE id=?',(sid,)).fetchone()
+    before=student
     stage='reinvite_pu' if reinvite else 'later'
     con.execute("""UPDATE students SET stage=?,refusal_reason=?,contacted_after_trial=1,
         priority=0,stage_changed_at=? WHERE id=?""",(stage,reason,sv.now_iso(),sid))
