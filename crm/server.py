@@ -912,6 +912,21 @@ def erp_people_transfer(con, h, user, body, q):
         raise ApiError(str(exc))
 
 
+@route("POST", "/api/erp/priority-history/plan", role="admin")
+@route("POST", "/api/erp/priority-history/apply", role="admin")
+def erp_priority_history(con, h, user, body, q):
+    from . import erppriorityhistory
+    applying = h.path.split("?", 1)[0].endswith("/apply")
+    try:
+        if applying:
+            return erppriorityhistory.apply(con, body.get("file_id"), body.get("erp_ids"),
+                                            body.get("token"), user, body.get("since") or "2026-11-01")
+        return erppriorityhistory.plan(con, body.get("file_id"), body.get("erp_ids"),
+                                       body.get("since") or "2026-11-01")
+    except (erppriorityhistory.PriorityHistoryError, erpimport.ImportError_) as exc:
+        raise ApiError(str(exc))
+
+
 @route("POST", "/api/erp/full/plan", role="admin")
 def erp_full_plan(con, h, user, body, q):
     from . import erpfull, erpimport

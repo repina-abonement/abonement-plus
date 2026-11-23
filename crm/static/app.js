@@ -1180,6 +1180,53 @@ function erpPriorityPeopleSetup(box) {
   apply.onclick = () => run(true);
 }
 
+function erpPriorityHistorySetup(box) {
+  const after = box.querySelector("[data-erp-priority]") || box.querySelector("#erp-history-transfer");
+  if (!after || box.querySelector("[data-erp-priority-history]")) return;
+  const section = document.createElement("section");
+  section.className = "erp-step"; section.dataset.erpPriorityHistory = "1";
+  section.innerHTML = `<div class="erp-step-title"><span class="erp-step-number">3</span><div><h3>Перенести ноябрьскую историю абонементов</h3>
+    <p>Добавляет в хронологию даты продажи, группу, период и количество занятий. Оплаты, долг и баланс из ERP не читаются</p></div></div>
+    <div class="field"><label for="erp-priority-subs">Проданные абонементы</label><input id="erp-priority-subs" type="file" accept=".xlsx,.csv"><div class="small muted">Выберите один файл, например «Проданные абонементы (5).xlsx»</div></div>
+    <div class="field"><label for="erp-priority-history-ids">ERP ID нужных детей</label><textarea id="erp-priority-history-ids" rows="4" placeholder="По одному ID в строке"></textarea></div>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="erp-priority-history-check">1. Проверить историю</button><button class="btn primary" id="erp-priority-history-apply" disabled>2. Перенести историю</button></div>
+    <div id="erp-priority-history-out" aria-live="polite"></div>`;
+  after.after(section);
+  const file = section.querySelector("#erp-priority-subs"), ids = section.querySelector("#erp-priority-history-ids");
+  const check = section.querySelector("#erp-priority-history-check"), apply = section.querySelector("#erp-priority-history-apply"), out = section.querySelector("#erp-priority-history-out");
+  let uploaded = null, approved = null;
+  const reset = () => { uploaded = approved = null; apply.disabled = true; out.replaceChildren(); };
+  file.onchange = ids.oninput = reset;
+  const base64 = (chosen) => new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result.split(",")[1]); reader.onerror = reject; reader.readAsDataURL(chosen); });
+  async function upload(chosen) {
+    const result = await api("POST", "/api/erp/upload", { filename: chosen.name, data: await base64(chosen), kind: "subs" });
+    await api("PUT", `/api/erp/uploads/${result.id}`, { kind: "subs" }); return result.id;
+  }
+  function show(report, applied) {
+    out.innerHTML = `<div class="note" style="margin-top:12px"><b>${applied ? "✅ История перенесена" : "Результат проверки истории"}</b>
+      <div>Найдено ID в отчёте: <b>${report.found.length} из ${report.requested.length}</b></div>
+      <div>Новых записей хронологии: <b>${report.new}</b> · уже были: <b>${report.already}</b></div>
+      ${report.missing.length ? `<div class="danger-text">Нет строк абонементов: ${report.missing.map(esc).join(", ")}. Это не отменяет более приоритетные сведения Telegram</div>` : ""}
+      ${report.issues.length ? `<div class="danger-text">Требуют сверки: ${report.issues.length}</div>` : ""}
+      ${applied ? `<div>Добавлено сейчас: <b>${report.applied}</b></div>` : ""}</div>`;
+  }
+  async function run(applying) {
+    const erp_ids = [...new Set(ids.value.split(/[^0-9]+/).filter(Boolean))];
+    if (!file.files[0]) { out.textContent = "Выберите файл проданных абонементов"; return; }
+    if (!erp_ids.length) { out.textContent = "Вставьте ERP ID"; return; }
+    check.disabled = apply.disabled = true; out.textContent = applying ? "Переношу историю…" : "Проверяю историю…";
+    try {
+      if (!uploaded) uploaded = await upload(file.files[0]);
+      const body = { file_id: uploaded, erp_ids, since: "2026-11-01" }; if (applying) body.token = approved;
+      const report = await api("POST", `/api/erp/priority-history/${applying ? "apply" : "plan"}`, body); show(report, applying);
+      if (!applying && !report.issues.length) { approved = report.token; apply.disabled = false; }
+      if (applying) approved = null;
+    } catch (error) { out.textContent = error.message; }
+    finally { check.disabled = false; if (!approved) apply.disabled = true; }
+  }
+  check.onclick = () => run(false); apply.onclick = () => run(true);
+}
+
 /* Настройки → Перенос из ERP: файлы, колонки, группы, пробный прогон, перенос, сверка, отмена */
 async function renderErp(box) {
   const d = await api("GET", "/api/erp");
@@ -1221,6 +1268,7 @@ async function renderErp(box) {
   if (typeof erpHistorySetup === "function") erpHistorySetup(box);
   try { erpPeopleSetup(box, d); } catch (error) { fail(error); }
   try { erpPriorityPeopleSetup(box); } catch (error) { fail(error); }
+  try { erpPriorityHistorySetup(box); } catch (error) { fail(error); }
   try { erpTaskTransferSetup(box,d); } catch (error) { fail(error); }
   try { erpFullSetup(box, d); } catch (error) { fail(error); }
   if (done) {
@@ -1318,13 +1366,13 @@ async function renderErp(box) {
 
 function erpOrganizeTools(box) {
   if (box.querySelector('[data-erp-advanced]')) return;
-  const head=box.querySelector('.erp-page-head'),primary=box.querySelector('#erp-history-transfer'),priority=box.querySelector('[data-erp-priority]');
+  const head=box.querySelector('.erp-page-head'),primary=box.querySelector('#erp-history-transfer'),priority=box.querySelector('[data-erp-priority]'),priorityHistory=box.querySelector('[data-erp-priority-history]');
   if(!head||!primary)return;
   const advanced=document.createElement('details');advanced.className='erp-advanced';advanced.dataset.erpAdvanced='1';
   advanced.innerHTML='<summary><span><b>Другие инструменты переноса</b><small>Карточки, задачи, сверки, восстановление и технические операции</small></span><span aria-hidden="true">⌄</span></summary><div data-erp-advanced-body></div>';
   const body=advanced.querySelector('[data-erp-advanced-body]');
-  [...box.children].filter(node=>node!==head&&node!==primary&&node!==priority).forEach(node=>body.append(node));
-  (priority||primary).after(advanced);
+  [...box.children].filter(node=>node!==head&&node!==primary&&node!==priority&&node!==priorityHistory).forEach(node=>body.append(node));
+  (priorityHistory||priority||primary).after(advanced);
 }
 function erpUploadHtml(u, kinds) {
   return `<div class="erp-up" data-up="${u.id}"><div class="row" style="align-items:center;gap:8px"><b style="flex:1">${esc(u.filename)} <span class="muted small">· ${u.count} строк</span></b>
