@@ -846,6 +846,8 @@ function boardHtml(data) {
   const bar = data.funnel === "sales" && data.today_end ? `<div class="board-bar small">
       ${S.boardAll ? "Показаны все карточки" : "Показаны задачи на сегодня"}${!S.boardAll && hidden ? ` · отложено на другие дни: <b>${hidden}</b>` : ""}${later ? ` · «Пригласим позже»: ${later}` : ""}
       <button class="linkish small" data-boardall>${S.boardAll ? "Только на сегодня" : "Показать все"}</button></div>` : "";
+  S.boardCardDetails=S.boardCardDetails||{};
+  data.columns.forEach(column=>column.cards.forEach(card=>{S.boardCardDetails[card.id]=card}));
   return `${bar}<div class="board">${data.columns.map((c) => `
       <section class="col" data-stage="${c.key}">
         <div class="col-head"><h3>${esc(c.title)}</h3>${c.auto ? `<span class="auto">сам</span>` : ""}<span class="count">${c.cards.length}</span></div>
@@ -857,7 +859,21 @@ function boardHtml(data) {
 function wireBoard(page, funnel, data) {
   page.querySelectorAll("[data-boardall]").forEach((b) => (b.onclick = () => { S.boardAll = !S.boardAll; render(); }));
   page.querySelectorAll(".card").forEach((el) => (el.onclick = () => openStudent(+el.dataset.id)));
+  wireBoardCardPreview(page);
   if (data.draggable) enableDrag(page, funnel, data.columns);
+}
+
+function wireBoardCardPreview(page){
+  const popup=document.createElement("aside");popup.className="board-card-preview";popup.hidden=true;popup.setAttribute("role","tooltip");document.body.appendChild(popup);
+  let current=null,timer;
+  const hide=()=>{clearTimeout(timer);popup.hidden=true;current=null};
+  const position=()=>{if(!current?.isConnected)return hide();const r=current.getBoundingClientRect(),w=Math.min(380,innerWidth-24);popup.style.width=w+"px";popup.style.left=Math.max(12,Math.min(innerWidth-w-12,r.right+10))+"px";const h=popup.getBoundingClientRect().height;popup.style.top=Math.max(12,Math.min(innerHeight-h-12,r.top))+"px"};
+  const show=card=>{clearTimeout(timer);current=card;const item=S.boardCardDetails?.[card.dataset.id];if(!item)return hide();const title=item.task_title||item.due_title||item.title||"Текущая задача";const note=item.task_note||"Подробное описание пока не добавлено";popup.innerHTML=`<div class="board-card-preview-label">Текущая задача</div><strong>${esc(title)}</strong><div class="board-card-preview-client">${esc(displayChildName(item.name||""))}${item.parent?` · ${esc(item.parent)}`:""}</div>${item.due?`<div class="board-card-preview-due">Срок: ${dShort(item.due)}${item.due.slice(11,16)?` · ${esc(item.due.slice(11,16)==="23:59"?"в течение дня":item.due.slice(11,16))}`:""}</div>`:""}<div class="board-card-preview-note">${esc(note)}</div>`;popup.hidden=false;position()};
+  const later=()=>{clearTimeout(timer);timer=setTimeout(hide,160)};
+  page.querySelectorAll(".card").forEach(card=>{card.addEventListener("mouseenter",()=>{if(matchMedia("(hover:hover)").matches)show(card)});card.addEventListener("mouseleave",later);card.addEventListener("focus",()=>show(card));card.addEventListener("blur",later)});
+  popup.onmouseenter=()=>clearTimeout(timer);popup.onmouseleave=later;
+  const controller=new AbortController(),signal=controller.signal;window.addEventListener("resize",position,{signal});window.addEventListener("scroll",()=>{if(!popup.hidden)position()},{capture:true,passive:true,signal});
+  const observer=new MutationObserver(()=>{if(!page.isConnected){hide();popup.remove();controller.abort();observer.disconnect()}});observer.observe(document.body,{childList:true,subtree:true});
 }
 
 async function renderBoard(page, funnel) {
