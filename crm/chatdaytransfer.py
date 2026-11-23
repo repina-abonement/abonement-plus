@@ -73,19 +73,48 @@ def apply(con,data,user):
             datetime.fromisoformat(at)
             note=str(event.get('note') or '').strip()
             if not note:raise sv.ApiError('Пустое описание события')
+            single_sale=None
+            if event.get('event_kind')=='single_sale':
+                from . import money, singles
+                day=str(event.get('event_date') or '')[:10]
+                student=con.execute('SELECT group_id,trial_group_id FROM students WHERE id=?',(sid,)).fetchone()
+                gid=int(event.get('group_id') or student['trial_group_id'] or student['group_id'] or 0)
+                if not gid:raise sv.ApiError('Не определена группа разового занятия')
+                if singles.lesson_time(con,gid,day)!=str(event.get('lesson_time') or ''):
+                    raise sv.ApiError('В подтверждённой группе на эту дату другое время занятия')
+                visit=con.execute("SELECT * FROM single_visits WHERE student_id=? AND date=? AND status='booked'",(sid,day)).fetchone()
+                subid=visit['subscription_id'] if visit else None
+                if not subid:
+                    sold=singles.sell_visit(con,sid,gid,day,user);subid=sold['id']
+                sub=con.execute('SELECT status,price FROM subscriptions WHERE id=?',(subid,)).fetchone()
+                amount=int(event.get('amount') or 0)
+                if not sub or sub['price']!=amount:raise sv.ApiError('Стоимость разового в CRM не совпадает с подтверждённой суммой')
+                if sub['status']!='paid':
+                    money.add_payment(con,sid,amount,str(event.get('payment_method') or ''),user,subscription_id=subid,
+                                      comment='Подтверждено СЗ, сообщение '+source,paid_at=str(event.get('paid_at') or at)[:19])
+                singles.sync_paid_tasks(con,datetime.now(),sid)
+                con.execute("""UPDATE tasks SET status='cancelled',done_at=?,result='Заменено автоматическими задачами оплаченного разового'
+                    WHERE student_id=? AND status='open' AND source='manual' AND title LIKE ?""",
+                    (sv.now_iso(),sid,'%разовом занятии '+day[8:10]+'.'+day[5:7]+'%'))
+                single_sale={'subscription_id':subid,'date':day,'group_id':gid}
             con.execute('INSERT INTO history(student_id,ts,user_name,kind,text) VALUES (?,?,?,?,?)',(sid,at,'Перенос СЗ','chat_transfer',note))
             marked=False
             if event.get('event_kind')=='trial_result' and isinstance(event.get('came'),bool):
                 student=con.execute('SELECT trial_at FROM students WHERE id=?',(sid,)).fetchone()
                 if student and str(student['trial_at'] or '')[:10]==str(event.get('event_date') or '')[:10]:
                     sv.mark_trial(con,sid,event['came'],user);marked=True
+                if marked:
+                    con.execute("""UPDATE tasks SET status='cancelled',done_at=?,result='Результат ПУ подтверждён СЗ и тренером'
+                        WHERE student_id=? AND status='open' AND source='manual' AND due_at<=?
+                        AND (title LIKE 'После ПУ%' OR title LIKE '%пришёл ли%' OR title LIKE '%результат%ПУ%')""",
+                        (sv.now_iso(),sid,at[:10]+'T23:59'))
             if event.get('task_title') and event.get('task_due'):
                 tasks.add_task(con,'manual',sid,str(event['task_due'])[:16],auto_key='chat-day:'+source,
                                title=str(event['task_title'])[:300],note=str(event.get('task_note') or note)[:4000],source='erp')
             con.execute('INSERT INTO chat_day_transfer_events VALUES (?,?,?,?,?,?,?,?)',(source,sid,str(event.get('source_chat') or ''),at,str(event.get('event_kind') or 'note'),json.dumps(event,ensure_ascii=False),sv.now_iso(),user.get('name','')))
             tasks.ensure_client_task_coverage(con)
             con.execute('RELEASE chat_day_event')
-            result['applied'].append({'source_id':source,'student_id':sid,'name':matches[0]['name'],'trial_marked':marked,'added':note,'tasks':_current_tasks(con,sid)})
+            result['applied'].append({'source_id':source,'student_id':sid,'name':matches[0]['name'],'trial_marked':marked,'single_sale':single_sale,'added':note,'tasks':_current_tasks(con,sid)})
         except BaseException as error:
             con.execute('ROLLBACK TO chat_day_event');con.execute('RELEASE chat_day_event')
             result['errors'].append({'source_id':source,'name':event.get('student_name'),'error':str(error)})
