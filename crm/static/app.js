@@ -1462,9 +1462,12 @@ async function renderWorkdesk(page) {
       return cardDate === S.workdeskDate;
     }) })) };
   };
-  const newCardIds=new Set(visibleFreshLeads.map(card=>Number(card.id)));
-  const salesWithoutNewCards=d.board?{...d.board,columns:d.board.columns.map(column=>({...column,cards:column.cards.filter(card=>!newCardIds.has(Number(card.id)))}))}:d.board;
-  let salesForDate=filterBoardForDate(salesWithoutNewCards),renewForDate=filterBoardForDate(renew),paymentsForDate=filterBoardForDate(d.manual_payment_checks);
+  const freshLeadIds=new Set(freshLeads.map(card=>Number(card.id)));
+  const leadCards=(d.board?.columns||[]).find(column=>column.key==='lead')?.cards||[];
+  const otherLeadCards=leadCards.filter(card=>!freshLeadIds.has(Number(card.id)));
+  const leadsBoard={funnel:'sales',draggable:false,columns:[{key:'lead',title:'Новые лиды',cards:otherLeadCards}]};
+  const salesWithoutLeads=d.board?{...d.board,columns:d.board.columns.filter(column=>column.key!=='lead')}:d.board;
+  let leadsForDate=filterBoardForDate(leadsBoard),salesForDate=filterBoardForDate(salesWithoutLeads),renewForDate=filterBoardForDate(renew),paymentsForDate=filterBoardForDate(d.manual_payment_checks);
   const taskIdsInBoard=(board,cardsAreTasks=false)=>new Set((board?.columns||[]).flatMap(column=>column.cards||[]).map(card=>Number(cardsAreTasks?card.id:card.task_id)).filter(Boolean));
   const paymentTaskIds=taskIdsInBoard(paymentsForDate,true);
   const withoutTaskIds=(board,ids)=>board?{...board,columns:board.columns.map(column=>({...column,cards:column.cards.filter(card=>!ids.has(Number(card.task_id)))}))}:board;
@@ -1475,21 +1478,23 @@ async function renderWorkdesk(page) {
   renewForDate=withoutTaskIds(renewForDate,new Set([...paymentTaskIds,...newTaskIds]));
   const renewTaskIds=taskIdsInBoard(renewForDate);
   salesForDate=withoutTaskIds(salesForDate,new Set([...paymentTaskIds,...newTaskIds,...renewTaskIds]));
-  const specializedTaskIds=new Set([...taskIdsInBoard(newCardsBoard),...taskIdsInBoard(salesForDate),...taskIdsInBoard(renewForDate),...paymentTaskIds]);
+  leadsForDate=withoutTaskIds(leadsForDate,new Set([...paymentTaskIds,...newTaskIds,...renewTaskIds,...taskIdsInBoard(salesForDate)]));
+  const specializedTaskIds=new Set([...taskIdsInBoard(newCardsBoard),...taskIdsInBoard(leadsForDate),...taskIdsInBoard(salesForDate),...taskIdsInBoard(renewForDate),...paymentTaskIds]);
   const erpSection=(can("sales") || S.viewAs || S.user.is_offline_admin)
     ? await erpTasksSection(S.viewAs,taskLayout,[...specializedTaskIds]) : {html:"",count:0};
   const erpHtml=erpSection.html;
   const pipelineItems = [
-    { key:"new", icon:"✨", label:"Новые карточки", count:visibleFreshLeads.length, html:newCardsPanel },
-    { key:"sales", icon:"🛒", label:"Продажи", count:(salesForDate?.columns||[]).reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-sales">${boardHtml(salesForDate)}</div>` },
-    ...(renewForDate ? [{ key:"renew", icon:"🔁", label:"Продления", count:renewForDate.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-renew">${boardHtml(renewForDate)}</div>` }] : []),
-    ...((paymentsForDate?.columns?.[0]?.cards||[]).length ? [{ key:"manual-payments", icon:"🧾", label:"Оплаты Точки", count:paymentsForDate.columns[0].cards.length, danger:true, html:`<div id="dw-manual-payment-checks"><p class="pipeline-note">Нужно подтвердить поступление на расчётный счёт и чек в ОФД</p>${boardHtml(paymentsForDate)}</div>` }] : []),
-    ...(erpHtml ? [{ key:"tasks", icon:"✅", label:"Прочие задачи", count:erpSection.count, html:`<div id="dw-erptasks-hub">${erpHtml}</div>` }] : [])
+    { group:"Лиды", key:"new", icon:"✨", label:"Свежие новые карточки", count:visibleFreshLeads.length, html:newCardsPanel },
+    { group:"Лиды", key:"leads", icon:"👤", label:"Остальные новые лиды", count:(leadsForDate?.columns||[]).reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-leads">${boardHtml(leadsForDate)}</div>` },
+    { group:"Клиенты", key:"sales", icon:"🛒", label:"Продажи", count:(salesForDate?.columns||[]).reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-sales">${boardHtml(salesForDate)}</div>` },
+    ...(renewForDate ? [{ group:"Клиенты", key:"renew", icon:"🔁", label:"Продления", count:renewForDate.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-renew">${boardHtml(renewForDate)}</div>` }] : []),
+    ...((paymentsForDate?.columns?.[0]?.cards||[]).length ? [{ group:"Контроль", key:"manual-payments", icon:"🧾", label:"Оплаты Точки", count:paymentsForDate.columns[0].cards.length, danger:true, html:`<div id="dw-manual-payment-checks"><p class="pipeline-note">Нужно подтвердить поступление на расчётный счёт и чек в ОФД</p>${boardHtml(paymentsForDate)}</div>` }] : []),
+    ...(erpHtml ? [{ group:"Контроль", key:"tasks", icon:"✅", label:"Прочие задачи", count:erpSection.count, html:`<div id="dw-erptasks-hub">${erpHtml}</div>` }] : [])
   ];
   if (!pipelineItems.some(item=>item.key===S.deskPipeline)) S.deskPipeline = visibleFreshLeads.length ? "new" : "sales";
   const pipelineHub = `<section class="pipeline-hub" aria-label="Работа с клиентами">
     <div class="pipeline-hub-head"><div><h2>Работа с клиентами</h2><p>Все воронки в одном месте</p></div><div class="pipeline-date-filter" aria-label="Фильтр по дате"><button type="button" class="btn sm ${S.workdeskDate===S.meta.today?'primary':''}" data-pipeline-today>На сегодня</button><label><span>Дата</span><input type="date" value="${esc(S.workdeskDate)}" data-pipeline-date></label><span class="pipeline-hub-total">${pipelineItems.reduce((sum,item)=>sum+(item.count||0),0)} карточек</span></div></div>
-    <nav class="pipeline-tabs" aria-label="Выберите воронку">${pipelineItems.map(item=>`<button type="button" class="pipeline-tab ${item.key===S.deskPipeline?'active':''} ${item.danger?'danger':''}" data-pipeline-tab="${item.key}" aria-selected="${item.key===S.deskPipeline}"><span>${item.icon}</span><b>${esc(item.label)}</b>${item.count!==null?`<em>${item.count}</em>`:''}</button>`).join('')}</nav>
+    <nav class="pipeline-tabs" aria-label="Выберите воронку">${pipelineItems.map((item,index)=>`${!index||pipelineItems[index-1].group!==item.group?`<span class="pipeline-tab-group">${esc(item.group)}</span>`:''}<button type="button" class="pipeline-tab ${item.key===S.deskPipeline?'active':''} ${item.danger?'danger':''}" data-pipeline-tab="${item.key}" aria-selected="${item.key===S.deskPipeline}"><span>${item.icon}</span><b>${esc(item.label)}</b>${item.count!==null?`<em>${item.count}</em>`:''}</button>`).join('')}</nav>
     <div class="pipeline-panels">${pipelineItems.map(item=>`<section class="pipeline-panel" data-pipeline-panel="${item.key}" ${item.key===S.deskPipeline?'':'hidden'}><div class="pipeline-panel-title"><span>${item.icon}</span><h3>${esc(item.label)}</h3>${item.count!==null?`<span class="count">${item.count}</span>`:''}</div>${item.html}</section>`).join('')}</div>
   </section>`;
   const hot = `<section class="now ${u.length ? "" : "calm"}" id="dw-hot">
@@ -1510,7 +1515,7 @@ async function renderWorkdesk(page) {
   // Временно оставляем на администраторском рабочем столе только единый центр
   // клиентских воронок. Остальные готовые виджеты не удаляем: они сохранены в
   // коде и очереди разработки до отдельного решения по составу нового стола.
-  page.innerHTML = pipelineHub;
+  page.innerHTML = bar + pipelineHub;
   page.querySelectorAll("[data-rvclose]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/reviews/${b.dataset.rvclose}/close`, {}); render(); } catch (e) { fail(e); } }));
   const dateInput=page.querySelector("[data-pipeline-date]");
   if(dateInput)dateInput.onchange=()=>{if(!dateInput.value)return;S.workdeskDate=dateInput.value;S.etDay=dateInput.value===S.meta.today?'today':dateInput.value;render()};
@@ -1528,6 +1533,7 @@ async function renderWorkdesk(page) {
   page.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => { const el = document.getElementById(b.dataset.jump); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }));
   if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
   const newCardsBoardElement=page.querySelector("#dw-new-cards");if(newCardsBoardElement)wireBoard(newCardsBoardElement,"new",newCardsBoard);
+  const leadsBoardElement=page.querySelector("#dw-leads");if(leadsBoardElement)wireBoard(leadsBoardElement,"sales",leadsForDate);
   const salesBoard=page.querySelector("#dw-sales");if(salesBoard)wireBoard(salesBoard,"sales",salesForDate);
   const renewBoard=page.querySelector("#dw-renew");if(renewForDate&&renewBoard)wireBoard(renewBoard,"members",renewForDate);
   const manualPaymentBoard=page.querySelector("#dw-manual-payment-checks");if(manualPaymentBoard)wireBoard(manualPaymentBoard,"manual_payment_checks",d.manual_payment_checks);

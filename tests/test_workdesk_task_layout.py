@@ -59,8 +59,13 @@ def test_admin_funnels_share_one_readable_pipeline_hub():
     assert 'class="pipeline-hub"' in app
     assert 'data-pipeline-tab="${item.key}"' in app
     assert 'data-pipeline-panel="${item.key}"' in app
-    for label in ("Новые карточки", "Продажи", "Продления", "Оплаты Точки", "Прочие задачи"):
+    for label in ("Свежие новые карточки", "Остальные новые лиды", "Продажи", "Продления", "Оплаты Точки", "Прочие задачи"):
         assert label in app
+    assert 'group:"Лиды"' in app
+    assert 'class="pipeline-tab-group"' in app
+    assert "column.key!=='lead'" in app
+    assert 'id="dw-leads"' in app
+    assert 'page.innerHTML = bar + pipelineHub;' in app
     assert 'key:"skips"' not in app
     assert 'specializedTaskIds' in app
     assert 'excluded.has(Number(task.id))' in script
@@ -90,8 +95,8 @@ def test_admin_funnels_share_one_readable_pipeline_hub():
 def test_admin_workdesk_temporarily_renders_only_the_pipeline_hub():
     app = (ROOT / "crm/static/app.js").read_text(encoding="utf-8")
 
-    assert "page.innerHTML = pipelineHub;" in app
-    rendered_tail = app.split("page.innerHTML = pipelineHub;", 1)[1]
+    assert "page.innerHTML = bar + pipelineHub;" in app
+    rendered_tail = app.split("page.innerHTML = bar + pipelineHub;", 1)[1]
     assert 'class="desk-hello"' not in rendered_tail
     assert 'class="desk-side"' not in rendered_tail
 
@@ -104,8 +109,8 @@ def test_new_application_is_a_prominent_action_until_client_status_changes():
     assert "key:'new_application',title:'Новая заявка'" in app
     assert "processedNewCards" not in app
     assert 'wireBoard(newCardsBoardElement,"new",newCardsBoard)' in app
-    assert "salesWithoutNewCards" in app
-    assert "!newCardIds.has(Number(card.id))" in app
+    assert "salesWithoutLeads" in app
+    assert "!freshLeadIds.has(Number(card.id))" in app
     assert "x.needs_processing" in app
     assert ".fresh-leads-alert" not in styles
     assert ".fresh-lead-card" not in styles
