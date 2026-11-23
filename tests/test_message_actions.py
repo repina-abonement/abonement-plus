@@ -33,6 +33,15 @@ class MessageActionsTest(unittest.TestCase):
         self.assertEqual(call.call_args.args[0:2], (self.con, "editMessageText"))
         self.assertEqual(self.con.execute("SELECT text FROM messages WHERE id=?", (self.mid,)).fetchone()[0], "Новый текст")
 
+    def test_whatsapp_edit_uses_wazzup_before_local_update(self):
+        self.con.execute("UPDATE conversations SET channel='whatsapp' WHERE id=?", (self.cid,))
+        self.con.execute("UPDATE messages SET external_id='wz-message-id' WHERE id=?", (self.mid,))
+        with patch.object(comms, "wz_call", return_value={}) as call:
+            messageactions.edit(self.con, self.mid, "Исправленный текст", self.user)
+        self.assertEqual(call.call_args.args[0:3], (self.con, "PATCH", "message/wz-message-id"))
+        self.assertEqual(call.call_args.args[3], {"text": "Исправленный текст"})
+        self.assertEqual(self.con.execute("SELECT text FROM messages WHERE id=?", (self.mid,)).fetchone()[0], "Исправленный текст")
+
 
 if __name__ == "__main__":
     unittest.main()

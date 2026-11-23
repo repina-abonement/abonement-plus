@@ -1163,8 +1163,10 @@ def _wz_ack(con, conv, result):
     return result["messageId"]
 
 
-def _wz_send_raw(con, cid, conv: dict, text: str) -> str:
+def _wz_send_raw(con, cid, conv: dict, text: str, ref_message_id: str = "") -> str:
     body = _wz_destination(con, conv) | _wz_recipient(conv, con) | {"text": text, "crmMessageId": uuid.uuid4().hex}
+    if ref_message_id:
+        body["refMessageId"] = ref_message_id
     return _wz_ack(con, conv, wz_call(con, "POST", "message", body))
 
 
@@ -1245,7 +1247,7 @@ def send_sticker(con, cid: int, sticker: str, user: dict) -> dict:
     return {"id": mid, "demo": demo}
 
 
-def send(con, cid: int, text: str, user: dict, request_id: str = "") -> dict:
+def send(con, cid: int, text: str, user: dict, request_id: str = "", reply_message_id=None) -> dict:
     text = (text or "").strip()
     if not text:
         raise CommsError("Пустое сообщение")
@@ -1253,10 +1255,19 @@ def send(con, cid: int, text: str, user: dict, request_id: str = "") -> dict:
     if not conv:
         raise CommsError("Переписка не найдена")
     conv = dict(conv)
+    reply = None
+    if reply_message_id not in (None, ""):
+        try:
+            reply_message_id = int(reply_message_id)
+        except (TypeError, ValueError):
+            raise CommsError("Сообщение для ответа не найдено")
+        reply = con.execute("SELECT * FROM messages WHERE id=? AND conversation_id=?", (reply_message_id, cid)).fetchone()
+        if not reply or not reply["external_id"]:
+            raise CommsError("Сообщение для ответа не найдено в этом чате")
     request_id=(request_id or "").strip()
     if request_id and not re.fullmatch(r"[A-Za-z0-9_-]{16,80}",request_id):
         raise CommsError("Некорректный идентификатор отправки. Обновите страницу и повторите")
-    text_hash=hashlib.sha256((str(cid)+"\0"+text).encode()).hexdigest()
+    text_hash=hashlib.sha256((str(cid)+"\0"+text+"\0"+str(reply_message_id or "")).encode()).hexdigest()
     if request_id:
         prior=con.execute("SELECT * FROM message_send_requests WHERE request_id=?",(request_id,)).fetchone()
         if prior:
@@ -1276,13 +1287,20 @@ def send(con, cid: int, text: str, user: dict, request_id: str = "") -> dict:
     if conv["channel"] == "tg_archive":
         raise CommsError("Это архив переписки до CRM: ответьте в Telegram, MAX или WhatsApp")
     if conv["external_id"].startswith("demo-"):
-        mid = add_message(con, cid, "out", text, user_name=name, status="demo", external_id="demo" + uuid.uuid4().hex)
+        mid = add_message(con, cid, "out", text, user_name=name, status="demo", external_id="demo" + uuid.uuid4().hex,
+                          reply_external_id=reply["external_id"] if reply else None,
+                          reply_snapshot=_reply_snapshot(dict(reply)) if reply else None)
         return {"id": mid, "demo": True}
     try:
         if conv["channel"] == "telegram":
             meta = json.loads(conv["meta"] or "{}")
             biz = meta.get("biz")
             payload = {"chat_id": int(conv["external_id"]), "text": text}
+            if reply:
+                raw_reply = str(reply["external_id"])
+                raw_reply = raw_reply[1:] if raw_reply[:1] in ("m", "b") else raw_reply
+                if raw_reply.isdigit():
+                    payload["reply_parameters"] = {"message_id": int(raw_reply)}
             if biz:
                 payload["business_connection_id"] = biz
             res = tg_call(con, "sendMessage", payload)
@@ -1291,7 +1309,7 @@ def send(con, cid: int, text: str, user: dict, request_id: str = "") -> dict:
             js = max_call(con, "POST", "messages", query={"chat_id": conv["external_id"]}, data={"text": text})
             ext = (((js or {}).get("message") or {}).get("body") or {}).get("mid") or ("x" + uuid.uuid4().hex)
         elif conv["channel"] == "whatsapp" or conv["channel"].startswith("wazzup_"):
-            ext = _wz_send_raw(con, cid, conv, text)
+            ext = _wz_send_raw(con, cid, conv, text, str(reply["external_id"]) if reply else "")
         else:
             raise CommsError("Этот канал не поддерживается")
     except CommsError as e:
@@ -1299,7 +1317,9 @@ def send(con, cid: int, text: str, user: dict, request_id: str = "") -> dict:
         if request_id:
             con.execute("UPDATE message_send_requests SET state='error',message_id=?,error=? WHERE request_id=?",(failed,str(e),request_id))
         raise
-    mid = add_message(con, cid, "out", text, user_name=name, external_id=ext, status="sent" if ext else "")
+    mid = add_message(con, cid, "out", text, user_name=name, external_id=ext, status="sent" if ext else "",
+                      reply_external_id=reply["external_id"] if reply else None,
+                      reply_snapshot=_reply_snapshot(dict(reply)) if reply else None)
     if request_id:
         con.execute("UPDATE message_send_requests SET state='sent',message_id=? WHERE request_id=?",(mid,request_id))
     return {"id": mid}

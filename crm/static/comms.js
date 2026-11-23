@@ -149,6 +149,22 @@ document.addEventListener('click',async event=>{
   const text=prompt('Измените сообщение',current);if(text===null||text.trim()===current.trim())return;
   button.disabled=true;try{await api('PATCH',`/api/messages/${button.dataset.editMessage}`,{text});toast('Сообщение изменено');await reloadMessageContext(button)}catch(error){button.disabled=false;fail(error)}
 });
+function setComposerReply(button){
+  const message=button.closest('.msg'),box=button.closest('#comms-box,[data-chat]');if(!message||!box)return;
+  const input=box.querySelector('#cm-text,#chat-text'),composer=input?.closest('.composer');if(!input||!composer)return;
+  const conversationId=message.dataset.conversationId,select=composer.querySelector('#cm-to,#chat-to');
+  if(select&&conversationId){
+    const value=select.id==='cm-to'?'c'+conversationId:conversationId;
+    if([...select.options].some(option=>option.value===value)){select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}))}
+  }
+  input._replyMessageId=message.dataset.messageId;
+  let preview=composer.querySelector('.composer-reply');if(!preview){preview=document.createElement('div');preview.className='composer-reply';composer.insertBefore(preview,composer.querySelector('.row'))}
+  const text=message.querySelector('.chat-message-copyable')?.textContent?.trim()||'Вложение';
+  preview.innerHTML=`<div><span>Ответ на сообщение</span><strong>${esc(text.slice(0,160))}</strong></div><button type="button" aria-label="Отменить ответ">×</button>`;
+  preview.querySelector('button').onclick=()=>{input._replyMessageId='';preview.remove()};
+  button.closest('.msg-actions').open=false;input.focus();
+}
+document.addEventListener('click',event=>{const button=event.target.closest('[data-reply-message]');if(button&&!button.disabled){event.preventDefault();setComposerReply(button)}});
 async function chooseForwardTarget(){
   const query=prompt('Кому переслать? Введите имя или телефон');if(!query?.trim())return 0;
   const result=await api('GET',`/api/inbox?filter=all&q=${encodeURIComponent(query.trim())}`),rows=result.conversations||[];
@@ -230,12 +246,13 @@ function msgHtml(m) {
   const uncertain=mayDelete&&m.deletion_status==='uncertain';
   const action=(label,attrs,enabled=true,reason='',extraClass='')=>`<button type="button" class="msg-action ${extraClass}" ${attrs} ${enabled?'':'disabled'} title="${esc(reason||label)}">${label}</button>`;
   const copyAction=action('Копировать','data-copy-message',copyable,copyable?'':'У сообщения нет текста','msg-copy');
-  const editAction=action('Редактировать',`data-edit-message="${m.id}"`,!!m.can_edit,m.edit_reason||'Редактирование недоступно');
+  const replyAction=action('Ответить',`data-reply-message="${m.id}"`,!!m.conversation_id,m.conversation_id?'':'Чат сообщения не найден');
+  const editAction=m.can_edit?action('Редактировать',`data-edit-message="${m.id}"`):'';
   const forwardAction=action('Переслать',`data-forward-message="${m.id}"`,copyable,copyable?'':'Пересылка вложений пока недоступна');
   const pinAction=action(m.pinned?'Открепить':'Закрепить в чате',`data-pin-message="${m.id}" data-pinned="${m.pinned?'1':'0'}"`);
   const deleteAction=action('Удалить',`data-delete-message="${m.id}" data-local-delete="${m.local_delete?'1':'0'}"`,mayDelete&&!uncertain&&!!m.can_delete,m.delete_reason||(!mayDelete?'Удаление доступно только администратору':'Удаление недоступно'),'msg-delete');
   const reactionButtons=['👍','❤️','😂','😮','😢','🙏'].map(emoji=>`<button type="button" data-react-message="${m.id}" data-emoji="${emoji}" title="Поставить ${emoji}">${emoji}</button>`).join('');
-  const actions=`<details class="msg-actions"><summary aria-label="Действия с сообщением" title="Действия с сообщением">⋯</summary><div class="msg-actions-menu">${editAction}${deleteAction}${forwardAction}${pinAction}<div class="msg-reaction-picker"><span>Реакция</span>${reactionButtons}</div>${copyAction}</div></details>`;
+  const actions=`<details class="msg-actions"><summary aria-label="Действия с сообщением" title="Действия с сообщением">⋯</summary><div class="msg-actions-menu">${replyAction}${editAction}${deleteAction}${forwardAction}${pinAction}<div class="msg-reaction-picker"><span>Реакция</span>${reactionButtons}</div>${copyAction}</div></details>`;
   const deletionHint=uncertain?'<div class="small muted">Удаление не подтверждено — проверьте сообщение в мессенджере</div>':'';
   const media = m.media ? (["image", "sticker"].includes(m.kind)
     ? `<a href="/api/messages/${m.id}/media" data-chat-image aria-haspopup="dialog" target="_blank" rel="noopener"><img class="msg-img${m.kind === "sticker" ? " msg-sticker" : ""}" loading="lazy" src="/api/messages/${m.id}/media" alt="${m.kind === "sticker" ? "Стикер" : "Фото"}">${m.kind === "sticker" ? `<span hidden>Стикер: открыть файл</span>` : ""}</a>`
@@ -247,7 +264,7 @@ function msgHtml(m) {
   const reply=m.reply_context,replyLabel=reply?.text||({image:'Фото',file:'Файл',audio:'Аудио',video:'Видео',sticker:'Стикер'}[reply?.kind])||(reply?.has_media?'Вложение':'Исходное сообщение');
   const replyBlock=reply?`<div class="msg-reply-context" ${reply.message_id?`data-reply-jump="${reply.message_id}" role="button" tabindex="0"`:''}><span>Ответ на сообщение</span><strong>${linkedText(replyLabel)}</strong></div>`:'';
   const reactions=(m.reactions||[]).map(r=>`<button type="button" class="msg-reaction ${r.mine?'mine':''}" data-react-message="${m.id}" data-emoji="${r.mine?'':r.emoji}" title="${r.mine?'Убрать реакцию':'Поставить реакцию'}">${r.emoji} ${r.count}</button>`).join('');
-  return `<div class="msg ${m.direction}${m.status === "error" ? " err" : ""}${m.pinned?' msg-pinned':''}" data-message-id="${m.id}">
+  return `<div class="msg ${m.direction}${m.status === "error" ? " err" : ""}${m.pinned?' msg-pinned':''}" data-message-id="${m.id}" data-conversation-id="${m.conversation_id||''}">
     ${actions}${m.pinned?'<div class="msg-pin-label">📌 Закреплено в чате</div>':''}${deletionHint}${replyBlock}${media}${m.text ? `<div class="msg-text${copyable?' chat-message-copyable':''}">${esc(m.text)}</div>` : ""}${label ? `<div class="msg-text muted">${label}</div>` : ""}${reactions?`<div class="msg-reactions">${reactions}</div>`:''}
     <div class="msg-meta">${[esc(who), esc(m.channel_label||""), dtWhen(m.ts), m.direction==='out'?({sent:"Отправлено",delivered:"Доставлено",read:"Прочитано",error:"Ошибка отправки",demo:"тест, не отправлено"}[m.status]||""):""].filter(Boolean).join(" · ")}</div>
     ${m.status==='error'&&m.error?`<details class="msg-error-details"><summary>Подробнее об ошибке</summary><div>${esc(m.error)}</div></details>`:''}
@@ -533,7 +550,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
     const sentValue=$('#cm-text').value;
     const requestId=messageRequestId($('#cm-text'),to,sentValue);
     try {
-      if (to[0] === "c") await api("POST", `/api/conversations/${to.slice(1)}/send`, { text,request_id:requestId });
+      if (to[0] === "c") await api("POST", `/api/conversations/${to.slice(1)}/send`, { text,request_id:requestId,reply_message_id:$('#cm-text')._replyMessageId||null });
       else {
         const created = await api("POST", `/api/families/${familyId}/whatsapp`, {parent_id:+to.slice(1),text,request_id:requestId,channel:to[0] === "m" ? "max" : to[0] === "t" ? "telegram" : "whatsapp"});
         if (created.conversation_id) S.familySendTargets[targetKey] = "c" + created.conversation_id;
@@ -794,7 +811,7 @@ async function openChat(cid, keepScroll = false) {
     const to = $("#chat-to") ? +$("#chat-to").value : cid;
     const requestId=messageRequestId(input,String(to),sentValue);
     try {
-      await api("POST", `/api/conversations/${to}/send`, { text,request_id:requestId });
+      await api("POST", `/api/conversations/${to}/send`, { text,request_id:requestId,reply_message_id:input._replyMessageId||null });
       clearMessageRequest(input);
       S.chatDrafts=S.chatDrafts||{};
       if(input.isConnected){clearSentComposerDraft(input,sentValue);S.chatDrafts[cid]={text:input.value,attachment:null};if(c.open_q&&confirm('В этом диалоге открытый вопрос — он решён?'))await api('POST',`/api/conversations/${cid}/question/close`,{});openChat(cid)}

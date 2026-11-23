@@ -3194,7 +3194,7 @@ def conv_send(con, h, user, body, q, cid):
     try:
         if body.get("sticker"):
             return comms.send_sticker(con, int(cid), body["sticker"], user)
-        return comms.send(con, int(cid), body.get("text") or "", user, body.get("request_id") or "")
+        return comms.send(con, int(cid), body.get("text") or "", user, body.get("request_id") or "", body.get("reply_message_id"))
     except comms.CommsError as error:
         # The send functions record a failed attempt. Keep it, while preserving the
         # non-2xx response so the UI retains the draft and never claims success.

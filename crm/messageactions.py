@@ -22,7 +22,8 @@ def public(con, message, user=None):
         """SELECT emoji,COUNT(*) count,MAX(CASE WHEN user_id=? THEN 1 ELSE 0 END) mine
            FROM message_reactions WHERE message_id=? GROUP BY emoji ORDER BY MIN(created_at)""", (uid, mid))]
     editable = message.get("direction") == "out" and message.get("kind") == "text" and bool(message.get("text"))
-    message["can_edit"] = bool(editable and (str(message.get("external_id") or "").startswith("demo") or message.get("channel") == "telegram"))
+    supported = message.get("channel") in ("telegram", "whatsapp", "wazzup_telegram", "wazzup_max")
+    message["can_edit"] = bool(editable and (str(message.get("external_id") or "").startswith("demo") or supported))
     message["edit_reason"] = "" if message["can_edit"] else ("Можно редактировать только отправленный текст" if not editable else "Этот мессенджер не разрешает CRM редактировать сообщение")
     return message
 
@@ -79,15 +80,18 @@ def edit(con, mid, text, user):
     external = str(message.get("external_id") or "")
     if not external.startswith("demo"):
         conv = con.execute("SELECT * FROM conversations WHERE id=?", (message["conversation_id"],)).fetchone()
-        raw_id = external[1:] if external[:1] in ("m", "b") else external
-        if not raw_id.isdigit():
-            raise comms.CommsError("Не найден идентификатор сообщения Telegram")
-        payload = {"chat_id": int(conv["external_id"]), "message_id": int(raw_id), "text": text}
-        import json
-        meta = json.loads(conv["meta"] or "{}")
-        if meta.get("biz"):
-            payload["business_connection_id"] = meta["biz"]
-        comms.tg_call(con, "editMessageText", payload)
+        if message["channel"] == "telegram":
+            raw_id = external[1:] if external[:1] in ("m", "b") else external
+            if not raw_id.isdigit():
+                raise comms.CommsError("Не найден идентификатор сообщения Telegram")
+            payload = {"chat_id": int(conv["external_id"]), "message_id": int(raw_id), "text": text}
+            import json
+            meta = json.loads(conv["meta"] or "{}")
+            if meta.get("biz"):
+                payload["business_connection_id"] = meta["biz"]
+            comms.tg_call(con, "editMessageText", payload)
+        else:
+            comms.wz_call(con, "PATCH", "message/" + external, {"text": text})
     con.execute("UPDATE messages SET text=? WHERE id=?", (text, mid))
     latest = con.execute("SELECT id FROM messages WHERE conversation_id=? ORDER BY ts DESC,id DESC LIMIT 1", (message["conversation_id"],)).fetchone()
     if latest and latest[0] == mid:

@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from crm import comms, db
 
@@ -46,6 +47,27 @@ class MessageReplyContextTest(unittest.TestCase):
         result = comms.conversation(self.con, cid, False)["messages"][-1]["reply_context"]
         self.assertEqual(result["external_id"], "m70")
         self.assertIn("Исходная ссылка", result["text"])
+
+    def test_outgoing_wazzup_reply_cites_selected_message(self):
+        cid = comms.upsert_conversation(self.con, "whatsapp", "79990000000",
+                                        meta={"channelId": "wa-channel", "chatType": "whatsapp"})
+        original = comms.add_message(self.con, cid, "in", "Исходный вопрос", external_id="wz-original")
+        user = dict(self.con.execute("SELECT * FROM users WHERE role='admin' LIMIT 1").fetchone())
+        with patch.object(comms, "wz_call", return_value={"messageId": "wz-answer"}) as call:
+            result = comms.send(self.con, cid, "Ответ", user, reply_message_id=original)
+        body = call.call_args.args[3]
+        self.assertEqual(body["refMessageId"], "wz-original")
+        shown = comms.conversation(self.con, cid, False, user)["messages"][-1]
+        self.assertEqual(shown["id"], result["id"])
+        self.assertEqual(shown["reply_context"]["message_id"], original)
+
+    def test_reply_cannot_reference_message_from_another_chat(self):
+        first = comms.upsert_conversation(self.con, "whatsapp", "79990000001")
+        second = comms.upsert_conversation(self.con, "whatsapp", "79990000002")
+        foreign = comms.add_message(self.con, first, "in", "Чужое", external_id="foreign")
+        user = dict(self.con.execute("SELECT * FROM users WHERE role='admin' LIMIT 1").fetchone())
+        with self.assertRaisesRegex(comms.CommsError, "в этом чате"):
+            comms.send(self.con, second, "Ответ", user, reply_message_id=foreign)
 
 
 if __name__ == "__main__":
