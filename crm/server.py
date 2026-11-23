@@ -1912,8 +1912,10 @@ def planner_add(con, h, user, body, q):
 @route("GET", "/api/planner/week", role="planner")
 def planner_week(con, h, user, body, q):
     from datetime import date as _d
+    requested_days = int(q.get("days") or 7)
     return px(planner.week, con, user, q.get("start") or _d.today().isoformat(),
-              int(q["user"]) if q.get("user") else None, rolling=q.get("rolling") == "1",days=1 if q.get("days")=="1" else 7)
+              int(q["user"]) if q.get("user") else None,
+              rolling=q.get("rolling") == "1", days=requested_days if requested_days in (1, 4, 7) else 7)
 
 
 @route("GET", "/api/planner/tasks/{tid}", role="planner")

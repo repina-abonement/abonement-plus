@@ -161,9 +161,8 @@ function openPlannerEventForm(host,day,refresh,event={}){
 async function renderWeek(box) {
   const C = S.planner;
   if (!C.start) C.start = S.meta.today;
-  const w = await api("GET", `/api/planner/week?rolling=1&days=${C.layout==='day'?1:7}&start=${C.start}${C.user ? "&user=" + C.user : ""}`);
-  const dayView=C.layout==='day';
-  const end = addDays(w.start, dayView?0:6), today = S.meta.today;
+  const w = await api("GET", `/api/planner/week?days=4&start=${C.start}${C.user ? "&user=" + C.user : ""}`);
+  const end = addDays(w.start, 3), today = S.meta.today;
   C.readOnly=w.can_edit===false;C.user=w.user_id;
   const addButton=$('#pl-add');if(addButton)addButton.disabled=w.can_add===undefined?C.readOnly:!w.can_add;
   const visible = (t) => (C.status === "all" || t.status === C.status) && (!w.shifts_enabled || !C.shift || C.shift==='all' || !t.shift || t.shift==='common' || t.shift===C.shift);
@@ -183,11 +182,11 @@ async function renderWeek(box) {
     if(!w.shifts_enabled || ![1,3].includes(new Date(day+'T12:00:00').getDay()))return plainGroups(items);
     return ['morning','evening','common'].filter(shift=>!C.shift||C.shift==='all'||shift==='common'||shift===C.shift).map(shift=>`<section class="planner-shift planner-shift-${shift}" data-drop-shift="${shift}"><div class="planner-shift-heading"><b>${PLAN_SHIFTS[shift]}</b>${w.can_add?`<button type="button" class="btn sm" data-pq="${day}" data-pqshift="${shift}" aria-label="Добавить: ${PLAN_SHIFTS[shift]}">＋</button>`:''}</div>${plainGroups(items.filter(t=>(t.shift||'common')===shift))}</section>`).join('');
   };
-  box.innerHTML = `<div class="planner-period-switch"><button type="button" class="btn sm ${dayView?'primary':''}" data-period="day">День</button><button type="button" class="btn sm ${dayView?'':'primary'}" data-period="week">Неделя</button></div><div class="week-nav">
-      <button class="btn sm" data-wk="${dayView?-1:-7}">‹</button>
-      <b>${dShort(w.start)}${dayView?'':' – '+dShort(end)}</b>
-      <button class="btn sm" data-wk="${dayView?1:7}">›</button>
-      <button class="btn sm" data-wk="0">${dayView?'Сегодня':'Эта неделя'}</button>
+  box.innerHTML = `<div class="week-nav">
+      <button class="btn sm" data-wk="-7">‹</button>
+      <b>${dShort(w.start)} – ${dShort(end)}</b>
+      <button class="btn sm" data-wk="7">›</button>
+      <button class="btn sm" data-wk="0">Эта неделя</button>
       <label>С даты <input type="date" id="wk-start" value="${w.start}"></label>
       <label>Статус <select id="wk-status"><option value="all">Все задачи</option><option value="open">Открытые</option><option value="done">Выполненные</option></select></label>
       ${w.can_manage ? `<select id="wk-user">${w.staff.map((u) => `<option value="${u.id}" ${u.id === w.user_id ? "selected" : ""}>${esc(u.name)}${u.id === S.user.id ? " (я)" : ""}</option>`).join("")}</select>` : ""}
@@ -195,7 +194,7 @@ async function renderWeek(box) {
     ${w.shifts_enabled?`<label class="planner-shift-filter">Показать <select id="wk-shift"><option value="all">Все смены</option><option value="morning">Утро и общие задачи</option><option value="evening">Основная и общие задачи</option></select></label>`:''}
     ${overdue.length ? `<section class="col overdue-col"><div class="col-head"><h3>Просрочено: перетащите на нужный день</h3><span class="count">${overdue.length}</span></div>
       <div class="col-body ov-body">${overdue.map(pcard).join("")}</div></section>` : ""}
-    <div class="board week-board ${dayView?'planner-single-day':''}">${days.map((d) => `<section class="col ${d.date === today ? "is-today" : ""} ${d.date < today ? "past" : ""}" data-day="${d.date}">
+    <div class="board week-board">${days.map((d) => `<section class="col ${d.date === today ? "is-today" : ""} ${d.date < today ? "past" : ""}" data-day="${d.date}">
       <div class="col-head"><h3>${PL_DAY.format(new Date(d.date + "T00:00"))}</h3><span class="count">${d.tasks.length+(d.events||[]).length}</span></div>
       ${(d.events||[]).length?`<section class="planner-events-section" aria-label="Мероприятия"><div class="planner-section-heading"><b>Мероприятия</b><span>${(d.events||[]).length}</span></div>
       <div class="planner-events">${(d.events||[]).map(event=>`<button type="button" class="planner-event" data-event-edit="${event.id}"><b>🎉 ${esc(event.title)}</b><span>${event.start_time?esc(event.start_time+'–'+event.end_time):'Время не указано'}${event.branch_name?' · '+esc(event.branch_name):''}</span></button>`).join('')}</div>
@@ -203,7 +202,6 @@ async function renderWeek(box) {
       <section class="planner-tasks-section" aria-label="Задачи"><div class="planner-section-heading"><b>Задачи</b><span>${d.tasks.length}</span></div><button type="button" class="btn sm pquick" data-pq="${d.date}" ${(w.can_add===undefined?C.readOnly:!w.can_add)?'disabled':''}>+ Добавить задачу</button><div class="col-body">${groups(d.tasks,d.date)}</div></section>
     </section>`).join("")}</div>
     <input type="date" id="pmove-date" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px">`;
-  box.querySelectorAll('[data-period]').forEach(button=>button.onclick=()=>{C.layout=button.dataset.period;C.start=S.meta.today;renderWeek(box)});
   box.querySelectorAll("[data-wk]").forEach((b) => (b.onclick = () => { C.start = +b.dataset.wk ? addDays(w.start, +b.dataset.wk) : S.meta.today; renderWeek(box); }));
   if ($("#wk-user")) $("#wk-user").onchange = (e) => { C.user = +e.target.value; renderWeek(box); };
   box.querySelector("#wk-start").onchange = (e) => {

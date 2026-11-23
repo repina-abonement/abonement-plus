@@ -306,7 +306,7 @@ def week(con, user: dict, start: str, who: int | None = None, *, rolling: bool =
         who=None
     uid = who or (offlineplanner.pool_id(con) if offlineplanner.member(con,user) else user['id'])
     today = date.today()
-    day_count=1 if days==1 else 7
+    day_count=days if days in (1,4,7) else 7
     for i in range(day_count):  # повторы на эту неделю (не дальше двух месяцев вперёд)
         d = d0 + timedelta(days=i)
         if today <= d <= today + timedelta(days=62):
