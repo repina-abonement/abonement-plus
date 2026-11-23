@@ -51,8 +51,13 @@ def calculate(con, student, on: date | None = None, *, monthly=None) -> str:
     sid = student["id"]
     months = confirmed_monthly_months(con, sid) if monthly is None else monthly
     if months:
+        previous = logic.shift_month(cur, -1)
         if cur in months:
-            return "Постоянный посетитель"
+            if previous in months:
+                return "Постоянный посетитель"
+            if any(month < cur for month in months):
+                return "Вернувшийся"
+            return "Новый оплативший посетитель"
         if max(months) > cur:
             return "Куплен на будущий период"
         return "Не оплачен текущий месяц"
