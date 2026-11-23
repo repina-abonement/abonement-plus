@@ -88,6 +88,12 @@ const reviewed = context.chatDayPayload([{name:'Служба заботы',messa
 for(const expected of [['Егоров Артур','2023-10-17','+79142001995'],['Мастердеев Денис','2022-03-04','+79859523765']]){const event=reviewed.events.find(x=>x.student_name===expected[0]);if(!event||!event.create_if_missing||event.birth!==expected[1]||event.phone!==expected[2])throw new Error('Reviewed identity missing: '+expected[0])}
 console.log('PASS reviewed clients receive identity from earlier care messages');
 
+const sergievsky = context.chatDayPayload([{name:'Служба заботы',messages:[
+  {id:22884,date:'2026-11-22T17:16:40',text:'Сергиевский Женя\nОтработка 24.11 в 17:45\nПришлите напоминалку пожалуйста'},
+]},{name:'ТРЕНЕРЫ',messages:[]}], '2026-11-22');
+if(!sergievsky.events.some(event=>event.erp_id==='182330'))throw new Error('Sergievsky ERP identity missing');
+console.log('PASS Sergievsky short chat name links through verified ERP ID');
+
 const surnameOnly = context.chatDayPayload([{name:'Служба заботы',messages:[
   {id:30001,date:'2026-11-20T10:00:00',text:'Иванов Пётр 01.02.2024\nМама Анна +79001112233'},
   {id:30002,date:'2026-11-22T19:00:00',text:'Отчет 22.11\n• Иванов 16:45 решили подождать до весны'},

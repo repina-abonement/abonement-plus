@@ -166,6 +166,16 @@ def test_create_capable_result_runs_before_other_facts_of_same_client():
     assert con.execute("SELECT COUNT(*) FROM students WHERE name='Тестов Тимофей'").fetchone()[0]==1
 
 
+def test_chat_transfer_prefers_verified_erp_id_over_short_chat_name():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'erp-id-match.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    sid=services.create_student(con,{'name':'Евгений Сергиевский','birth':'2022-01-01','parent_name':'Родитель','phone':'+7 900 222-11-00'},user)
+    con.execute("UPDATE students SET erp_id='182330' WHERE id=?",(sid,))
+    event={'source_id':'sz:22884','source_chat':'Служба заботы','source_at':'2026-11-22T17:16:40','student_name':'Сергиевский Женя','erp_id':'182330','event_kind':'makeup_booking','event_date':'2026-11-24','note':'Отработка 24.11 в 17:45','task_title':'Напомнить об отработке 24.11 в 17:45','task_due':'2026-11-24T09:00'}
+    result=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(result['applied'])==1 and not result['unmatched'] and result['applied'][0]['student_id']==sid
+
+
 def test_confirmed_paid_sale_does_not_leave_manual_renewal_duplicate():
     con=db.connect(str(Path(tempfile.mkdtemp())/'sale.sqlite3'));db.init_db(con)
     user={'id':1,'role':'admin','name':'Руководитель'}

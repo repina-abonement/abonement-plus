@@ -48,6 +48,10 @@ def _words(value):
 
 
 def _match(con,event):
+    erp_id=str(event.get('erp_id') or '').strip()
+    if erp_id:
+        row=con.execute('SELECT id,name,erp_id,family_id FROM students WHERE archived=0 AND erp_id=?',(erp_id,)).fetchone()
+        if row:return [dict(row)]
     phone=comms.normalize_phone(str(event.get('phone') or ''))
     name=_words(event.get('student_name'))
     candidates=[]
