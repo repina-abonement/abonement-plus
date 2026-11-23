@@ -1227,6 +1227,30 @@ function erpPriorityHistorySetup(box) {
   check.onclick = () => run(false); apply.onclick = () => run(true);
 }
 
+function erpPriorityAttendanceSetup(box) {
+  const after = box.querySelector("[data-erp-priority-history]") || box.querySelector("[data-erp-priority]");
+  if (!after || box.querySelector("[data-erp-priority-attendance]")) return;
+  const section = document.createElement("section");
+  section.className = "erp-step"; section.dataset.erpPriorityAttendance = "1";
+  section.innerHTML = `<div class="erp-step-title"><span class="erp-step-number">4</span><div><h3>Проверить посещения и задачи</h3>
+    <p>Показывает фактические отметки за 1–22 ноября и задачу на сверку недостающих занятий. Ничего не изменяет</p></div></div>
+    <button class="btn primary" id="erp-priority-attendance-check">Проверить 9 карточек</button>
+    <div id="erp-priority-attendance-out" aria-live="polite"></div>`;
+  after.after(section);
+  const button = section.querySelector("#erp-priority-attendance-check"), out = section.querySelector("#erp-priority-attendance-out");
+  button.onclick = async () => {
+    button.disabled = true; out.textContent = "Проверяю рабочие карточки…";
+    try {
+      const report = await api("GET", "/api/erp/priority-attendance/report"), s = report.summary;
+      out.innerHTML = `<div class="note" style="margin-top:12px"><b>Результат проверки</b>
+        <div>Карточки: <b>${s.cards} из 9</b> · отметки: <b>${s.marks}</b> · открытые задачи на сверку: <b>${s.open_tasks}</b></div>
+        ${s.missing_tasks ? `<div class="danger-text">Нет задачи на сверку: ${s.missing_tasks}</div>` : ""}
+        <div style="margin-top:8px">${report.clients.map(c => `<div><b>${esc(c.name)}</b> — отметок: ${c.marks}; ${c.task ? `задача: ${esc(c.task.status === "open" ? "открыта" : c.task.status)} (${esc(c.task.due_at.slice(0,10))})` : "задачи нет"}</div>`).join("")}</div></div>`;
+    } catch (error) { out.textContent = error.message; }
+    finally { button.disabled = false; }
+  };
+}
+
 /* Настройки → Перенос из ERP: файлы, колонки, группы, пробный прогон, перенос, сверка, отмена */
 async function renderErp(box) {
   const d = await api("GET", "/api/erp");
@@ -1269,6 +1293,7 @@ async function renderErp(box) {
   try { erpPeopleSetup(box, d); } catch (error) { fail(error); }
   try { erpPriorityPeopleSetup(box); } catch (error) { fail(error); }
   try { erpPriorityHistorySetup(box); } catch (error) { fail(error); }
+  try { erpPriorityAttendanceSetup(box); } catch (error) { fail(error); }
   try { erpTaskTransferSetup(box,d); } catch (error) { fail(error); }
   try { erpFullSetup(box, d); } catch (error) { fail(error); }
   if (done) {
@@ -1366,13 +1391,13 @@ async function renderErp(box) {
 
 function erpOrganizeTools(box) {
   if (box.querySelector('[data-erp-advanced]')) return;
-  const head=box.querySelector('.erp-page-head'),primary=box.querySelector('#erp-history-transfer'),priority=box.querySelector('[data-erp-priority]'),priorityHistory=box.querySelector('[data-erp-priority-history]');
+  const head=box.querySelector('.erp-page-head'),primary=box.querySelector('#erp-history-transfer'),priority=box.querySelector('[data-erp-priority]'),priorityHistory=box.querySelector('[data-erp-priority-history]'),priorityAttendance=box.querySelector('[data-erp-priority-attendance]');
   if(!head||!primary)return;
   const advanced=document.createElement('details');advanced.className='erp-advanced';advanced.dataset.erpAdvanced='1';
   advanced.innerHTML='<summary><span><b>Другие инструменты переноса</b><small>Карточки, задачи, сверки, восстановление и технические операции</small></span><span aria-hidden="true">⌄</span></summary><div data-erp-advanced-body></div>';
   const body=advanced.querySelector('[data-erp-advanced-body]');
-  [...box.children].filter(node=>node!==head&&node!==primary&&node!==priority&&node!==priorityHistory).forEach(node=>body.append(node));
-  (priorityHistory||priority||primary).after(advanced);
+  [...box.children].filter(node=>node!==head&&node!==primary&&node!==priority&&node!==priorityHistory&&node!==priorityAttendance).forEach(node=>body.append(node));
+  (priorityAttendance||priorityHistory||priority||primary).after(advanced);
 }
 function erpUploadHtml(u, kinds) {
   return `<div class="erp-up" data-up="${u.id}"><div class="row" style="align-items:center;gap:8px"><b style="flex:1">${esc(u.filename)} <span class="muted small">· ${u.count} строк</span></b>

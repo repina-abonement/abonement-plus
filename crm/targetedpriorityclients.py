@@ -203,3 +203,47 @@ def apply(con):
 def report(con):
     row = con.execute("SELECT value FROM settings WHERE key=?", (KEY,)).fetchone()
     return json.loads(row[0]) if row else {"state": "pending"}
+
+
+def attendance_report(con):
+    """Read-only working-state check for the nine priority client cards."""
+    rows = []
+    for key, name in CLIENTS.items():
+        matches = con.execute(
+            "SELECT id FROM students WHERE archived=0 AND trim(name) IN (?,?) ORDER BY id",
+            (name, " ".join(reversed(name.split()))),
+        ).fetchall()
+        item = {"key": key, "name": name, "matches": len(matches), "marks": 0,
+                "mark_dates": [], "task": None}
+        if len(matches) != 1:
+            rows.append(item)
+            continue
+        sid = matches[0]["id"]
+        marks = set()
+        for row in con.execute(
+                "SELECT date,status,group_id FROM attendance WHERE student_id=? AND date BETWEEN '2026-11-01' AND '2026-11-22'",
+                (sid,)):
+            marks.add((row["date"], "", f"native:{row['group_id']}:{row['status']}"))
+        for table in ("erp_history_visits", "erp_history_unassigned_visits"):
+            for row in con.execute(
+                    f"SELECT visit_date,visit_time,status FROM {table} WHERE student_id=? AND visit_date BETWEEN '2026-11-01' AND '2026-11-22'",
+                    (sid,)):
+                marks.add((row["visit_date"], row["visit_time"] or "", row["status"]))
+        task = con.execute(
+            "SELECT id,title,due_at,status FROM tasks WHERE auto_key=? ORDER BY id DESC LIMIT 1",
+            (f"priority-clients:attendance-audit:{key}:2026-11-01-22",),
+        ).fetchone()
+        item.update(student_id=sid, marks=len(marks),
+                    mark_dates=sorted({mark[0] for mark in marks}),
+                    task=dict(task) if task else None)
+        rows.append(item)
+    return {
+        "period": {"from": "2026-11-01", "to": "2026-11-22"},
+        "clients": rows,
+        "summary": {
+            "cards": sum(row["matches"] == 1 for row in rows),
+            "marks": sum(row["marks"] for row in rows),
+            "open_tasks": sum(bool(row["task"] and row["task"]["status"] == "open") for row in rows),
+            "missing_tasks": sum(not row["task"] for row in rows),
+        },
+    }

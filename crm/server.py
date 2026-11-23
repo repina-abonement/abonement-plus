@@ -927,6 +927,12 @@ def erp_priority_history(con, h, user, body, q):
         raise ApiError(str(exc))
 
 
+@route("GET", "/api/erp/priority-attendance/report", role="admin")
+def erp_priority_attendance_report(con, h, user, body, q):
+    from . import targetedpriorityclients
+    return targetedpriorityclients.attendance_report(con)
+
+
 @route("POST", "/api/erp/full/plan", role="admin")
 def erp_full_plan(con, h, user, body, q):
     from . import erpfull, erpimport

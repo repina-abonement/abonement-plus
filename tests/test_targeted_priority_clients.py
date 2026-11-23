@@ -32,6 +32,11 @@ class PriorityClientFactsTest(unittest.TestCase):
         targetedpriorityclients.ensure_attendance_control(self.con)
         self.assertEqual(5, self.con.execute("SELECT count(*) FROM erp_history_unassigned_visits WHERE source_id LIKE 'priority-trainers:%'").fetchone()[0])
         self.assertEqual(9, self.con.execute("SELECT count(*) FROM tasks WHERE auto_key LIKE 'priority-clients:attendance-audit:%'").fetchone()[0])
+        report = targetedpriorityclients.attendance_report(self.con)
+        self.assertEqual(9, report["summary"]["cards"])
+        self.assertEqual(5, report["summary"]["marks"])
+        self.assertEqual(9, report["summary"]["open_tasks"])
+        self.assertEqual(0, report["summary"]["missing_tasks"])
 
 
 if __name__ == "__main__":
