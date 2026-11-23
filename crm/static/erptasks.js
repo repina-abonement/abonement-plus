@@ -32,8 +32,7 @@ async function erpTasksSection(asUser=null, layout="grid", excludedTaskIds=[]) {
         <div class="et-meta ${d.day === "overdue" ? "et-late" : ""}">${when(t)}</div></div>
       <div class="et-act">
         <button class="btn sm primary" data-etdone="${t.id}">✓ Готово</button>
-        <button class="btn sm" data-etmove="${t.id}" title="Перенести, передать, поправить">Перенести</button></div>
-      <button type="button" class="et-details-toggle" data-etdetails="${t.id}" aria-expanded="false">Подробности</button>
+        <button class="btn sm" data-etmove="${t.id}" title="Перенести задачу">Перенести</button></div>
     </article>`;
   };
   const empty = exactDay ? `На ${dShort(S.etDay)} задач нет` : { overdue: "Просроченных задач нет 👍", today: "На сегодня задач нет", tomorrow: "На завтра задач пока нет", future: "Будущих задач пока нет" }[d.day];
@@ -80,7 +79,7 @@ function wireErpTasks(page) {
   if (add) add.onclick = () => openClientTaskForm(box.querySelector("#et-addbox"), render);
   box.querySelectorAll("[data-etopen]").forEach((b) => (b.onclick = (e) => { if (!e.target.closest("button")) openStudent(+b.dataset.etopen); }));
   box.querySelectorAll("[data-etopen]").forEach(b=>b.addEventListener("keydown",e=>{if(e.target===b&&(e.key==="Enter"||e.key===" ")){e.preventDefault();openStudent(+b.dataset.etopen)}}));
-  box.querySelectorAll("[data-etmove]").forEach((b) => (b.onclick = () => openTaskEdit(S.taskById[b.dataset.etmove], render)));
+  box.querySelectorAll("[data-etmove]").forEach((b) => (b.onclick = () => openTaskMove(S.taskById[b.dataset.etmove], render)));
   box.querySelectorAll("[data-etdone]").forEach((b) => (b.onclick = async () => {
     const t = S.taskById[b.dataset.etdone];
     if (t && t.kind === "rebook" && typeof openRebook === "function") return openRebook(t.id);
@@ -118,21 +117,22 @@ function reinviteDone(t) {
 function wireErpTaskDetails(box) {
   const popup=document.createElement('aside');popup.id='et-details-popover';popup.className='et-details-popover task-copyable';popup.hidden=true;popup.setAttribute('role','region');popup.setAttribute('aria-label','Подробности задачи');document.body.appendChild(popup);
   let current=null,pinned=false,timer;
-  const hide=()=>{clearTimeout(timer);popup.hidden=true;current?.querySelector('[data-etdetails]')?.setAttribute('aria-expanded','false');current?.removeAttribute('aria-describedby');current=null;pinned=false};
+  const hide=()=>{clearTimeout(timer);popup.hidden=true;current?.removeAttribute('aria-describedby');current=null;pinned=false};
   const position=()=>{if(!current?.isConnected)return hide();const r=current.getBoundingClientRect(),w=Math.min(360,innerWidth-24);popup.style.width=w+'px';popup.style.left=Math.max(12,Math.min(innerWidth-w-12,r.right+8))+'px';const h=popup.getBoundingClientRect().height;popup.style.top=Math.max(12,Math.min(innerHeight-h-12,r.top))+'px'};
   const show=(card,pin=false)=>{
     clearTimeout(timer);if(current!==card)hide();current=card;pinned=pin||pinned;
     const t=S.taskById[card.dataset.et];if(!t)return hide();const s=t.student||{};
-    popup.innerHTML=`<div class="et-details-head"><strong>${esc(t.title||'Задача')}</strong><button type="button" class="icon-btn" data-etclose aria-label="Закрыть подробности">×</button></div>${s.name?`<b>${esc(displayChildName(s.name))}</b>`:''}<dl>${s.parent?`<div><dt>Родитель</dt><dd>${esc(s.parent)}</dd></div>`:''}${s.phone?`<div><dt>Телефон</dt><dd>${esc(s.phone)}</dd></div>`:''}${t.due_at?`<div><dt>Срок</dt><dd>${dShort(t.due_at)}${t.client_task||t.student_id||t.student?.id||t.family_id?'':' · '+esc(t.due_at.slice(11,16)==='23:59'?'в течение дня':t.due_at.slice(11,16))}</dd></div>`:''}</dl>${t.note?`<div class="et-details-note">${esc(t.note)}</div>`:'<p class="muted small">Дополнительного описания нет</p>'}`;
-    popup.hidden=false;card.setAttribute('aria-describedby',popup.id);card.querySelector('[data-etdetails]')?.setAttribute('aria-expanded','true');popup.querySelector('[data-etclose]').onclick=hide;position();
+    const history=(t.client_history||[]).map(item=>`<li><time>${esc(dtWhen(item.ts))}</time><span>${esc(item.text)}</span>${item.user_name?`<small>${esc(item.user_name)}</small>`:''}</li>`).join('');
+    popup.innerHTML=`<div class="et-details-head"><strong>${esc(t.title||'Задача')}</strong><button type="button" class="icon-btn" data-etclose aria-label="Закрыть подробности">×</button></div>${s.name?`<b>${esc(displayChildName(s.name))}</b>`:''}<dl>${s.parent?`<div><dt>Родитель</dt><dd>${esc(s.parent)}</dd></div>`:''}${s.phone?`<div><dt>Телефон</dt><dd>${esc(s.phone)}</dd></div>`:''}${t.created_at?`<div><dt>Добавлена</dt><dd>${esc(dtWhen(t.created_at))}</dd></div>`:''}${t.due_at?`<div><dt>Дедлайн</dt><dd>${dShort(t.due_at)}${t.client_task||t.student_id||t.student?.id||t.family_id?'':' · '+esc(t.due_at.slice(11,16)==='23:59'?'в течение дня':t.due_at.slice(11,16))}</dd></div>`:''}</dl><div class="et-details-note"><b>Что сделать</b><div>${t.note?esc(t.note):'Дополнительного комментария нет'}</div></div>${history?`<div class="et-client-history"><b>Последние события клиента</b><ol>${history}</ol></div>`:''}`;
+    popup.hidden=false;card.setAttribute('aria-describedby',popup.id);popup.querySelector('[data-etclose]').onclick=hide;position();
   };
   const later=()=>{if(!pinned){clearTimeout(timer);timer=setTimeout(()=>{if(!current?.matches(':focus-within'))hide()},180)}};
   box.querySelectorAll('.et-card').forEach(card=>{
     card.addEventListener('mouseenter',()=>{if(matchMedia('(hover:hover)').matches)show(card)});card.addEventListener('mouseleave',later);
     card.addEventListener('focusin',e=>{if(e.target===card)show(card)});card.addEventListener('focusout',later);
-    card.querySelector('[data-etdetails]').onclick=e=>{e.stopPropagation();if(current===card&&pinned)hide();else show(card,true)};
+    card.addEventListener('click',e=>{if(e.target.closest('button'))hide()});
   });
-  box.addEventListener('click',e=>{if(!e.target.closest('[data-etdetails]'))hide()},{capture:true});
+  box.addEventListener('click',()=>hide(),{capture:true});
   box.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-etopen]'))hide()},{capture:true});
   popup.onmouseenter=()=>clearTimeout(timer);popup.onmouseleave=later;
   // Abort listeners when the board is replaced, including navigation away from dashboard.

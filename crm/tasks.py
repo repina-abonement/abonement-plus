@@ -865,6 +865,9 @@ def _task_out(con, r) -> dict:
                            (SELECT p.name FROM parents p WHERE p.family_id=s.family_id ORDER BY p.is_primary DESC,p.id LIMIT 1) AS parent
                            FROM students s JOIN families f ON f.id=s.family_id WHERE s.id=?""", (d["student_id"],)).fetchone()
         d["student"] = dict(s) if s else None
+        d["client_history"] = [dict(item) for item in con.execute(
+            "SELECT ts,kind,text,user_name FROM history WHERE student_id=? ORDER BY ts DESC,id DESC LIMIT 6",
+            (d["student_id"],))]
         if s and s["trial_at"]:
             d["auto"] = [dict(x) for x in con.execute(
                 "SELECT kind, ts, ok, channel, error FROM auto_messages WHERE student_id=? AND trial_at=? ORDER BY ts",

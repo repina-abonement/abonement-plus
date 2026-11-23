@@ -26,13 +26,22 @@ def test_workdesk_supports_status_funnel_for_regular_admin_and_grid_for_other_ro
 
 def test_workdesk_task_cards_keep_primary_actions_and_context():
     script = (ROOT / "crm/static/erptasks.js").read_text(encoding="utf-8")
+    tasks_script = (ROOT / "crm/static/tasks.js").read_text(encoding="utf-8")
 
     assert 'class="et-kind"' in script
     assert 'data-etdone="${t.id}"' in script
     assert 'data-etmove="${t.id}"' in script
+    assert 'openTaskMove(S.taskById[b.dataset.etmove], render)' in script
     assert 'data-etopen="${s.id}"' in script
     assert '["future", "Будущие"]' in script
     assert 'future: "Будущих задач пока нет"' in script
+    assert 'Последние события клиента' in script
+    assert 'Добавлена' in script and 'Что сделать' in script and 'Дедлайн' in script
+    assert 'data-etdetails' not in script
+    move = tasks_script.split('function openTaskMove',1)[1].split('/* Блок задач',1)[0]
+    for label in ('Название задачи','Комментарий','Дедлайн переноса','Сохранить','Отмена'):
+        assert label in move
+    assert 'assignee_id' not in move and 'erpOutcomePicker' not in move and 'priority' not in move
 
 
 def test_workdesk_retries_a_temporary_server_or_network_failure():

@@ -189,6 +189,26 @@ function openTaskEdit(t, onDone, focus) {
   };
 }
 
+/* «Перенести» — отдельное короткое действие без цепочек, приоритета и выбора ответственного. */
+function openTaskMove(t,onDone){
+  if(!t)return;
+  const wrap=document.createElement('div');wrap.className='need-wrap';
+  wrap.innerHTML=`<form class="need-card task-move-form"><h3>Перенести задачу</h3>
+    ${t.student?`<div class="small muted task-move-client">${esc(displayChildName(t.student.name))}${t.student.parent?` · ${esc(t.student.parent)}`:''}</div>`:''}
+    <div class="field"><label>Название задачи</label><input name="title" value="${esc(t.title||'')}" required maxlength="200"></div>
+    <div class="field"><label>Комментарий</label><textarea name="note" rows="4" maxlength="1000" placeholder="Что нужно учесть при выполнении">${esc(t.note||'')}</textarea></div>
+    <div class="field"><label>Дедлайн переноса</label><input name="due_at" type="${t.client_task?'date':'datetime-local'}" value="${esc((t.due_at||'').slice(0,t.client_task?10:16))}" required></div>
+    <div class="need-err small"></div><div class="row task-move-actions"><button class="btn primary">Сохранить</button><button type="button" class="btn" data-task-move-cancel>Отмена</button></div></form>`;
+  document.body.appendChild(wrap);const form=wrap.querySelector('form'),close=()=>wrap.remove();
+  wrap.querySelector('[data-task-move-cancel]').onclick=close;wrap.onclick=e=>{if(e.target===wrap)close()};
+  wrap.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();close()}};
+  setTimeout(()=>form.elements.title.focus(),40);
+  form.onsubmit=async e=>{e.preventDefault();const error=wrap.querySelector('.need-err');error.textContent='';try{
+    await api('PATCH',`/api/tasks/${t.id}`,{title:form.elements.title.value,note:form.elements.note.value,due_at:form.elements.due_at.value});
+    toast('Задача перенесена');close();onDone&&onDone();
+  }catch(err){error.textContent=err.message}};
+}
+
 /* Блок задач наверху карточки клиента: ближайшая задача видна сразу, остальные по кнопке, последние записи истории */
 function cardTasksBlock(d) {
   const T = d.tasks || { open: [], done: [] };
