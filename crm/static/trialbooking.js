@@ -55,7 +55,7 @@ async function openTrialBookingHub(d, root, reload, options={}) {
     const groups=data.groups||[];
     if(!root.isConnected)return;
     if(!groups.length){root.innerHTML='<p class="need-err">Нет действующих групп, доступных для пробного занятия. Проверьте настройки групп и филиалов</p>';return}
-    root.innerHTML=`<form data-trial-calendar><h3>Пробное занятие</h3><div class="row"><div class="field"><label>Группа</label><select name="group_id" required><option value="">Выберите группу</option>${groups.map(g=>`<option value="${g.id}" ${g.id===(d.student.trial_group_id||d.student.group_id)?'selected':''}>${esc(pastGroupLabel(g))}</option>`).join('')}</select></div><div class="field"><label>Месяц</label><input name="month" type="month" required value="${esc(S.meta.today.slice(0,7))}"></div></div><div class="trial-calendar-days" data-trial-days></div><p class="small" data-trial-selection aria-live="polite">Выберите день и время занятия</p><p class="need-err" data-trial-error role="alert"></p><div class="sc-actions"><button type="submit" class="btn primary" disabled>Подтвердить запись</button><button type="button" class="btn" data-close-trial>Отмена</button></div></form>`;
+    root.innerHTML=`<form data-trial-calendar><h3>Пробное занятие</h3><div class="row"><div class="field"><label>Группа</label><select name="group_id" data-search-select="off" required><option value="">Выберите группу</option>${groups.map(g=>`<option value="${g.id}" ${g.id===(d.student.trial_group_id||d.student.group_id)?'selected':''}>${esc(pastGroupLabel(g))}</option>`).join('')}</select></div><div class="field"><label>Месяц</label><input name="month" type="month" required value="${esc(S.meta.today.slice(0,7))}"></div></div><div class="trial-calendar-days" data-trial-days></div><p class="small" data-trial-selection aria-live="polite">Выберите день и время занятия</p><p class="need-err" data-trial-error role="alert"></p><div class="sc-actions"><button type="submit" class="btn primary" disabled>Подтвердить запись</button><button type="button" class="btn" data-close-trial>Отмена</button></div></form>`;
     const form=root.querySelector('form'),f=form.elements,days=form.querySelector('[data-trial-days]'),error=form.querySelector('[data-trial-error]'),submit=form.querySelector('[type=submit]'),selection=form.querySelector('[data-trial-selection]');
     let selected=null,generation=0,busy=false;
     const requestId=crypto.randomUUID();
@@ -82,7 +82,6 @@ async function openTrialBookingHub(d, root, reload, options={}) {
       }catch(e){if(version===generation){days.replaceChildren();error.textContent=e.message}}
     };
     f.group_id.onchange=f.month.onchange=load;
-    if(typeof pastGroupSearch==='function')pastGroupSearch(f.group_id);
     form.querySelector('[data-close-trial]').onclick=()=>{if(!busy){generation++;root.replaceChildren();root.hidden=true}};
     form.onsubmit=async e=>{
       e.preventDefault();if(busy||!selected)return;

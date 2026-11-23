@@ -18,12 +18,13 @@ const fs=require('fs'),assert=require('assert'),playwright=require(process.env.P
     await page.addScriptTag({path:'crm/static/pastentry.js'});
     await page.addScriptTag({path:'crm/static/trialbooking.js'});
     await page.evaluate(()=>openTrialBookingHub({student:{id:7,group_id:null,trial_group_id:null}},document.querySelector('#root'),()=>{},{futureOnly:true}));
-    const input=page.locator('.group-search input');
-    assert.equal(await input.count(),1,(await page.locator('#root').innerHTML())+' errors='+JSON.stringify(errors));
-    await input.focus();
-    const options=await page.locator('.group-search-option').allTextContents();
+    const select=page.locator('select[name="group_id"]');
+    assert.equal(await select.count(),1,(await page.locator('#root').innerHTML())+' errors='+JSON.stringify(errors));
+    assert.equal(await page.locator('.group-search input').count(),0,'Проблемный поисковый компонент не должен открываться из кнопки ПУ');
+    const options=await select.locator('option').allTextContents();
     assert(options.some(text=>text.includes('Небо')&&text.includes('17:45')),JSON.stringify(options));
-    assert.equal(await page.locator('.group-search-list').getAttribute('hidden'),null);
-    console.log('PASS trial group returned by the dedicated API is selectable');
+    await select.selectOption('11');
+    assert.equal(await select.inputValue(),'11');
+    console.log('PASS the PU button renders a native selectable trial group list');
   }finally{await browser.close()}
 })().catch(error=>{console.error(error);process.exit(1)});

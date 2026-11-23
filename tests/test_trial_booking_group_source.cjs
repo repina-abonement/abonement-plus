@@ -5,6 +5,8 @@ const end=js.indexOf('\n}',start)+2;
 const fn=js.slice(start,end);
 assert(fn.includes('/trial-groups'));
 assert(fn.includes('const groups=data.groups||[]'));
+assert(fn.includes('name="group_id" data-search-select="off"'));
+assert(!fn.includes("pastGroupSearch(f.group_id)"));
 assert(!fn.includes('/past-entry-options'));
 assert(fn.includes('Нет действующих групп, доступных для пробного занятия'));
 console.log('PASS trial booking uses its permission-safe group directory');
