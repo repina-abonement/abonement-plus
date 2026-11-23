@@ -1,9 +1,9 @@
 """One-time recovery of Evgeny Sergievsky by verified ERP identity."""
 import json
 
-from . import chatdaytransfer
+from . import chatdaytransfer, tasks
 
-KEY = "targeted_sergievsky_chat_transfer_20261123"
+KEY = "targeted_sergievsky_chat_transfer_20261123_v2"
 ERP_ID = "182330"
 NAME = "Евгений Сергиевский"
 SOURCE_ID = "sz:22884"
@@ -42,14 +42,23 @@ def apply(con):
            'clarification_task_note':'Добавить дату рождения, имя приоритетного родителя и телефон из карточки ERP или рабочего чата, не создавая второго клиента'}
     result=chatdaytransfer.apply(con,{'events':[event]},dict(actor))
     row=con.execute("SELECT id,name,erp_id,group_id FROM students WHERE archived=0 AND erp_id=?",(ERP_ID,)).fetchone()
+    day_before_id=tasks.add_task(con,'manual',row['id'],'2026-11-23T23:59',
+        auto_key='sergievsky-makeup-day-before:2026-11-24',
+        title='Напомнить родителю об отработке 24.11 в 17:45',
+        note='Родитель сам попросил напомнить заранее. Сегодня отправить отдельное напоминание об отработке завтра, 24.11 в 17:45',
+        source='manual') if row else None
     reminder=con.execute("SELECT id,title,due_at FROM tasks WHERE student_id=? AND status='open' AND title=?",
                          (row['id'],event['task_title'])).fetchone() if row else None
     clarify=con.execute("SELECT id,title,due_at FROM tasks WHERE student_id=? AND status='open' AND title=?",
                         (row['id'],event['clarification_task_title'])).fetchone() if row else None
+    day_before=con.execute("SELECT id,title,due_at FROM tasks WHERE student_id=? AND status='open' AND auto_key=?",
+                           (row['id'],'sergievsky-makeup-day-before:2026-11-24')).fetchone() if row else None
     complete=bool(row and row['name'] in ('Евгений Сергиевский','Сергиевский Евгений') and str(row['erp_id'])==ERP_ID
                   and reminder and str(reminder['due_at'])[:10]=='2026-11-24' and clarify
+                  and day_before and str(day_before['due_at'])[:10]=='2026-11-23'
                   and not result['errors'] and not result['unmatched'] and not result['ambiguous'])
     return _save(con,{'state':'complete' if complete else 'verification_failed','student_id':row['id'] if row else None,
                       'group_id':row['group_id'] if row else None,'reminder_task_id':reminder['id'] if reminder else None,
+                      'day_before_task_id':day_before['id'] if day_before else day_before_id,
                       'clarification_task_id':clarify['id'] if clarify else None,
                       'transfer':{key:len(value) for key,value in result.items()}})
