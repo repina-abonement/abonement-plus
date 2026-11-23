@@ -230,10 +230,18 @@ def apply(con,data,user):
         if not source:result['errors'].append({'name':event.get('student_name'),'error':'Нет ID сообщения источника'});continue
         old=con.execute('SELECT student_id FROM chat_day_transfer_events WHERE source_id=?',(source,)).fetchone()
         if old:
-            _reconcile_trial_booking(con,old['student_id'],event)
-            _reconcile_single_sale(con,old['student_id'],event)
-            _reconcile_trial_outcome(con,old['student_id'],event)
-            _reconcile_confirmed_sale(con,old['student_id'],event)
+            con.execute('SAVEPOINT chat_day_existing')
+            try:
+                _reconcile_trial_booking(con,old['student_id'],event)
+                _reconcile_single_sale(con,old['student_id'],event)
+                _reconcile_subscription_sale(con,old['student_id'],event,user)
+                _reconcile_trial_outcome(con,old['student_id'],event)
+                _reconcile_confirmed_sale(con,old['student_id'],event)
+                con.execute('RELEASE chat_day_existing')
+            except Exception as exc:
+                con.execute('ROLLBACK TO chat_day_existing');con.execute('RELEASE chat_day_existing')
+                result['errors'].append({'name':event.get('student_name'),'error':str(exc)})
+                continue
             student=con.execute('SELECT id,name FROM students WHERE id=?',(old['student_id'],)).fetchone()
             result['already'].append({'source_id':source,'student_id':old['student_id'],'name':student['name'] if student else '', 'tasks':_current_tasks(con,old['student_id'])});continue
         matches=_match(con,event)

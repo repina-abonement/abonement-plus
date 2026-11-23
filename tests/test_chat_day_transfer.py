@@ -1,3 +1,4 @@
+import json
 import tempfile
 from pathlib import Path
 
@@ -114,7 +115,7 @@ def test_confirmed_paid_sale_does_not_leave_manual_renewal_duplicate():
     user={'id':1,'role':'admin','name':'Руководитель'}
     branch=schedule.save_branch(con,{'name':'ТЦ «Небо»'})
     group=schedule.save_group(con,{'name':'Небо Ср Вс','branch_id':branch,'weekdays':[2,6],'time':'16:45','age':'4–5'})
-    sid=services.create_student(con,{'name':'Микаладзе Леон','birth':'2022-01-01','parent_name':'Мама','phone':'+7 900 555-44-33'},user)
+    sid=services.create_student(con,{'name':'Микаладзе Леон','birth':'2022-01-01','parent_name':'Анна','phone':'+7 900 555-44-33'},user)
     con.execute("UPDATE students SET group_id=?,trial_group_id=?,trial_at='2026-11-22T16:45' WHERE id=?",(group,group,sid))
     for month in ('2026-11','2026-12'):
         con.execute("""INSERT INTO subscriptions(student_id,month,tariff,lessons,per_lesson,price,status,created_at,paid_at)
@@ -149,6 +150,34 @@ def test_confirmed_care_chat_sale_creates_two_subscriptions_and_one_payment():
     assert con.execute("SELECT COUNT(*) FROM invoice_payment_targets WHERE payment_id=(SELECT id FROM payments WHERE student_id=?)",(sid,)).fetchone()[0]==2
     second=chatdaytransfer.apply(con,{'events':[event]},user)
     assert len(second['already'])==1
+    assert con.execute("SELECT COUNT(*) FROM subscriptions WHERE student_id=?",(sid,)).fetchone()[0]==2
+    assert con.execute("SELECT COUNT(*) FROM payments WHERE student_id=?",(sid,)).fetchone()[0]==1
+
+
+def test_previously_saved_sale_is_completed_on_repeat_without_duplicates():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'saved-sale.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    branch=schedule.save_branch(con,{'name':'ТЦ «Небо»'})
+    group=schedule.save_group(con,{'name':'Небо Ср Вс 16:45','branch_id':branch,'weekdays':[2,6],'time':'16:45','age':'4–5'})
+    sid=services.create_student(con,{'name':'Микаладзе Леон','birth':'2022-01-01','parent_name':'Анна','phone':'+7 900 555-44-33'},user)
+    con.execute("UPDATE students SET group_id=?,trial_group_id=?,trial_at='2026-11-22T16:45',trial_came=1 WHERE id=?",(group,group,sid))
+    event={'source_id':'sz:22889:subscription-sale','source_chat':'Служба заботы','source_at':'2026-11-22T20:15:29',
+        'student_name':'Микаладзе Леон','event_kind':'subscription_sale','sale_date':'2026-11-22','paid_at':'2026-11-22T20:15:29',
+        'lesson_time':'16:45','weekdays':[2,6],'tariff':'flex','discount_percent':20,'amount':9920,'payment_method':'card_branch',
+        'components':[{'month':'2026-11','price':2480,'dates':['2026-11-25','2026-11-29']},
+            {'month':'2026-12','price':7440,'dates':['2026-12-02','2026-12-06','2026-12-09','2026-12-13','2026-12-16','2026-12-20']}],
+        'note':'Оплачен абонемент за ноябрь и декабрь, группа Ср/Вс 16:45, 9920 ₽ картой в филиале'}
+    con.execute('INSERT INTO chat_day_transfer_events VALUES (?,?,?,?,?,?,?,?)',(
+        event['source_id'],sid,event['source_chat'],event['source_at'],event['event_kind'],json.dumps(event,ensure_ascii=False),
+        '2026-11-23T00:00','Перенос СЗ'))
+    first=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(first['already'])==1 and not first['errors']
+    assert [(row['month'],row['price'],row['status']) for row in con.execute(
+        "SELECT month,price,status FROM subscriptions WHERE student_id=? ORDER BY month",(sid,))]==[
+        ('2026-11',2480,'paid'),('2026-12',7440,'paid')]
+    assert con.execute("SELECT COUNT(*) FROM payments WHERE student_id=? AND amount=9920 AND cancelled=0",(sid,)).fetchone()[0]==1
+    second=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(second['already'])==1 and not second['errors']
     assert con.execute("SELECT COUNT(*) FROM subscriptions WHERE student_id=?",(sid,)).fetchone()[0]==2
     assert con.execute("SELECT COUNT(*) FROM payments WHERE student_id=?",(sid,)).fetchone()[0]==1
 
