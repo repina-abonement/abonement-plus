@@ -700,6 +700,36 @@ def ensure_client_task_coverage(con, now: datetime | None = None) -> int:
     return made
 
 
+def ensure_trial_confirm_task(con, student_id: int, now: datetime | None = None) -> int:
+    """Create the ERP-style day-before call task immediately after booking a trial."""
+    now = (now or _now()).replace(second=0, microsecond=0)
+    student = con.execute("""SELECT id,trial_at,funnel,stage,archived,historical_trial,erp_id
+        FROM students WHERE id=?""", (student_id,)).fetchone()
+    eligible = bool(student and student["trial_at"] and student["funnel"] == "sales"
+        and not student["archived"] and not student["historical_trial"] and not student["erp_id"]
+        and student["stage"] not in ("bought", "refused")
+        and datetime.fromisoformat(student["trial_at"]) > now)
+    current_key = f"trial_confirm:{student_id}:{student['trial_at']}" if eligible else ""
+    con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',result='Пробное перенесено или отменено'
+        WHERE student_id=? AND kind='trial_confirm' AND source='auto' AND status='open'
+          AND COALESCE(auto_key,'')!=?""", (_iso(now), student_id, current_key))
+    if not eligible:
+        return 0
+    trial_at = datetime.fromisoformat(student["trial_at"])
+    due = max(now, trial_at - timedelta(hours=23, minutes=59))
+    existing = con.execute("SELECT id,status FROM tasks WHERE auto_key=?", (current_key,)).fetchone()
+    if existing and existing["status"] == "cancelled":
+        con.execute("""UPDATE tasks SET status='open',due_at=?,done_at=NULL,done_by='',result=''
+            WHERE id=?""", (_iso(due), existing["id"]))
+        created = existing["id"]
+    else:
+        created = add_task(con, "trial_confirm", student_id, due, auto_key=current_key)
+    if con.execute("SELECT 1 FROM tasks WHERE auto_key=? AND status='open'", (current_key,)).fetchone():
+        con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',result='Появилась штатная задача цепочки'
+            WHERE auto_key=? AND status='open'""", (_iso(now), f"client-coverage:{student_id}"))
+    return int(bool(created))
+
+
 def run(con, now: datetime | None = None, send: bool = True) -> dict:
     """Один проход: создать задачи по пробным, отправить автосообщения, закрыть неактуальные задачи."""
     now = now or _now()
@@ -761,8 +791,7 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
         # задачи
         if t > now:
             # ERP: задача звонка возникает при записи на ПУ, срок — за 23:59 до занятия.
-            made += bool(add_task(con, "trial_confirm", s["id"], max(now, t - timedelta(hours=23, minutes=59)),
-                                  auto_key=f"trial_confirm:{key}"))
+            made += ensure_trial_confirm_task(con, s["id"], now)
         # «не пришёл» и «нет отметки 2 часа» ведёт этап «Не дошёл до ПУ» (crm/pu.py)
         if s["trial_came"] == 1:  # ERP: событие «Пришли на ПУ» создаёт «Почему не купили» без задержки.
             marked = s.get("trial_marked_at") or _iso(now)
@@ -1071,6 +1100,7 @@ def erp_board(con, day: str = "today", user: dict | None = None) -> dict:
 def for_student(con, sid: int) -> dict:
     """Задачи для карточки: открытые (ближайшая первой) и несколько последних выполненных."""
     ensure_subscription_renewal(con, sid)
+    ensure_trial_confirm_task(con, sid)  # восстанавливает цепочку у уже записанного на будущее ПУ
     fam = (con.execute("SELECT family_id FROM students WHERE id=?", (sid,)).fetchone() or [None])[0]
     q = "SELECT * FROM tasks WHERE (student_id=? OR (kind='rebook' AND family_id=?)) AND status=? ORDER BY "
     return {"open": [_task_out(con, r) for r in con.execute(q + "substr(due_at,1,10),priority DESC,due_at,id", (sid, fam, "open"))], "done": []}  # выполненные не показываем

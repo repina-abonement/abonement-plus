@@ -14,6 +14,8 @@ def main():
     assert not present({"kind":"note","text":"Семья сообщила о пропуске"}).get("technical_only")
     assert "clientHistoryHtml(d.history,d.journey)" in app
     assert "Хронология клиента" in app and "d.journey" in app
+    assert ".sort((a,b)=>String(b.ts||'').localeCompare(String(a.ts||''))" in app
+    assert "journey.slice().sort" in app
     assert 'class="client-history-table"' in app
     for heading in ("Дата", "Время", "Событие / задача", "Комментарий", "Автор"):
         assert heading in app

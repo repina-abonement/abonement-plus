@@ -1219,6 +1219,8 @@ def update_student(con, sid: int, data: dict, user) -> None:
             if "trial_at" in changes:
                 from . import tasks as _tasks
                 _tasks.send_booked(con, sid)  # сразу скрипт родителю: дата, время, место, что взять
+        from . import tasks as _tasks
+        _tasks.ensure_trial_confirm_task(con, sid)  # задача звонка появляется сразу, без ожидания фонового прохода
     names = {"name": "имя", "birth": "дата рождения", "group_id": "группа", "branch_id": "филиал", "tariff": "тариф",
              "trial_at": "пробное", "source": "источник", "source_id": "источник", "refusal_reason": "причина отказа"}
     if changes:

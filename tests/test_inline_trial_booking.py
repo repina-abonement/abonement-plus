@@ -4,7 +4,7 @@ import unittest
 from datetime import date,timedelta
 from pathlib import Path
 from unittest.mock import patch
-from crm import db, services as sv, trialoffer, smart
+from crm import db, services as sv, trialoffer, smart, tasks
 
 
 class InlineBookingTest(unittest.TestCase):
@@ -35,9 +35,15 @@ class InlineBookingTest(unittest.TestCase):
         self.assertNotIn(disabled,[row['id'] for row in rows])
         self.assertNotIn(makeup,[row['id'] for row in rows])
     def test_books_with_required_data_in_one_operation(self):
+        tasks.ensure_client_task_coverage(self.con)
+        fallback=self.con.execute("SELECT id FROM tasks WHERE student_id=? AND kind='client_followup' AND status='open'",(self.sid,)).fetchone()
+        self.assertIsNotNone(fallback)
         with patch('crm.tasks.send_booked') as notify:
             result=trialoffer.book_inline(self.con,self.sid,self.data,self.user)
         self.assertTrue(result['ok']);notify.assert_called_once()
+        reminder=self.con.execute("SELECT due_at FROM tasks WHERE student_id=? AND kind='trial_confirm' AND status='open'",(self.sid,)).fetchone()
+        self.assertEqual(reminder['due_at'],(self.day-timedelta(days=1)).isoformat()+'T16:46')
+        self.assertEqual(self.con.execute("SELECT status FROM tasks WHERE id=?",(fallback['id'],)).fetchone()[0],'cancelled')
         self.con.execute('UPDATE groups SET capacity=1 WHERE id=?',(self.gid,))
         with patch('crm.tasks.send_booked') as again:
             self.assertTrue(trialoffer.book_inline(self.con,self.sid,self.data,self.user)['ok'])
