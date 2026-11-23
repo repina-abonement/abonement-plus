@@ -2017,7 +2017,8 @@ select:not([multiple]):not([size]){appearance:none;-webkit-appearance:none;paddi
 .family-contacts{position:relative}.family-contacts>summary{cursor:pointer;color:var(--accent);font-size:13px;padding:7px 10px}
 .family-contact-list{position:absolute;right:0;top:100%;z-index:35;display:grid;gap:8px;min-width:240px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:0 8px 24px #0002}
 .family-contact-list button{text-align:left;display:grid;gap:4px}.family-contact-list button span{font-size:12px;color:var(--ink-2)}
-#comms-box .family-chat-feed{gap:10px;min-height:180px;max-height:480px;padding:20px;background:#edf2f5;border-bottom:1px solid var(--line)}
+#comms-box .family-chat-feed{gap:10px;min-height:120px;max-height:min(32vh,300px);padding:16px 20px;background:#edf2f5;border-bottom:1px solid var(--line)}
+#comms-box .family-chat-feed:has(>.muted:only-child){min-height:88px;max-height:88px;padding:12px 20px}
 #comms-box .family-chat-feed>.muted{align-self:center;margin:auto;text-align:center}
 #comms-box .msg{max-width:min(78%,620px);padding:10px 14px;font-size:14px;line-height:1.55;background:var(--surface);border-radius:15px 15px 15px 4px;box-shadow:0 1px 3px #172b2010}
 #comms-box .msg.out{background:#dcf1e5;border-radius:15px 15px 4px 15px}
@@ -2027,7 +2028,7 @@ select:not([multiple]):not([size]){appearance:none;-webkit-appearance:none;paddi
 .family-trial-tools>summary{cursor:pointer;font-size:14px;font-weight:600;color:#72591d}
 .family-trial-tools>summary span{font-size:12px;font-weight:400;margin-left:8px;color:#82734d}
 .family-trial-tools .to-bar{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-#comms-box .composer{margin:0;padding:16px 20px 20px;background:var(--surface);border-radius:0 0 18px 18px;gap:10px}
+#comms-box .composer{position:sticky;bottom:8px;z-index:20;margin:0;padding:14px 20px 16px;background:var(--surface);border-radius:0 0 18px 18px;box-shadow:0 -8px 20px rgba(28,45,34,.08);gap:10px}
 #comms-box .reply-target-current{padding:8px 10px;background:var(--surface-2);border:0}
 #comms-box .reply-target-caption{display:none}
 #comms-box .reply-target-summary{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}
@@ -2049,7 +2050,7 @@ select:not([multiple]):not([size]){appearance:none;-webkit-appearance:none;paddi
 
 .msg-error-details{margin-top:7px;font-size:12px;line-height:1.4;color:var(--red);overflow-wrap:anywhere}.msg-error-details>summary{cursor:pointer}
 html.theme-soft #comms-box .family-chat-feed{background:#182624}html.theme-soft #comms-box .msg.out{background:#214b3b}html.theme-soft #comms-box .family-trial-tools{background:#332d1c}html.theme-soft #comms-box .family-trial-tools>summary{color:#e4cf97}html.theme-soft #comms-box .msg.err{background:#492c2c}
-@media(max-width:600px){#comms-box .family-chat-header,#comms-box .composer{padding:12px}#comms-box .family-chat-feed{padding:14px 10px;max-height:55dvh}#comms-box .msg{max-width:90%}#comms-box .family-trial-tools{padding:11px 12px}.family-trial-tools>summary span{display:block;margin:3px 0 0 20px}#comms-box .composer>.row{display:flex;flex-direction:column;align-items:stretch}#comms-box .composer>.row textarea{width:100%}#comms-box .composer #cm-send{align-self:flex-end;min-width:120px}.family-contact-list{min-width:210px}}
+@media(max-width:600px){#comms-box .family-chat-header,#comms-box .composer{padding:12px}#comms-box .family-chat-feed{padding:12px 10px;min-height:100px;max-height:30dvh}#comms-box .family-chat-feed:has(>.muted:only-child){min-height:72px;max-height:72px}#comms-box .msg{max-width:90%}#comms-box .family-trial-tools{padding:11px 12px}.family-trial-tools>summary span{display:block;margin:3px 0 0 20px}#comms-box .composer>.row{display:flex;flex-direction:column;align-items:stretch}#comms-box .composer>.row textarea{width:100%}#comms-box .composer #cm-send{align-self:flex-end;min-width:120px}.family-contact-list{min-width:210px}}
 @media(max-width:600px){#comms-box .composer>.row{flex-wrap:nowrap}#comms-box .composer>.row textarea{flex:0 0 auto}#comms-box .composer #cm-send{flex:0 0 auto}}
 @media(prefers-color-scheme:dark){#comms-box .family-chat-feed{background:#182624}#comms-box .msg.out{background:#214b3b}#comms-box .family-trial-tools{background:#332d1c}#comms-box .family-trial-tools>summary{color:#e4cf97}#comms-box .msg.err{background:#492c2c}}
 /* Эмодзи: компактная панель по образцу Telegram */
