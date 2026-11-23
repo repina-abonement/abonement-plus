@@ -186,3 +186,31 @@ def test_previously_saved_sale_is_completed_on_repeat_without_duplicates():
     assert con.execute("SELECT COUNT(*) FROM subscriptions WHERE student_id=?",(sid,)).fetchone()[0]==2
     assert con.execute("SELECT COUNT(*) FROM payments WHERE student_id=?",(sid,)).fetchone()[0]==1
 
+
+def test_dussek_december_cash_sale_records_net_amount_and_no_duplicate_followup():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'dussek.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    branch=schedule.save_branch(con,{'name':'ТЦ «Небо»'})
+    group=schedule.save_group(con,{'name':'Небо Пн Ср 10:30','branch_id':branch,'weekdays':[0,2],'time':'10:30','age':'1,5–3'})
+    con.execute("INSERT INTO group_terms(group_id,valid_from,per_lesson,credit_limit) VALUES (?,'2026-11',1600,2)",(group,))
+    sid=services.create_student(con,{'name':'Дюссек Михаил','birth':'2024-01-26','parent_name':'Мария','phone':'+7 910 541-64-73'},user)
+    con.execute("UPDATE students SET group_id=?,trial_group_id=?,trial_at='2026-11-23T10:30' WHERE id=?",(group,group,sid))
+    sale={'source_id':'sz:22930:дюссек-продажа','source_chat':'Служба заботы','source_at':'2026-11-23T11:45:01',
+        'student_name':'Дюссек Михаил','event_kind':'subscription_sale','sale_date':'2026-11-23','paid_at':'2026-11-23T11:45:01',
+        'lesson_time':'10:30','weekdays':[0,2],'tariff':'fixed','discount_percent':20,'amount':10240,'payment_method':'cash',
+        'components':[{'month':'2026-12','price':10240,'dates':['2026-12-02','2026-12-07','2026-12-09','2026-12-14','2026-12-16','2026-12-21','2026-12-23','2026-12-28']}],
+        'note':'Куплен декабрьский абонемент за 10240 ₽; получено 10500 ₽ наличными, сдача 260 ₽ возвращена клиенту'}
+    outcome={'source_id':'sz:22930:дюссек-результат','source_chat':'Служба заботы','source_at':'2026-11-23T11:45:01',
+        'student_name':'Дюссек Михаил','event_kind':'trial_result','event_date':'2026-11-23','came':True,'outcome':'purchased',
+        'subscription_months':['2026-12'],'note':'Пришёл на ПУ и купил декабрьский абонемент'}
+    result=chatdaytransfer.apply(con,{'events':[sale,outcome]},user)
+    assert len(result['applied'])==2 and not result['errors']
+    sub=con.execute("SELECT price,status,lessons FROM subscriptions WHERE student_id=? AND month='2026-12'",(sid,)).fetchone()
+    assert (sub['price'],sub['status'],sub['lessons'])==(10240,'paid',8)
+    payment=con.execute("SELECT amount,method,comment FROM payments WHERE student_id=? AND cancelled=0",(sid,)).fetchone()
+    assert (payment['amount'],payment['method'])==(10240,'cash')
+    assert not con.execute("SELECT 1 FROM tasks WHERE student_id=? AND status='open' AND (kind='why_not_bought' OR title='Почему не купили')",(sid,)).fetchone()
+    second=chatdaytransfer.apply(con,{'events':[sale,outcome]},user)
+    assert len(second['already'])==2 and not second['errors']
+    assert con.execute("SELECT COUNT(*) FROM payments WHERE student_id=? AND cancelled=0",(sid,)).fetchone()[0]==1
+
