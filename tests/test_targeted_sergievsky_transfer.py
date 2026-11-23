@@ -16,8 +16,11 @@ def test_verified_sergievsky_transfer_recovers_erp_card_and_tasks_once():
     tasks=[tuple(row) for row in con.execute("SELECT title,substr(due_at,1,10) FROM tasks WHERE student_id=? AND status='open' ORDER BY title",(first['student_id'],))]
     assert ('Напомнить родителю об отработке 24.11 в 17:45','2026-11-23') in tasks
     assert ('Напомнить об отработке 24.11 в 17:45','2026-11-24') in tasks
+    assert ('Проверить продление на декабрь с учётом отъезда 10.12','2026-11-23') in tasks
     assert any(title=='Заполнить данные семьи Сергиевского из ERP' for title,_ in tasks)
     assert con.execute("SELECT count(*) FROM tasks WHERE student_id=? AND status='open' AND auto_key='sergievsky-makeup-day-before:2026-11-24'",(first['student_id'],)).fetchone()[0]==1
+    assert con.execute("SELECT count(*) FROM tasks WHERE student_id=? AND status='open' AND auto_key='sergievsky-december-renewal:2026-12'",(first['student_id'],)).fetchone()[0]==1
+    assert con.execute("SELECT count(*) FROM chat_day_transfer_events WHERE student_id=? AND source_id IN ('sz:20167:сергиевский-абон','trainers:26839:сергиевский','trainers:27053:сергиевский','sz:21894:сергиевский','trainers:27140:сергиевский','sz:22880:сергиевский-декабрь')",(first['student_id'],)).fetchone()[0]==6
     assert targetedsergievskytransfer.apply(con)==first
     assert con.execute("SELECT count(*) FROM students WHERE erp_id='182330'").fetchone()[0]==1
 
