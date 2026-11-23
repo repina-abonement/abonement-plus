@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS erp_history_planned_lessons (
  UNIQUE(source_subscription_id,lesson_date,lesson_time));
 """
 PILOT_KEYS = {
+    "6928fa92feb0f0f045a0b919e412ac553108fc1fc063df2d803fe95642663fd9",
+    "994a7ea5726bbe1ccef0f0ed49a13019e97ae352f5d32edee24669709b7b6fcc",
     "f7533a86fd636507e83293edac782e09df1f8cf9a89671b3d99186f94658c9fd",
     "f78480f2a11791f7de661cf39becbc730a431b89406160fa4ef711880cf0b5af",
     "41d57dc88afea471725ed1ca23bdd64bdc7e1ea9d6c43723eeb711849c5983db",
@@ -55,6 +57,14 @@ PILOT_KEYS = {
 }
 PILOT_KEYS.add("8cb28126f976831e0b2335f8bdb8dbddf6415fc0862b4e52ef3f42ba9b12b00e")
 PILOT_CONTRACTS = {
+    ("98506", "2026-11"): {
+        "828909": ("2026-11-01", "2026-11-29", 9, 13500),
+        "828908": ("2026-11-07", "2026-11-28", 4, 4800),
+    },
+    ("97061", "2026-11"): {
+        "828906": ("2026-11-01", "2026-11-29", 9, 10800),
+        "828907": ("2026-11-07", "2026-11-28", 4, 3840),
+    },
     ("84894", "2026-11"): {
         "827955": ("2026-11-01", "2026-11-29", 9, 13500),
         "827957": ("2026-11-07", "2026-11-28", 4, 4800),
