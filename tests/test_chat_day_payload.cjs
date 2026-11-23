@@ -44,3 +44,11 @@ const nov23 = context.chatDayPayload([{name:'Служба заботы',messages
 const matveyDec=nov23.events.find(event=>event.student_name==='Решетняк Матвей');
 if(!matveyDec||matveyDec.amount!==11520||matveyDec.payment_method!=='tochka_qr_link'||matveyDec.components[0].dates.length!==9)throw new Error('Reshetnyak December sale not parsed');
 console.log('PASS Reshetnyak November and December sales');
+
+const kiselev = context.chatDayPayload([{name:'Служба заботы',messages:[
+  {id:21788,date:'2026-11-16T18:16:23',text:'5120 пробить чек @D_Tatyana13\n\nОплата абонемента ноябрь\n\nКиселев Илья ✅\n\n#ВНЕСТИ_В_ЕРП'},
+]},{name:'ТРЕНЕРЫ',messages:[]}], '2026-11-16');
+const ilyaSale=kiselev.events.find(event=>event.event_kind==='subscription_sale');
+if(!ilyaSale||ilyaSale.student_name!=='Киселёв Илья'||ilyaSale.amount!==5120||ilyaSale.payment_method!=='card'||ilyaSale.components[0].dates.length!==4)throw new Error('Kiselev November sale not parsed');
+if(!kiselev.events.some(event=>event.event_kind==='trial_result'&&event.outcome==='purchased'))throw new Error('Kiselev trial result not parsed');
+console.log('PASS Kiselev November sale and trial result');
