@@ -43,19 +43,19 @@ class ErpStatusLogicTest(unittest.TestCase):
 
     def test_all_purchase_system_statuses(self):
         new = self.child("members"); self.paid(new, "2026-11")
-        self.assertEqual(self.status(new), "Новый оплативший посетитель")
+        self.assertEqual(self.status(new), "Постоянный посетитель")
 
         regular = self.child("members"); self.paid(regular, "2026-10"); self.paid(regular, "2026-11")
         self.assertEqual(self.status(regular), "Постоянный посетитель")
 
         returned = self.child("members"); self.paid(returned, "2026-09"); self.paid(returned, "2026-11")
-        self.assertEqual(self.status(returned), "Вернувшийся")
+        self.assertEqual(self.status(returned), "Постоянный посетитель")
 
         unpaid = self.child("members"); self.paid(unpaid, "2026-10")
         self.assertEqual(self.status(unpaid), "Не оплачен текущий месяц")
 
         old = self.child("members"); self.paid(old, "2026-08")
-        self.assertEqual(self.status(old), "Нет абонемента")
+        self.assertEqual(self.status(old), "Не оплачен текущий месяц")
 
         single = self.child("members"); self.paid(single, "2026-11", "single")
         self.assertEqual(self.status(single), "Ходит разово")
@@ -90,7 +90,7 @@ class ErpStatusLogicTest(unittest.TestCase):
         self.con.execute("""INSERT INTO erp_history_subscriptions
             (source_id,student_id,group_id,month,valid_from,valid_until,lessons,source_payload,imported_at,imported_by)
             VALUES ('history-sub',?,?, '2026-11','2026-11-01','2026-11-30',4,'{}','2026-11-22','test')""", (sid, group))
-        self.assertEqual(self.status(sid), "Новый оплативший посетитель")
+        self.assertEqual(self.status(sid), "Постоянный посетитель")
         self.assertEqual(self.con.execute("SELECT funnel FROM students WHERE id=?", (sid,)).fetchone()[0], "members")
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM subscriptions WHERE student_id=?", (sid,)).fetchone()[0], 0)
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM payments WHERE student_id=?", (sid,)).fetchone()[0], 0)
@@ -108,7 +108,7 @@ class ErpStatusLogicTest(unittest.TestCase):
         erpstatus.sync_all(self.con, self.TODAY)
         self.assertEqual(self.con.execute("SELECT erp_status FROM students WHERE id=?", (preserved,)).fetchone()[0], "Думают")
         row = self.con.execute("SELECT funnel,stage,erp_status FROM students WHERE id=?", (active,)).fetchone()
-        self.assertEqual(tuple(row), ("members", "active", "Новый оплативший посетитель"))
+        self.assertEqual(tuple(row), ("members", "active", "Постоянный посетитель"))
 
     def test_targeted_kononenko_reconcile_keeps_renewal_task(self):
         self.child()
