@@ -58,5 +58,29 @@ const markov = context.chatDayPayload([{name:'Служба заботы',message
   {id:22891,date:'2026-11-22T20:32:01',text:'Отчет 22.11\n• Марков Тимофей 16:45 решили подождать до весны, в апреле исполнится 3, на тренировке не все понимал пока, связь в апреле с ними, группу 1,5-3 неудобно'},
 ]},{name:'ТРЕНЕРЫ',messages:[]}], '2026-11-22');
 const timofey=markov.events.find(event=>event.student_name==='Марков Тимофей');
-if(!timofey||!timofey.create_if_missing||timofey.birth!=='2024-04-23'||timofey.phone!=='+7 926 177-54-74'||timofey.trial_time!=='16:45')throw new Error('Markov identity was not attached to result');
+if(!timofey||!timofey.create_if_missing||timofey.birth!=='2024-04-23'||timofey.phone!=='+79261775474'||timofey.trial_time!=='16:45')throw new Error('Markov identity was not attached to result');
 console.log('PASS Markov full identity is attached to trial result');
+
+const reviewed = context.chatDayPayload([{name:'Служба заботы',messages:[
+  {id:21989,date:'2026-11-17T19:04:26',text:'Рубайло Михаил 01.02.25\n+79164496354 мама Анастасия\nИсточник: канал Футболики\nЗаписан на 23 ноября в 10:30'},
+  {id:22588,date:'2026-11-21T13:10:46',text:'Записан на пробное 22.11 в 16:45\nЕгоров Артур 17.10.23\nМама Октябрина\nИсточник Яндекс карты\n+79142001995'},
+  {id:22594,date:'2026-11-21T15:44:01',text:'Записан на пробное 22.11 в 17:45\nМастердеев Денис 4.03.22\nМама Наталия +79859523765'},
+  {id:22891,date:'2026-11-22T20:32:01',text:'Отчет 22.11\n• Егоров Артур 16:45 ушли с тренировки, мальчик к тренерам не пошел, перезаписаться и пробовать пока не готовы\n• Мастердеев Денис 17:45 ПРОДАЖА НОЯ+ДЕК 11880 (скидка 20%)'},
+]},{name:'ТРЕНЕРЫ',messages:[]}], '2026-11-22');
+for(const expected of [['Егоров Артур','2023-10-17','+79142001995'],['Мастердеев Денис','2022-03-04','+79859523765']]){const event=reviewed.events.find(x=>x.student_name===expected[0]);if(!event||!event.create_if_missing||event.birth!==expected[1]||event.phone!==expected[2])throw new Error('Reviewed identity missing: '+expected[0])}
+console.log('PASS reviewed clients receive identity from earlier care messages');
+
+const surnameOnly = context.chatDayPayload([{name:'Служба заботы',messages:[
+  {id:30001,date:'2026-11-20T10:00:00',text:'Иванов Пётр 01.02.2024\nМама Анна +79001112233'},
+  {id:30002,date:'2026-11-22T19:00:00',text:'Отчет 22.11\n• Иванов 16:45 решили подождать до весны'},
+]},{name:'ТРЕНЕРЫ',messages:[]}], '2026-11-22');
+const ivanov=surnameOnly.events.find(x=>x.student_name==='Иванов Пётр');
+if(!ivanov||!ivanov.create_if_missing||ivanov.phone!=='+79001112233')throw new Error('Unique surname was not linked to full identity');
+const ambiguousSurname = context.chatDayPayload([{name:'Служба заботы',messages:[
+  {id:30101,date:'2026-11-20T10:00:00',text:'Иванов Пётр 01.02.2024\nМама Анна +79001112233'},
+  {id:30102,date:'2026-11-20T10:01:00',text:'Иванов Иван 02.03.2023\nМама Ольга +79004445566'},
+  {id:30103,date:'2026-11-22T19:00:00',text:'Отчет 22.11\n• Иванов 16:45 решили подождать до весны'},
+]},{name:'ТРЕНЕРЫ',messages:[]}], '2026-11-22');
+const ambiguousIvanov=ambiguousSurname.events.find(x=>x.student_name==='Иванов');
+if(!ambiguousIvanov||ambiguousIvanov.create_if_missing)throw new Error('Ambiguous surname must not create a card');
+console.log('PASS surname-only facts link only to one unambiguous identity');

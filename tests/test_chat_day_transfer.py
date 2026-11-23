@@ -80,9 +80,10 @@ def test_privalov_known_later_decision_sets_stage_and_one_clear_task():
     assert (student['stage'],student['trial_came'])==('later',1)
     assert 'занимается в саду' in student['refusal_reason']
     open_tasks=con.execute("SELECT kind,title,due_at FROM tasks WHERE student_id=? AND status='open'",(sid,)).fetchall()
-    assert len(open_tasks)==1 and open_tasks[0]['kind']=='rebook'
-    assert open_tasks[0]['title']=='Пригласить снова на ПУ: ребёнок подрос'
-    assert open_tasks[0]['due_at'][:10]=='2027-02-21'
+    rebook=[task for task in open_tasks if task['kind']=='rebook']
+    assert len(rebook)==1
+    assert rebook[0]['title']=='Пригласить снова на ПУ: ребёнок подрос'
+    assert rebook[0]['due_at'][:10]=='2027-02-21'
     closed=con.execute("SELECT status,result FROM tasks WHERE student_id=? AND title='Почему не купили'",(sid,)).fetchone()
     assert closed['status']=='cancelled' and 'Решение семьи уже известно' in closed['result']
 
@@ -133,6 +134,36 @@ def test_markov_missing_card_is_created_from_verified_care_identity():
     assert con.execute("SELECT 1 FROM tasks WHERE student_id=? AND status='open' AND auto_key=?",(student['id'],f"ad-source-required:{student['id']}")).fetchone()
     second=chatdaytransfer.apply(con,{'events':[event]},user)
     assert len(second['already'])==1 and con.execute("SELECT COUNT(*) FROM students WHERE name='Марков Тимофей'").fetchone()[0]==1
+
+
+def test_future_verified_booking_creates_one_card_but_incomplete_identity_does_not():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'future-create.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    complete={'source_id':'sz:future:1','source_chat':'Служба заботы','source_at':'2026-11-23T12:00:00',
+        'student_name':'Новый Ребёнок','birth':'2023-05-06','parent_name':'Анна','phone':'+7 900 123-45-67',
+        'create_if_missing':True,'event_kind':'trial_booking','event_date':'2026-11-28','trial_time':'11:00',
+        'note':'Записан на пробное 28.11 в 11:00'}
+    incomplete=complete|{'source_id':'sz:future:2','student_name':'Другой Ребёнок','phone':'','parent_name':''}
+    result=chatdaytransfer.apply(con,{'events':[complete,incomplete]},user)
+    assert len(result['applied'])==1 and len(result['unmatched'])==1 and not result['errors']
+    assert con.execute("SELECT COUNT(*) FROM students WHERE name='Новый Ребёнок'").fetchone()[0]==1
+    assert con.execute("SELECT COUNT(*) FROM students WHERE name='Другой Ребёнок'").fetchone()[0]==0
+    repeat=chatdaytransfer.apply(con,{'events':[complete]},user)
+    assert len(repeat['already'])==1 and con.execute("SELECT COUNT(*) FROM students WHERE name='Новый Ребёнок'").fetchone()[0]==1
+
+
+def test_create_capable_result_runs_before_other_facts_of_same_client():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'ordered-create.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    note={'source_id':'sz:ordered:note','source_chat':'Служба заботы','source_at':'2026-11-22T19:00:00',
+          'student_name':'Тестов Тимофей','event_kind':'note','note':'Предварительно обсудили следующий шаг'}
+    result={'source_id':'sz:ordered:result','source_chat':'Служба заботы','source_at':'2026-11-22T20:00:00',
+        'student_name':'Тестов Тимофей','birth':'2024-04-23','parent_name':'Вера','phone':'+7 900 111-22-33',
+        'create_if_missing':True,'event_kind':'trial_result','event_date':'2026-11-22','trial_time':'16:45','came':True,
+        'outcome':'later','note':'Семья решила вернуться позже'}
+    applied=chatdaytransfer.apply(con,{'events':[note,result]},user)
+    assert len(applied['applied'])==2 and not applied['unmatched'] and not applied['errors']
+    assert con.execute("SELECT COUNT(*) FROM students WHERE name='Тестов Тимофей'").fetchone()[0]==1
 
 
 def test_confirmed_paid_sale_does_not_leave_manual_renewal_duplicate():

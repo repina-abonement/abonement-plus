@@ -234,6 +234,11 @@ def _reconcile_confirmed_sale(con,sid,event):
 def apply(con,data,user):
     events=data.get('events') if isinstance(data,dict) else None
     if not isinstance(events,list) or not events:raise sv.ApiError('В файле нет событий переноса')
+    # A reviewed day may mention a sale before the later line containing the
+    # full trial result. Create-capable identity events must run first so the
+    # remaining facts attach to that same card during one upload.
+    events=sorted(events,key=lambda event:0 if event.get('create_if_missing') is True
+                  and event.get('event_kind') in ('trial_booking','trial_result') else 1)
     result={'applied':[],'already':[],'unmatched':[],'ambiguous':[],'errors':[]}
     for event in events:
         source=str(event.get('source_id') or '').strip()
@@ -257,7 +262,7 @@ def apply(con,data,user):
         matches=_match(con,event)
         created=False
         if not matches:
-            allowed=(event.get('create_if_missing') is True and event.get('event_kind')=='trial_result'
+            allowed=(event.get('create_if_missing') is True and event.get('event_kind') in ('trial_booking','trial_result')
                      and str(event.get('source_chat') or '').casefold().startswith('служба заботы'))
             required=(str(event.get('student_name') or '').strip(),str(event.get('birth') or '').strip(),
                       str(event.get('parent_name') or '').strip(),str(event.get('phone') or '').strip())
