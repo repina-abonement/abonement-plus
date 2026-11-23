@@ -49,11 +49,10 @@ async function openTrialBookingHub(d, root, reload, options={}) {
   if(root.querySelector('[data-trial-calendar]')){root.scrollIntoView({block:'nearest',behavior:'smooth'});return}
   root.innerHTML='<p class="muted">Загружаю календарь…</p>';
   try{
-    // Запись на будущее ПУ не должна зависеть от API исторических оплат.
-    // Основной справочник уже загружен в /api/meta и одинаков для всей CRM.
-    const activeBranches=new Set((S.meta.branches||[]).filter(b=>b.active!==0).map(b=>b.id));
-    const groups=(S.meta.groups||[]).filter(g=>g.active!==0&&activeBranches.has(g.branch_id)&&!g.is_makeup&&
-      g.lesson_kind!=='ofp'&&!g.program_id&&g.trial_ok!==0);
+    // Отдельный справочник записи доступен клиентским администраторам даже тогда,
+    // когда широкий список настроек /api/meta скрыт их ролью.
+    const data=await api('GET',`/api/students/${d.student.id}/trial-groups`);
+    const groups=data.groups||[];
     if(!root.isConnected)return;
     if(!groups.length){root.innerHTML='<p class="need-err">Нет действующих групп, доступных для пробного занятия. Проверьте настройки групп и филиалов</p>';return}
     root.innerHTML=`<form data-trial-calendar><h3>Пробное занятие</h3><div class="row"><div class="field"><label>Группа</label><select name="group_id" required><option value="">Выберите группу</option>${groups.map(g=>`<option value="${g.id}" ${g.id===(d.student.trial_group_id||d.student.group_id)?'selected':''}>${esc(pastGroupLabel(g))}</option>`).join('')}</select></div><div class="field"><label>Месяц</label><input name="month" type="month" required value="${esc(S.meta.today.slice(0,7))}"></div></div><div class="trial-calendar-days" data-trial-days></div><p class="small" data-trial-selection aria-live="polite">Выберите день и время занятия</p><p class="need-err" data-trial-error role="alert"></p><div class="sc-actions"><button type="submit" class="btn primary" disabled>Подтвердить запись</button><button type="button" class="btn" data-close-trial>Отмена</button></div></form>`;

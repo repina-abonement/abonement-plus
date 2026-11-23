@@ -25,6 +25,15 @@ class InlineBookingTest(unittest.TestCase):
         self.assertEqual(len(result['slots']),1);self.assertEqual(result['slots'][0]['time'],'16:45')
         self.con.execute("INSERT INTO group_versions(group_id,valid_from,weekdays,time,day_times,created_at) VALUES (?,?,?,'17:30','','2026-11-13')",(self.gid,date.today().isoformat(),str(self.day.weekday())))
         self.assertEqual(trialoffer.booking_options(self.con,self.sid,self.birth,self.day.isoformat())['slots'][0]['time'],'17:30')
+
+    def test_trial_group_directory_is_independent_and_excludes_unavailable_groups(self):
+        other_branch=self.con.execute("INSERT INTO branches(name,active) VALUES ('Другой',1)").lastrowid
+        disabled=self.con.execute("INSERT INTO groups(branch_id,name,weekdays,time,age,trial_ok) VALUES (?,'Без пробных','1','12:00','3–5',0)",(other_branch,)).lastrowid
+        makeup=self.con.execute("INSERT INTO groups(branch_id,name,weekdays,time,age,is_makeup) VALUES (?,'Отработка','1','12:00','3–5',1)",(other_branch,)).lastrowid
+        rows=trialoffer.booking_groups(self.con,self.sid)['groups']
+        self.assertEqual([row['id'] for row in rows],[self.gid])
+        self.assertNotIn(disabled,[row['id'] for row in rows])
+        self.assertNotIn(makeup,[row['id'] for row in rows])
     def test_books_with_required_data_in_one_operation(self):
         with patch('crm.tasks.send_booked') as notify:
             result=trialoffer.book_inline(self.con,self.sid,self.data,self.user)

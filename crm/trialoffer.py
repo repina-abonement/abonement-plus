@@ -198,6 +198,19 @@ def booking_options(con, sid: int, birth: str = '', day: str = '', branch_id: in
     return {'slots':slots,'error':'' if slots else 'На выбранные даты нет подходящих свободных мест. Выберите другой день или филиал'}
 
 
+def booking_groups(con, sid: int) -> dict:
+    """The explicit group directory for trial booking, independent of broad /api/meta visibility."""
+    from . import services as sv
+    sv.get_student_row(con, sid)
+    groups = [dict(row) for row in con.execute('''SELECT g.id,g.name,g.branch_id,g.active,g.trial_ok,
+        g.lesson_kind,g.program_id,g.is_makeup,b.name AS branch
+        FROM groups g JOIN branches b ON b.id=g.branch_id
+        WHERE g.active=1 AND b.active=1 AND g.is_makeup=0 AND g.program_id IS NULL
+          AND COALESCE(g.lesson_kind,'')!='ofp' AND COALESCE(g.trial_ok,1)!=0
+        ORDER BY b.name,g.name,g.id''')]
+    return {'groups': groups}
+
+
 def book_inline(con,sid: int,data: dict,user: dict) -> dict:
     """Save required data and the selected slot together; failed bookings leave no partial edits."""
     from . import smart, services as sv

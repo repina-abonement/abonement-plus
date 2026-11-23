@@ -3296,6 +3296,12 @@ def inline_trial_options(con,h,user,body,q,sid):
     return trialoffer.booking_options(con,int(sid),q.get('birth') or '',q.get('date') or '',bid)
 
 
+@route("GET", "/api/students/{sid}/trial-groups", role="operator|client_ops:full")
+def trial_booking_groups(con,h,user,body,q,sid):
+    from . import trialoffer
+    return trialoffer.booking_groups(con,int(sid))
+
+
 @route("POST", "/api/students/{sid}/trial-booking", role="operator|client_ops:full")
 def inline_trial_book(con,h,user,body,q,sid):
     from . import trialoffer
