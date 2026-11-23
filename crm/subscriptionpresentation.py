@@ -95,13 +95,18 @@ def unpaid_group_names(con, sid, ym, enrollments):
     """
     from . import subscriptiondates
     rows=rows_for_card(con,sid)
+    active_groups={e['group_id'] for e in enrollments}
     owed={};covered=set()
     for row in rows:
         if row.get('history_import'):
             continue
-        if row['history_only'] or row['display_month']!=ym or not row['group_id']:
+        if row['history_only'] or row['display_month']!=ym:
             continue
-        gid=row['group_id']
+        # Early CRM imports could create a real monthly invoice without an
+        # enrollment_id. With one current group its purpose is unambiguous.
+        gid=row['group_id'] or (next(iter(active_groups)) if len(active_groups)==1 else None)
+        if not gid:
+            continue
         if row['price']>row['paid_amount']:
             owed[gid]=row.get('group_name') or 'Группа №'+str(gid)
         else:

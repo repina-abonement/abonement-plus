@@ -809,7 +809,7 @@ def board(con, funnel: str) -> dict:
             elif _sg.is_single(con, s["id"], cur):
                 key = "single"  # разовые занятия: не должники (Юлия, 03.11)
                 card["badge"] = "Разовые занятия"
-            elif month_state(cur) != "paid":
+            elif unpaid_groups(con, s["id"], cur):
                 key = "unpaid_cur"
                 card["color"] = "red"
                 gs = unpaid_groups(con, s["id"], cur)
