@@ -1474,7 +1474,7 @@ async function renderWorkdesk(page) {
     ...((paymentsForDate?.columns?.[0]?.cards||[]).length ? [{ key:"manual-payments", icon:"🧾", label:"Оплаты Точки", count:paymentsForDate.columns[0].cards.length, danger:true, html:`<div id="dw-manual-payment-checks"><p class="pipeline-note">Нужно подтвердить поступление на расчётный счёт и чек в ОФД</p>${boardHtml(paymentsForDate)}</div>` }] : []),
     ...(erpHtml ? [{ key:"tasks", icon:"✅", label:"Задачи", count:null, html:`<div id="dw-erptasks-hub">${erpHtml}</div>` }] : [])
   ];
-  if (!pipelineItems.some(item=>item.key===S.deskPipeline)) S.deskPipeline = freshLeads.length ? "new" : "sales";
+  if (!pipelineItems.some(item=>item.key===S.deskPipeline)) S.deskPipeline = visibleFreshLeads.length ? "new" : "sales";
   const pipelineHub = `<section class="pipeline-hub" aria-label="Работа с клиентами">
     <div class="pipeline-hub-head"><div><h2>Работа с клиентами</h2><p>Все воронки в одном месте</p></div><div class="pipeline-date-filter" aria-label="Фильтр по дате"><button type="button" class="btn sm ${S.workdeskDate===S.meta.today?'primary':''}" data-pipeline-today>На сегодня</button><label><span>Дата</span><input type="date" value="${esc(S.workdeskDate)}" data-pipeline-date></label><span class="pipeline-hub-total">${pipelineItems.reduce((sum,item)=>sum+(item.count||0),0)} карточек</span></div></div>
     <nav class="pipeline-tabs" aria-label="Выберите воронку">${pipelineItems.map(item=>`<button type="button" class="pipeline-tab ${item.key===S.deskPipeline?'active':''} ${item.danger?'danger':''}" data-pipeline-tab="${item.key}" aria-selected="${item.key===S.deskPipeline}"><span>${item.icon}</span><b>${esc(item.label)}</b>${item.count!==null?`<em>${item.count}</em>`:''}</button>`).join('')}</nav>
