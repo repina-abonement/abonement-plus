@@ -70,7 +70,7 @@ class RenewalPaymentChainTest(unittest.TestCase):
 
         money.reconcile(self.con, self.sid)
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM tasks WHERE student_id=? AND status='open' AND kind='renew'", (self.sid,)).fetchone()[0], 1)
-        self.assertEqual(self.con.execute("SELECT erp_status FROM students WHERE id=?", (self.sid,)).fetchone()[0], "Постоянный посетитель")
+        self.assertEqual(self.con.execute("SELECT erp_status FROM students WHERE id=?", (self.sid,)).fetchone()[0], "Новый оплативший посетитель")
 
 
 if __name__ == "__main__":
