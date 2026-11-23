@@ -3,9 +3,16 @@
    ручные в «Ручных». «Выполнено» ставит следующую задачу по цепочке */
 S.etDay = S.etDay || "today";
 
-async function erpTasksSection(asUser=null, layout="grid") {
+async function erpTasksSection(asUser=null, layout="grid", excludedTaskIds=[]) {
   let d;
-  try { d = await api("GET", "/api/tasks/erp-board?day=" + S.etDay + (asUser ? "&as_user=" + encodeURIComponent(asUser.id) : "")); } catch (_) { return ""; }
+  try { d = await api("GET", "/api/tasks/erp-board?day=" + S.etDay + (asUser ? "&as_user=" + encodeURIComponent(asUser.id) : "")); } catch (_) { return {html:"",count:0}; }
+  const excluded=new Set(excludedTaskIds.map(Number));
+  let removed=0;
+  d.columns=d.columns.map((column)=>{
+    const cards=column.cards.filter((task)=>{const duplicate=excluded.has(Number(task.id));if(duplicate)removed+=1;return !duplicate});
+    return {...column,cards};
+  }).filter((column)=>column.cards.length);
+  if(d.counts&&Object.prototype.hasOwnProperty.call(d.counts,d.day))d.counts[d.day]=Math.max(0,(d.counts[d.day]||0)-removed);
   S.taskById = S.taskById || {};
   d.columns.forEach((c) => c.cards.forEach((t) => (S.taskById[t.id] = t)));
   const exactDay = /^\d{4}-\d{2}-\d{2}$/.test(S.etDay);
@@ -31,8 +38,8 @@ async function erpTasksSection(asUser=null, layout="grid") {
   };
   const empty = exactDay ? `На ${dShort(S.etDay)} задач нет` : { overdue: "Просроченных задач нет 👍", today: "На сегодня задач нет", tomorrow: "На завтра задач пока нет", future: "Будущих задач пока нет" }[d.day];
   const funnel = layout === "funnel";
-  return `<section class="et-box ${funnel ? "et-funnel-layout" : "et-grid-layout"}" id="dw-erptasks">
-    <div class="now-head"><h3>📋 Задачи</h3>
+  const html=`<section class="et-box ${funnel ? "et-funnel-layout" : "et-grid-layout"}" id="dw-erptasks">
+    <div class="now-head"><h3>📋 Прочие задачи</h3>
       <div class="seg et-tabs">${tabs.map(([k, l]) => `<button data-etday="${k}" class="${d.day === k ? "active" : ""} ${k === "overdue" && d.counts.overdue ? "et-red" : ""}">${l} <b>${d.counts[k]}</b></button>`).join("")}${exactDay?`<button class="active">${dShort(S.etDay)}</button>`:""}</div>
       <button class="btn sm" id="et-add" style="margin-left:auto">+ Ручная задача</button></div>
     <div id="et-addbox"></div>
@@ -44,6 +51,7 @@ async function erpTasksSection(asUser=null, layout="grid") {
       <div class="et-task-grid" role="list" aria-label="Задачи на выбранный день">${d.columns.flatMap((c) => c.cards.map((t) => card(t, c.key, c.title))).join("")}</div>`
       : `<div class="muted small" style="padding:6px 2px">${empty}</div>`}
   </section>`;
+  return {html,count:d.columns.reduce((sum,column)=>sum+column.cards.length,0)};
 }
 
 function wireErpTasks(page) {

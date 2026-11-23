@@ -654,7 +654,7 @@ def card_summary(con, s: dict, st: dict) -> dict:
         con.execute("SELECT name FROM groups WHERE id=?", (s["group_id"],)).fetchone() if s["group_id"] else None)
     sib = con.execute("SELECT COUNT(*) FROM students WHERE family_id=? AND id != ?",
                       (s["family_id"], s["id"])).fetchone()[0]
-    task = con.execute("""SELECT title,note,due_at,kind FROM tasks WHERE student_id=? AND status='open'
+    task = con.execute("""SELECT id,title,note,due_at,kind FROM tasks WHERE student_id=? AND status='open'
                         ORDER BY due_at,priority DESC,id LIMIT 1""", (s["id"],)).fetchone()
     return {
         "id": s["id"], "name": s["name"], "family": fam["name"] if fam else "", "family_id": s["family_id"],
@@ -666,6 +666,7 @@ def card_summary(con, s: dict, st: dict) -> dict:
         "branch": "" if grp else _branch_name(con, s.get("branch_id")),
         "score": (__import__("crm.smart", fromlist=["lead_score"]).lead_score(con, s) or {}).get("level") if s["funnel"] == "sales" else None,
         "task_title": task["title"] if task else "",
+        "task_id": task["id"] if task else None,
         "task_note": task["note"] if task else "",
         "task_kind": task["kind"] if task else "",
         "due": task["due_at"] if task else "",

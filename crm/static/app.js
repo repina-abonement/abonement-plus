@@ -1406,8 +1406,7 @@ async function renderWorkdesk(page) {
   const tasksHtmlRequest = tasksSection().catch((error) => `<section class="now red-box workdesk-part-error">
     <div class="now-head"><h3>Задачи временно не загрузились</h3><button type="button" class="btn sm" data-reload-workdesk>Повторить</button></div>
     <div class="small">Остальные разделы рабочего стола доступны. ${esc(error.message || "Ошибка сервера")}</div></section>`);
-  const [d, tasksHtml, schedHtml, erpHtml, skips, members] = await Promise.all([workdeskData, tasksHtmlRequest, scheduleWidget().catch(() => ""),
-    (can("sales") || S.viewAs || S.user.is_offline_admin) ? erpTasksSection(S.viewAs, taskLayout) : Promise.resolve(""), can("skips") ? api("GET", "/api/board/skips").catch(() => null) : Promise.resolve(null),
+  const [d, tasksHtml, schedHtml, members] = await Promise.all([workdeskData, tasksHtmlRequest, scheduleWidget().catch(() => ""),
     can("members", "full") ? api("GET", "/api/board/members").catch(() => null) : Promise.resolve(null)]);
   // воронка «Продления» (Юлия, 04.11): разовые, не оплачен, продлить (с 20 числа), счёт выставлен, ушёл. Оплатившие не попадают
   const since30 = addDays(S.meta.today, -30);
@@ -1430,7 +1429,7 @@ async function renderWorkdesk(page) {
     sched: { html: schedHtml, icon: "📅", label: "Сегодня в филиалах" },
     bday: { html: birthdaysBox(d.birthdays), icon: "🎂", label: "Дни рождения" },
     // Юлия, 04.11: задачи по клиентам у администраторов общие, они в «📋 Задачи»; «Мои задачи» на столе не нужны
-    tasks: { html: erpHtml ? "" : tasksHtml, icon: "✅", label: "Задачи" },
+    tasks: { html: tasksHtml, icon: "✅", label: "Прочие задачи" },
     answers: { html: coachAnswersBox(d.coach_answers), icon: "💬", label: "Ответы тренеров", n: (d.coach_answers || []).length },
     reports: { html: shiftReportsBox(d.shift_reports), icon: "📝", label: "Отчёты о смене",
       n: d.shift_reports ? d.shift_reports.late.length + d.shift_reports.issues.length : 0, red: true },
@@ -1465,14 +1464,27 @@ async function renderWorkdesk(page) {
   };
   const newCardIds=new Set(visibleFreshLeads.map(card=>Number(card.id)));
   const salesWithoutNewCards=d.board?{...d.board,columns:d.board.columns.map(column=>({...column,cards:column.cards.filter(card=>!newCardIds.has(Number(card.id)))}))}:d.board;
-  const salesForDate=filterBoardForDate(salesWithoutNewCards),renewForDate=filterBoardForDate(renew),skipsForDate=filterBoardForDate(skips),paymentsForDate=filterBoardForDate(d.manual_payment_checks);
+  let salesForDate=filterBoardForDate(salesWithoutNewCards),renewForDate=filterBoardForDate(renew),paymentsForDate=filterBoardForDate(d.manual_payment_checks);
+  const taskIdsInBoard=(board,cardsAreTasks=false)=>new Set((board?.columns||[]).flatMap(column=>column.cards||[]).map(card=>Number(cardsAreTasks?card.id:card.task_id)).filter(Boolean));
+  const paymentTaskIds=taskIdsInBoard(paymentsForDate,true);
+  const withoutTaskIds=(board,ids)=>board?{...board,columns:board.columns.map(column=>({...column,cards:column.cards.filter(card=>!ids.has(Number(card.task_id)))}))}:board;
+  // Одна и та же задача может быть показана только в одной воронке. Оплата Точки
+  // приоритетнее новой заявки, продления и продажи; затем идёт новая заявка,
+  // продление, продажа и только после них «Прочие задачи».
+  const newTaskIds=taskIdsInBoard(newCardsBoard);
+  renewForDate=withoutTaskIds(renewForDate,new Set([...paymentTaskIds,...newTaskIds]));
+  const renewTaskIds=taskIdsInBoard(renewForDate);
+  salesForDate=withoutTaskIds(salesForDate,new Set([...paymentTaskIds,...newTaskIds,...renewTaskIds]));
+  const specializedTaskIds=new Set([...taskIdsInBoard(newCardsBoard),...taskIdsInBoard(salesForDate),...taskIdsInBoard(renewForDate),...paymentTaskIds]);
+  const erpSection=(can("sales") || S.viewAs || S.user.is_offline_admin)
+    ? await erpTasksSection(S.viewAs,taskLayout,[...specializedTaskIds]) : {html:"",count:0};
+  const erpHtml=erpSection.html;
   const pipelineItems = [
     { key:"new", icon:"✨", label:"Новые карточки", count:visibleFreshLeads.length, html:newCardsPanel },
     { key:"sales", icon:"🛒", label:"Продажи", count:(salesForDate?.columns||[]).reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-sales">${boardHtml(salesForDate)}</div>` },
     ...(renewForDate ? [{ key:"renew", icon:"🔁", label:"Продления", count:renewForDate.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-renew">${boardHtml(renewForDate)}</div>` }] : []),
-    ...(skipsForDate ? [{ key:"skips", icon:"🩹", label:"Пропуски и отработки", count:skipsForDate.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-skips">${skipsForDate.note?`<div class="pipeline-note">${esc(skipsForDate.note)}</div>`:""}${boardHtml(skipsForDate)}</div>` }] : []),
     ...((paymentsForDate?.columns?.[0]?.cards||[]).length ? [{ key:"manual-payments", icon:"🧾", label:"Оплаты Точки", count:paymentsForDate.columns[0].cards.length, danger:true, html:`<div id="dw-manual-payment-checks"><p class="pipeline-note">Нужно подтвердить поступление на расчётный счёт и чек в ОФД</p>${boardHtml(paymentsForDate)}</div>` }] : []),
-    ...(erpHtml ? [{ key:"tasks", icon:"✅", label:"Задачи", count:null, html:`<div id="dw-erptasks-hub">${erpHtml}</div>` }] : [])
+    ...(erpHtml ? [{ key:"tasks", icon:"✅", label:"Прочие задачи", count:erpSection.count, html:`<div id="dw-erptasks-hub">${erpHtml}</div>` }] : [])
   ];
   if (!pipelineItems.some(item=>item.key===S.deskPipeline)) S.deskPipeline = visibleFreshLeads.length ? "new" : "sales";
   const pipelineHub = `<section class="pipeline-hub" aria-label="Работа с клиентами">
@@ -1517,7 +1529,6 @@ async function renderWorkdesk(page) {
   if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
   const newCardsBoardElement=page.querySelector("#dw-new-cards");if(newCardsBoardElement)wireBoard(newCardsBoardElement,"new",newCardsBoard);
   const salesBoard=page.querySelector("#dw-sales");if(salesBoard)wireBoard(salesBoard,"sales",salesForDate);
-  const skipsBoard=page.querySelector("#dw-skips");if(skipsForDate&&skipsBoard)wireBoard(skipsBoard,"skips",skipsForDate);
   const renewBoard=page.querySelector("#dw-renew");if(renewForDate&&renewBoard)wireBoard(renewBoard,"members",renewForDate);
   const manualPaymentBoard=page.querySelector("#dw-manual-payment-checks");if(manualPaymentBoard)wireBoard(manualPaymentBoard,"manual_payment_checks",d.manual_payment_checks);
   wireErpTasks(page);
