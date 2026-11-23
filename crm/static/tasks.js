@@ -208,7 +208,7 @@ function openTaskMove(t,onDone){
   }catch(err){error.textContent=err.message}};
 }
 
-/* Блок задач наверху карточки клиента: ближайшая задача видна сразу, остальные по кнопке, последние записи истории */
+/* Блок задач наверху карточки клиента: все открытые задачи видны сразу, последние записи истории отдельно */
 function cardTasksBlock(d) {
   const T = d.tasks || { open: [], done: [] };
   (T.open || []).concat(T.done || []).forEach((t) => { S.taskById = S.taskById || {}; S.taskById[t.id] = t; });
@@ -223,8 +223,7 @@ function cardTasksBlock(d) {
   return `<div class="ct-box">
     <div class="ct-head"><div><b>Задачи</b>${T.open.length ? `<span class="ct-count">${T.open.length}</span>` : ""}</div>
       <button class="btn sm ct-add" data-ctadd><span aria-hidden="true">＋</span> Добавить</button></div>
-    ${T.open.length ? row(T.open[0], true) : `<div class="small muted">Открытых задач нет</div>`}
-    ${T.open.length > 1 ? `<details class="ct-more"><summary class="small">Ещё ${T.open.length - 1}</summary>${T.open.slice(1).map((t) => row(t)).join("")}</details>` : ""}
+    ${T.open.length ? T.open.map((t, index) => row(t, index === 0)).join("") : `<div class="small muted">Открытых задач нет</div>`}
     <div data-ctaddbox></div>
     ${last.length ? `<button class="linkish small ct-history-link" data-cthist>История задач <span aria-hidden="true">→</span></button>` : ""}
   </div>`;

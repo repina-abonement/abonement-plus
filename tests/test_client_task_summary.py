@@ -12,6 +12,9 @@ def main():
     assert 'class="ct-meta"' in block
     assert 'class="ct-count"' in block
     assert "История задач" in block
+    assert 'class="ct-more"' not in block
+    assert "Ещё ${T.open.length - 1}" not in block
+    assert "T.open.map((t, index) => row(t, index === 0)).join" in block
     print("PASS client task card is concise, structured and keeps full note in task details")
 
 
