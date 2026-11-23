@@ -1451,11 +1451,9 @@ async function renderWorkdesk(page) {
   const firstName = (S.user.name || "").split(" ")[0];
   const dateTxt = new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" }).replace(/^./, (c) => c.toUpperCase());
   const freshLeads = (d.new_cards_today?.cards || []).filter((x) => x.needs_processing);
-  const processedNewCards = (d.new_cards_today?.cards || []).filter((x) => !x.needs_processing);
   const visibleFreshLeads=who==='offline'?[]:freshLeads;
   const newCardsBoard={funnel:'new',draggable:false,columns:[
-    {key:'new_application',title:'Новая заявка',cards:visibleFreshLeads.map(card=>({...card,color:'red',badge:'Новая заявка',group:card.group||`Источник: ${card.source||'не указан'}`}))},
-    {key:'processed_today',title:'Обработаны сегодня',cards:processedNewCards}
+    {key:'new_application',title:'Новая заявка',cards:visibleFreshLeads.map(card=>({...card,color:'red',badge:'Новая заявка',group:card.group||`Источник: ${card.source||'не указан'}`}))}
   ]};
   const newCardsPanel=`<div id="dw-new-cards">${boardHtml(newCardsBoard)}</div>`;
   const filterBoardForDate = (board) => {
@@ -1465,9 +1463,11 @@ async function renderWorkdesk(page) {
       return cardDate === S.workdeskDate;
     }) })) };
   };
-  const salesForDate=filterBoardForDate(d.board),renewForDate=filterBoardForDate(renew),skipsForDate=filterBoardForDate(skips),paymentsForDate=filterBoardForDate(d.manual_payment_checks);
+  const newCardIds=new Set(visibleFreshLeads.map(card=>Number(card.id)));
+  const salesWithoutNewCards=d.board?{...d.board,columns:d.board.columns.map(column=>({...column,cards:column.cards.filter(card=>!newCardIds.has(Number(card.id)))}))}:d.board;
+  const salesForDate=filterBoardForDate(salesWithoutNewCards),renewForDate=filterBoardForDate(renew),skipsForDate=filterBoardForDate(skips),paymentsForDate=filterBoardForDate(d.manual_payment_checks);
   const pipelineItems = [
-    { key:"new", icon:"✨", label:"Новые карточки", count:visibleFreshLeads.length+processedNewCards.length, html:newCardsPanel },
+    { key:"new", icon:"✨", label:"Новые карточки", count:visibleFreshLeads.length, html:newCardsPanel },
     { key:"sales", icon:"🛒", label:"Продажи", count:(salesForDate?.columns||[]).reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-sales">${boardHtml(salesForDate)}</div>` },
     ...(renewForDate ? [{ key:"renew", icon:"🔁", label:"Продления", count:renewForDate.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-renew">${boardHtml(renewForDate)}</div>` }] : []),
     ...(skipsForDate ? [{ key:"skips", icon:"🩹", label:"Пропуски и отработки", count:skipsForDate.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-skips">${skipsForDate.note?`<div class="pipeline-note">${esc(skipsForDate.note)}</div>`:""}${boardHtml(skipsForDate)}</div>` }] : []),
