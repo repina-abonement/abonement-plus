@@ -52,3 +52,11 @@ const ilyaSale=kiselev.events.find(event=>event.event_kind==='subscription_sale'
 if(!ilyaSale||ilyaSale.student_name!=='Киселёв Илья'||ilyaSale.amount!==5120||ilyaSale.payment_method!=='card'||ilyaSale.components[0].dates.length!==4)throw new Error('Kiselev November sale not parsed');
 if(!kiselev.events.some(event=>event.event_kind==='trial_result'&&event.outcome==='purchased'))throw new Error('Kiselev trial result not parsed');
 console.log('PASS Kiselev November sale and trial result');
+
+const markov = context.chatDayPayload([{name:'Служба заботы',messages:[
+  {id:21473,date:'2026-11-14T11:55:50',text:'Внесите запись на ПУ 18.11 среда на 16:45\nТимофей Марков 23.04.2024\nМама Вера\n89261775474 тг и макс'},
+  {id:22891,date:'2026-11-22T20:32:01',text:'Отчет 22.11\n• Марков Тимофей 16:45 решили подождать до весны, в апреле исполнится 3, на тренировке не все понимал пока, связь в апреле с ними, группу 1,5-3 неудобно'},
+]},{name:'ТРЕНЕРЫ',messages:[]}], '2026-11-22');
+const timofey=markov.events.find(event=>event.student_name==='Марков Тимофей');
+if(!timofey||!timofey.create_if_missing||timofey.birth!=='2024-04-23'||timofey.phone!=='+7 926 177-54-74'||timofey.trial_time!=='16:45')throw new Error('Markov identity was not attached to result');
+console.log('PASS Markov full identity is attached to trial result');

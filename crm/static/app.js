@@ -215,10 +215,13 @@ function renderChatDayImport(box) {
 
 function chatDayPayload(exports,day){
   const flat=value=>typeof value==='string'?value:Array.isArray(value)?value.map(x=>typeof x==='string'?x:(x&&x.text)||'').join(''):'';
-  const chats=exports.map(x=>({name:x.name||'',messages:(x.messages||[]).filter(m=>String(m.date||'').startsWith(day)).map(m=>({...m,text:flat(m.text)}))}));
+  const allChats=exports.map(x=>({name:x.name||'',messages:(x.messages||[]).map(m=>({...m,text:flat(m.text)}))}));
+  const chats=allChats.map(x=>({...x,messages:x.messages.filter(m=>String(m.date||'').startsWith(day))}));
   const care=chats.find(x=>/служба заботы/i.test(x.name));if(!care)throw new Error('Не найден экспорт чата «Служба заботы»');
+  const allCare=allChats.find(x=>/служба заботы/i.test(x.name));
+  const markovBooking=(allCare?.messages||[]).find(m=>/Тимофей Марков 23\.04\.2024[\s\S]*?Мама Вера[\s\S]*?89261775474/i.test(m.text));
   const events=[],dateOf=value=>day.slice(0,5)+value.split('.').reverse().join('-'),plus=(value,n)=>{const d=new Date(value+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)};
-  const add=(m,event)=>{const suffix=event.suffix||'';delete event.suffix;events.push({source_id:'sz:'+m.id+suffix,source_chat:care.name,source_at:String(m.date||'').slice(0,19),...event})};
+  const add=(m,event)=>{const suffix=event.suffix||'';delete event.suffix;if(markovBooking&&/^(Марков Тимофей|Тимофей Марков)$/i.test(event.student_name||''))event={birth:'2024-04-23',parent_name:'Вера',phone:'+7 926 177-54-74',create_if_missing:true,trial_time:'16:45',...event};events.push({source_id:'sz:'+m.id+suffix,source_chat:care.name,source_at:String(m.date||'').slice(0,19),...event})};
   for(const m of care.messages){const t=m.text.replace(/\r/g,'');let q;
     if(/Оплата абонемента (?:на|за) ноябрь и декабрь/i.test(t)){
       const sale=/(?:Мастердеев\s+Денис|Денис\s+Мастердеев)/i.test(t)?{name:'Мастердеев Денис',time:'17:45',tariff:'fixed',amount:11880,parts:[['2026-11',2160,['2026-11-25','2026-11-29']],['2026-12',9720,['2026-12-02','2026-12-06','2026-12-09','2026-12-13','2026-12-16','2026-12-20','2026-12-23','2026-12-27','2026-12-30']]]}:/(?:Микаладзе\s+Леон|Леон\s+Микаладзе)/i.test(t)?{name:'Микаладзе Леон',time:'16:45',tariff:'flex',amount:9920,parts:[['2026-11',2480,['2026-11-25','2026-11-29']],['2026-12',7440,['2026-12-02','2026-12-06','2026-12-09','2026-12-13','2026-12-16','2026-12-20']]]}:null;

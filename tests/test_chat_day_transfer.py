@@ -115,6 +115,26 @@ def test_markov_egorov_and_khvostov_receive_their_real_followup_chains():
             assert repaired['due_at'][:10]=='2027-03-23'
 
 
+def test_markov_missing_card_is_created_from_verified_care_identity():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'markov-create.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    event={'source_id':'sz:22891:марков-тимофей','source_chat':'Служба заботы','source_at':'2026-11-22T20:32:01',
+        'student_name':'Марков Тимофей','birth':'2024-04-23','parent_name':'Вера','phone':'+7 926 177-54-74',
+        'create_if_missing':True,'event_kind':'trial_result','event_date':'2026-11-22','trial_time':'16:45','came':True,
+        'outcome':'later','note':'Решили подождать до весны: на тренировке пока не всё понимал, хотят группу с детьми постарше'}
+    first=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(first['applied'])==1 and not first['errors'] and not first['unmatched']
+    student=con.execute("SELECT id,birth,trial_at,trial_came,stage FROM students WHERE name='Марков Тимофей'").fetchone()
+    assert student and (student['birth'],student['trial_at'],student['trial_came'],student['stage'])==('2024-04-23','2026-11-22T16:45',1,'later')
+    parent=con.execute("SELECT name,phone_norm FROM parents WHERE family_id=(SELECT family_id FROM students WHERE id=?)",(student['id'],)).fetchone()
+    assert parent['name']=='Вера' and parent['phone_norm'].endswith('9261775474')
+    task=con.execute("SELECT title,due_at FROM tasks WHERE student_id=? AND status='open' AND kind='rebook'",(student['id'],)).fetchone()
+    assert task and task['due_at'][:10]=='2027-03-23'
+    assert con.execute("SELECT 1 FROM tasks WHERE student_id=? AND status='open' AND auto_key=?",(student['id'],f"ad-source-required:{student['id']}")).fetchone()
+    second=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(second['already'])==1 and con.execute("SELECT COUNT(*) FROM students WHERE name='Марков Тимофей'").fetchone()[0]==1
+
+
 def test_confirmed_paid_sale_does_not_leave_manual_renewal_duplicate():
     con=db.connect(str(Path(tempfile.mkdtemp())/'sale.sqlite3'));db.init_db(con)
     user={'id':1,'role':'admin','name':'Руководитель'}

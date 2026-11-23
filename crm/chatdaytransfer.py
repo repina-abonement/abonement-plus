@@ -255,11 +255,34 @@ def apply(con,data,user):
             student=con.execute('SELECT id,name FROM students WHERE id=?',(old['student_id'],)).fetchone()
             result['already'].append({'source_id':source,'student_id':old['student_id'],'name':student['name'] if student else '', 'tasks':_current_tasks(con,old['student_id'])});continue
         matches=_match(con,event)
+        created=False
         if not matches:
-            result['unmatched'].append({'source_id':source,'name':event.get('student_name'),'phone':event.get('phone','')});continue
+            allowed=(event.get('create_if_missing') is True and event.get('event_kind')=='trial_result'
+                     and str(event.get('source_chat') or '').casefold().startswith('служба заботы'))
+            required=(str(event.get('student_name') or '').strip(),str(event.get('birth') or '').strip(),
+                      str(event.get('parent_name') or '').strip(),str(event.get('phone') or '').strip())
+            if not allowed or not all(required):
+                result['unmatched'].append({'source_id':source,'name':event.get('student_name'),'phone':event.get('phone','')});continue
+            try:datetime.fromisoformat(required[1])
+            except ValueError:
+                result['errors'].append({'source_id':source,'name':event.get('student_name'),'error':'Неверная дата рождения новой карточки'});continue
+            con.execute('SAVEPOINT chat_day_event')
+            try:
+                sid=sv.create_student(con,{'name':required[0],'birth':required[1],'parent_name':required[2],
+                    'phone':required[3],'funnel':'sales','source':str(event.get('source') or '')},user)
+                trial_day=str(event.get('event_date') or '')[:10]
+                trial_time=str(event.get('trial_time') or '')[:5]
+                datetime.fromisoformat(trial_day+'T'+trial_time)
+                con.execute("UPDATE students SET trial_at=?,historical_trial=1,stage='trial_booked',stage_changed_at=? WHERE id=?",
+                            (trial_day+'T'+trial_time,sv.now_iso(),sid))
+                matches=[{'id':sid,'name':required[0]}];created=True
+            except Exception as exc:
+                con.execute('ROLLBACK TO chat_day_event');con.execute('RELEASE chat_day_event')
+                result['errors'].append({'source_id':source,'name':event.get('student_name'),'error':str(exc)});continue
         if len(matches)!=1:
             result['ambiguous'].append({'source_id':source,'name':event.get('student_name'),'candidates':[x['name'] for x in matches]});continue
-        sid=matches[0]['id']; con.execute('SAVEPOINT chat_day_event')
+        sid=matches[0]['id']
+        if not created:con.execute('SAVEPOINT chat_day_event')
         try:
             at=str(event.get('source_at') or '')[:19]
             datetime.fromisoformat(at)
