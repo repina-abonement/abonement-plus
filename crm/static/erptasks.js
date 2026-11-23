@@ -8,6 +8,7 @@ async function erpTasksSection(asUser=null, layout="grid") {
   try { d = await api("GET", "/api/tasks/erp-board?day=" + S.etDay + (asUser ? "&as_user=" + encodeURIComponent(asUser.id) : "")); } catch (_) { return ""; }
   S.taskById = S.taskById || {};
   d.columns.forEach((c) => c.cards.forEach((t) => (S.taskById[t.id] = t)));
+  const exactDay = /^\d{4}-\d{2}-\d{2}$/.test(S.etDay);
   const tabs = [["overdue", "Просрочено"], ["today", "Сегодня"], ["tomorrow", "Завтра"], ["future", "Будущие"]];
   const when = (t) => {
     if(t.client_task||t.student_id||t.student?.id||t.family_id)return `📅 ${dShort(t.due_at)}`;
@@ -28,11 +29,11 @@ async function erpTasksSection(asUser=null, layout="grid") {
       <button type="button" class="et-details-toggle" data-etdetails="${t.id}" aria-expanded="false">Подробности</button>
     </article>`;
   };
-  const empty = { overdue: "Просроченных задач нет 👍", today: "На сегодня задач нет", tomorrow: "На завтра задач пока нет", future: "Будущих задач пока нет" }[d.day];
+  const empty = exactDay ? `На ${dShort(S.etDay)} задач нет` : { overdue: "Просроченных задач нет 👍", today: "На сегодня задач нет", tomorrow: "На завтра задач пока нет", future: "Будущих задач пока нет" }[d.day];
   const funnel = layout === "funnel";
   return `<section class="et-box ${funnel ? "et-funnel-layout" : "et-grid-layout"}" id="dw-erptasks">
     <div class="now-head"><h3>📋 Задачи</h3>
-      <div class="seg et-tabs">${tabs.map(([k, l]) => `<button data-etday="${k}" class="${d.day === k ? "active" : ""} ${k === "overdue" && d.counts.overdue ? "et-red" : ""}">${l} <b>${d.counts[k]}</b></button>`).join("")}</div>
+      <div class="seg et-tabs">${tabs.map(([k, l]) => `<button data-etday="${k}" class="${d.day === k ? "active" : ""} ${k === "overdue" && d.counts.overdue ? "et-red" : ""}">${l} <b>${d.counts[k]}</b></button>`).join("")}${exactDay?`<button class="active">${dShort(S.etDay)}</button>`:""}</div>
       <button class="btn sm" id="et-add" style="margin-left:auto">+ Ручная задача</button></div>
     <div id="et-addbox"></div>
     ${d.columns.length ? funnel ? `<div class="et-board-navigation" aria-label="Прокрутка воронки задач"><button type="button" class="btn sm" data-etleft aria-label="Предыдущие статусы">← Влево</button><span class="small muted" data-etrange></span><button type="button" class="btn sm" data-etright aria-label="Следующие статусы">Вправо →</button></div>

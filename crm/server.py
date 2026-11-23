@@ -12,6 +12,7 @@ import re
 import secrets
 import traceback
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1227,9 +1228,14 @@ def workdesk(con, h, user, body, q):
     part = lambda name, build, fallback: _workdesk_piece(con, name, build, fallback, errors)
     sip_user = int(q["as_user"]) if q.get("as_user") and user["role"] == "admin" else user["id"]
     sip_number = (con.execute("SELECT sip_number FROM users WHERE id=?", (sip_user,)).fetchone() or [""])[0]
+    selected_day = q.get("date") or ""
+    try:
+        selected_ref = datetime.fromisoformat(selected_day).replace(tzinfo=ZoneInfo("Europe/Moscow")) if selected_day else None
+    except ValueError:
+        raise ApiError("Некорректная дата", 400)
     result = {"urgent": reds + rest, "board": board,
             "refund_requests": part("refund_requests", lambda: __import__("crm.refundapproval",fromlist=["listing"]).listing(con), []) if user["role"]=="admin" else [],
-            "new_cards_today": part("new_cards_today", lambda: sv.new_cards_today(con), []),
+            "new_cards_today": part("new_cards_today", lambda: sv.new_cards_today(con, selected_ref, not selected_day or selected_day == date.today().isoformat()), []),
             "birthdays": part("birthdays", lambda: sv.birthdays(con), []),
             "needs_subs": part("needs_subs", lambda: schedule.needs_subs(con), []),
             "manual_payment_checks": part("manual_payment_checks", lambda: __import__("crm.manualpaymentcheck",fromlist=["task_board"]).task_board(con), {"columns": []}),

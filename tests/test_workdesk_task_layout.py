@@ -60,6 +60,12 @@ def test_admin_funnels_share_one_readable_pipeline_hub():
     assert ".pipeline-tabs" in styles
     assert ".pipeline-panel[hidden]" in styles
     assert "flex-basis: 82vw" in styles
+    assert 'data-pipeline-today' in app
+    assert 'data-pipeline-date' in app
+    assert 'S.workdeskDate' in app
+    assert 'filterBoardForDate' in app
+    assert 'card.due || card.stage_changed_at || card.created_at' in app
+    assert '.pipeline-date-filter' in styles
 
 
 def test_admin_workdesk_temporarily_renders_only_the_pipeline_hub():

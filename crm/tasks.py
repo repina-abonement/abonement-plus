@@ -1026,6 +1026,12 @@ def erp_board(con, day: str = "today", user: dict | None = None) -> dict:
         scope_args.append(int(user["id"]))
     cond = {"overdue": ("substr(t.due_at,1,10) < ?", t0), "today": ("substr(t.due_at,1,10) = ?", t0),
             "tomorrow": ("substr(t.due_at,1,10) = ?", tomorrow), "future": ("substr(t.due_at,1,10) > ?", tomorrow)}
+    try:
+        selected = date.fromisoformat(day).isoformat()
+    except (TypeError, ValueError):
+        selected = None
+    if selected:
+        cond[day] = ("substr(t.due_at,1,10) = ?", selected)
     counts = {k: con.execute(f"SELECT COUNT(*) FROM ({base} AND {c})", (*visible_ids, *scope_args, v)).fetchone()[0] for k, (c, v) in cond.items()}
     c, v = cond.get(day, cond["today"])
     order = [k for k, _ in ERP_COLUMNS]

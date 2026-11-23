@@ -666,7 +666,7 @@ def card_summary(con, s: dict, st: dict) -> dict:
     }
 
 
-def new_cards_today(con, ref=None):
+def new_cards_today(con, ref=None, include_pending=True):
     from zoneinfo import ZoneInfo
     tz=ZoneInfo('Europe/Moscow')
     day=(ref or datetime.now(tz)).astimezone(tz).date()
@@ -685,7 +685,7 @@ def new_cards_today(con, ref=None):
                AND substr(due_at,1,10)<=? LIMIT 1""", (row['id'], day.isoformat())).fetchone()
         # Красная очередь включает все необработанные заявки, даже если они поступили раньше.
         # Обычные карточки после обработки показываем здесь только в день создания.
-        if created.date()!=day and not pending:
+        if created.date()!=day and not (include_pending and pending):
             continue
         card=card_summary(con,dict(row),settings(con))
         card['created_at']=row['created_at']

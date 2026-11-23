@@ -61,9 +61,11 @@ class NewClientTest(unittest.TestCase):
     def test_unprocessed_application_from_previous_day_remains_in_queue(self):
         sid=sv.create_new_lead(self.con,{**self.data,'source':'Промоутер: Иван Ивакин'},self.user)
         self.con.execute("UPDATE students SET created_at='2026-11-20T12:00' WHERE id=?",(sid,))
+        self.con.execute("UPDATE tasks SET due_at='2026-11-22T23:59' WHERE student_id=? AND kind='call_lead'",(sid,))
         ref=datetime.fromisoformat('2026-11-22T12:00:00+03:00')
         card=next(x for x in sv.new_cards_today(self.con,ref)['cards'] if x['id']==sid)
         self.assertTrue(card['needs_processing'])
+        self.assertNotIn(sid,[x['id'] for x in sv.new_cards_today(self.con,ref,include_pending=False)['cards']])
         self.con.execute("UPDATE tasks SET status='done' WHERE student_id=? AND kind='call_lead'",(sid,))
         self.assertNotIn(sid,[x['id'] for x in sv.new_cards_today(self.con,ref)['cards']])
 

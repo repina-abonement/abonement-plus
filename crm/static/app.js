@@ -1328,7 +1328,11 @@ async function renderWorkdesk(page) {
   if (S.viewAs && S.viewAs.role === "coach") { await renderCoachToday(page, S.viewAs.id, bar); return wireViewAs(page); }
   const taskDeskUser = S.viewAs || S.user;
   const taskLayout = taskDeskUser.role === "operator" && !taskDeskUser.is_senior && !taskDeskUser.is_offline_admin ? "funnel" : "grid";
-  const workdeskUrl = "/api/workdesk" + (S.viewAs ? "?as_user=" + S.viewAs.id : "");
+  S.workdeskDate = S.workdeskDate || S.meta.today;
+  const workdeskParams = new URLSearchParams();
+  if (S.viewAs) workdeskParams.set("as_user", S.viewAs.id);
+  if (S.workdeskDate !== S.meta.today) workdeskParams.set("date", S.workdeskDate);
+  const workdeskUrl = "/api/workdesk" + (workdeskParams.size ? "?" + workdeskParams.toString() : "");
   const workdeskData = api("GET", workdeskUrl).catch(async (error) => {
     // Во время автоматической публикации служба перезапускается на несколько секунд.
     // GET безопасно повторить: не оставляем вместо рабочего стола постоянную «Ошибка сервера».
@@ -1336,6 +1340,7 @@ async function renderWorkdesk(page) {
     await new Promise((resolve) => setTimeout(resolve, 1200));
     return api("GET", workdeskUrl);
   });
+  S.etDay = S.workdeskDate === S.meta.today ? (S.etDay && !/^\d{4}-\d{2}-\d{2}$/.test(S.etDay) ? S.etDay : "today") : S.workdeskDate;
   const tasksHtmlRequest = tasksSection().catch((error) => `<section class="now red-box workdesk-part-error">
     <div class="now-head"><h3>Задачи временно не загрузились</h3><button type="button" class="btn sm" data-reload-workdesk>Повторить</button></div>
     <div class="small">Остальные разделы рабочего стола доступны. ${esc(error.message || "Ошибка сервера")}</div></section>`);
@@ -1392,18 +1397,26 @@ async function renderWorkdesk(page) {
   const newCardsPanel = `${freshLeadAlert}${processedNewCards.length ? `<section class="new-cards-today" id="dw-new-cards">
     <div class="now-head"><h3>Обработанные сегодня</h3><span class="count">${processedNewCards.length}</span></div>
     <div class="new-cards-list">${processedNewCards.map(k=>`<button type="button" class="btn" data-new-card="${k.id}"><b>${esc(k.name)}</b><span class="small muted">${esc(k.stage==='lead'?'Новый лид':k.trial_at?'Записан на ПУ':'В работе')}</span></button>`).join('')}</div>
-  </section>` : ""}${!freshLeads.length && !processedNewCards.length ? '<div class="pipeline-empty">Сегодня новых карточек нет</div>' : ""}`;
+  </section>` : ""}${!freshLeads.length && !processedNewCards.length ? `<div class="pipeline-empty">${S.workdeskDate===S.meta.today?'Сегодня':dShort(S.workdeskDate)} новых карточек нет</div>` : ""}`;
+  const filterBoardForDate = (board) => {
+    if (!board || S.workdeskDate === S.meta.today) return board;
+    return { ...board, columns: board.columns.map(column => ({ ...column, cards: column.cards.filter(card => {
+      const cardDate = String(card.due || card.stage_changed_at || card.created_at || "").slice(0, 10);
+      return cardDate === S.workdeskDate;
+    }) })) };
+  };
+  const salesForDate=filterBoardForDate(d.board),renewForDate=filterBoardForDate(renew),skipsForDate=filterBoardForDate(skips),paymentsForDate=filterBoardForDate(d.manual_payment_checks);
   const pipelineItems = [
     { key:"new", icon:"✨", label:"Новые карточки", count:(d.new_cards_today?.cards||[]).length, html:newCardsPanel },
-    { key:"sales", icon:"🛒", label:"Продажи", count:(d.board?.columns||[]).reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-sales">${boardHtml(d.board)}</div>` },
-    ...(renew ? [{ key:"renew", icon:"🔁", label:"Продления", count:renew.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-renew">${boardHtml(renew)}</div>` }] : []),
-    ...(skips ? [{ key:"skips", icon:"🩹", label:"Пропуски и отработки", count:skips.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-skips">${skips.note?`<div class="pipeline-note">${esc(skips.note)}</div>`:""}${boardHtml(skips)}</div>` }] : []),
-    ...((d.manual_payment_checks?.columns?.[0]?.cards||[]).length ? [{ key:"manual-payments", icon:"🧾", label:"Оплаты Точки", count:d.manual_payment_checks.columns[0].cards.length, danger:true, html:`<div id="dw-manual-payment-checks"><p class="pipeline-note">Нужно подтвердить поступление на расчётный счёт и чек в ОФД</p>${boardHtml(d.manual_payment_checks)}</div>` }] : []),
+    { key:"sales", icon:"🛒", label:"Продажи", count:(salesForDate?.columns||[]).reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-sales">${boardHtml(salesForDate)}</div>` },
+    ...(renewForDate ? [{ key:"renew", icon:"🔁", label:"Продления", count:renewForDate.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-renew">${boardHtml(renewForDate)}</div>` }] : []),
+    ...(skipsForDate ? [{ key:"skips", icon:"🩹", label:"Пропуски и отработки", count:skipsForDate.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-skips">${skipsForDate.note?`<div class="pipeline-note">${esc(skipsForDate.note)}</div>`:""}${boardHtml(skipsForDate)}</div>` }] : []),
+    ...((paymentsForDate?.columns?.[0]?.cards||[]).length ? [{ key:"manual-payments", icon:"🧾", label:"Оплаты Точки", count:paymentsForDate.columns[0].cards.length, danger:true, html:`<div id="dw-manual-payment-checks"><p class="pipeline-note">Нужно подтвердить поступление на расчётный счёт и чек в ОФД</p>${boardHtml(paymentsForDate)}</div>` }] : []),
     ...(erpHtml ? [{ key:"tasks", icon:"✅", label:"Задачи", count:null, html:`<div id="dw-erptasks-hub">${erpHtml}</div>` }] : [])
   ];
   if (!pipelineItems.some(item=>item.key===S.deskPipeline)) S.deskPipeline = freshLeads.length ? "new" : "sales";
   const pipelineHub = `<section class="pipeline-hub" aria-label="Работа с клиентами">
-    <div class="pipeline-hub-head"><div><h2>Работа с клиентами</h2><p>Все воронки в одном месте</p></div><span class="pipeline-hub-total">${pipelineItems.reduce((sum,item)=>sum+(item.count||0),0)} карточек</span></div>
+    <div class="pipeline-hub-head"><div><h2>Работа с клиентами</h2><p>Все воронки в одном месте</p></div><div class="pipeline-date-filter" aria-label="Фильтр по дате"><button type="button" class="btn sm ${S.workdeskDate===S.meta.today?'primary':''}" data-pipeline-today>На сегодня</button><label><span>Дата</span><input type="date" value="${esc(S.workdeskDate)}" data-pipeline-date></label></div><span class="pipeline-hub-total">${pipelineItems.reduce((sum,item)=>sum+(item.count||0),0)} карточек</span></div>
     <nav class="pipeline-tabs" aria-label="Выберите воронку">${pipelineItems.map(item=>`<button type="button" class="pipeline-tab ${item.key===S.deskPipeline?'active':''} ${item.danger?'danger':''}" data-pipeline-tab="${item.key}" aria-selected="${item.key===S.deskPipeline}"><span>${item.icon}</span><b>${esc(item.label)}</b>${item.count!==null?`<em>${item.count}</em>`:''}</button>`).join('')}</nav>
     <div class="pipeline-panels">${pipelineItems.map(item=>`<section class="pipeline-panel" data-pipeline-panel="${item.key}" ${item.key===S.deskPipeline?'':'hidden'}><div class="pipeline-panel-title"><span>${item.icon}</span><h3>${esc(item.label)}</h3>${item.count!==null?`<span class="count">${item.count}</span>`:''}</div>${item.html}</section>`).join('')}</div>
   </section>`;
@@ -1429,6 +1442,10 @@ async function renderWorkdesk(page) {
   page.querySelectorAll("[data-rvclose]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/reviews/${b.dataset.rvclose}/close`, {}); render(); } catch (e) { fail(e); } }));
   page.querySelectorAll("[data-new-card]").forEach(b=>b.onclick=()=>openStudent(+b.dataset.newCard));
   page.querySelectorAll("[data-fresh-lead]").forEach(b=>b.onclick=()=>openStudent(+b.dataset.freshLead));
+  const dateInput=page.querySelector("[data-pipeline-date]");
+  if(dateInput)dateInput.onchange=()=>{if(!dateInput.value)return;S.workdeskDate=dateInput.value;S.etDay=dateInput.value===S.meta.today?'today':dateInput.value;render()};
+  const todayButton=page.querySelector("[data-pipeline-today]");
+  if(todayButton)todayButton.onclick=()=>{S.workdeskDate=S.meta.today;S.etDay='today';render()};
   page.querySelectorAll("[data-pipeline-tab]").forEach(button=>button.onclick=()=>{
     S.deskPipeline=button.dataset.pipelineTab;
     page.querySelectorAll("[data-pipeline-tab]").forEach(tab=>{const active=tab===button;tab.classList.toggle("active",active);tab.setAttribute("aria-selected",active?"true":"false")});
@@ -1440,9 +1457,9 @@ async function renderWorkdesk(page) {
   page.querySelectorAll(".dwf").forEach((x) => x.addEventListener("toggle", () => { S.dwOpen[x.dataset.dwk] = x.open; }));
   page.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => { const el = document.getElementById(b.dataset.jump); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }));
   if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
-  const salesBoard=page.querySelector("#dw-sales");if(salesBoard)wireBoard(salesBoard,"sales",d.board);
-  const skipsBoard=page.querySelector("#dw-skips");if(skips&&skipsBoard)wireBoard(skipsBoard,"skips",skips);
-  const renewBoard=page.querySelector("#dw-renew");if(renew&&renewBoard)wireBoard(renewBoard,"members",renew);
+  const salesBoard=page.querySelector("#dw-sales");if(salesBoard)wireBoard(salesBoard,"sales",salesForDate);
+  const skipsBoard=page.querySelector("#dw-skips");if(skipsForDate&&skipsBoard)wireBoard(skipsBoard,"skips",skipsForDate);
+  const renewBoard=page.querySelector("#dw-renew");if(renewForDate&&renewBoard)wireBoard(renewBoard,"members",renewForDate);
   const manualPaymentBoard=page.querySelector("#dw-manual-payment-checks");if(manualPaymentBoard)wireBoard(manualPaymentBoard,"manual_payment_checks",d.manual_payment_checks);
   wireErpTasks(page);
   wireTasks(page);

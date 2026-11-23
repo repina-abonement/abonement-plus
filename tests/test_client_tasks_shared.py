@@ -24,6 +24,8 @@ def main():
     assert [t['id'] for t in cards if t.get('student_id')==sid]==[b,a]
     assert personal not in [t['id'] for t in cards] and later not in [t['id'] for t in cards]
     assert future in [t['id'] for col in tasks.erp_board(c,'future',v)['columns'] for t in col['cards']]
+    assert later in [t['id'] for col in tasks.erp_board(c,tomorrow,v)['columns'] for t in col['cards']]
+    assert a not in [t['id'] for col in tasks.erp_board(c,tomorrow,v)['columns'] for t in col['cards']]
     assert tasks.erp_board(c,'future',v)['counts']['future']>=1
     assert tasks.ensure_client_task_coverage(c)>0
     fallback=c.execute("SELECT * FROM tasks WHERE student_id=? AND kind='client_followup'",(uncovered,)).fetchone()
