@@ -61,6 +61,9 @@ def calculate(con, student, on: date | None = None, *, monthly=None) -> str:
                     prior_month = prior.get('month') if isinstance(prior,dict) else None
                     if prior_month and prior.get('erp_id') and prior_month < cur:
                         earlier.add(prior_month)
+            if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_prior_memberships'").fetchone():
+                earlier.update(row[0] for row in con.execute(
+                    "SELECT month FROM erp_prior_memberships WHERE student_id=? AND month<?", (sid, cur)))
             if previous in earlier:
                 return "Постоянный посетитель"
             if earlier:

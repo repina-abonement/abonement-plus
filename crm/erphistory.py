@@ -11,6 +11,10 @@ from . import logic, schedule
 from .db import normalize_phone
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS erp_prior_memberships (
+ source_id TEXT PRIMARY KEY, student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+ month TEXT NOT NULL, evidence TEXT NOT NULL, recorded_at TEXT NOT NULL, recorded_by TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS erp_prior_memberships_student ON erp_prior_memberships(student_id,month);
 CREATE TABLE IF NOT EXISTS erp_history_subscriptions (
  id INTEGER PRIMARY KEY, source_id TEXT NOT NULL UNIQUE, student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
  group_id INTEGER NOT NULL REFERENCES groups(id), month TEXT NOT NULL, valid_from TEXT NOT NULL, valid_until TEXT NOT NULL,
@@ -430,6 +434,55 @@ def _student(con, row, selected_id=None):
     candidates = [dict(r) for r in con.execute("""SELECT DISTINCT s.id,s.name,s.birth,s.erp_id FROM students s JOIN parents p ON p.family_id=s.family_id
         WHERE s.birth=? AND p.phone_norm=?""", (birth, phone)) if _same_name(r["name"], name)]
     return (candidates[0], "profile") if len(candidates) == 1 else (None, "Несколько подходящих карточек" if candidates else "Карточка CRM не найдена")
+
+
+def prior_membership(con, body, user, *, apply=False):
+    """Record verified earlier entitlement solely as evidence for status calculation."""
+    from . import erpstatus
+
+    erp_id = str(body.get("erp_student_id") or "").strip()
+    source_id = str(body.get("subscription_id") or "").strip()
+    name = str(body.get("child") or "").strip()
+    month = str(body.get("month") or "").strip()
+    evidence = str(body.get("evidence") or "").strip()
+    if not (re.fullmatch(r"[1-9][0-9]{0,15}", erp_id)
+            and re.fullmatch(r"[1-9][0-9]{0,15}", source_id)
+            and re.fullmatch(r"[1-9][0-9]{3}-(?:0[1-9]|1[0-2])", month)
+            and len(name.split()) >= 2 and 1 <= len(evidence) <= 1500):
+        raise HistoryError("Укажите ФИО, ID ребёнка и абонемента ERP, месяц и источник подтверждения")
+
+    ids = {row[0] for row in con.execute("""
+        SELECT id FROM students WHERE erp_id=?
+        UNION SELECT student_id FROM erp_full_identities WHERE namespace='student' AND source_id=?
+    """, (erp_id, erp_id))}
+    if len(ids) != 1:
+        raise HistoryError("Нужна однозначная связь карточки с ID ученика ERP")
+    sid = ids.pop()
+    student = con.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone()
+    if (not student or student["archived"] or not _same_name(student["name"], name)
+            or student["erp_id"] and str(student["erp_id"]) != erp_id):
+        raise HistoryError("ФИО или ID ученика не совпадает с действующей карточкой")
+    months = erpstatus.confirmed_monthly_months(con, sid)
+    if logic.shift_month(month, 1) not in months:
+        raise HistoryError("В карточке отсутствует подтверждённый абонемент на следующий месяц")
+    known = list(con.execute("""
+        SELECT student_id,month FROM erp_history_subscriptions WHERE source_id=?
+        UNION SELECT student_id,month FROM erp_prior_memberships WHERE source_id=?
+    """, (source_id, source_id)))
+    if any(row["student_id"] != sid or row["month"] != month for row in known):
+        raise HistoryError("Этот номер абонемента ERP уже относится к другой карточке или месяцу")
+    result = {"student_id": sid, "name": student["name"], "month": month,
+              "subscription_id": source_id, "existing": bool(known) or month in months}
+    token = _token([erp_id, name, evidence, result])
+    if not apply:
+        return {**result, "token": token}
+    if body.get("token") != token:
+        raise HistoryError("Данные изменились. Проверьте их ещё раз")
+    if not result["existing"]:
+        con.execute("""INSERT INTO erp_prior_memberships
+            (source_id,student_id,month,evidence,recorded_at,recorded_by) VALUES (?,?,?,?,?,?)""",
+            (source_id, sid, month, evidence, datetime.now().isoformat(timespec="seconds"), user["name"]))
+    return {**result, "status": erpstatus.sync_one(con, sid)}
 
 
 def _group(con, source, day, tm, student_id=None, kind="", *, erp_id="", subscription_id=""):

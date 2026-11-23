@@ -22,6 +22,7 @@ function erpHistorySetup(box){
   const runPreview=async()=>{invalidate();try{let payload=JSON.parse(input.value);const id=panel.querySelector('[data-eh-id]').value.trim(),period=panel.querySelector('[data-eh-period]').value,studentId=student.value;if(!id||!period)throw new Error('Укажите ERP ID и период');const rows=Array.isArray(payload)?payload:[payload],chosen=rows.filter(x=>String(x.erp_student_id||'')===id);if(chosen.length!==1)throw new Error('В JSON должна быть ровно одна запись выбранного ребёнка');payload=chosen[0];const student_ids=studentId?{[id]:Number(studentId)}:{},unassigned_visit_ids=[...approvedUnassigned],visit_group_ids={...selectedVisitGroups},r=await api('POST','/api/erp/history/preview',{payload,period,student_ids,unassigned_visit_ids,visit_group_ids});draw(r);out.querySelectorAll('[data-eh-unassigned]').forEach(x=>x.onchange=()=>{if(x.checked)approvedUnassigned.add(x.dataset.ehUnassigned);else approvedUnassigned.delete(x.dataset.ehUnassigned);runPreview()});out.querySelectorAll('[data-eh-visit]').forEach(x=>x.onchange=()=>{selectedVisitGroups[x.dataset.ehVisit]=Number(x.value);runPreview()});if(r.can_apply){checked={payload,period,student_ids,unassigned_visit_ids,visit_group_ids,token:r.token};apply.disabled=false}}catch(e){out.textContent=e.message;fail(e)}};
   panel.querySelector('[data-eh-preview]').onclick=()=>{approvedUnassigned.clear();selectedVisitGroups={};runPreview()};
   apply.onclick=async()=>{if(!checked)return;apply.disabled=true;try{const r=await api('POST','/api/erp/history/apply',checked);draw(r.preview);toast(`Перенесено: абонементов ${r.subscriptions_added}, занятий в плане ${r.planned_lessons_added||0}, новых отметок ${r.visits_added}, уточнено ${r.visits_updated||0}`);checked=null}catch(e){fail(e);out.textContent=e.message}};
+  setupPriorMembership(panel);
   const creditButton=document.createElement('button');
   creditButton.type='button';
   creditButton.className='btn';
@@ -50,4 +51,52 @@ function erpHistorySetup(box){
   const rcPayload=()=>({student_id:rcStudent,target_subscription_id:Number(rcTarget.value),absence_ids:[...rc.querySelectorAll('[data-rc-absence]:checked')].map(x=>Number(x.value)),source_erp_subscription_id:rc.querySelector('[data-rc-source]').value.trim(),basis:rc.querySelector('[data-rc-basis]').value.trim()});
   rcPreview.onclick=async()=>{rcChecked=null;rcApply.disabled=true;try{const payload=rcPayload();if(!payload.target_subscription_id||!payload.absence_ids.length)throw new Error('Выберите целевой абонемент и пропуски');const result=await api('POST','/api/erp/revenue-carry/preview',payload);rcOut.innerHTML=result.issues.length?result.issues.map(esc).join('<br>'):`<b>Проверка пройдена</b><br>Перенос: ${rub(result.amount)}<br>${result.source_loaded?'Исходная выручка найдена':'Исходная выручка ещё не загружена; корректировка будет ждать историю ERP'}`;if(result.token){rcChecked={...payload,token:result.token};rcApply.disabled=false}}catch(e){rcOut.textContent=e.message;fail(e)}};
   rcApply.onclick=async()=>{if(!rcChecked)return;rcApply.disabled=true;try{const result=await api('POST','/api/erp/revenue-carry/apply',rcChecked);rcOut.innerHTML=`<b>Основание сохранено</b><br>${result.source_loaded?'Корректировка связана с исторической выручкой':'Исходная выручка ещё не загружена; повторно переносить не нужно'}`;rcChecked=null}catch(e){rcOut.textContent=e.message;fail(e)}};
+}
+
+function setupPriorMembership(panel) {
+  const block = document.createElement('details');
+  block.className = 'erp-paste';
+  block.innerHTML = `<summary>Учесть предыдущий абонемент для статуса</summary>
+    <p>Подтвердите предыдущий месяц по выгрузке ERP. CRM сохранит основание для статуса. В деньгах и журнале новых записей не появится</p>
+    <form><div class="erp-history-fields">
+      <label>Фамилия и имя ребёнка<input name="child" required></label>
+      <label>ID ученика ERP<input name="erp_student_id" required inputmode="numeric"></label>
+      <label>Месяц предыдущего абонемента<input name="month" type="month" required></label>
+      <label>Номер предыдущего абонемента ERP<input name="subscription_id" required inputmode="numeric"></label>
+    </div><label>Источник подтверждения<textarea name="evidence" required maxlength="1500" rows="2"></textarea></label>
+    <div class="erp-history-action"><button class="btn" type="submit">Проверить предыдущий абонемент</button>
+    <button class="btn primary" type="button" disabled>Сохранить основание статуса</button></div>
+    <p aria-live="polite"></p></form>`;
+  panel.append(block);
+  const form = block.querySelector('form');
+  const save = form.querySelector('button[type="button"]');
+  const out = form.querySelector('[aria-live]');
+  let checked = null;
+  let revision = 0;
+  form.oninput = () => { revision++; checked = null; save.disabled = true; out.textContent = ''; };
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const version = ++revision;
+    const fields = Object.fromEntries(new FormData(form));
+    checked = null;
+    save.disabled = true;
+    try {
+      const result = await api('POST', '/api/erp/prior-membership/preview', fields);
+      if (version !== revision) return;
+      checked = {...fields, token:result.token};
+      out.textContent = `${result.name} · ${result.month} · абонемент №${result.subscription_id}. ${result.existing ? 'Месяц уже учтён' : 'Можно сохранить основание'}`;
+      save.disabled = false;
+    } catch (error) { if (version === revision) out.textContent = error.message; }
+  };
+  save.onclick = async () => {
+    if (!checked) return;
+    const version = ++revision;
+    const fields = checked;
+    checked = null;
+    save.disabled = true;
+    try {
+      const result = await api('POST', '/api/erp/prior-membership/apply', fields);
+      if (version === revision) out.textContent = `${result.name} · ${result.status}`;
+    } catch (error) { if (version === revision) out.textContent = error.message; }
+  };
 }

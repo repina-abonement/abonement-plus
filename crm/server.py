@@ -933,6 +933,25 @@ def erp_full_apply(con, h, user, body, q):
         raise ApiError(str(e))
 
 
+@route("POST", "/api/erp/prior-membership/preview", role="admin")
+def erp_prior_preview(con, h, user, body, q):
+    from . import erphistory
+    try:
+        return erphistory.prior_membership(con, body, user)
+    except erphistory.HistoryError as exc:
+        raise ApiError(str(exc))
+
+
+@route("POST", "/api/erp/prior-membership/apply", role="admin")
+def erp_prior_apply(con, h, user, body, q):
+    from . import backup, erphistory
+    backup.backup_once()
+    try:
+        return erphistory.prior_membership(con, body, user, apply=True)
+    except erphistory.HistoryError as exc:
+        raise ApiError(str(exc))
+
+
 @route("POST", "/api/erp/history/preview", role="admin")
 def erp_history_preview(con, h, user, body, q):
     from . import erphistory
