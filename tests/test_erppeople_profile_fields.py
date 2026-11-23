@@ -65,6 +65,24 @@ class ErpPeopleProfileFieldsTest(unittest.TestCase):
         self.assertEqual(self.con.execute("SELECT source FROM students WHERE id=?", (sid,)).fetchone()[0], "Сборная")
         self.assertEqual(self.con.execute("SELECT email FROM parents WHERE family_id=(SELECT family_id FROM students WHERE id=?)", (sid,)).fetchone()[0], "verified@example.test")
 
+    def test_erp_id_filter_skips_every_other_full_file_row(self):
+        sid = services.create_student(self.con, {
+            "name": "Иванов Александр", "parent_name": "Родитель", "phone": "+7 900 111-22-33",
+        }, self.user)
+        self.con.execute("UPDATE students SET erp_id='42' WHERE id=?", (sid,))
+        visitor, lead = self.upload(), self.lead_file()
+        preview = erppeople.transfer(self.con, [visitor], [lead], self.user, erp_ids=["42"])
+        self.assertEqual(preview["filter"], {"requested": ["42"], "found": ["42"], "missing": []})
+        self.assertEqual(preview["counts"].get("visitors"), 1)
+        self.assertEqual(preview["counts"].get("leads", 0), 0)
+        self.assertEqual(preview["counts"].get("new", 0), 0)
+        erppeople.transfer(self.con, [visitor], [lead], self.user, preview["token"], ["42"])
+        self.assertEqual(self.con.execute("SELECT count(*) FROM students").fetchone()[0], 1)
+
+        missing = erppeople.transfer(self.con, [visitor], [lead], self.user, erp_ids=["777"])
+        self.assertEqual(missing["filter"]["missing"], ["777"])
+        self.assertEqual(missing["counts"], {})
+
 
 if __name__ == "__main__":
     unittest.main()

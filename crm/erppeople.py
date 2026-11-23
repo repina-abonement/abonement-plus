@@ -87,11 +87,15 @@ def _apply_profile(con, sid, rec, user):
     return preview
 
 
-def _plan(con, visitors, leads):
+def _plan(con, visitors, leads, erp_ids=None):
     if not visitors or not leads or set(visitors) & set(leads):
         raise ei.ImportError_("Выберите отдельно файлы посетителей и лидов")
     files = erpfull._files(con, visitors + leads)
     matcher = erpfull.Matcher(con)
+    requested = {str(value).strip() for value in (erp_ids or []) if str(value).strip()}
+    if any(not value.isdigit() for value in requested):
+        raise ei.ImportError_("ERP ID должны состоять только из цифр")
+    found_requested = set()
     candidates = defaultdict(list)
     counts = Counter()
     issues = []
@@ -113,6 +117,10 @@ def _plan(con, visitors, leads):
             namespace = "lead" if lead else "student"
             rec["id_namespace"] = namespace
             eid = rec.get("erp_id", "").strip()
+            if requested and eid not in requested:
+                continue
+            if requested and eid:
+                found_requested.add(eid)
             status = "Новый лид" if lead else row[status_column].strip()
             counts["leads" if lead else "visitors"] += 1
             if not eid or not status:
@@ -157,16 +165,18 @@ def _plan(con, visitors, leads):
             profile["source_present" if preview["source"][key] else "source_missing"][label] += 1
         profile["fill"].update(preview["fill"])
         profile["conflicts"].extend({"erp_id": eid, "namespace": namespace, **item} for item in preview["conflicts"])
-    report = {"counts": dict(counts), "issues": issues, "profile": {
+    report = {"counts": dict(counts), "issues": issues, "filter": {
+        "requested": sorted(requested), "found": sorted(found_requested),
+        "missing": sorted(requested - found_requested)}, "profile": {
         "source_present": dict(profile["source_present"]), "source_missing": dict(profile["source_missing"]),
         "fill": dict(profile["fill"]), "conflicts": profile["conflicts"]}, "token": token}
     return report, actions
 
 
-def transfer(con, visitors, leads, user, token=None):
+def transfer(con, visitors, leads, user, token=None, erp_ids=None):
     if any(not isinstance(ids, list) or any(type(uid) is not int for uid in ids) for ids in (visitors, leads)):
         raise ei.ImportError_("Выберите файлы посетителей и лидов")
-    report, actions = _plan(con, visitors, leads)
+    report, actions = _plan(con, visitors, leads, erp_ids)
     if token is None:
         return report
     if token != report["token"]:

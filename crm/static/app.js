@@ -1073,27 +1073,32 @@ function erpPeopleSetup(box, data) {
       <p class="small muted">Переносятся карточки без счетов и денежных операций. Обязательные поля проверки: имя и фамилия ребёнка, дата рождения, телефон, имя и роль родителя, почта, рекламный источник и комментарий. Уже созданные карточки, в том числе дети из сборной, сопоставляются без дублей: пустые поля дополняются, расхождения показываются для ручной сверки</p>
       <div class="field"><label for="erp-people-visitors">Посетители, включая архив</label><select id="erp-people-visitors" multiple>${options}</select></div>
       <div class="field"><label for="erp-people-leads">Лиды</label><select id="erp-people-leads" multiple>${options}</select></div>
+      <div class="field"><label for="erp-people-ids">Только указанные ERP ID (необязательно)</label><textarea id="erp-people-ids" rows="2" placeholder="Например: 64928, 65188, 79204"></textarea><div class="small muted">Если поле заполнено, остальные строки полных файлов полностью пропускаются и новые карточки по ним не создаются</div></div>
       <button class="btn" id="erp-people-plan" ${options ? "" : "disabled"}>Проверить</button>
       <button class="btn primary" id="erp-people-apply" disabled>Перенести</button>
       <div id="erp-people-out" aria-live="polite"></div>
     </div>`);
   const root = box.querySelector("#erp-people");
   const visitors = root.querySelector("#erp-people-visitors"), leads = root.querySelector("#erp-people-leads");
+  const ids = root.querySelector("#erp-people-ids");
   const check = root.querySelector("#erp-people-plan"), apply = root.querySelector("#erp-people-apply");
   const out = root.querySelector("#erp-people-out");
   const selected = (select) => Array.from(select.selectedOptions, (option) => +option.value);
   let approved = null;
   function show(report, applied) {
     const n = report.counts, p = report.profile || {}, missing = Object.entries(p.source_missing || {}).filter(([, count]) => count), fill = Object.entries(p.fill || {}).filter(([, count]) => count);
+    const filter = report.filter || {};
     out.innerHTML = `<p>${applied ? "Перенос выполнен. " : ""}Строк посетителей ${n.visitors || 0}, лидов ${n.leads || 0}. Совпадают ${n.same || 0}, обновление статуса ${n.updated || 0}, новые карточки ${n.new || 0}, повторные строки ${n.repeated_rows || 0}</p>
+      ${(filter.requested || []).length ? `<div class="note"><b>Фильтр ERP ID:</b> найдено ${(filter.found || []).length} из ${filter.requested.length}${(filter.missing || []).length ? `. Не найдены: ${filter.missing.map(esc).join(", ")}` : ""}</div>` : ""}
       ${fill.length ? `<div class="note"><b>${applied ? "Дополнены" : "Будут дополнены"} пустые поля</b><ul>${fill.map(([field, count]) => `<li>${esc(field)}: ${count}</li>`).join("")}</ul></div>` : ""}
       ${missing.length ? `<details><summary>Нет значения в исходной ERP: ${missing.reduce((total, [, count]) => total + count, 0)}</summary><ul>${missing.map(([field, count]) => `<li>${esc(field)}: ${count}</li>`).join("")}</ul><p class="small muted">CRM не придумывает отсутствующие сведения. Такие поля нужно заполнить позднее по подтверждённому источнику</p></details>` : ""}
       ${(p.conflicts || []).length ? `<details open><summary>Расхождения карточки и ERP: ${p.conflicts.length}</summary><ul>${p.conflicts.map((item) => `<li>ERP ID ${esc(item.erp_id)} · ${esc(item.field)}: в CRM «${esc(item.crm)}», в ERP «${esc(item.erp)}». Значение CRM сохранится до ручной сверки</li>`).join("")}</ul></details>` : ""}
       ${report.issues.length ? `<details><summary>Требуют сверки: ${report.issues.length}</summary><ul>${report.issues.map(([row, reason]) => `<li>${esc(row)}: ${esc(reason)}</li>`).join("")}</ul></details>` : ""}`;
   }
-  visitors.onchange = leads.onchange = () => { approved = null; apply.disabled = true; out.replaceChildren(); };
+  visitors.onchange = leads.onchange = ids.oninput = () => { approved = null; apply.disabled = true; out.replaceChildren(); };
   async function run(applyChanges) {
-    const files = { visitors: selected(visitors), leads: selected(leads) };
+    const erp_ids = ids.value.split(/[^0-9]+/).filter(Boolean);
+    const files = { visitors: selected(visitors), leads: selected(leads), erp_ids };
     if (applyChanges && !approved) return;
     if (applyChanges) files.token = approved;
     approved = null;
