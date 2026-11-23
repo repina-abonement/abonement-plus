@@ -70,6 +70,10 @@ def test_admin_funnels_share_one_readable_pipeline_hub():
     assert 'filterBoardForDate' in app
     assert 'card.due || card.stage_changed_at || card.created_at' in app
     assert '.pipeline-date-filter' in styles
+    date_filter_markup=app.split('class="pipeline-date-filter"',1)[1].split('</div></div>',1)[0]
+    assert 'class="pipeline-hub-total"' in date_filter_markup
+    assert '.pipeline-date-filter>.btn { min-height:42px' in styles
+    assert '.pipeline-hub-total { display:inline-flex' in styles and 'min-height:42px' in styles
     assert 'wireBoardCardPreview(page)' in app
     assert 'item.task_note' in app
     assert '.board-card-preview-note' in styles
