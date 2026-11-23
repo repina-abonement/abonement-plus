@@ -893,7 +893,7 @@ function boardHtml(data) {
       ${S.boardAll ? "Показаны все карточки" : "Показаны задачи на сегодня"}${!S.boardAll && hidden ? ` · отложено на другие дни: <b>${hidden}</b>` : ""}${later ? ` · «Пригласим позже»: ${later}` : ""}
       <button class="linkish small" data-boardall>${S.boardAll ? "Только на сегодня" : "Показать все"}</button></div>` : "";
   S.boardCardDetails=S.boardCardDetails||{};
-  data.columns.forEach(column=>column.cards.forEach(card=>{S.boardCardDetails[card.id]=card}));
+  data.columns.forEach(column=>column.cards.forEach(card=>{const student=card.student||card;card._board_detail_key=`${data.funnel}:${student.id||card.id}:${card.task_id||card.id}`;S.boardCardDetails[card._board_detail_key]=card}));
   return `${bar}<div class="board">${data.columns.map((c) => `
       <section class="col" data-stage="${c.key}">
         <div class="col-head"><h3>${esc(c.title)}</h3>${c.auto ? `<span class="auto">сам</span>` : ""}<span class="count">${c.cards.length}</span></div>
@@ -914,7 +914,7 @@ function wireBoardCardPreview(page){
   let current=null,timer;
   const hide=()=>{clearTimeout(timer);popup.hidden=true;current=null};
   const position=()=>{if(!current?.isConnected)return hide();const r=current.getBoundingClientRect(),w=Math.min(380,innerWidth-24);popup.style.width=w+"px";popup.style.left=Math.max(12,Math.min(innerWidth-w-12,r.right+10))+"px";const h=popup.getBoundingClientRect().height;popup.style.top=Math.max(12,Math.min(innerHeight-h-12,r.top))+"px"};
-  const show=card=>{clearTimeout(timer);current=card;const item=S.boardCardDetails?.[card.dataset.id];if(!item)return hide();const title=item.task_title||item.due_title||item.title||"Текущая задача";const note=item.task_note||"Подробное описание пока не добавлено";popup.innerHTML=`<div class="board-card-preview-label">Текущая задача</div><strong>${esc(title)}</strong><div class="board-card-preview-client">${esc(displayChildName(item.name||""))}${item.parent?` · ${esc(item.parent)}`:""}</div>${item.due?`<div class="board-card-preview-due">Срок: ${dShort(item.due)}${item.due.slice(11,16)?` · ${esc(item.due.slice(11,16)==="23:59"?"в течение дня":item.due.slice(11,16))}`:""}</div>`:""}<div class="board-card-preview-note">${esc(note)}</div>`;popup.hidden=false;position()};
+  const show=card=>{clearTimeout(timer);current=card;const item=S.boardCardDetails?.[card.dataset.detailKey];if(!item)return hide();const student=item.student||item,title=item.task_title||item.title||item.due_title||"Текущая задача",due=item.due||item.due_at||"",note=item.task_note||item.note||"Подробное описание пока не добавлено";const extra=[student.group,student.branch?`Филиал: ${student.branch}`:"",student.source?`Источник: ${student.source}`:"",student.tariff?`Тариф: ${student.tariff}`:""].filter(Boolean);popup.innerHTML=`<div class="board-card-preview-label">Текущая задача</div><strong>${esc(title)}</strong><div class="board-card-preview-client">${esc(displayChildName(student.name||""))}${student.parent?` · ${esc(student.parent)}`:""}${student.phone?` · ${esc(student.phone)}`:""}</div>${due?`<div class="board-card-preview-due">Срок: ${dShort(due)}${due.slice(11,16)?` · ${esc(due.slice(11,16)==="23:59"?"в течение дня":due.slice(11,16))}`:""}</div>`:""}${extra.length?`<div class="board-card-preview-extra">${extra.map(esc).join(" · ")}</div>`:""}<div class="board-card-preview-note">${esc(note)}</div>`;popup.hidden=false;position()};
   const later=()=>{clearTimeout(timer);timer=setTimeout(hide,160)};
   page.querySelectorAll(".card").forEach(card=>{card.addEventListener("mouseenter",()=>{if(matchMedia("(hover:hover)").matches)show(card)});card.addEventListener("mouseleave",later);card.addEventListener("focus",()=>show(card));card.addEventListener("blur",later)});
   popup.onmouseenter=()=>clearTimeout(timer);popup.onmouseleave=later;
@@ -1558,15 +1558,14 @@ async function renderWorkdesk(page) {
 }
 
 function cardHtml(k, draggable) {
-  const sub = [k.parent, k.phone].filter(Boolean).join(", ");
-  const meta2 = [k.group || (k.branch ? "📍 " + k.branch : ""), k.tariff === "flex" ? "гибкий" : (k.group ? "негибкий" : ""), k.siblings ? `братьев и сестёр: ${k.siblings}` : ""].filter(Boolean).join(" · ");
-  return `<article class="card ${k.color || ""}" data-id="${k.id}" ${draggable ? 'draggable="true"' : ""}>
+  const student=k.student||k, due=k.due||k.due_at||"", taskTitle=k.task_title||k.title||k.due_title||"";
+  const studentId=student.id||k.student_id||k.id;
+  return `<article class="card ${k.color || ""}" data-id="${studentId}" data-detail-key="${esc(k._board_detail_key||"")}" ${draggable ? 'draggable="true"' : ""}>
     ${k.color ? `<span class="ref-card ${k.color}" title="${k.color === "red" ? "Срочно" : "Пора связаться"}"></span>` : ""}
-    <div class="name">${esc(displayChildName(k.name))}</div>
-    <div class="meta">${esc(sub)}</div>
-    ${meta2 ? `<div class="meta">${esc(meta2)}</div>` : ""}
-    ${k.badge ? `<span class="badge">${esc(k.badge)}</span>` : ""}
-    ${k.due ? `<div class="due ${k.due_color || ""}" title="${esc(k.due_title || "")}">⏰ ${dueText(k.due)}</div>` : ""}
+    <div class="name">${esc(displayChildName(student.name||""))}</div>
+    <div class="meta card-contact">${esc([student.parent,student.phone].filter(Boolean).join(", "))}</div>
+    ${taskTitle ? `<div class="card-task">${esc(taskTitle)}</div>` : ""}
+    ${due ? `<div class="due ${k.due_color || ""}" title="${esc(k.due_title || "")}">⏰ ${dueText(due)}</div>` : ""}
   </article>`;
 }
 function dueText(iso) {

@@ -80,6 +80,10 @@ def test_admin_funnels_share_one_readable_pipeline_hub():
     assert '.pipeline-hub-total { display:inline-flex' in styles and 'min-height:42px' in styles
     assert 'wireBoardCardPreview(page)' in app
     assert 'item.task_note' in app
+    assert 'class="card-task"' in app
+    assert 'student.parent,student.phone' in app
+    assert 'meta2' not in app
+    assert 'data-detail-key=' in app
     assert '.board-card-preview-note' in styles
 
 
