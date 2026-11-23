@@ -30,7 +30,7 @@ def test_confirmed_trial_and_paid_single_are_linked_without_duplicates():
     sid=services.create_student(con,{'name':'Ворожцов Михаил','birth':'2024-07-01','parent_name':'Мария','phone':'+7 991 701-69-38','trial_group_id':group,'trial_at':'2026-11-22T10:00'},user)
     con.execute('UPDATE students SET trial_group_id=?,trial_at=? WHERE id=?',(group,'2026-11-22T10:00',sid))
     con.execute("INSERT INTO tasks(student_id,kind,title,note,due_at,status,source,created_at) VALUES (?,?,?,?,?,?,?,?)",
-                (sid,'manual','После ПУ в 10:00 уточнить у тренера, пришёл ли Михаил','Старый вопрос','2026-11-22T12:00','open','manual','2026-11-21T12:00'))
+                (sid,'manual','После ПУ в 10:00 уточнить у тренера, пришёл ли Михаил','Старый вопрос','2026-11-22T12:00','open','erp','2026-11-21T12:00'))
     payload={'events':[
         {'source_id':'sz:22809:trial-v2','source_chat':'Служба заботы','source_at':'2026-11-22T10:32:29','student_name':'Ворожцов Миша','event_kind':'trial_result','event_date':'2026-11-22','came':True,'note':'Пробное: пришёл и занимался'},
         {'source_id':'sz:22809:single','source_chat':'Служба заботы','source_at':'2026-11-22T10:32:29','student_name':'Ворожцов Миша','event_kind':'single_sale','event_date':'2026-11-28','lesson_time':'10:00','amount':2500,'payment_method':'card_branch','paid_at':'2026-11-22T10:32:29','note':'Оплачено разовое занятие 28.11 в 10:00, 2500 ₽ картой'},
@@ -38,13 +38,17 @@ def test_confirmed_trial_and_paid_single_are_linked_without_duplicates():
     first=chatdaytransfer.apply(con,payload,user)
     assert len(first['applied'])==2 and not first['errors']
     assert con.execute('SELECT trial_came FROM students WHERE id=?',(sid,)).fetchone()[0]==1
-    assert con.execute("SELECT status FROM tasks WHERE student_id=? AND source='manual'",(sid,)).fetchone()[0]=='cancelled'
+    assert con.execute("SELECT status FROM tasks WHERE student_id=? AND kind='manual'",(sid,)).fetchone()[0]=='cancelled'
     visit=con.execute("SELECT subscription_id FROM single_visits WHERE student_id=? AND date='2026-11-28'",(sid,)).fetchone()
     assert visit and con.execute('SELECT status FROM subscriptions WHERE id=?',(visit[0],)).fetchone()[0]=='paid'
     assert con.execute('SELECT COUNT(*) FROM payments WHERE student_id=?',(sid,)).fetchone()[0]==1
     second=chatdaytransfer.apply(con,payload,user)
     assert len(second['already'])==2
     assert con.execute('SELECT COUNT(*) FROM payments WHERE student_id=?',(sid,)).fetchone()[0]==1
+    con.execute("INSERT INTO tasks(student_id,kind,title,due_at,status,source,created_at) VALUES (?,?,?,?,?,?,?)",
+                (sid,'manual','Напомнить о разовом занятии 28.11 в 10:00','2026-11-28T23:59','open','erp','2026-11-23T12:00'))
+    chatdaytransfer.init(con)
+    assert con.execute("SELECT status FROM tasks WHERE student_id=? AND title LIKE 'Напомнить о разовом%'",(sid,)).fetchone()[0]=='cancelled'
 
 
 def test_existing_trial_booking_removes_imported_duplicate_and_site_priority():

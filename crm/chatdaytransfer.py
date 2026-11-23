@@ -30,8 +30,11 @@ def init(con):
     # real trial booking. This is deliberately idempotent on every startup.
     con.execute("""UPDATE students SET priority=0 WHERE priority=1 AND trial_at IS NOT NULL
         AND substr(trial_at,1,10)>=?""",(sv.today().isoformat(),))
-    for row in con.execute("SELECT student_id,payload FROM chat_day_transfer_events WHERE event_kind='trial_booking'").fetchall():
-        try:_reconcile_trial_booking(con,row['student_id'],json.loads(row['payload']))
+    for row in con.execute("SELECT student_id,payload,event_kind FROM chat_day_transfer_events WHERE event_kind IN ('trial_booking','single_sale')").fetchall():
+        try:
+            event=json.loads(row['payload'])
+            _reconcile_trial_booking(con,row['student_id'],event)
+            _reconcile_single_sale(con,row['student_id'],event)
         except (TypeError,ValueError,KeyError):continue
 
 
@@ -73,6 +76,22 @@ def _reconcile_trial_booking(con,sid,event):
     return True
 
 
+def _reconcile_single_sale(con,sid,event):
+    """Remove a manual reminder once the same dated single visit is paid."""
+    if event.get('event_kind')!='single_sale':return False
+    day=str(event.get('event_date') or '')[:10]
+    if len(day)!=10:return False
+    paid=con.execute("""SELECT 1 FROM single_visits v JOIN subscriptions s ON s.id=v.subscription_id
+        WHERE v.student_id=? AND v.date=? AND v.status='booked' AND s.status='paid' LIMIT 1""",(sid,day)).fetchone()
+    if not paid:return False
+    label=day[8:10]+'.'+day[5:7]
+    con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',
+        result='Заменено автоматическими задачами оплаченного разового'
+        WHERE student_id=? AND status='open' AND kind='manual'
+        AND title LIKE ?""",(sv.now_iso(),sid,'%разовом занятии '+label+'%'))
+    return True
+
+
 def apply(con,data,user):
     events=data.get('events') if isinstance(data,dict) else None
     if not isinstance(events,list) or not events:raise sv.ApiError('В файле нет событий переноса')
@@ -83,6 +102,7 @@ def apply(con,data,user):
         old=con.execute('SELECT student_id FROM chat_day_transfer_events WHERE source_id=?',(source,)).fetchone()
         if old:
             _reconcile_trial_booking(con,old['student_id'],event)
+            _reconcile_single_sale(con,old['student_id'],event)
             student=con.execute('SELECT id,name FROM students WHERE id=?',(old['student_id'],)).fetchone()
             result['already'].append({'source_id':source,'student_id':old['student_id'],'name':student['name'] if student else '', 'tasks':_current_tasks(con,old['student_id'])});continue
         matches=_match(con,event)
@@ -116,9 +136,7 @@ def apply(con,data,user):
                     money.add_payment(con,sid,amount,str(event.get('payment_method') or ''),user,subscription_id=subid,
                                       comment='Подтверждено СЗ, сообщение '+source,paid_at=str(event.get('paid_at') or at)[:19])
                 singles.sync_paid_tasks(con,datetime.now(),sid)
-                con.execute("""UPDATE tasks SET status='cancelled',done_at=?,result='Заменено автоматическими задачами оплаченного разового'
-                    WHERE student_id=? AND status='open' AND source='manual' AND title LIKE ?""",
-                    (sv.now_iso(),sid,'%разовом занятии '+day[8:10]+'.'+day[5:7]+'%'))
+                _reconcile_single_sale(con,sid,event)
                 single_sale={'subscription_id':subid,'date':day,'group_id':gid}
             con.execute('INSERT INTO history(student_id,ts,user_name,kind,text) VALUES (?,?,?,?,?)',(sid,at,'Перенос СЗ','chat_transfer',note))
             marked=False
@@ -128,7 +146,7 @@ def apply(con,data,user):
                     sv.mark_trial(con,sid,event['came'],user);marked=True
                 if marked:
                     con.execute("""UPDATE tasks SET status='cancelled',done_at=?,result='Результат ПУ подтверждён СЗ и тренером'
-                        WHERE student_id=? AND status='open' AND source='manual' AND due_at<=?
+                        WHERE student_id=? AND status='open' AND kind='manual' AND due_at<=?
                         AND (title LIKE 'После ПУ%' OR title LIKE '%пришёл ли%' OR title LIKE '%результат%ПУ%')""",
                         (sv.now_iso(),sid,at[:10]+'T23:59'))
             booked=_reconcile_trial_booking(con,sid,event)
