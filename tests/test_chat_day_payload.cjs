@@ -61,6 +61,16 @@ const kiselevIdentity=kiselevWithProfile.events.find(event=>event.event_kind==='
 if(!kiselevIdentity||!kiselevIdentity.create_if_missing||kiselevIdentity.birth!=='2025-04-01'||kiselevIdentity.phone!=='+79191076540')throw new Error('Kiselev spelling variant did not link to identity');
 console.log('PASS Kiselev spelling variant links to the verified identity');
 
+const nikitina = context.chatDayPayload([{name:'Служба заботы',messages:[
+  {id:21323,date:'2026-11-13T16:03:21',text:'Никитина Софья 5.03.2025\n+79260327334 Екатерина\nЗаписана в новую группу на 16.11 в 10:00\nИсточник: по рекомендации друзей, Кристина Решетняк'},
+  {id:21662,date:'2026-11-16T11:11:14',text:'Оплата Никитина Софья. За ноябрь и декабрь до 14 числа включительно. 15 декабря улетают на месяц. Сумма 10240-00 за 8 занятий. Пришли по рекомендации Решетняк Матвея. Ему нужно сделать за это скидку в будущем. Оплата по qr-коду.'},
+]},{name:'ТРЕНЕРЫ',messages:[]}], '2026-11-16');
+const sofiaSale=nikitina.events.find(event=>event.event_kind==='subscription_sale');
+if(!sofiaSale||sofiaSale.amount!==10240||sofiaSale.payment_method!=='sbp'||sofiaSale.components.length!==2||sofiaSale.components.flatMap(x=>x.dates).length!==8)throw new Error('Nikitina sale not parsed');
+if(!sofiaSale.create_if_missing||sofiaSale.birth!=='2025-03-05'||sofiaSale.phone!=='+79260327334'||!/рекомендации/i.test(sofiaSale.source||''))throw new Error('Nikitina identity or source missing');
+if(!nikitina.events.some(event=>event.event_kind==='trial_result'&&event.outcome==='purchased'))throw new Error('Nikitina trial result not parsed');
+console.log('PASS Nikitina trial, source and split November/December sale');
+
 const markov = context.chatDayPayload([{name:'Служба заботы',messages:[
   {id:21473,date:'2026-11-14T11:55:50',text:'Внесите запись на ПУ 18.11 среда на 16:45\nТимофей Марков 23.04.2024\nМама Вера\n89261775474 тг и макс'},
   {id:22891,date:'2026-11-22T20:32:01',text:'Отчет 22.11\n• Марков Тимофей 16:45 решили подождать до весны, в апреле исполнится 3, на тренировке не все понимал пока, связь в апреле с ними, группу 1,5-3 неудобно'},

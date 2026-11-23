@@ -293,6 +293,9 @@ def apply(con,data,user):
             datetime.fromisoformat(at)
             note=str(event.get('note') or '').strip()
             if not note:raise sv.ApiError('Пустое описание события')
+            if str(event.get('source') or '').strip():
+                con.execute("UPDATE students SET source=? WHERE id=? AND trim(COALESCE(source,''))=''",
+                            (str(event['source']).strip()[:300],sid))
             single_sale=None
             subscription_sale=None
             if event.get('event_kind')=='single_sale':
