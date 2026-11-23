@@ -9,8 +9,8 @@ def main():
     def staff(login,role):return c.execute("INSERT INTO users(login,pw_hash,name,role) VALUES (?,'test',?,?)",(login,login,role)).lastrowid
     one=staff('one','operator');two=staff('two','operator');coach=staff('coach','coach')
     u={'id':one,'name':'one','role':'operator'};v={'id':two,'name':'two','role':'operator'}
-    sid=sv.create_student(c,{'name':'Тест Клиент','parent_name':'Анна','phone':'+79000000441','funnel':'members'},u)
-    uncovered=sv.create_student(c,{'name':'Без Задачи','parent_name':'Мария','phone':'+79000000442','funnel':'members'},u)
+    sid=sv.create_student(c,{'name':'Тест Клиент','parent_name':'Анна','phone':'+79000000441','funnel':'members','source':'Тест'},u)
+    uncovered=sv.create_student(c,{'name':'Без Задачи','parent_name':'Мария','phone':'+79000000442','funnel':'members','source':'Тест'},u)
     today=date.today().isoformat();tomorrow=(date.today()+timedelta(days=1)).isoformat()
     a=tasks.add_client_task(c,sid,{'title':'Обычная','due':today,'note':'Подробный контекст задачи для другого администратора'},u)
     b=tasks.add_client_task(c,sid,{'title':'Приоритет','due':today,'priority':True},u)
@@ -63,6 +63,21 @@ def main():
     assert b not in [t['id'] for col in tasks.erp_board(c,'today',v)['columns'] for t in col['cards']]
     assert tasks.for_student(c,sid)['open'][0]['id']==a
     assert c.execute('SELECT due_at,assignee_id FROM tasks WHERE id=?',(personal,)).fetchone()[0]==today+'T12:00'
+
+    # Новый клиент CRM без рекламного источника получает отдельную обязательную задачу.
+    lead=sv.create_new_lead(c,{'name':'Новый без источника','parent_name':'Ирина','phone':'+79000000443'},u)
+    source_task=c.execute("SELECT * FROM tasks WHERE student_id=? AND auto_key=?",(lead,f'ad-source-required:{lead}')).fetchone()
+    assert source_task and source_task['status']=='open' and source_task['title']=='Уточнить рекламный источник'
+    sv.update_student(c,lead,{'source':'Яндекс Карты'},u)
+    assert c.execute('SELECT status FROM tasks WHERE id=?',(source_task['id'],)).fetchone()[0]=='cancelled'
+    erp=sv.create_student(c,{'name':'Перенос ERP','parent_name':'Ольга','phone':'+79000000444'},u)
+    c.execute("UPDATE students SET erp_id='12345' WHERE id=?",(erp,))
+    tasks.ensure_ad_source_tasks(c)
+    assert not c.execute("SELECT 1 FROM tasks WHERE student_id=? AND auto_key=? AND status='open'",(erp,f'ad-source-required:{erp}')).fetchone()
+    old=sv.create_student(c,{'name':'Старая карточка','parent_name':'Елена','phone':'+79000000445'},u)
+    c.execute("UPDATE students SET created_at='2026-11-01T12:00' WHERE id=?",(old,))
+    tasks.ensure_ad_source_tasks(c)
+    assert not c.execute("SELECT 1 FROM tasks WHERE student_id=? AND auto_key=? AND status='open'",(old,f'ad-source-required:{old}')).fetchone()
     tasks.complete(c,a,v)
     assert tasks.my_tasks(c,u)['done_today']>=1 and tasks.my_tasks(c,v)['done_today']>=1
     print('ok: client tasks shared with every operator, priority per date, date-only edit, no assignee choice, private plans stay private')

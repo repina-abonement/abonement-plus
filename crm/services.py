@@ -712,6 +712,7 @@ def create_new_lead(con,data,user):
     tid=tasks.add_task(con,'call_lead',sid,stamp,auto_key=f'life:call_lead:{sid}',title='Новый лид',source='life')
     if tid:
         con.execute('UPDATE tasks SET assignee_id=NULL,priority=1 WHERE id=?',(tid,))
+    tasks.ensure_ad_source_tasks(con)
     family=con.execute('SELECT family_id FROM students WHERE id=?',(sid,)).fetchone()[0]
     comms.relink_family_conversations(con,family)
     return sid
@@ -1225,6 +1226,9 @@ def update_student(con, sid: int, data: dict, user) -> None:
              "trial_at": "пробное", "source": "источник", "source_id": "источник", "refusal_reason": "причина отказа"}
     if changes:
         log(con, sid, "Изменено: " + ", ".join(names[c] for c in changes), user, "system")
+        if "source" in changes or "source_id" in changes:
+            from . import tasks as _tasks
+            _tasks.ensure_ad_source_tasks(con)
         from . import erpstatus
         erpstatus.sync_one(con, sid)
 

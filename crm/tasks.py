@@ -667,11 +667,40 @@ def request_missing_data(con, day: date) -> int:
     return made
 
 
+def ensure_ad_source_tasks(con, now: datetime | None = None) -> int:
+    """New CRM leads since 02.11 must have an ad source; ERP-imported cards are exempt."""
+    now = (now or _now()).replace(second=0, microsecond=0)
+    due = now.date().isoformat() + "T23:59"
+    made = 0
+    for student in con.execute("""SELECT id,source,source_id,erp_id,created_at,archived FROM students
+        WHERE created_at>='2026-11-02' ORDER BY id""").fetchall():
+        sid = student["id"]
+        key = f"ad-source-required:{sid}"
+        missing = (not student["archived"] and not str(student["erp_id"] or "").strip()
+                   and not student["source_id"] and not str(student["source"] or "").strip())
+        current = con.execute("SELECT id,status FROM tasks WHERE auto_key=?", (key,)).fetchone()
+        if missing:
+            note = ("В карточке нового клиента не указан рекламный источник. Уточните, откуда клиент узнал о нас, "
+                    "и заполните поле «Рекламный источник»")
+            if current:
+                con.execute("""UPDATE tasks SET kind='request_data',title='Уточнить рекламный источник',note=?,
+                    due_at=?,status='open',source='data_quality',done_at=NULL,done_by='',result='' WHERE id=?""",
+                    (note, due, current["id"]))
+            else:
+                made += bool(add_task(con, "request_data", sid, due, title="Уточнить рекламный источник",
+                                      source="data_quality", auto_key=key, note=note))
+        elif current and current["status"] == "open":
+            con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',
+                result='Рекламный источник заполнен или карточка относится к переносу ERP' WHERE id=?""",
+                (_iso(now), current["id"]))
+    return made
+
+
 def ensure_client_task_coverage(con, now: datetime | None = None) -> int:
     """Every non-archived client has an open next action; normal chain tasks take precedence."""
     now = (now or _now()).replace(second=0, microsecond=0)
     due = now.date().isoformat() + "T23:59"
-    made = 0
+    made = ensure_ad_source_tasks(con, now)
     for student in con.execute("SELECT id,family_id,funnel,stage FROM students WHERE archived=0 ORDER BY id").fetchall():
         sid = student["id"]
         key = f"client-coverage:{sid}"
