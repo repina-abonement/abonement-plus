@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import json
 from datetime import date
 
 from . import logic
@@ -53,9 +54,16 @@ def calculate(con, student, on: date | None = None, *, monthly=None) -> str:
     if months:
         previous = logic.shift_month(cur, -1)
         if cur in months:
-            if previous in months:
+            earlier = {month for month in months if month < cur}
+            if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
+                for row in con.execute("SELECT source_payload FROM erp_history_subscriptions WHERE student_id=? AND month=?", (sid,cur)):
+                    prior = json.loads(row[0] or '{}').get('previous_erp_subscription') or {}
+                    prior_month = prior.get('month') if isinstance(prior,dict) else None
+                    if prior_month and prior.get('erp_id') and prior_month < cur:
+                        earlier.add(prior_month)
+            if previous in earlier:
                 return "Постоянный посетитель"
-            if any(month < cur for month in months):
+            if earlier:
                 return "Вернувшийся"
             return "Новый оплативший посетитель"
         if max(months) > cur:
