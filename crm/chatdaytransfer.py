@@ -25,6 +25,14 @@ ALIASES = {
 
 def init(con):
     con.executescript(SCHEMA)
+    # Repair cards created before booking began clearing the urgent site-lead
+    # flag, and remove temporary chat-import tasks already superseded by a
+    # real trial booking. This is deliberately idempotent on every startup.
+    con.execute("""UPDATE students SET priority=0 WHERE priority=1 AND trial_at IS NOT NULL
+        AND substr(trial_at,1,10)>=?""",(sv.today().isoformat(),))
+    for row in con.execute("SELECT student_id,payload FROM chat_day_transfer_events WHERE event_kind='trial_booking'").fetchall():
+        try:_reconcile_trial_booking(con,row['student_id'],json.loads(row['payload']))
+        except (TypeError,ValueError,KeyError):continue
 
 
 def _words(value):
