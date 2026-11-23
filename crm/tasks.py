@@ -197,16 +197,15 @@ def add_task(con, kind: str, student_id: int | None, due: datetime | str, *, aut
 def subscription_renewal_plan(con, student_id):
     from . import logic, schedule, closures
     month=con.execute("SELECT MAX(month) FROM subscriptions WHERE student_id=? AND status!='cancelled' AND COALESCE(kind,'month')='month'",(student_id,)).fetchone()[0]
+    notes=[]
     if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
         history_month=con.execute("SELECT MAX(month) FROM erp_history_subscriptions WHERE student_id=?",(student_id,)).fetchone()[0]
-        if history_month and (not month or history_month > month):
+        if history_month and (not month or history_month >= month):
             month = history_month
-            names=[r[0] for r in con.execute("""SELECT DISTINCT COALESCE(g.name,'') FROM erp_history_subscriptions h
-                LEFT JOIN groups g ON g.id=h.group_id WHERE h.student_id=? AND h.month=? ORDER BY g.name""",(student_id,month)) if r[0]]
-            note=f"Абонемент: {logic.month_label(month)}"+(' · '+' + '.join(names) if names else '')+". Перенесён из истории ERP"
-            return {'due':month+'-20T23:59','note':note}
+            names=[r[0] for r in con.execute("""SELECT DISTINCT g.name FROM erp_history_subscriptions h
+                JOIN groups g ON g.id=h.group_id WHERE h.student_id=? AND h.month=? ORDER BY g.name""",(student_id,month)) if r[0]]
+            notes.append(f"Абонемент: {logic.month_label(month)}"+(' · '+' + '.join(names) if names else '')+". Перенесён из истории")
     if not month:return None
-    notes=[]
     for sub in con.execute("SELECT * FROM subscriptions WHERE student_id=? AND month=? AND status!='cancelled' AND COALESCE(kind,'month')='month'",(student_id,month)):
         enrollment=con.execute('SELECT * FROM enrollments WHERE id=?',(sub['enrollment_id'],)).fetchone()
         try:parts=json.loads(sub['lesson_schedule'] or '[]')
@@ -254,44 +253,59 @@ def update_renewal_reason(con, task_id, reason):
 
 
 def refresh_subscription_renewals(con):
-    # Обновляем только открытые автоматические задачи; выполненные не открываем заново.
-    for task in con.execute("SELECT * FROM tasks WHERE source='subscription' AND kind='renew' AND status='open' AND auto_key LIKE 'subscription-renew:%'").fetchall():
-        plan=subscription_renewal_plan(con,task['student_id'])
-        if plan:
-            if task['renewal_reason'] != plan['note']:
-                update_renewal_reason(con,task['id'],plan['note'])
-            if task['due_at'] != plan['due']:
-                con.execute('UPDATE tasks SET due_at=? WHERE id=?',(plan['due'],task['id']))
+    students = "SELECT DISTINCT student_id FROM subscriptions WHERE status!='cancelled' AND COALESCE(kind,'month')='month'"
+    if con.execute("SELECT 1 FROM sqlite_master WHERE name='erp_history_subscriptions' AND type='table'").fetchone():
+        students += " UNION SELECT student_id FROM erp_history_subscriptions"
+    students += " UNION SELECT student_id FROM tasks WHERE source='subscription' AND kind='renew' AND status='open'"
+    for row in con.execute(students).fetchall():
+        ensure_subscription_renewal(con, row[0])
+
+
+def ensure_subscription_renewal(con, student_id):
+    key = f"subscription-renew:{student_id}"
+    existing = con.execute("SELECT * FROM tasks WHERE auto_key=?", (key,)).fetchone()
+    plan = subscription_renewal_plan(con, student_id)
+    if not plan:
+        if existing and existing['status'] == 'open':
+            con.execute("UPDATE tasks SET status='cancelled',done_at=?,result='Нет действующего абонемента' WHERE id=?", (_iso(_now()),existing['id']))
+        return None
+    if existing and existing['status'] != 'open':
+        # Keep the completed task and its outcome in the client's history.
+        con.execute("UPDATE tasks SET auto_key=NULL WHERE id=? AND status!='open'", (existing['id'],))
+        existing = None
+    if not existing:
+        previous = con.execute("""SELECT id FROM tasks WHERE student_id=? AND status='open'
+            AND source IN ('auto','erp','erp_rule','subscription')
+            AND (kind='renew' OR trim(title)='Проверить продление')
+            ORDER BY id LIMIT 1""",(student_id,)).fetchone()
+        if previous:
+            con.execute("""UPDATE OR IGNORE tasks SET kind='renew',title='Проверить продление',
+                source='subscription',auto_key=?,assignee_id=NULL WHERE id=? AND status='open'""",(key,previous['id']))
+            existing = con.execute("SELECT * FROM tasks WHERE auto_key=?", (key,)).fetchone()
+    if not existing:
+        con.execute("""INSERT OR IGNORE INTO tasks(kind,title,student_id,due_at,source,auto_key,created_at)
+            VALUES ('renew','Проверить продление',?,?,'subscription',?,?)""", (student_id,plan['due'],key,_iso(_now())))
+        existing = con.execute("SELECT * FROM tasks WHERE auto_key=?", (key,)).fetchone()
+    if existing['due_at'] != plan['due']:
+        con.execute("UPDATE tasks SET due_at=? WHERE id=?", (plan['due'],existing['id']))
+    if existing['renewal_reason'] != plan['note']:
+        update_renewal_reason(con, existing['id'], plan['note'])
+    return existing['id']
 
 
 def schedule_renewal(con, student_id: int) -> int | None:
-    """Одна общая задача на 20 число месяца действия абонемента."""
-    plan=subscription_renewal_plan(con,student_id)
-    if not plan:return None
-    due,note=plan['due'],plan['note']
-    key = f"subscription-renew:{student_id}"
-    existing_rows = con.execute("SELECT id FROM tasks WHERE auto_key=? ORDER BY id", (key,)).fetchall()
-    existing = existing_rows[0] if existing_rows else None
-    for duplicate in existing_rows[1:]:
-        con.execute("UPDATE tasks SET status='cancelled',done_at=?,result='Дубликат задачи продления' WHERE id=?",(_iso(_now()),duplicate['id']))
+    """Одна общая задача на 20 число месяца последнего абонемента."""
+    tid = ensure_subscription_renewal(con, student_id)
+    if tid is None:return None
     # Закрываем прежние задачи продажи/продления, сохраняя историю и ручные поручения.
     sale_kinds = {'call_lead', 'no_answer', 'revive', 'renew', 'why_not_bought', 'close_sale', 'first_pay'}
     erp_titles = {'проверить оплату абонемента', 'проверить продление', 'думает'}
     for task in con.execute("SELECT * FROM tasks WHERE student_id=? AND status='open'", (student_id,)).fetchall():
-        if task['auto_key'] == key:
+        if task['id'] == tid:
             continue
         if task['kind'] in sale_kinds or (task['source'] == 'erp' and task['title'].strip().casefold() in erp_titles):
             con.execute("""UPDATE tasks SET status='cancelled', done_at=?,
                 result='Внесён абонемент: запланирована проверка продления' WHERE id=?""", (_iso(_now()), task['id']))
-    if existing:
-        tid = existing[0]
-        con.execute("""UPDATE tasks SET kind='renew', title='Проверить продление', due_at=?,
-            assignee_id=NULL, status='open', done_at=NULL, done_by='', result='' WHERE id=?""", (due,tid))
-    else:
-        tid = add_task(con, 'renew', student_id, due, title='Проверить продление',
-                       auto_key=key, source='subscription')
-        con.execute("UPDATE tasks SET assignee_id=NULL WHERE id=?", (tid,))
-    update_renewal_reason(con,tid,note)
     return tid
 
 
@@ -348,13 +362,7 @@ def sync_subscription_payment_tasks(con, student_id: int) -> int | None:
         if duplicate["status"] == "open":
             con.execute("UPDATE tasks SET status='cancelled',done_at=?,result='Дубликат контроля оплаты' WHERE id=?",
                         (_iso(_now()), duplicate["id"]))
-    # The invoice replaces the preceding renewal check, but not unrelated manual work.
-    for task in con.execute("SELECT * FROM tasks WHERE student_id=? AND status='open'", (student_id,)).fetchall():
-        if primary and task["id"] == primary["id"]:
-            continue
-        if task["kind"] == "renew" or task["title"].strip().casefold() == "проверить продление":
-            con.execute("""UPDATE tasks SET status='cancelled',done_at=?,
-                result='Счёт выставлен: ожидаем оплату' WHERE id=?""", (_iso(_now()), task["id"]))
+    ensure_subscription_renewal(con, student_id)
     if primary:
         tid = primary["id"]
         con.execute("""UPDATE tasks SET kind='payment_check',title='Проверить оплату абонемента',
@@ -1036,6 +1044,7 @@ def erp_board(con, day: str = "today", user: dict | None = None) -> dict:
 
 def for_student(con, sid: int) -> dict:
     """Задачи для карточки: открытые (ближайшая первой) и несколько последних выполненных."""
+    ensure_subscription_renewal(con, sid)
     fam = (con.execute("SELECT family_id FROM students WHERE id=?", (sid,)).fetchone() or [None])[0]
     q = "SELECT * FROM tasks WHERE (student_id=? OR (kind='rebook' AND family_id=?)) AND status=? ORDER BY "
     return {"open": [_task_out(con, r) for r in con.execute(q + "substr(due_at,1,10),priority DESC,due_at,id", (sid, fam, "open"))], "done": []}  # выполненные не показываем
