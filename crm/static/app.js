@@ -44,6 +44,15 @@ const MONTHS = ["январь", "февраль", "март", "апрель", "�
 const monthLabel = (ym) => { const [y, m] = ym.split("-").map(Number); return `${MONTHS[m - 1]} ${y}`; };
 const dShort = (iso) => { if (!iso) return ""; const [y, m, d] = iso.slice(0, 10).split("-"); return `${d}.${m}`; };
 const dtShort = (iso) => iso ? `${dShort(iso)} ${iso.slice(11, 16)}` : "";
+const birthDisplay = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value || "") ? value.split("-").reverse().join(".") : (value || "");
+function birthIso(value) {
+  const match = String(value || "").trim().match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/);
+  if (!match) return null;
+  const day = +match[1], month = +match[2], year = +match[3], candidate = new Date(year, month - 1, day);
+  if (year < 1900 || candidate.getFullYear() !== year || candidate.getMonth() !== month - 1 || candidate.getDate() !== day) return null;
+  const iso = `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+  return iso <= S.meta.today ? iso : null;
+}
 const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 const PAY_METHODS = {cash:"Наличные",paykeeper:"По ссылке PayKeeper",paykeeper_manual:"По ссылке PayKeeper",card_branch:"Картой на филиале",sber_qr_branch:"По QR Сбера на филиале",tochka_qr_link:"По QR/ссылке Точки от администратора",card:"Картой (канал не уточнён)",sbp:"СБП (банк не уточнён)",online:"Онлайн-оплата (канал не уточнён)",transfer:"Перевод",unknown:"Перенесено",balance:"Перенос с баланса",refund:"Возврат",refund_pending:"Ожидает возврата"};
 const PAY_MANUAL_METHODS = ['cash','paykeeper_manual','card_branch','sber_qr_branch','tochka_qr_link','transfer'];
@@ -69,20 +78,25 @@ async function api(method, url, body) {
 /* Окошко «Не хватает данных»: имя и фамилия ребёнка, дата рождения, имя и телефон родителя, для продажи ещё почта */
 function askRequired(need) {
   return new Promise((resolve) => {
-    const types = { child_name: "text", birth: "date", parent_name: "text", phone: "tel", email: "email" };
+    const types = { child_name: "text", birth: "text", parent_name: "text", phone: "tel", email: "email" };
     const ph = { child_name: "Например: Петя Иванов", parent_name: "Например: Анна", phone: "+7 900 123-45-67", email: "Например: anna@mail.ru" };
     const wrap = document.createElement("div");
     wrap.className = "need-wrap";
     wrap.innerHTML = `<form class="need-card"><h3>${need.kind === "sale" ? "Перед продажей абонемента" : "Перед записью на пробное"}</h3>
       <p class="small muted">${need.kind === "sale" ? "Заполните данные клиента. Если почты пока нет, её можно добавить позже" : "Уточните у родителя и заполните. Без этого на пробное не записать"}</p>
       ${need.fields.map((k) => `<div class="field ${need.missing.includes(k)&&!need.optional?.includes(k) ? "need-miss" : ""}"><label>${esc(need.labels[k])}${need.optional?.includes(k) ? " · можно позже" : need.missing.includes(k) ? " · нужно заполнить" : ""}</label>
-        <input name="${k}" type="${types[k]}" value="${esc(need.values[k] || "")}" placeholder="${esc(ph[k] || "")}" ${k === "email" ? 'autocomplete="off"' : ""} ${need.optional?.includes(k)?"":"required"}></div>`).join("")}
+        ${k === "birth" ? `<div class="need-date-row"><input name="birth" type="text" inputmode="numeric" autocomplete="bday" value="${esc(birthDisplay(need.values[k] || ""))}" placeholder="ДД.ММ.ГГГГ" required><input type="date" class="need-date-picker" data-birth-picker max="${esc(S.meta.today)}" aria-label="Выбрать дату рождения в календаре"></div>` : `<input name="${k}" type="${types[k]}" value="${esc(need.values[k] || "")}" placeholder="${esc(ph[k] || "")}" ${k === "email" ? 'autocomplete="off"' : ""} ${need.optional?.includes(k)?"":"required"}>`}</div>`).join("")}
       <div class="need-err small"></div>
       <div class="row" style="gap:10px;margin-top:6px"><button class="btn primary" style="flex:1">Сохранить и продолжить</button><button type="button" class="btn" data-ncancel style="flex:0 0 auto">Отмена</button></div>
       <button type="button" class="btn ghost" data-nask style="width:100%;margin-top:8px">💬 Данных нет: попросить у родителя</button></form>`;
     document.body.appendChild(wrap);
     const f = wrap.querySelector("form");
     splitChildNameFields(f,"child_name",true);
+    const birth = f.elements.birth, birthPicker = f.querySelector("[data-birth-picker]");
+    if (birth && birthPicker) {
+      birthPicker.onchange = () => { birth.value = birthDisplay(birthPicker.value); birth.focus(); };
+      birth.onblur = () => { const iso = birthIso(birth.value); if (iso) birth.value = birthDisplay(iso); };
+    }
     const first = f.querySelector(".need-miss input:not([type=hidden])") || f.querySelector("input:not([type=hidden])"); if (first) setTimeout(() => first.focus(), 50);
     const done = (v) => { wrap.remove(); resolve(v); };
     wrap.querySelector("[data-ncancel]").onclick = () => done(false);
@@ -113,6 +127,11 @@ function askRequired(need) {
     f.onsubmit = async (e) => {
       e.preventDefault();
       const body = Object.fromEntries(need.fields.map((k) => [k, f.elements[k].value.trim()]));
+      if (body.birth) {
+        const iso = birthIso(body.birth);
+        if (!iso) { wrap.querySelector(".need-err").textContent = "Введите дату рождения в формате ДД.ММ.ГГГГ"; f.elements.birth.focus(); return; }
+        body.birth = iso;
+      }
       try {
         const r = await fetch(`/api/students/${need.student_id}/required`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         const d = await r.json().catch(() => ({}));

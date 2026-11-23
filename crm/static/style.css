@@ -1333,6 +1333,9 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 .need-card { background: var(--surface); color: var(--ink); border-radius: 18px; padding: 20px 22px; width: min(460px, 100%); max-height: 92vh; overflow: auto;
   box-shadow: 0 18px 50px -12px rgba(0,0,0,.45); }
 .need-card h3 { margin: 0 0 4px; font-size: 19px; }
+.need-date-row{display:flex;align-items:stretch;gap:8px}
+.need-date-row>input[name="birth"]{min-width:0;flex:1}
+.need-date-picker{flex:0 0 52px;width:52px;padding:9px;color:transparent;cursor:pointer}
 .need-miss label { color: #b42318; font-weight: 600; }
 .need-miss input { border-color: #f0a29b; background: #fff8f7; }
 .need-err { color: #b42318; min-height: 18px; margin-top: 4px; }
