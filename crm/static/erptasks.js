@@ -18,7 +18,7 @@ async function erpTasksSection(asUser=null, layout="grid") {
   };
   const card = (t, col, colTitle) => {
     const s = t.student || {};
-    return `<article class="et-card ${d.day === "overdue" ? "late" : ""}" data-et="${t.id}" ${s.id ? `data-etopen="${s.id}" role="button" tabindex="0" aria-label="Открыть карточку ${esc(displayChildName(s.name))}"` : ""}>
+    return `<article class="et-card ${d.day === "overdue" ? "late" : ""}" data-et="${t.id}" data-etkind="${esc(col)}" ${s.id ? `data-etopen="${s.id}" role="button" tabindex="0" aria-label="Открыть карточку ${esc(displayChildName(s.name))}"` : ""}>
       <div class="et-card-top"><span class="et-kind">${esc(colTitle)}</span>${t.priority ? '<span class="et-priority" title="Приоритет">🔥</span>' : ""}</div>
       <div class="et-what">${t.icon || "✅"} ${esc(t.title)}</div>
       <div class="et-card-context">${s.name ? `<div class="et-name">${esc(displayChildName(s.name))}</div>` : ""}
@@ -40,7 +40,7 @@ async function erpTasksSection(asUser=null, layout="grid") {
       <div class="et-board" tabindex="0" role="region" aria-label="Воронка задач по статусам за выбранный день">${d.columns.map((c) => `<section class="et-col ${c.key === "other" ? "et-other" : ""} ${c.key === "unpaid_visit" ? "et-unpaid" : ""}">
         <div class="et-head"><span>${esc(c.title)}</span><span class="cnt">${c.cards.length}</span></div>
         <div class="et-cards">${c.cards.map((t) => card(t, c.key, c.title)).join("")}</div></section>`).join("")}</div>`
-      : `<div class="et-summary">${d.columns.map((c) => `<span class="et-summary-kind ${c.key === "unpaid_visit" ? "danger" : ""}">${esc(c.title)} <b>${c.cards.length}</b></span>`).join("")}</div>
+      : `<div class="et-summary" aria-label="Фильтр по типу задачи">${d.columns.map((c) => `<button type="button" class="et-summary-kind ${c.key === "unpaid_visit" ? "danger" : ""}" data-etfilter="${esc(c.key)}" aria-pressed="false">${esc(c.title)} <b>${c.cards.length}</b></button>`).join("")}<button type="button" class="et-summary-reset" data-etfilter-reset hidden>Показать все</button></div>
       <div class="et-task-grid" role="list" aria-label="Задачи на выбранный день">${d.columns.flatMap((c) => c.cards.map((t) => card(t, c.key, c.title))).join("")}</div>`
       : `<div class="muted small" style="padding:6px 2px">${empty}</div>`}
   </section>`;
@@ -57,6 +57,17 @@ function wireErpTasks(page) {
     left.onclick=()=>board.scrollBy({left:-Math.max(224,board.clientWidth*.8),behavior:"smooth"});right.onclick=()=>board.scrollBy({left:Math.max(224,board.clientWidth*.8),behavior:"smooth"});board.addEventListener("scroll",sync,{passive:true});const ro=new ResizeObserver(sync);ro.observe(board);const mo=new MutationObserver(()=>{if(!board.isConnected){ro.disconnect();mo.disconnect()}});mo.observe(document.body,{childList:true,subtree:true});requestAnimationFrame(sync);
   }
   box.querySelectorAll("[data-etday]").forEach((b) => (b.onclick = () => { S.etDay = b.dataset.etday; render(); }));
+  const filterButtons=[...box.querySelectorAll("[data-etfilter]")],filterReset=box.querySelector("[data-etfilter-reset]");
+  const applyKindFilter=(kind)=>{
+    const active=kind&&filterButtons.some(button=>button.dataset.etfilter===kind)?kind:"";
+    box.querySelectorAll(".et-task-grid .et-card").forEach(card=>card.hidden=!!active&&card.dataset.etkind!==active);
+    filterButtons.forEach(button=>{const on=button.dataset.etfilter===active;button.classList.toggle("active",on);button.setAttribute("aria-pressed",on?"true":"false")});
+    if(filterReset)filterReset.hidden=!active;
+    S.etKindFilter=active;
+  };
+  filterButtons.forEach(button=>button.onclick=()=>applyKindFilter(S.etKindFilter===button.dataset.etfilter?"":button.dataset.etfilter));
+  if(filterReset)filterReset.onclick=()=>applyKindFilter("");
+  applyKindFilter(S.etKindFilter||"");
   const add = box.querySelector("#et-add");
   if (add) add.onclick = () => openClientTaskForm(box.querySelector("#et-addbox"), render);
   box.querySelectorAll("[data-etopen]").forEach((b) => (b.onclick = (e) => { if (!e.target.closest("button")) openStudent(+b.dataset.etopen); }));

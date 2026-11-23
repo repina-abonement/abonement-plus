@@ -11,6 +11,10 @@ def test_workdesk_supports_status_funnel_for_regular_admin_and_grid_for_other_ro
 
     assert 'class="et-task-grid"' in script
     assert 'class="et-summary"' in script
+    assert 'data-etfilter="${esc(c.key)}"' in script
+    assert 'data-etkind="${esc(col)}"' in script
+    assert 'applyKindFilter' in script
+    assert '.et-summary-kind.active' in styles
     assert 'class="et-board"' in script
     assert 'class="et-col ' in script
     assert 'layout="grid"' in script
