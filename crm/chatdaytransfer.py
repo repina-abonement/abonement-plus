@@ -51,6 +51,20 @@ def _current_tasks(con,sid):
     return [dict(r) for r in con.execute("SELECT id,title,due_at,note FROM tasks WHERE student_id=? AND status='open' ORDER BY due_at,id",(sid,))]
 
 
+def _reconcile_trial_booking(con,sid,event):
+    """A confirmed CRM booking supersedes the temporary imported follow-up."""
+    if event.get('event_kind')!='trial_booking':return False
+    student=con.execute('SELECT trial_at FROM students WHERE id=?',(sid,)).fetchone()
+    day=str(event.get('event_date') or '')[:10]
+    if not student or not day or str(student['trial_at'] or '')[:10]!=day:return False
+    con.execute('UPDATE students SET priority=0 WHERE id=?',(sid,))
+    con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',
+        result='Пробное уже записано, действует автоматическое напоминание'
+        WHERE student_id=? AND status='open' AND auto_key=?""",
+        (sv.now_iso(),sid,'chat-day:'+str(event.get('source_id') or '').strip()))
+    return True
+
+
 def apply(con,data,user):
     events=data.get('events') if isinstance(data,dict) else None
     if not isinstance(events,list) or not events:raise sv.ApiError('В файле нет событий переноса')
@@ -60,6 +74,7 @@ def apply(con,data,user):
         if not source:result['errors'].append({'name':event.get('student_name'),'error':'Нет ID сообщения источника'});continue
         old=con.execute('SELECT student_id FROM chat_day_transfer_events WHERE source_id=?',(source,)).fetchone()
         if old:
+            _reconcile_trial_booking(con,old['student_id'],event)
             student=con.execute('SELECT id,name FROM students WHERE id=?',(old['student_id'],)).fetchone()
             result['already'].append({'source_id':source,'student_id':old['student_id'],'name':student['name'] if student else '', 'tasks':_current_tasks(con,old['student_id'])});continue
         matches=_match(con,event)
@@ -108,7 +123,8 @@ def apply(con,data,user):
                         WHERE student_id=? AND status='open' AND source='manual' AND due_at<=?
                         AND (title LIKE 'После ПУ%' OR title LIKE '%пришёл ли%' OR title LIKE '%результат%ПУ%')""",
                         (sv.now_iso(),sid,at[:10]+'T23:59'))
-            if event.get('task_title') and event.get('task_due'):
+            booked=_reconcile_trial_booking(con,sid,event)
+            if event.get('task_title') and event.get('task_due') and not booked:
                 tasks.add_task(con,'manual',sid,str(event['task_due'])[:16],auto_key='chat-day:'+source,
                                title=str(event['task_title'])[:300],note=str(event.get('task_note') or note)[:4000],source='erp')
             con.execute('INSERT INTO chat_day_transfer_events VALUES (?,?,?,?,?,?,?,?)',(source,sid,str(event.get('source_chat') or ''),at,str(event.get('event_kind') or 'note'),json.dumps(event,ensure_ascii=False),sv.now_iso(),user.get('name','')))

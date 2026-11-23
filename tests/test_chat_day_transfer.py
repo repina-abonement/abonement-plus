@@ -46,3 +46,15 @@ def test_confirmed_trial_and_paid_single_are_linked_without_duplicates():
     assert len(second['already'])==2
     assert con.execute('SELECT COUNT(*) FROM payments WHERE student_id=?',(sid,)).fetchone()[0]==1
 
+
+def test_existing_trial_booking_removes_imported_duplicate_and_site_priority():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'gunin.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    sid=services.create_student(con,{'name':'Гунин Егор','birth':'2018-06-01','parent_name':'Светлана','phone':'+7 926 321-25-80'},user)
+    con.execute("UPDATE students SET trial_at='2026-11-28T11:00',priority=1 WHERE id=?",(sid,))
+    event={'source_id':'sz:22823','source_chat':'Служба заботы','source_at':'2026-11-22T11:41:54','student_name':'Гунин Егор','phone':'+7 926 321-25-80','event_kind':'trial_booking','event_date':'2026-11-28','note':'Записан на пробное 28.11 в 11:00','task_title':'Подтвердить пробное 28.11 в 11:00','task_due':'2026-11-28T09:00'}
+    first=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(first['applied'])==1 and not first['errors']
+    assert con.execute('SELECT priority FROM students WHERE id=?',(sid,)).fetchone()[0]==0
+    assert not con.execute("SELECT 1 FROM tasks WHERE student_id=? AND auto_key='chat-day:sz:22823' AND status='open'",(sid,)).fetchone()
+

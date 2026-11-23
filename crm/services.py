@@ -1196,11 +1196,15 @@ def update_student(con, sid: int, data: dict, user) -> None:
             nodeadline.auto_exit(con, sid, "записан на пробное")
         if data.get("trial_at") and s["funnel"] == "sales" and str(data["trial_at"])[:10] >= today().isoformat() \
                 and s["stage"] not in ("trial_booked", "trial_reminder", "on_trial"):
-            con.execute("UPDATE students SET stage='trial_booked', stage_changed_at=?, refusal_reason='', dnd=0 WHERE id=?", (now_iso(), sid))
+            con.execute("UPDATE students SET stage='trial_booked', stage_changed_at=?, refusal_reason='', dnd=0, priority=0 WHERE id=?", (now_iso(), sid))
             if s["stage"] in ("missed_trial", "later", "refused"):
                 log(con, sid, f"Записан на пробное: этап «{SALES_LABELS.get(s['stage'], s['stage'])}» снят", user, "stage")
                 from . import pu as _pu
                 _pu._close_family_task_if_empty(con, s["family_id"], "Записан на пробное")
+        elif data.get("trial_at") and s["funnel"] == "sales" and str(data["trial_at"])[:10] >= today().isoformat():
+            # A site lead stops being an unprocessed urgent request as soon as
+            # an administrator has booked an actual trial slot.
+            con.execute("UPDATE students SET priority=0 WHERE id=?",(sid,))
     if ("trial_at" in changes or "group_id" in changes) and s["funnel"] == "sales":
         cur = get_student_row(con, sid)
         if cur["trial_at"] and not cur["group_id"]:  # Юлия, 01.11: при записи на ПУ группа обязательна
