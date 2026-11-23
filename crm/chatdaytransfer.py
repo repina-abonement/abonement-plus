@@ -89,6 +89,7 @@ def _reconcile_trial_booking(con,sid,event):
         result='Пробное уже записано, действует автоматическое напоминание'
         WHERE student_id=? AND status='open' AND auto_key=?""",
         (sv.now_iso(),sid,'chat-day:'+str(event.get('source_id') or '').strip()))
+    tasks.ensure_trial_confirm_task(con,sid)
     return True
 
 
@@ -316,8 +317,9 @@ def apply(con,data,user):
                 trial_day=str(event.get('event_date') or '')[:10]
                 trial_time=str(event.get('trial_time') or '')[:5]
                 datetime.fromisoformat(trial_day+'T'+trial_time)
-                con.execute("UPDATE students SET trial_at=?,historical_trial=1,stage='trial_booked',stage_changed_at=? WHERE id=?",
-                            (trial_day+'T'+trial_time,sv.now_iso(),sid))
+                historical=int(trial_day < sv.today().isoformat())
+                con.execute("UPDATE students SET trial_at=?,historical_trial=?,stage='trial_booked',stage_changed_at=? WHERE id=?",
+                            (trial_day+'T'+trial_time,historical,sv.now_iso(),sid))
                 matches=[{'id':sid,'name':required[0]}];created=True
             except Exception as exc:
                 con.execute('ROLLBACK TO chat_day_event');con.execute('RELEASE chat_day_event')

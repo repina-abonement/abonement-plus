@@ -374,6 +374,8 @@ def init_db(con: sqlite3.Connection):
     targetedmarkovtransfer.apply(con)
     from . import targetedkhvostovtransfer
     targetedkhvostovtransfer.apply(con)
+    from . import targetedrubaylotransfer
+    targetedrubaylotransfer.apply(con)
     groupterms.provision_nebo_morning(con)
     from . import mypay, coachreport
     mypay.init(con)

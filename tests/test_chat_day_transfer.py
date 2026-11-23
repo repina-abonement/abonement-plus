@@ -147,6 +147,10 @@ def test_future_verified_booking_creates_one_card_but_incomplete_identity_does_n
     result=chatdaytransfer.apply(con,{'events':[complete,incomplete]},user)
     assert len(result['applied'])==1 and len(result['unmatched'])==1 and not result['errors']
     assert con.execute("SELECT COUNT(*) FROM students WHERE name='Новый Ребёнок'").fetchone()[0]==1
+    created=con.execute("SELECT id,historical_trial FROM students WHERE name='Новый Ребёнок'").fetchone()
+    assert created['historical_trial']==0
+    reminder=con.execute("SELECT title,due_at FROM tasks WHERE student_id=? AND kind='trial_confirm' AND status='open'",(created['id'],)).fetchone()
+    assert reminder and reminder['title']=='Напоминание о ПУ (звонок)' and reminder['due_at'][:10]=='2026-11-27'
     assert con.execute("SELECT COUNT(*) FROM students WHERE name='Другой Ребёнок'").fetchone()[0]==0
     repeat=chatdaytransfer.apply(con,{'events':[complete]},user)
     assert len(repeat['already'])==1 and con.execute("SELECT COUNT(*) FROM students WHERE name='Новый Ребёнок'").fetchone()[0]==1
