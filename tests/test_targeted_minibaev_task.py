@@ -48,7 +48,7 @@ class TargetedMinibaevTaskTest(unittest.TestCase):
         profile = targetedminibaevtask.reconcile_profile(self.con, __import__('datetime').date(2026,11,22))
         self.assertEqual(profile["state"], "complete")
         self.assertEqual((profile["status"], profile["funnel"], profile["stage"]),
-                         ("Новый оплативший посетитель", "members", "active"))
+                         ("Постоянный посетитель", "members", "active"))
         self.assertEqual([(t["id"],t["kind"],t["status"]) for t in profile["open_tasks"]],
                          [(task_report["open_task"]["id"], "renew", "open")])
 
