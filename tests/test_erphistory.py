@@ -45,7 +45,10 @@ def main():
     assert dashboard['kpi']['revenue']['value']==12345 and dashboard['kpi']['holders']['value']==1
     assert dashboard['kpi']['fill']['subs_count']==1 and dashboard['kpi']['avg']['value']==12345
     after=(con.execute('SELECT count(*) FROM payments').fetchone()[0],money.balance(con,sid),dict(con.execute('SELECT * FROM students WHERE id=?',(sid,)).fetchone()))
-    assert before==after
+    # Reading the card recalculates the display status from historical subscriptions.
+    assert after[2]["erp_status"] == "Не оплачен текущий месяц"
+    assert before[:2] == after[:2]
+    assert {k:v for k,v in before[2].items() if k != "erp_status"} == {k:v for k,v in after[2].items() if k != "erp_status"}
     con.execute("UPDATE students SET erp_id='' WHERE id=?",(sid,))
     con.execute("INSERT INTO erp_full_identities(namespace,source_id,student_id) VALUES ('student','TEST-ERP',?)",(sid,))
     linked=erphistory.preview(con,payload,'2025-09')
