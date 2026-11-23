@@ -44,16 +44,19 @@ class PartialRenewalTest(unittest.TestCase):
         tasks.schedule_renewal(self.con,self.sid)
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM tasks WHERE kind='renew' AND status='open'").fetchone()[0],1)
 
-    def test_refresh_existing_only_open_automatic_and_snapshot_not_count(self):
+    def test_refresh_preserves_completed_history_and_restores_open_renewal(self):
         result=self.sale('2026-11')
         self.con.execute("UPDATE subscriptions SET lessons=99 WHERE id=?",(result['id'],))
         self.con.execute("UPDATE tasks SET due_at='2026-11-27T23:59',note='' WHERE id=?",(self.task()['id'],))
         tasks.refresh_subscription_renewals(self.con)
         self.assertEqual(self.task()['due_at'],'2026-11-20T23:59')
         self.assertIn('включено занятий: 4',self.task()['renewal_reason'])
-        self.con.execute("UPDATE tasks SET status='done',note='Completed' WHERE id=?",(self.task()['id'],))
+        completed_id = self.task()['id']
+        self.con.execute("UPDATE tasks SET status='done',note='Completed' WHERE id=?",(completed_id,))
         tasks.refresh_subscription_renewals(self.con)
-        self.assertEqual((self.task()['status'],self.task()['note']),('done','Completed'))
+        self.assertEqual(tuple(self.con.execute('SELECT status,note FROM tasks WHERE id=?',(completed_id,)).fetchone()),('done','Completed'))
+        self.assertEqual(self.task()['status'],'open')
+        self.assertNotEqual(self.task()['id'],completed_id)
 
     def test_note_survives_refresh_and_reschedule(self):
         self.sale('2026-11')
