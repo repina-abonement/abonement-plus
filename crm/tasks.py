@@ -185,13 +185,15 @@ def renewal_covered(con, student_id, due, title):
 
 
 def add_task(con, kind: str, student_id: int | None, due: datetime | str, *, auto_key: str | None = None,
-             title: str = "", source: str = "auto", assignee: int | None = None, note: str = "") -> int | None:
+             title: str = "", source: str = "auto", assignee: int | None = None, note: str = "",
+             shared: bool = False) -> int | None:
     due_s = due if isinstance(due, str) else _iso(due)
     if source in ("erp", "erp_rule", "auto") and renewal_covered(con, student_id, due_s, title):
         return None
     cur = con.execute("""INSERT OR IGNORE INTO tasks(kind, title, student_id, assignee_id, due_at, source, auto_key, note,
                          created_at) VALUES (?,?,?,?,?,?,?,?,?)""",
-                      (kind, title or KINDS.get(kind, ("Задача",))[0], student_id, assignee or owner(con), due_s, source,
+                      (kind, title or KINDS.get(kind, ("Задача",))[0], student_id,
+                       None if shared else (assignee or owner(con)), due_s, source,
                        auto_key, note, _iso(_now())))
     return cur.lastrowid if cur.rowcount else None
 
@@ -1271,6 +1273,9 @@ def add_client_task(con,sid,data,user):
     try:due=client_due(data.get('due'))
     except ValueError:raise comms.CommsError('Неверная дата') from None
     if data.get('priority',False) not in (True,False,0,1):raise comms.CommsError('Неверный приоритет')
-    tid=add_task(con,'manual',sid,due,title=title,source='manual',note=str(data.get('note') or '')[:1000])
+    # Клиентская ручная задача общая для администраторов. Сразу вставляем её
+    # без ответственного: промежуточное назначение владельцу задач могло
+    # нарушить внешний ключ ещё до последующего UPDATE и вернуть HTTP 500.
+    tid=add_task(con,'manual',sid,due,title=title,source='manual',note=str(data.get('note') or '')[:1000],shared=True)
     con.execute('UPDATE tasks SET assignee_id=NULL,priority=? WHERE id=?',(int(bool(data.get('priority'))),tid))
     return tid

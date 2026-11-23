@@ -17,6 +17,12 @@ def main():
     later=tasks.add_client_task(c,sid,{'title':'Завтра','due':tomorrow,'priority':True},u)
     future_day=(date.today()+timedelta(days=8)).isoformat()
     future=tasks.add_client_task(c,sid,{'title':'Дальняя задача','due':future_day},u)
+    # Закрытая задача с тем же названием не мешает создать новую общую задачу.
+    repeated=tasks.add_client_task(c,sid,{'title':'Уточнить дни посещения','due':today,'note':'Первый вариант'},u)
+    tasks.complete(c,repeated,u)
+    repeated_again=tasks.add_client_task(c,sid,{'title':'Уточнить дни посещения','due':tomorrow,'note':'Сохранённое подробное описание'},u)
+    assert repeated_again and repeated_again!=repeated
+    assert tuple(c.execute('SELECT status,assignee_id,note FROM tasks WHERE id=?',(repeated_again,)).fetchone())==('open',None,'Сохранённое подробное описание')
     personal=tasks.add_task(c,'plan',None,today+'T12:00',title='Личное',assignee=one)
     unrelated=tasks.add_task(c,'manual',None,today+'T13:00',title='Чужое бытовое',assignee=two)
     # Задачи клиента видит другой администратор; личные поручения не становятся общими.
