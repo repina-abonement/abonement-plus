@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from . import comms, services as sv, tasks
 
@@ -30,11 +30,12 @@ def init(con):
     # real trial booking. This is deliberately idempotent on every startup.
     con.execute("""UPDATE students SET priority=0 WHERE priority=1 AND trial_at IS NOT NULL
         AND substr(trial_at,1,10)>=?""",(sv.today().isoformat(),))
-    for row in con.execute("SELECT student_id,payload,event_kind FROM chat_day_transfer_events WHERE event_kind IN ('trial_booking','single_sale')").fetchall():
+    for row in con.execute("SELECT student_id,payload,event_kind FROM chat_day_transfer_events WHERE event_kind IN ('trial_booking','single_sale','trial_result')").fetchall():
         try:
             event=json.loads(row['payload'])
             _reconcile_trial_booking(con,row['student_id'],event)
             _reconcile_single_sale(con,row['student_id'],event)
+            _reconcile_trial_outcome(con,row['student_id'],event)
         except (TypeError,ValueError,KeyError):continue
 
 
@@ -92,6 +93,31 @@ def _reconcile_single_sale(con,sid,event):
     return True
 
 
+def _reconcile_trial_outcome(con,sid,event):
+    """Turn an already known 'grow up and return later' answer into the right stage and one task."""
+    if event.get('event_kind')!='trial_result' or event.get('came') is not True:return False
+    note=str(event.get('note') or '')
+    if event.get('outcome')!='later' and not re.search(r'пусть подраст|секци[яи] в сад',note,re.I):return False
+    day=str(event.get('event_date') or '')[:10]
+    try:due=datetime.combine(datetime.fromisoformat(day).date()+timedelta(days=91),datetime.min.time()).replace(hour=11)
+    except ValueError:return False
+    reason=str(event.get('refusal_reason') or 'Ребёнок пока не готов: занимается в саду, семья изначально не планировала покупку')
+    before=con.execute('SELECT stage,refusal_reason FROM students WHERE id=?',(sid,)).fetchone()
+    con.execute("""UPDATE students SET stage='later',refusal_reason=?,contacted_after_trial=1,
+        priority=0,stage_changed_at=? WHERE id=?""",(reason,sv.now_iso(),sid))
+    con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',
+        result='Решение семьи уже известно: пригласить позже'
+        WHERE student_id=? AND status='open' AND kind='manual' AND auto_key=?""",
+        (sv.now_iso(),sid,'chat-day:'+str(event.get('source_id') or '').strip()))
+    from . import pu
+    pu.ensure_task(con,sid,due,datetime.fromisoformat(str(event.get('source_at') or day+'T12:00')[:19]),
+                   title='Пригласить снова на ПУ: ребёнок подрос')
+    if not before or before['stage']!='later' or before['refusal_reason']!=reason:
+        sv.log(con,sid,f'Семья пока не планирует покупку: {reason}. Пригласим снова {due:%d.%m.%Y}',
+               {'name':'Перенос СЗ'},'stage')
+    return True
+
+
 def apply(con,data,user):
     events=data.get('events') if isinstance(data,dict) else None
     if not isinstance(events,list) or not events:raise sv.ApiError('В файле нет событий переноса')
@@ -103,6 +129,7 @@ def apply(con,data,user):
         if old:
             _reconcile_trial_booking(con,old['student_id'],event)
             _reconcile_single_sale(con,old['student_id'],event)
+            _reconcile_trial_outcome(con,old['student_id'],event)
             student=con.execute('SELECT id,name FROM students WHERE id=?',(old['student_id'],)).fetchone()
             result['already'].append({'source_id':source,'student_id':old['student_id'],'name':student['name'] if student else '', 'tasks':_current_tasks(con,old['student_id'])});continue
         matches=_match(con,event)
@@ -150,7 +177,8 @@ def apply(con,data,user):
                         AND (title LIKE 'После ПУ%' OR title LIKE '%пришёл ли%' OR title LIKE '%результат%ПУ%')""",
                         (sv.now_iso(),sid,at[:10]+'T23:59'))
             booked=_reconcile_trial_booking(con,sid,event)
-            if event.get('task_title') and event.get('task_due') and not booked:
+            outcome=_reconcile_trial_outcome(con,sid,event)
+            if event.get('task_title') and event.get('task_due') and not booked and not outcome:
                 tasks.add_task(con,'manual',sid,str(event['task_due'])[:16],auto_key='chat-day:'+source,
                                title=str(event['task_title'])[:300],note=str(event.get('task_note') or note)[:4000],source='erp')
             con.execute('INSERT INTO chat_day_transfer_events VALUES (?,?,?,?,?,?,?,?)',(source,sid,str(event.get('source_chat') or ''),at,str(event.get('event_kind') or 'note'),json.dumps(event,ensure_ascii=False),sv.now_iso(),user.get('name','')))

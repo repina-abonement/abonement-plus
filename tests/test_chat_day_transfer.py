@@ -62,3 +62,22 @@ def test_existing_trial_booking_removes_imported_duplicate_and_site_priority():
     assert con.execute('SELECT priority FROM students WHERE id=?',(sid,)).fetchone()[0]==0
     assert not con.execute("SELECT 1 FROM tasks WHERE student_id=? AND auto_key='chat-day:sz:22823' AND status='open'",(sid,)).fetchone()
 
+
+def test_privalov_known_later_decision_sets_stage_and_one_clear_task():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'privalov.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    branch=schedule.save_branch(con,{'name':'ТЦ «Небо»'})
+    group=schedule.save_group(con,{'name':'Небо Вс 17:45','branch_id':branch,'weekdays':[6],'time':'17:45','age':'4–5'})
+    sid=services.create_student(con,{'name':'Привалов Даниил','birth':'2022-01-01','parent_name':'Мама','phone':'+7 900 222-33-44'},user)
+    con.execute("UPDATE students SET group_id=?,trial_group_id=?,trial_at='2026-11-22T17:45' WHERE id=?",(group,group,sid))
+    event={'source_id':'sz:22891:привалов-даня','source_chat':'Служба заботы','source_at':'2026-11-22T20:32:01','student_name':'Привалов Даня','event_kind':'trial_result','event_date':'2026-11-22','came':True,'note':'Пробное 22.11 в 17:45: мама изначально не планировала, пусть подрастёт, занятий хватает в секции в саду','task_title':'Уточнить решение семьи после пробного','task_due':'2026-12-01T12:00'}
+    result=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(result['applied'])==1 and not result['errors']
+    student=con.execute('SELECT stage,trial_came,refusal_reason FROM students WHERE id=?',(sid,)).fetchone()
+    assert (student['stage'],student['trial_came'])==('later',1)
+    assert 'занимается в саду' in student['refusal_reason']
+    open_tasks=con.execute("SELECT kind,title,due_at FROM tasks WHERE student_id=? AND status='open'",(sid,)).fetchall()
+    assert len(open_tasks)==1 and open_tasks[0]['kind']=='rebook'
+    assert open_tasks[0]['title']=='Пригласить снова на ПУ: ребёнок подрос'
+    assert open_tasks[0]['due_at'][:10]=='2027-02-21'
+
