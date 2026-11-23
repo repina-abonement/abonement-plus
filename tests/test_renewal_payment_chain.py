@@ -51,7 +51,7 @@ class RenewalPaymentChainTest(unittest.TestCase):
         self.assertEqual(control["id"], existing_control)
         self.assertEqual((control["title"], control["due_at"], control["status"]),
                          ("Проверить оплату абонемента", "2026-11-25T23:59", "open"))
-        self.assertEqual(self.con.execute("SELECT status FROM tasks WHERE id=?", (renewal_id,)).fetchone()[0], "cancelled")
+        self.assertEqual(tuple(self.con.execute("SELECT status,due_at FROM tasks WHERE id=?", (renewal_id,)).fetchone()), ("open", "2026-12-20T23:59"))
         self.assertIn("10000 ₽", control["note"])
 
         money.add_payment(self.con, self.sid, 4000, "card_branch", self.user, subscription_id=invoice_id)
