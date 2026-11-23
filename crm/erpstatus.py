@@ -2,8 +2,7 @@
 
 Автоматически рассчитываются только объективные системные статусы. Региональные и
 служебные пользовательские статусы без подтверждённого события здесь не выдумываются.
-Карточки, пришедшие из ERP, сохраняют исходный ``erp_status``, пока в CRM не появится
-более новое подтверждённое событие — оплаченный абонемент текущего/будущего месяца.
+При наличии подтверждённых абонементов статус определяется по месяцу действия.
 """
 from __future__ import annotations
 
@@ -46,35 +45,21 @@ def confirmed_monthly_months(con, sid: int) -> list[str]:
     return sorted(months)
 
 
-def calculate(con, student, on: date | None = None) -> str:
+def calculate(con, student, on: date | None = None, *, monthly=None) -> str:
     on = on or date.today()
-    cur, prev = logic.month_of(on), logic.shift_month(logic.month_of(on), -1)
+    cur = logic.month_of(on)
     sid = student["id"]
+    months = confirmed_monthly_months(con, sid) if monthly is None else monthly
+    if months:
+        if cur in months:
+            return "Постоянный посетитель"
+        if max(months) > cur:
+            return "Куплен на будущий период"
+        return "Не оплачен текущий месяц"
+
     if con.execute("SELECT 1 FROM waitlist WHERE student_id=? AND status IN ('queued','offered')", (sid,)).fetchone():
         return "Лист ожидания"
-    paid = [tuple(r) for r in con.execute(
-        """SELECT month,COALESCE(kind,'month') FROM subscriptions
-           WHERE student_id=? AND status='paid' ORDER BY month""", (sid,)
-    )]
-    monthly = confirmed_monthly_months(con, sid)
-    singles = [month for month, kind in paid if kind == "single"]
-
-    if monthly:
-        has_cur = cur in monthly
-        has_future = any(month > cur for month in monthly)
-        had_prev = prev in monthly
-        had_earlier = any(month < cur for month in monthly)
-        if not has_cur and has_future:
-            return "Куплен на будущий период"
-        if has_cur:
-            if had_prev or has_future:
-                return "Постоянный посетитель"
-            if had_earlier:
-                return "Вернувшийся"
-            return "Новый оплативший посетитель"
-        if had_prev:
-            return "Не оплачен текущий месяц"
-        return "Нет абонемента"
+    singles = con.execute("SELECT 1 FROM subscriptions WHERE student_id=? AND status='paid' AND kind='single' LIMIT 1", (sid,)).fetchone()
     if singles:
         return "Ходит разово"
 
@@ -98,20 +83,23 @@ def sync_one(con, sid: int, on: date | None = None, *, log: bool = True) -> str:
         return ""
     month = logic.month_of(on or date.today())
     monthly = confirmed_monthly_months(con, sid)
-    objective_paid = any(value >= month for value in monthly)
-    if (row["erp_id"] or "").strip() and not objective_paid:
+    if (row["erp_id"] or "").strip() and not monthly:
         return row["erp_status"] or ""
-    value = calculate(con, row, on)
+    value = calculate(con, row, on, monthly=monthly)
     has_current = month in monthly
     if has_current and (row["funnel"] != "members" or row["stage"] != "active"):
         con.execute("UPDATE students SET funnel='members',stage='active',priority=0 WHERE id=?", (sid,))
-        con.execute("""UPDATE tasks SET status='cancelled',done_at=datetime('now'),result='Отменена: есть оплаченный абонемент'
-                       WHERE student_id=? AND status='open' AND kind IN
-                       ('call_lead','no_answer','close_sale','trial_confirm','trial_today','how_was','why_not_bought','reinvite_pu','no_show')""", (sid,))
         if log:
             from .db import now_iso
             con.execute("INSERT INTO history(student_id,ts,user_name,kind,text) VALUES (?,?,'CRM','stage','Оплаченный абонемент: карточка переведена в действующие клиенты')",
                         (sid, now_iso()))
+    if monthly and max(monthly) >= month:
+        obsolete = """student_id=? AND status='open' AND source!='manual' AND
+                      (kind IN ('call_lead','no_answer','close_sale','trial_confirm','trial_today','how_was',
+                                'why_not_bought','reinvite_pu','no_show') OR title='Новый лид')"""
+        if con.execute(f"SELECT 1 FROM tasks WHERE {obsolete} LIMIT 1",(sid,)).fetchone():
+            con.execute(f"""UPDATE tasks SET status='cancelled',done_at=datetime('now'),
+                            result='Есть подтверждённый абонемент' WHERE {obsolete}""",(sid,))
     if value != (row["erp_status"] or ""):
         con.execute("UPDATE students SET erp_status=? WHERE id=?", (value, sid))
         if log:
