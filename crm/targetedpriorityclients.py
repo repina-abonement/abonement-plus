@@ -101,28 +101,35 @@ def ensure_attendance_control(con):
         if len(rows) == 1:
             ids[key] = rows[0]["id"]
     inserted = 0
-    # Only a trainer note containing both an explicit lesson date and time is
-    # safe to turn into a mark automatically.  Notes without a time remain
-    # evidence in chronology and are covered by the manual audit task below.
+    # A report with an explicit date and a uniquely determined programme
+    # session is safe to mark. Several group reports omit the time in text,
+    # but the named programme has one session at that date in the sold plan.
+    report_times = {
+        "trainers-26693-ofp": "20:30", "trainers-26789": "19:30",
+        "trainers-26810": "18:30", "trainers-26908": "20:30",
+        "trainers-27065": "19:30",
+    }
     import re
     for event in _events():
         if event.get("source_chat") != "ТРЕНЕРЫ":
             continue
         date_match = re.search(r"\b(\d{2})\.(\d{2})\b", event.get("note", ""))
         time_match = re.search(r"\b(\d{2}:\d{2})\b", event.get("note", ""))
-        if not date_match or not time_match:
+        message_id = event["source_id"].split(":", 2)[1]
+        tm = time_match.group(1) if time_match else report_times.get(message_id)
+        if not date_match or not tm:
             continue
         client = event["source_id"].rsplit(":", 1)[-1]
         sid = ids.get(client)
         if not sid:
             continue
-        day = f"2026-{date_match.group(2)}-{date_match.group(1)}"; tm = time_match.group(1)
+        day = f"2026-{date_match.group(2)}-{date_match.group(1)}"
         kind = "makeup" if "отработ" in event.get("note", "").casefold() else "subscription"
         group = event.get("note", "").removeprefix("Тренеры: присутствовал ")
-        message_id = event["source_id"].split(":", 2)[1]
         exists = con.execute(
             "SELECT 1 FROM erp_history_visits WHERE student_id=? AND visit_date=? AND visit_time=?", (sid, day, tm)).fetchone() or con.execute(
-            "SELECT 1 FROM erp_history_unassigned_visits WHERE student_id=? AND visit_date=? AND visit_time=?", (sid, day, tm)).fetchone()
+            "SELECT 1 FROM erp_history_unassigned_visits WHERE student_id=? AND visit_date=? AND visit_time=?", (sid, day, tm)).fetchone() or con.execute(
+            "SELECT 1 FROM attendance WHERE student_id=? AND date=? AND status='present'", (sid, day)).fetchone()
         if exists:
             continue
         source_id = f"priority-trainers:{message_id}:{client}:{day}:{tm}"
@@ -219,16 +226,19 @@ def attendance_report(con):
             rows.append(item)
             continue
         sid = matches[0]["id"]
-        marks = set()
-        for row in con.execute(
-                "SELECT date,status,group_id FROM attendance WHERE student_id=? AND date BETWEEN '2026-11-01' AND '2026-11-22'",
-                (sid,)):
-            marks.add((row["date"], "", f"native:{row['group_id']}:{row['status']}"))
+        historical = set()
         for table in ("erp_history_visits", "erp_history_unassigned_visits"):
             for row in con.execute(
                     f"SELECT visit_date,visit_time,status FROM {table} WHERE student_id=? AND visit_date BETWEEN '2026-11-01' AND '2026-11-22'",
                     (sid,)):
-                marks.add((row["visit_date"], row["visit_time"] or "", row["status"]))
+                historical.add((row["visit_date"], row["visit_time"] or "", row["status"]))
+        marks = set(historical)
+        historical_dates = {(date, status) for date, _, status in historical}
+        for row in con.execute(
+                "SELECT date,status,group_id FROM attendance WHERE student_id=? AND date BETWEEN '2026-11-01' AND '2026-11-22'",
+                (sid,)):
+            if (row["date"], row["status"]) not in historical_dates:
+                marks.add((row["date"], "", f"native:{row['group_id']}:{row['status']}"))
         task = con.execute(
             "SELECT id,title,due_at,status FROM tasks WHERE auto_key=? ORDER BY id DESC LIMIT 1",
             (f"priority-clients:attendance-audit:{key}:2026-11-01-22",),
