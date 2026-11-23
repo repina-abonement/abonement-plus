@@ -14,8 +14,9 @@ def test_verified_khvostov_transfer_recovers_card_and_followup_once():
     student = con.execute("SELECT name,birth,trial_at,trial_came,stage,source FROM students WHERE id=?",
                           (first["student_id"],)).fetchone()
     assert tuple(student) == ("Хвостов Александр", "2024-08-13", "2026-11-23T10:30", 0, "reinvite_pu", "ТРЦ")
-    assert first["task_title"] == "Предложить адаптационное повторное ПУ с родителем"
-    assert first["task_due"][:10] == "2026-11-30"
+    assert first["task_title"] == "Пригласить на адаптационное ПУ 25.11 в 10:30 вместе с родителем"
+    assert first["task_due"][:10] == "2026-11-24"
+    assert con.execute("SELECT COUNT(*) FROM tasks WHERE student_id=? AND status='open' AND kind='rebook'",(first['student_id'],)).fetchone()[0] == 1
     assert targetedkhvostovtransfer.apply(con) == first
     assert con.execute("SELECT COUNT(*) FROM students WHERE name='Хвостов Александр'").fetchone()[0] == 1
     assert con.execute("SELECT COUNT(*) FROM chat_day_transfer_events WHERE source_id=?",

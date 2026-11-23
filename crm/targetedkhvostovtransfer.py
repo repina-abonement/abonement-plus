@@ -4,7 +4,7 @@ import json
 from . import chatdaytransfer, comms
 
 
-KEY = "targeted_khvostov_chat_transfer_20261123"
+KEY = "targeted_khvostov_chat_transfer_20261123_v2"
 NAME = "Хвостов Александр"
 PHONE = "+79253530404"
 SOURCE_ID = "sz:22926:хвостов-результат"
@@ -63,21 +63,29 @@ def apply(con):
         "came": False,
         "outcome": "reinvite",
         "note": "ПУ 23.11 в 10:30 не состоялось: ребёнок не смог отойти от родителей и войти в тренировку. После нескольких попыток посмотрел часть занятия; предложен мягкий адаптационный визит вместе с папой без давления",
-        "followup_due": "2026-11-30T11:00",
-        "followup_title": "Предложить адаптационное повторное ПУ с родителем",
+        "followup_due": "2026-11-24T11:00",
+        "followup_title": "Пригласить на адаптационное ПУ 25.11 в 10:30 вместе с родителем",
     }
     result = chatdaytransfer.apply(con, {"events": [event]}, dict(actor))
     row = con.execute("""SELECT s.id,s.birth,s.trial_at,s.trial_came,s.stage,s.source
         FROM students s JOIN parents p ON p.family_id=s.family_id
         WHERE s.archived=0 AND (phone_match(p.phone_norm,?) OR phone_match(p.phone,?))""",
         (phone, phone)).fetchone()
+    open_rebook = con.execute("""SELECT id FROM tasks WHERE student_id=?
+        AND status='open' AND kind='rebook' ORDER BY id""", (row["id"],)).fetchall() if row else []
+    if len(open_rebook) == 1:
+        con.execute("""UPDATE tasks SET title=?,due_at=?,note=? WHERE id=?""",
+                    (event["followup_title"], event["followup_due"],
+                     "Связаться 24.11 и пригласить на занятие этой же группы в среду 25.11 в 10:30. Предложить прийти вместе с родителем, мягко и без давления",
+                     open_rebook[0]["id"]))
     task = con.execute("""SELECT id,title,due_at FROM tasks WHERE student_id=?
         AND status='open' AND kind='rebook' ORDER BY id LIMIT 1""", (row["id"],)).fetchone() if row else None
     complete = bool(row and row["birth"] == "2024-08-13"
                     and row["trial_at"] == "2026-11-23T10:30"
                     and row["trial_came"] == 0 and row["stage"] == "reinvite_pu"
                     and row["source"] == "ТРЦ" and task
-                    and str(task["due_at"])[:10] == "2026-11-30"
+                    and task["title"] == event["followup_title"]
+                    and str(task["due_at"])[:10] == "2026-11-24"
                     and not result["errors"] and not result["unmatched"] and not result["ambiguous"])
     return _save(con, {"state": "complete" if complete else "verification_failed",
                        "student_id": row["id"] if row else None,
