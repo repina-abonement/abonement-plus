@@ -119,7 +119,8 @@ def _reconcile_subscription_sale(con,sid,event,user):
     if not total or not method:raise sv.ApiError('В подтверждённой продаже не указаны сумма или способ оплаты')
     discount_id=None
     if event.get('discount_percent'):
-        discount=con.execute("SELECT id,percent FROM discounts WHERE rule='first_on_trial_day' AND active=1 ORDER BY id LIMIT 1").fetchone()
+        rule=str(event.get('discount_rule') or 'first_on_trial_day')
+        discount=con.execute("SELECT id,percent FROM discounts WHERE rule=? AND active=1 ORDER BY id LIMIT 1",(rule,)).fetchone()
         if not discount or int(discount['percent'])!=int(event['discount_percent']):
             raise sv.ApiError('Подтверждённая скидка не совпадает с действующим правилом CRM')
         discount_id=discount['id']

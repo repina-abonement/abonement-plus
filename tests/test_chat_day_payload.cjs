@@ -31,3 +31,16 @@ if (!dussekSale || dussekSale.student_name !== 'Дюссек Михаил' || du
 if (dussekSale.components[0].dates.length !== 8 || dussekSale.components[0].dates.includes('2026-12-30')) throw new Error('Dussek lesson composition is wrong');
 if (!dussekResult || !dussekResult.came || dussekResult.outcome !== 'purchased') throw new Error('Dussek trial result not parsed');
 console.log('PASS Dussek December cash sale and trial result');
+
+const nov16 = context.chatDayPayload([{name:'Служба заботы',messages:[
+  {id:21661,date:'2026-11-16T11:07:53',text:'Оплата Решетняк Матвей 5120 за ноябрь. Декабрь не стали оплачивать, т.к. у него брат ходит и все равно всегда есть скидка 20% за второго ребенка. Оплата картой.'},
+]}], '2026-11-16');
+const matveyNov = nov16.events.find(event=>event.event_kind==='subscription_sale');
+if(!matveyNov||matveyNov.amount!==5120||matveyNov.discount_rule!=='sibling'||matveyNov.components[0].dates.length!==4)throw new Error('Reshetnyak November sale not parsed');
+if(!nov16.events.some(event=>event.event_kind==='trial_result'&&event.came&&event.outcome==='purchased'))throw new Error('Reshetnyak trial result not parsed');
+const nov23 = context.chatDayPayload([{name:'Служба заботы',messages:[
+  {id:22925,date:'2026-11-23T11:15:40',text:'Решетняк Арсений\nПродление на декабрь\nГруппа пн/чт 7800\nОплата через точку банк\n\nРешетняк Матвей\nГруппа пн/среда (малыши)\n\nПродление на декабрь , 9 тренировок - 11520 (14400-20% за второго ребенка)\nОплата через точку банк'},
+]}], '2026-11-23');
+const matveyDec=nov23.events.find(event=>event.student_name==='Решетняк Матвей');
+if(!matveyDec||matveyDec.amount!==11520||matveyDec.payment_method!=='tochka_qr_link'||matveyDec.components[0].dates.length!==9)throw new Error('Reshetnyak December sale not parsed');
+console.log('PASS Reshetnyak November and December sales');

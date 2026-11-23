@@ -214,3 +214,31 @@ def test_dussek_december_cash_sale_records_net_amount_and_no_duplicate_followup(
     assert len(second['already'])==2 and not second['errors']
     assert con.execute("SELECT COUNT(*) FROM payments WHERE student_id=? AND cancelled=0",(sid,)).fetchone()[0]==1
 
+
+def test_reshetnyak_two_month_sibling_sales_are_exact_and_idempotent():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'reshetnyak.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    branch=schedule.save_branch(con,{'name':'ТЦ «Небо»'})
+    group=schedule.save_group(con,{'name':'Небо Пн Ср 10:30','branch_id':branch,'weekdays':[0,2],'time':'10:30','age':'1,5–3'})
+    con.execute("INSERT INTO group_terms(group_id,valid_from,per_lesson,credit_limit) VALUES (?,'2026-11',1600,2)",(group,))
+    older=services.create_student(con,{'name':'Решетняк Арсений','birth':'2020-01-01','parent_name':'Кристина','phone':'+7 963 616-19-67','funnel':'members','group_id':group},user)
+    family=con.execute('SELECT family_id FROM students WHERE id=?',(older,)).fetchone()[0]
+    sid=services.create_student(con,{'name':'Решетняк Матвей','birth':'2025-03-10','family_id':family},user)
+    con.execute("UPDATE students SET group_id=?,trial_group_id=?,trial_at='2026-11-16T10:00' WHERE id=?",(group,group,sid))
+    common={'source_chat':'Служба заботы','student_name':'Решетняк Матвей','event_kind':'subscription_sale','weekdays':[0,2],
+        'tariff':'fixed','discount_percent':20,'discount_rule':'sibling'}
+    nov=common|{'source_id':'sz:21661:решетняк-ноябрь','source_at':'2026-11-16T11:07:53','sale_date':'2026-11-16','paid_at':'2026-11-16T11:07:53','amount':5120,'payment_method':'card_branch',
+        'components':[{'month':'2026-11','price':5120,'dates':['2026-11-18','2026-11-23','2026-11-25','2026-11-30']}], 'note':'Ноябрь 5120 ₽, карта, скидка за второго ребёнка'}
+    trial={'source_id':'sz:21661:решетняк-пу','source_chat':'Служба заботы','source_at':'2026-11-16T11:07:53','student_name':'Решетняк Матвей','event_kind':'trial_result','event_date':'2026-11-16','came':True,'outcome':'purchased','subscription_months':['2026-11'],'note':'Пришёл на ПУ и купил абонемент'}
+    dec=common|{'source_id':'sz:22925:решетняк-декабрь','source_at':'2026-11-23T11:15:40','sale_date':'2026-11-23','paid_at':'2026-11-23T11:15:40','lesson_time':'10:30','amount':11520,'payment_method':'tochka_qr_link',
+        'components':[{'month':'2026-12','price':11520,'dates':['2026-12-02','2026-12-07','2026-12-09','2026-12-14','2026-12-16','2026-12-21','2026-12-23','2026-12-28','2026-12-30']}], 'note':'Декабрь 11520 ₽, Точка, скидка за второго ребёнка'}
+    first=chatdaytransfer.apply(con,{'events':[nov,trial,dec]},user)
+    assert len(first['applied'])==3 and not first['errors']
+    assert [(r['month'],r['price'],r['status'],r['lessons']) for r in con.execute("SELECT month,price,status,lessons FROM subscriptions WHERE student_id=? ORDER BY month",(sid,))]==[('2026-11',5120,'paid',4),('2026-12',11520,'paid',9)]
+    assert [(r['amount'],r['method']) for r in con.execute("SELECT amount,method FROM payments WHERE student_id=? AND cancelled=0 ORDER BY paid_at",(sid,))]==[(5120,'card_branch'),(11520,'tochka_qr_link')]
+    assert con.execute("SELECT trial_came FROM students WHERE id=?",(sid,)).fetchone()[0]==1
+    assert con.execute("SELECT 1 FROM tasks WHERE student_id=? AND auto_key=? AND status='open'",(sid,f'ad-source-required:{sid}')).fetchone()
+    second=chatdaytransfer.apply(con,{'events':[nov,trial,dec]},user)
+    assert len(second['already'])==3 and not second['errors']
+    assert con.execute("SELECT COUNT(*) FROM payments WHERE student_id=? AND cancelled=0",(sid,)).fetchone()[0]==2
+
