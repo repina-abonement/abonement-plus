@@ -61,6 +61,8 @@ function setupPriorMembership(panel) {
     <form><div class="erp-history-fields">
       <label>Фамилия и имя ребёнка<input name="child" required></label>
       <label>ID ученика ERP<input name="erp_student_id" required inputmode="numeric"></label>
+      <label>Номер проверенной карточки CRM<input name="crm_student_id" inputmode="numeric"></label>
+      <label>Телефон родителя для сверки карточки без связи ERP<input name="parent_phone" type="tel"></label>
       <label>Месяц предыдущего абонемента<input name="month" type="month" required></label>
       <label>Номер предыдущего абонемента ERP<input name="subscription_id" required inputmode="numeric"></label>
     </div><label>Источник подтверждения<textarea name="evidence" required maxlength="1500" rows="2"></textarea></label>
@@ -84,7 +86,7 @@ function setupPriorMembership(panel) {
       const result = await api('POST', '/api/erp/prior-membership/preview', fields);
       if (version !== revision) return;
       checked = {...fields, token:result.token};
-      out.textContent = `${result.name} · ${result.month} · абонемент №${result.subscription_id}. ${result.existing ? 'Месяц уже учтён' : 'Можно сохранить основание'}`;
+      out.textContent = `${result.name} · карточка №${result.student_id} · ${result.month} · абонемент №${result.subscription_id}. ${result.existing ? 'Месяц уже учтён' : 'Можно сохранить основание'}`;
       save.disabled = false;
     } catch (error) { if (version === revision) out.textContent = error.message; }
   };

@@ -47,3 +47,13 @@ class PriorMembershipTest(unittest.TestCase):
         self.con.execute("INSERT INTO erp_prior_memberships VALUES ('42',?,'2026-09','источник','','')", (self.sid,))
         with self.assertRaises(erphistory.HistoryError):
             self.plan()
+
+    def test_explicit_card_matches_family_but_does_not_replace_existing_erp_identity(self):
+        self.con.execute("UPDATE students SET erp_id='' WHERE id=?", (self.sid,))
+        checked = {'crm_student_id': self.sid, 'parent_phone': '+7 (900) 100-20-30'}
+        self.assertEqual(self.plan(**checked)['student_id'], self.sid)
+        with self.assertRaises(erphistory.HistoryError):
+            self.plan(crm_student_id=self.sid, parent_phone='79000000000')
+        self.con.execute('UPDATE students SET erp_id=? WHERE id=?', ('999', self.sid))
+        with self.assertRaises(erphistory.HistoryError):
+            self.plan(**checked)

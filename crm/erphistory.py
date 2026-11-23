@@ -455,6 +455,23 @@ def prior_membership(con, body, user, *, apply=False):
         SELECT id FROM students WHERE erp_id=?
         UNION SELECT student_id FROM erp_full_identities WHERE namespace='student' AND source_id=?
     """, (erp_id, erp_id))}
+    expected_sid = str(body.get("crm_student_id") or "").strip()
+    if expected_sid:
+        if not re.fullmatch(r"[1-9][0-9]{0,15}", expected_sid):
+            raise HistoryError("Проверьте номер карточки CRM")
+        expected_sid = int(expected_sid)
+        if ids and ids != {expected_sid}:
+            raise HistoryError("Связь ERP указывает на другую карточку. Проверьте возможный дубль")
+        if not ids:
+            phone = normalize_phone(str(body.get("parent_phone") or ""))
+            if len(phone) < 10:
+                raise HistoryError("Для карточки без связи ERP укажите телефон родителя")
+            family_matches = {r["id"] for r in con.execute("""
+                SELECT DISTINCT s.id,s.name FROM students s JOIN parents p ON p.family_id=s.family_id
+                WHERE substr(p.phone_norm,-10)=?""", (phone[-10:],)) if _same_name(r["name"], name)}
+            if family_matches != {expected_sid}:
+                raise HistoryError("ФИО, семейный телефон и номер карточки CRM должны совпасть однозначно")
+            ids = family_matches
     if len(ids) != 1:
         raise HistoryError("Нужна однозначная связь карточки с ID ученика ERP")
     sid = ids.pop()
