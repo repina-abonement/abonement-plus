@@ -1,0 +1,11 @@
+const fs=require('fs'),assert=require('assert');
+const js=fs.readFileSync('crm/static/trialbooking.js','utf8');
+const start=js.indexOf('async function openTrialBookingHub');
+const end=js.indexOf('\n}',start)+2;
+const fn=js.slice(start,end);
+assert(fn.includes('S.meta.groups||[]'));
+assert(fn.includes('activeBranches.has(g.branch_id)'));
+assert(fn.includes('g.trial_ok!==0'));
+assert(!fn.includes('/past-entry-options'));
+assert(fn.includes('Нет действующих групп, доступных для пробного занятия'));
+console.log('PASS trial booking uses the live CRM group directory');
