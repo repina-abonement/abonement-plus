@@ -1432,7 +1432,7 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .pipeline-panel .col { min-height: 110px; max-height: min(68vh,620px); border: 1px solid color-mix(in srgb,var(--line) 80%,transparent); }
 .pipeline-note { margin: 0 0 12px; padding: 9px 11px; border-radius: 10px; background: var(--surface); color: var(--ink-2); font-size: 13px; }
 .pipeline-empty { padding: 42px 20px; border: 1px dashed var(--line); border-radius: 14px; color: var(--ink-2); text-align: center; }
-.board-card-preview{position:fixed;z-index:1200;max-height:min(70vh,480px);overflow:auto;padding:15px 16px;border:1px solid var(--line);border-radius:14px;background:var(--surface);box-shadow:0 16px 42px rgba(28,45,34,.18);color:var(--ink);line-height:1.45}
+.board-card-preview{position:fixed;z-index:1200;pointer-events:none;max-height:min(70vh,480px);overflow:auto;padding:15px 16px;border:1px solid var(--line);border-radius:14px;background:var(--surface);box-shadow:0 16px 42px rgba(28,45,34,.18);color:var(--ink);line-height:1.45}
 .board-card-preview-label{margin-bottom:5px;color:var(--ink-2);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
 .board-card-preview strong{display:block;font-size:15px}
 .board-card-preview-client,.board-card-preview-due{margin-top:6px;color:var(--ink-2);font-size:12px}
