@@ -1436,6 +1436,8 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .board-card-preview-label{margin-bottom:5px;color:var(--ink-2);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
 .board-card-preview strong{display:block;font-size:15px}
 .board-card-preview-client,.board-card-preview-due{margin-top:6px;color:var(--ink-2);font-size:12px}
+.board-card-preview-client{display:flex;flex-direction:column;gap:3px}
+.board-card-preview-phone{color:var(--ink);font-size:17px;font-weight:700;letter-spacing:.02em;line-height:1.35}
 .board-card-preview-extra{margin-top:8px;color:var(--ink-2);font-size:12px}
 .board-card-preview-note{margin-top:11px;padding-top:10px;border-top:1px solid var(--line);white-space:pre-wrap;font-size:13px}
 .card .card-contact{white-space:normal;overflow-wrap:anywhere}.card .card-task{margin-top:8px;font-size:13px;font-weight:650;line-height:1.35;color:var(--ink)}
