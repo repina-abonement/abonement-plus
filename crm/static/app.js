@@ -31,7 +31,9 @@ function keyboardLayoutVariants(value) {
     if (index < 0) return ch;
     const result = to[index]; return ch === lower ? result : result.toUpperCase();
   }).join("");
-  return [...new Set([source, swap(KEYBOARD_EN, KEYBOARD_RU), swap(KEYBOARD_RU, KEYBOARD_EN)].filter(Boolean))];
+  // Пустой запрос означает «показать все». Без этого варианта поисковые
+  // выпадающие списки групп и филиалов открывались пустыми до первого ввода.
+  return source ? [...new Set([source, swap(KEYBOARD_EN, KEYBOARD_RU), swap(KEYBOARD_RU, KEYBOARD_EN)].filter(Boolean))] : [""];
 }
 function searchTextMatches(text, query) {
   const haystack = String(text || "").toLocaleLowerCase("ru").replace(/ё/g, "е");

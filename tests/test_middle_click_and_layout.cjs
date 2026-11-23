@@ -21,6 +21,8 @@ vm.createContext(context);
 vm.runInContext(source.slice(helperStart, helperEnd) + source.slice(navStart, navEnd), context);
 
 assert.deepStrictEqual([...context.keyboardLayoutVariants('bdfyjd')], ['bdfyjd', 'иванов']);
+assert.deepStrictEqual([...context.keyboardLayoutVariants('')], ['']);
+assert(context.searchTextMatches('Небо · Сб 11:00', ''), 'empty searchable-select query must show every option');
 assert(context.searchTextMatches('Иванов Александр', 'bdfyjd'));
 assert(context.searchTextMatches('John Smith', 'Smith'));
 assert.strictEqual(context.crmNavigationUrl({ dataset: { view: 'payments' } }), 'https://ab-plus.ru/#payments');
