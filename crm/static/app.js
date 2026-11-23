@@ -196,7 +196,7 @@ function renderTgImport(box) {
 
 function renderChatDayImport(box) {
   box.innerHTML = `<h3>📥 Проверенные факты из СЗ и отчётов тренеров</h3>
-    <div class="small muted" style="margin-bottom:8px">Загружает подготовленный файл одного дня. Платежи и баланс не изменяются. Существующие карточки ищутся по полному имени и телефону; неоднозначные или отсутствующие совпадения пропускаются. Повторная загрузка не создаёт записи повторно</div>
+    <div class="small muted" style="margin-bottom:8px">Загружает проверенные факты одного дня. Подтверждённые в СЗ или отчёте тренеров продажи оформляются вместе с абонементом и платежом; сведения об оплатах из ERP не используются. Существующие карточки ищутся по полному имени и телефону; неоднозначные или отсутствующие совпадения пропускаются. Повторная загрузка не создаёт записи повторно</div>
     <div class="row"><div class="field"><label>Дата</label><input type="date" data-chat-day-date value="2026-11-22"></div><div class="field"><label>Файлы</label><label class="btn primary">Выбрать оба result.json<input type="file" data-chat-day-file accept=".json,application/json" multiple hidden></label></div></div>
     <div data-chat-day-result class="small" style="margin-top:10px"></div>`;
   box.querySelector('[data-chat-day-file]').onchange=async event=>{
@@ -220,8 +220,8 @@ function chatDayPayload(exports,day){
   const events=[],dateOf=value=>day.slice(0,5)+value.split('.').reverse().join('-'),plus=(value,n)=>{const d=new Date(value+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)};
   const add=(m,event)=>{const suffix=event.suffix||'';delete event.suffix;events.push({source_id:'sz:'+m.id+suffix,source_chat:care.name,source_at:String(m.date||'').slice(0,19),...event})};
   for(const m of care.messages){const t=m.text.replace(/\r/g,'');let q;
-    if(/Оплата абонемента на ноябрь и декабрь/i.test(t)){
-      const sale=/Мастердеев Денис/i.test(t)?{name:'Мастердеев Денис',time:'17:45',tariff:'fixed',amount:11880,parts:[['2026-11',2160,['2026-11-25','2026-11-29']],['2026-12',9720,['2026-12-02','2026-12-06','2026-12-09','2026-12-13','2026-12-16','2026-12-20','2026-12-23','2026-12-27','2026-12-30']]]}:/Микаладзе Леон/i.test(t)?{name:'Микаладзе Леон',time:'16:45',tariff:'flex',amount:9920,parts:[['2026-11',2480,['2026-11-25','2026-11-29']],['2026-12',7440,['2026-12-02','2026-12-06','2026-12-09','2026-12-13','2026-12-16','2026-12-20']]]}:null;
+    if(/Оплата абонемента (?:на|за) ноябрь и декабрь/i.test(t)){
+      const sale=/(?:Мастердеев\s+Денис|Денис\s+Мастердеев)/i.test(t)?{name:'Мастердеев Денис',time:'17:45',tariff:'fixed',amount:11880,parts:[['2026-11',2160,['2026-11-25','2026-11-29']],['2026-12',9720,['2026-12-02','2026-12-06','2026-12-09','2026-12-13','2026-12-16','2026-12-20','2026-12-23','2026-12-27','2026-12-30']]]}:/(?:Микаладзе\s+Леон|Леон\s+Микаладзе)/i.test(t)?{name:'Микаладзе Леон',time:'16:45',tariff:'flex',amount:9920,parts:[['2026-11',2480,['2026-11-25','2026-11-29']],['2026-12',7440,['2026-12-02','2026-12-06','2026-12-09','2026-12-13','2026-12-16','2026-12-20']]]}:null;
       if(sale)add(m,{suffix:':subscription-sale',student_name:sale.name,event_kind:'subscription_sale',sale_date:day,paid_at:String(m.date||'').slice(0,19),lesson_time:sale.time,weekdays:[2,6],tariff:sale.tariff,discount_percent:20,amount:sale.amount,payment_method:'card_branch',components:sale.parts.map(([month,price,dates])=>({month,price,dates,dates_reason:'Даты и скидка 20% подтверждены сообщением СЗ'})),note:`Оплачен абонемент за ноябрь и декабрь, группа Ср/Вс ${sale.time}, ${sale.amount} ₽ картой в филиале`});
     }
     if((q=t.match(/ПУ\s+([^\n]+?)\s+продажа разовое\s+(\d+)\s+карта[\s\S]*?запись на\s+(\d{2}\.\d{2})\s+в\s+(\d{2}:\d{2})/i))){
