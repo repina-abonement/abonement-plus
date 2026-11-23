@@ -70,6 +70,8 @@ def test_privalov_known_later_decision_sets_stage_and_one_clear_task():
     group=schedule.save_group(con,{'name':'Небо Вс 17:45','branch_id':branch,'weekdays':[6],'time':'17:45','age':'4–5'})
     sid=services.create_student(con,{'name':'Привалов Даниил','birth':'2022-01-01','parent_name':'Мама','phone':'+7 900 222-33-44'},user)
     con.execute("UPDATE students SET group_id=?,trial_group_id=?,trial_at='2026-11-22T17:45' WHERE id=?",(group,group,sid))
+    con.execute("""INSERT INTO tasks(student_id,kind,title,due_at,status,source,auto_key,created_at)
+        VALUES (?,?,?,?,?,?,?,?)""",(sid,'why_not_bought','Почему не купили','2026-11-23T23:59','open','erp','erp:Почему не купили:Привалов','2026-11-22T20:40'))
     event={'source_id':'sz:22891:привалов-даня','source_chat':'Служба заботы','source_at':'2026-11-22T20:32:01','student_name':'Привалов Даня','event_kind':'trial_result','event_date':'2026-11-22','came':True,'note':'Пробное 22.11 в 17:45: мама изначально не планировала, пусть подрастёт, занятий хватает в секции в саду','task_title':'Уточнить решение семьи после пробного','task_due':'2026-12-01T12:00'}
     result=chatdaytransfer.apply(con,{'events':[event]},user)
     assert len(result['applied'])==1 and not result['errors']
@@ -80,6 +82,8 @@ def test_privalov_known_later_decision_sets_stage_and_one_clear_task():
     assert len(open_tasks)==1 and open_tasks[0]['kind']=='rebook'
     assert open_tasks[0]['title']=='Пригласить снова на ПУ: ребёнок подрос'
     assert open_tasks[0]['due_at'][:10]=='2027-02-21'
+    closed=con.execute("SELECT status,result FROM tasks WHERE student_id=? AND title='Почему не купили'",(sid,)).fetchone()
+    assert closed['status']=='cancelled' and 'Решение семьи уже известно' in closed['result']
 
 
 def test_markov_egorov_and_khvostov_receive_their_real_followup_chains():

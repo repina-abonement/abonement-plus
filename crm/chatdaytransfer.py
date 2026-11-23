@@ -118,8 +118,9 @@ def _reconcile_trial_outcome(con,sid,event):
         priority=0,stage_changed_at=? WHERE id=?""",(stage,reason,sv.now_iso(),sid))
     con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',
         result='Решение семьи уже известно: пригласить позже'
-        WHERE student_id=? AND status='open' AND kind='manual' AND auto_key=?""",
-        (sv.now_iso(),sid,'chat-day:'+str(event.get('source_id') or '').strip()))
+        WHERE student_id=? AND status='open' AND (
+          (kind='manual' AND auto_key=?) OR kind='why_not_bought' OR trim(title)='Почему не купили'
+        )""",(sv.now_iso(),sid,'chat-day:'+str(event.get('source_id') or '').strip()))
     from . import pu
     if event.get('followup_title'):title=str(event['followup_title'])
     elif reinvite:title='Предложить адаптационное повторное ПУ с родителем'
@@ -147,7 +148,9 @@ def _reconcile_confirmed_sale(con,sid,event):
     if required.issubset(paid):
         con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',
             result='Продажа оформлена, дальше действует автоматическая цепочка продления'
-            WHERE student_id=? AND status='open' AND kind='manual' AND auto_key=?""",(sv.now_iso(),sid,source))
+            WHERE student_id=? AND status='open' AND (
+              (kind='manual' AND auto_key=?) OR kind='why_not_bought' OR trim(title)='Почему не купили'
+            )""",(sv.now_iso(),sid,source))
         from . import erpstatus
         erpstatus.sync_one(con,sid)
         return True
