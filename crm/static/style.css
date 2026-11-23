@@ -1473,15 +1473,32 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 
 /* Задачи наверху карточки клиента */
 .sc-tasks { margin: 12px 0; }
-.ct-box { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; box-shadow: var(--shadow); }
-.ct-head { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
-.ct-row { display: flex; gap: 10px; align-items: center; padding: 9px 10px; border-radius: 12px; cursor: pointer; background: var(--surface-2); margin-top: 6px; }
-.ct-row:hover, .ct-row:focus { outline: 2px solid var(--line); }
-.ct-row.main { background: #fff6e8; border-left: 4px solid var(--orange, #e8711b); }
-.ct-row.late { background: var(--red-soft); border-left: 4px solid var(--red); }
-.ct-ico { font-size: 18px; } .ct-edit { color: var(--ink-2); }
+.ct-box { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px; box-shadow: 0 4px 16px rgba(35,55,42,.06); }
+.ct-head { display: flex; gap: 12px; align-items: center; justify-content:space-between; margin-bottom: 12px; }
+.ct-head>div { display:flex; align-items:center; gap:8px; font-size:16px; }
+.ct-count { display:inline-grid; place-items:center; min-width:22px; height:22px; padding:0 6px; border-radius:999px; background:#e8f3ec; color:var(--accent); font-size:12px; font-weight:700; }
+.ct-add { margin-left:auto; border-color:#cfd8d1; background:transparent; }
+.ct-add:hover { background:#f3f7f4; }
+.ct-row { display:flex; gap:12px; align-items:center; padding:13px 14px; border-radius:13px; cursor:pointer; background:#f6f9f7; border:1px solid transparent; margin-top:7px; transition:background .15s,border-color .15s,transform .15s; }
+.ct-row:hover, .ct-row:focus-visible { outline:none; background:#f0f6f2; border-color:#cbdccf; transform:translateY(-1px); }
+.ct-row.main { background:#f6f9f7; }
+.ct-row.late { background:#fff5f4; border-color:#f3d1cd; }
+.ct-ico { display:grid; place-items:center; flex:0 0 28px; width:28px; height:28px; border-radius:9px; background:#daf0e3; color:#168653; font-size:16px; font-weight:800; }
+.ct-row.late .ct-ico { background:#fbe0dd; color:#c9362b; }
+.ct-content { flex:1 1 auto; min-width:0; }
+.ct-title { display:flex; align-items:center; gap:8px; flex-wrap:wrap; line-height:1.3; }
+.ct-title b { font-size:15px; }
+.ct-meta { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:5px; color:var(--ink-2); font-size:12px; }
+.ct-date { font-variant-numeric:tabular-nums; }
+.ct-row.late .ct-date { color:#bd3028; font-weight:650; }
+.ct-priority { color:#8a5511; }
+.ct-edit { display:grid; place-items:center; flex:0 0 30px; width:30px; height:30px; border-radius:9px; color:var(--ink-2); opacity:.6; }
+.ct-row:hover .ct-edit { background:var(--surface); opacity:1; }
 .ct-more > summary { cursor: pointer; margin-top: 6px; color: var(--ink-2); }
 .ct-hist { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); line-height: 1.5; }
+.ct-history-link { margin-top:13px; padding:4px 2px; color:var(--ink-2); }
+.ct-history-link:hover { color:var(--accent); }
+@media(max-width:600px) { .ct-box { padding:14px; } .ct-row { padding:12px; } .ct-add { padding:8px 10px; } }
 /* задачи в узкой колонке стола и на телефоне: кнопки отдельной строкой, текст не сжимается */
 .desk-side .task, .tasks-box .task { flex-wrap: wrap; }
 .desk-side .task > .grow { flex: 1 1 calc(100% - 90px); min-width: 0; }
@@ -1642,9 +1659,9 @@ html.theme-soft .sidebar-account [data-account-logout] { background: var(--surfa
 .sc-grid[data-tab="abon"]>.sc-left,.sc-grid[data-tab="abon"]>.sc-info,
 .sc-grid[data-tab="info"]>.sc-left,.sc-grid[data-tab="info"]>.sc-right { display:none; }
 .sc-info .row { flex-wrap:wrap; } .sc-info .row>.field { min-width:0; flex:1 1 160px; }
-.sc-tasks .ct-row { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--accent); }
-.sc-tasks .ct-row.late { background:var(--surface); border-left-color:#d92d20; }
-.ct-history-link { margin-top:12px; }
+.sc-tasks .ct-row { background:#f6f9f7; border:1px solid transparent; }
+.sc-tasks .ct-row:hover { background:#f0f6f2; border-color:#cbdccf; }
+.sc-tasks .ct-row.late { background:#fff5f4; border-color:#f3d1cd; }
 @media(max-width:600px) { .sc-head { padding:16px; } .sc-finance-summary { grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; } .sc-finance-summary b { font-size:17px; } .sc-tabs button { font-size:12px; padding:11px 5px; } .sc-parent { width:100%; } }
 
 .sc-extra-actions { position:relative; } .sc-extra-actions summary { list-style:none; cursor:pointer; }

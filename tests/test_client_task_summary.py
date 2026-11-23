@@ -7,7 +7,12 @@ def main():
     assert "t.kind==='renew'&&t.note" not in block
     assert "openTaskEdit(t, reload)" in script
     assert "Подробное описание задачи" in script
-    print("PASS renewal card is concise while full note remains in task details")
+    assert 'class="ct-content"' in block
+    assert 'class="ct-title"' in block
+    assert 'class="ct-meta"' in block
+    assert 'class="ct-count"' in block
+    assert "История задач" in block
+    print("PASS client task card is concise, structured and keeps full note in task details")
 
 
 if __name__ == "__main__":

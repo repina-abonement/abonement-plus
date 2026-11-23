@@ -195,18 +195,19 @@ function cardTasksBlock(d) {
   (T.open || []).concat(T.done || []).forEach((t) => { S.taskById = S.taskById || {}; S.taskById[t.id] = t; });
   const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   const late=t=>t.client_task?t.due_at.slice(0,10)<S.meta.today:t.due_at<now;
-  const row = (t, main) => `<div class="ct-row ${main ? "main" : ""} ${late(t) ? "late" : ""}" data-ctask="${t.id}" role="button" tabindex="0" title="Нажмите, чтобы изменить задачу">
-    <span class="ct-ico">${t.icon || "✅"}</span><div class="grow"><b>${esc(t.title)}</b> ${kindPill(t)}
-    <div class="small muted">${late(t) ? "⏰ просрочено, " : ""}${dShort(t.due_at)}${t.priority?" · 🔥 Приоритет":""}</div></div>
-    <span class="ct-edit">✎</span></div>`;
+  const row = (t, main) => `<div class="ct-row ${main ? "main" : ""} ${late(t) ? "late" : ""}" data-ctask="${t.id}" role="button" tabindex="0" title="Открыть задачу">
+    <span class="ct-ico" aria-hidden="true">${t.icon || "✓"}</span>
+    <div class="ct-content"><div class="ct-title"><b>${esc(t.title)}</b>${kindPill(t)}</div>
+    <div class="ct-meta"><span class="ct-date">${late(t) ? "Просрочено · " : ""}${dShort(t.due_at)}</span>${t.priority?"<span class=\"ct-priority\">🔥 Приоритет</span>":""}</div></div>
+    <span class="ct-edit" aria-hidden="true">✎</span></div>`;
   const last = (d.history || []).slice(0, 2);
   return `<div class="ct-box">
-    <div class="ct-head"><b>✅ Задачи</b>${T.open.length > 1 ? `<span class="small muted">открыто ${T.open.length}</span>` : ""}
-      <button class="btn sm" data-ctadd style="margin-left:auto">+ Задача</button></div>
+    <div class="ct-head"><div><b>Задачи</b>${T.open.length ? `<span class="ct-count">${T.open.length}</span>` : ""}</div>
+      <button class="btn sm ct-add" data-ctadd><span aria-hidden="true">＋</span> Добавить</button></div>
     ${T.open.length ? row(T.open[0], true) : `<div class="small muted">Открытых задач нет</div>`}
     ${T.open.length > 1 ? `<details class="ct-more"><summary class="small">Ещё ${T.open.length - 1}</summary>${T.open.slice(1).map((t) => row(t)).join("")}</details>` : ""}
     <div data-ctaddbox></div>
-    ${last.length ? `<button class="linkish small ct-history-link" data-cthist>История клиента</button>` : ""}
+    ${last.length ? `<button class="linkish small ct-history-link" data-cthist>История задач <span aria-hidden="true">→</span></button>` : ""}
   </div>`;
 }
 function wireCardTasks(root, reload, sid) {
