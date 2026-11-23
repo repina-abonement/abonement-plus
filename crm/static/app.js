@@ -197,17 +197,37 @@ function renderTgImport(box) {
 function renderChatDayImport(box) {
   box.innerHTML = `<h3>📥 Проверенные факты из СЗ и отчётов тренеров</h3>
     <div class="small muted" style="margin-bottom:8px">Загружает подготовленный файл одного дня. Платежи и баланс не изменяются. Существующие карточки ищутся по полному имени и телефону; неоднозначные или отсутствующие совпадения пропускаются. Повторная загрузка не создаёт записи повторно</div>
-    <label class="btn primary">Выбрать файл дня<input type="file" data-chat-day-file accept=".json,application/json" hidden></label>
+    <div class="row"><div class="field"><label>Дата</label><input type="date" data-chat-day-date value="2026-11-22"></div><div class="field"><label>Файлы</label><label class="btn primary">Выбрать оба result.json<input type="file" data-chat-day-file accept=".json,application/json" multiple hidden></label></div></div>
     <div data-chat-day-result class="small" style="margin-top:10px"></div>`;
   box.querySelector('[data-chat-day-file]').onchange=async event=>{
-    const file=event.target.files[0],out=box.querySelector('[data-chat-day-result]');if(!file)return;
+    const files=[...event.target.files],out=box.querySelector('[data-chat-day-result]');if(!files.length)return;
     out.textContent='Переношу проверенные факты…';
     try{
-      const payload=JSON.parse(await file.text()),r=await api('POST','/api/import/chat-day',payload);
+      const raw=await Promise.all(files.map(async file=>JSON.parse(await file.text()))),day=box.querySelector('[data-chat-day-date]').value;
+      let payload=raw.find(x=>Array.isArray(x.events));
+      if(!payload){if(raw.length!==2)throw new Error('Выберите одновременно два result.json: СЗ и ТРЕНЕРЫ');payload=chatDayPayload(raw,day)}
+      const r=await api('POST','/api/import/chat-day',payload);
       const rows=(r.applied||[]).map(x=>`<div class="list-row"><div><b>${esc(x.name)}</b><div>${esc(x.added)}</div><div class="muted">${(x.tasks||[]).length?`Задача: ${esc(x.tasks[0].title)} · ${esc(dShort(x.tasks[0].due_at))}`:'Открытая задача создана автоматически'}</div></div></div>`).join('');
       out.innerHTML=`<p>✅ Внесено: <b>${r.applied.length}</b> · уже было: ${r.already.length} · не найдено: ${r.unmatched.length} · неоднозначно: ${r.ambiguous.length} · ошибки: ${r.errors.length}</p>${rows}${r.unmatched.length?`<p class="error">Не создавались новые карточки: ${r.unmatched.map(x=>esc(x.name)).join(', ')}</p>`:''}${r.ambiguous.length?`<p class="error">Нужно сверить совпадения: ${r.ambiguous.map(x=>esc(x.name)).join(', ')}</p>`:''}${r.errors.length?`<p class="error">Ошибки: ${r.errors.map(x=>esc(x.name+': '+x.error)).join('; ')}</p>`:''}`;
     }catch(error){out.innerHTML=`<span class="error">${esc(error.message||'Не удалось выполнить перенос')}</span>`}
   };
+}
+
+function chatDayPayload(exports,day){
+  const flat=value=>typeof value==='string'?value:Array.isArray(value)?value.map(x=>typeof x==='string'?x:(x&&x.text)||'').join(''):'';
+  const chats=exports.map(x=>({name:x.name||'',messages:(x.messages||[]).filter(m=>String(m.date||'').startsWith(day)).map(m=>({...m,text:flat(m.text)}))}));
+  const care=chats.find(x=>/служба заботы/i.test(x.name));if(!care)throw new Error('Не найден экспорт чата «Служба заботы»');
+  const events=[],dateOf=value=>day.slice(0,5)+value.split('.').reverse().join('-');
+  const add=(m,event)=>{const suffix=event.suffix||'';delete event.suffix;events.push({source_id:'sz:'+m.id+suffix,source_chat:care.name,source_at:String(m.date||'').slice(0,19),...event})};
+  for(const m of care.messages){const t=m.text.replace(/\r/g,'');let q;
+    if((q=t.match(/ПУ\s+([^\n]+?)\s+продажа разовое[\s\S]*?запись на\s+(\d{2}\.\d{2})\s+в\s+(\d{2}:\d{2})/i)))add(m,{student_name:q[1],event_kind:'trial_result',event_date:day,came:true,note:`Пробное ${dShort(day)}: пришёл и занимался. Семья пока не готова к месячному абонементу, выбрала разовое занятие ${q[2]} в ${q[3]}`,task_title:`Напомнить о разовом занятии ${q[2]} в ${q[3]}`,task_due:dateOf(q[2])+'T12:00'});
+    if((q=t.match(/^([^\n]+)\n(?:\+?\d[^\n]*\n\n)?Перезаписан на\s+(\d{2}\.\d{2})\s+в\s+(\d{2}:\d{2})/im)))add(m,{student_name:q[1],event_kind:'trial_booking',event_date:dateOf(q[2]),note:`Пробное перенесено на ${q[2]} в ${q[3]}`,task_title:`Подтвердить пробное ${q[2]} в ${q[3]}`,task_due:dateOf(q[2])+'T09:00'});
+    if((q=t.match(/^([^\n]+) записан на пу на\s+(\d{2}\.\d{2})\s+в\s+(\d{2}:\d{2})[^\n]*\n(\+?\d[^\n]*)/im)))add(m,{student_name:q[1],phone:q[4],event_kind:'trial_booking',event_date:dateOf(q[2]),note:`Записан на пробное ${q[2]} в ${q[3]}`,task_title:`Подтвердить пробное ${q[2]} в ${q[3]}`,task_due:dateOf(q[2])+'T09:00'});
+    if((q=t.match(/^([^\n]+)\nОтработка\s+(\d{2}\.\d{2})\s+в\s+(\d{2}:\d{2})/im)))add(m,{student_name:q[1],event_kind:'makeup_booking',event_date:dateOf(q[2]),note:`Отработка назначена на ${q[2]} в ${q[3]}. Родитель просил обязательно прислать напоминание`,task_title:`Напомнить об отработке ${q[2]} в ${q[3]}`,task_due:dateOf(q[2])+'T09:00'});
+    if((q=t.match(/Запись на ПУ\s+(\d{2}\.\d{2})\s+в\s+(\d{2}:\d{2})\n([^\n]+?)\s+\d{2}\.\d{2}\.\d{4}\n[^\n]*?(\d{10,})/i)))add(m,{student_name:q[3],phone:q[4],event_kind:'trial_booking',event_date:dateOf(q[1]),note:`Записан на пробное ${q[1]} в ${q[2]}`,task_title:`Проверить результат пробного ${q[1]}`,task_due:dateOf(q[1])+'T12:00'});
+    if(/Отчет\s+22\.11/i.test(t))for(const line of t.split('\n').filter(x=>/^•\s*/.test(x))){const p=line.match(/^•\s*([^\d]+?)\s+(\d{2}:\d{2})\s+(.+)$/);if(!p)continue;const detail=p[3];if(/разов/i.test(detail)||!/ПРОДАЖА|подождать|не готов|подумает/i.test(detail))continue;const came=!/ушли|не смог|не зашел/i.test(detail);let due='2026-12-01T12:00',title='Уточнить решение семьи после пробного';if(/весн/i.test(detail)){due='2027-04-01T12:00';title='Связаться с семьёй весной и предложить подходящую группу'}else if(/ПРОДАЖА НОЯ\+ДЕК/i.test(detail)){due='2026-12-20T12:00';title='Проверить продление после декабря'}add(m,{suffix:':'+p[1].trim().toLocaleLowerCase('ru').replace(/\s+/g,'-'),student_name:p[1].trim(),event_kind:'trial_result',event_date:day,came,note:`Пробное ${dShort(day)} в ${p[2]}: ${detail}`,task_title:title,task_due:due});}
+  }
+  if(!events.length)throw new Error('За выбранную дату не найдено поддерживаемых клиентских событий');return {date:day,events};
 }
 
 let toastTimer;
