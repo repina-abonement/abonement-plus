@@ -91,7 +91,7 @@ console.log('PASS reviewed clients receive identity from earlier care messages')
 const sergievsky = context.chatDayPayload([{name:'Служба заботы',messages:[
   {id:22884,date:'2026-11-22T17:16:40',text:'Сергиевский Женя\nОтработка 24.11 в 17:45\nПришлите напоминалку пожалуйста'},
 ]},{name:'ТРЕНЕРЫ',messages:[]}], '2026-11-22');
-if(!sergievsky.events.some(event=>event.erp_id==='182330'))throw new Error('Sergievsky ERP identity missing');
+if(!sergievsky.events.some(event=>event.erp_id==='182330'&&event.erp_create_if_missing&&event.student_name==='Евгений Сергиевский'&&/данные семьи/i.test(event.clarification_task_title)))throw new Error('Sergievsky ERP identity missing');
 console.log('PASS Sergievsky short chat name links through verified ERP ID');
 
 const surnameOnly = context.chatDayPayload([{name:'Служба заботы',messages:[

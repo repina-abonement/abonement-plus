@@ -279,6 +279,27 @@ def apply(con,data,user):
         matches=_match(con,event)
         created=False
         if not matches:
+            erp_allowed=(event.get('erp_create_if_missing') is True and str(event.get('erp_id') or '').strip()
+                         and str(event.get('student_name') or '').strip())
+            if erp_allowed:
+                con.execute('SAVEPOINT chat_day_event')
+                try:
+                    name=str(event['student_name']).strip();family=con.execute('INSERT INTO families(name) VALUES (?)',(name.split()[0],)).lastrowid
+                    group=con.execute('SELECT id FROM groups WHERE name=? ORDER BY active DESC,id LIMIT 1',(str(event.get('erp_group_name') or ''),)).fetchone()
+                    if not group and event.get('erp_group_time'):
+                        rows=con.execute("""SELECT g.id FROM groups g JOIN branches b ON b.id=g.branch_id
+                            WHERE g.active=1 AND g.is_makeup=0 AND g.time=? AND b.name LIKE ? ORDER BY g.id""",
+                            (str(event['erp_group_time']),'%'+str(event.get('erp_branch_hint') or '')+'%')).fetchall()
+                        if len(rows)==1:group=rows[0]
+                    gid=group['id'] if group else None
+                    sid=sv.create_student(con,{'name':name,'family_id':family,'funnel':'members' if gid else 'sales',
+                        'group_id':gid,'source':'ERP'},user)
+                    con.execute('UPDATE students SET erp_id=? WHERE id=?',(str(event['erp_id']).strip(),sid))
+                    matches=[{'id':sid,'name':name}];created=True
+                except Exception as exc:
+                    con.execute('ROLLBACK TO chat_day_event');con.execute('RELEASE chat_day_event')
+                    result['errors'].append({'source_id':source,'name':event.get('student_name'),'error':str(exc)});continue
+        if not matches:
             allowed=(event.get('create_if_missing') is True and event.get('event_kind') in ('trial_booking','trial_result')
                      and str(event.get('source_chat') or '').casefold().startswith('служба заботы'))
             required=(str(event.get('student_name') or '').strip(),str(event.get('birth') or '').strip(),

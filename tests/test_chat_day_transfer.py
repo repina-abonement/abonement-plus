@@ -176,6 +176,22 @@ def test_chat_transfer_prefers_verified_erp_id_over_short_chat_name():
     assert len(result['applied'])==1 and not result['unmatched'] and result['applied'][0]['student_id']==sid
 
 
+def test_chat_transfer_creates_incomplete_erp_card_instead_of_losing_client():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'erp-create.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    branch=schedule.save_branch(con,{'name':'ТЦ «Небо»'})
+    group=schedule.save_group(con,{'name':'Небо НУП ср/вс 16:45 возраст 3-4','branch_id':branch,'weekdays':[2,6],'time':'16:45','age':'3–4'})
+    event={'source_id':'sz:22884','source_chat':'Служба заботы','source_at':'2026-11-22T17:16:40','student_name':'Евгений Сергиевский','erp_id':'182330','erp_create_if_missing':True,'erp_group_name':'Небо НУП ср/вс 16:45 возраст 3-4','erp_group_time':'16:45','erp_branch_hint':'Небо','event_kind':'makeup_booking','event_date':'2026-11-24','note':'Отработка 24.11 в 17:45','task_title':'Напомнить об отработке 24.11 в 17:45','task_due':'2026-11-24T09:00','clarification_task_title':'Заполнить данные семьи Сергиевского из ERP'}
+    result=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(result['applied'])==1 and not result['unmatched'] and not result['errors']
+    student=con.execute("SELECT id,erp_id,group_id,funnel FROM students WHERE name='Евгений Сергиевский'").fetchone()
+    assert student and (student['erp_id'],student['group_id'],student['funnel'])==('182330',group,'members')
+    assert con.execute("SELECT COUNT(*) FROM parents WHERE family_id=(SELECT family_id FROM students WHERE id=?)",(student['id'],)).fetchone()[0]==0
+    assert con.execute("SELECT 1 FROM tasks WHERE student_id=? AND status='open' AND title='Заполнить данные семьи Сергиевского из ERP'",(student['id'],)).fetchone()
+    repeat=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(repeat['already'])==1 and con.execute("SELECT COUNT(*) FROM students WHERE erp_id='182330'").fetchone()[0]==1
+
+
 def test_confirmed_paid_sale_does_not_leave_manual_renewal_duplicate():
     con=db.connect(str(Path(tempfile.mkdtemp())/'sale.sqlite3'));db.init_db(con)
     user={'id':1,'role':'admin','name':'Руководитель'}
