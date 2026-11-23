@@ -36,6 +36,7 @@ def init(con):
             _reconcile_trial_booking(con,row['student_id'],event)
             _reconcile_single_sale(con,row['student_id'],event)
             _reconcile_trial_outcome(con,row['student_id'],event)
+            _reconcile_confirmed_sale(con,row['student_id'],event)
         except (TypeError,ValueError,KeyError):continue
 
 
@@ -95,27 +96,65 @@ def _reconcile_single_sale(con,sid,event):
 
 def _reconcile_trial_outcome(con,sid,event):
     """Turn an already known 'grow up and return later' answer into the right stage and one task."""
-    if event.get('event_kind')!='trial_result' or event.get('came') is not True:return False
+    if event.get('event_kind')!='trial_result':return False
     note=str(event.get('note') or '')
-    if event.get('outcome')!='later' and not re.search(r'пусть подраст|секци[яи] в сад',note,re.I):return False
+    later=event.get('outcome')=='later' or re.search(r'пусть подраст|секци[яи] в сад|подождать до весны|весной попробуют|пробовать пока не готовы',note,re.I)
+    reinvite=event.get('outcome')=='reinvite'
+    if not later and not reinvite:return False
     day=str(event.get('event_date') or '')[:10]
-    try:due=datetime.combine(datetime.fromisoformat(day).date()+timedelta(days=91),datetime.min.time()).replace(hour=11)
+    try:
+        base=datetime.fromisoformat(day).date()
+        if event.get('followup_due'):due=datetime.fromisoformat(str(event['followup_due'])[:16])
+        elif re.search(r'весн|апрел',note,re.I):due=datetime(base.year+1,4,1,11)
+        else:due=datetime.combine(base+timedelta(days=7 if reinvite else 91),datetime.min.time()).replace(hour=11)
     except ValueError:return False
-    reason=str(event.get('refusal_reason') or 'Ребёнок пока не готов: занимается в саду, семья изначально не планировала покупку')
+    if event.get('refusal_reason'):reason=str(event['refusal_reason'])
+    elif re.search(r'весн|апрел',note,re.I):reason='Ребёнок пока не готов по возрасту, семья хочет вернуться весной'
+    elif re.search(r'не смог|не заш[её]л|не готов',note,re.I):reason='Ребёнок пока не готов войти в тренировку, семья не готова повторять попытку сейчас'
+    else:reason='Ребёнок пока не готов: занимается в саду, семья изначально не планировала покупку'
     before=con.execute('SELECT stage,refusal_reason FROM students WHERE id=?',(sid,)).fetchone()
-    con.execute("""UPDATE students SET stage='later',refusal_reason=?,contacted_after_trial=1,
-        priority=0,stage_changed_at=? WHERE id=?""",(reason,sv.now_iso(),sid))
+    stage='reinvite_pu' if reinvite else 'later'
+    con.execute("""UPDATE students SET stage=?,refusal_reason=?,contacted_after_trial=1,
+        priority=0,stage_changed_at=? WHERE id=?""",(stage,reason,sv.now_iso(),sid))
     con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',
         result='Решение семьи уже известно: пригласить позже'
         WHERE student_id=? AND status='open' AND kind='manual' AND auto_key=?""",
         (sv.now_iso(),sid,'chat-day:'+str(event.get('source_id') or '').strip()))
     from . import pu
+    if event.get('followup_title'):title=str(event['followup_title'])
+    elif reinvite:title='Предложить адаптационное повторное ПУ с родителем'
+    elif re.search(r'весн|апрел',note,re.I):title='Связаться с семьёй весной и предложить подходящую группу'
+    elif re.search(r'не смог|не заш[её]л|не готов',note,re.I):title='Пригласить снова на ПУ: ребёнок будет готов'
+    else:title='Пригласить снова на ПУ: ребёнок подрос'
     pu.ensure_task(con,sid,due,datetime.fromisoformat(str(event.get('source_at') or day+'T12:00')[:19]),
-                   title='Пригласить снова на ПУ: ребёнок подрос')
-    if not before or before['stage']!='later' or before['refusal_reason']!=reason:
-        sv.log(con,sid,f'Семья пока не планирует покупку: {reason}. Пригласим снова {due:%d.%m.%Y}',
+                   title=title)
+    if not before or before['stage']!=stage or before['refusal_reason']!=reason:
+        action='Предложим адаптационное повторное ПУ' if reinvite else 'Пригласим снова'
+        sv.log(con,sid,f'{reason}. {action} {due:%d.%m.%Y}',
                {'name':'Перенос СЗ'},'stage')
     return True
+
+
+def _reconcile_confirmed_sale(con,sid,event):
+    """A chat sale is a fact, but financial rows are never invented by this importer."""
+    if event.get('event_kind')!='trial_result':return False
+    note=str(event.get('note') or '')
+    if event.get('outcome')!='purchased' and not re.search(r'ПРОДАЖА НОЯ\+ДЕК|\bКупил\b',note,re.I):return False
+    source='chat-day:'+str(event.get('source_id') or '').strip()
+    required=set(event.get('subscription_months') or ['2026-11','2026-12'])
+    paid={r[0] for r in con.execute("""SELECT month FROM subscriptions WHERE student_id=? AND status='paid'
+        AND COALESCE(kind,'month')='month'""",(sid,))}
+    if required.issubset(paid):
+        con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',
+            result='Продажа оформлена, дальше действует автоматическая цепочка продления'
+            WHERE student_id=? AND status='open' AND kind='manual' AND auto_key=?""",(sv.now_iso(),sid,source))
+        from . import erpstatus
+        erpstatus.sync_one(con,sid)
+        return True
+    con.execute("""UPDATE tasks SET title='Проверить оформление подтверждённой продажи',due_at=?,note=?
+        WHERE student_id=? AND status='open' AND kind='manual' AND auto_key=?""",
+        (sv.today().isoformat()+'T23:59',note,sid,source))
+    return False
 
 
 def apply(con,data,user):
@@ -130,6 +169,7 @@ def apply(con,data,user):
             _reconcile_trial_booking(con,old['student_id'],event)
             _reconcile_single_sale(con,old['student_id'],event)
             _reconcile_trial_outcome(con,old['student_id'],event)
+            _reconcile_confirmed_sale(con,old['student_id'],event)
             student=con.execute('SELECT id,name FROM students WHERE id=?',(old['student_id'],)).fetchone()
             result['already'].append({'source_id':source,'student_id':old['student_id'],'name':student['name'] if student else '', 'tasks':_current_tasks(con,old['student_id'])});continue
         matches=_match(con,event)
@@ -178,9 +218,11 @@ def apply(con,data,user):
                         (sv.now_iso(),sid,at[:10]+'T23:59'))
             booked=_reconcile_trial_booking(con,sid,event)
             outcome=_reconcile_trial_outcome(con,sid,event)
-            if event.get('task_title') and event.get('task_due') and not booked and not outcome:
+            sold=_reconcile_confirmed_sale(con,sid,event)
+            if event.get('task_title') and event.get('task_due') and not booked and not outcome and not sold:
                 tasks.add_task(con,'manual',sid,str(event['task_due'])[:16],auto_key='chat-day:'+source,
                                title=str(event['task_title'])[:300],note=str(event.get('task_note') or note)[:4000],source='erp')
+                _reconcile_confirmed_sale(con,sid,event)
             con.execute('INSERT INTO chat_day_transfer_events VALUES (?,?,?,?,?,?,?,?)',(source,sid,str(event.get('source_chat') or ''),at,str(event.get('event_kind') or 'note'),json.dumps(event,ensure_ascii=False),sv.now_iso(),user.get('name','')))
             tasks.ensure_client_task_coverage(con)
             con.execute('RELEASE chat_day_event')

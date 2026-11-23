@@ -81,3 +81,42 @@ def test_privalov_known_later_decision_sets_stage_and_one_clear_task():
     assert open_tasks[0]['title']=='Пригласить снова на ПУ: ребёнок подрос'
     assert open_tasks[0]['due_at'][:10]=='2027-02-21'
 
+
+def test_markov_egorov_and_khvostov_receive_their_real_followup_chains():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'followups.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    branch=schedule.save_branch(con,{'name':'ТЦ «Небо»'})
+    group=schedule.save_group(con,{'name':'Небо Вс','branch_id':branch,'weekdays':[6],'time':'16:45','age':'2–4'})
+    cases=[
+        ('Марков Тимофей','2023-04-01','2026-11-22T16:45',True,'Решили подождать до весны, в апреле исполнится 3','later','2027-04-01','Связаться с семьёй весной и предложить подходящую группу'),
+        ('Егоров Артур','2023-10-17','2026-11-22T16:45',False,'Не смог зайти, перезаписаться и пробовать пока не готовы','later','2027-02-21','Пригласить снова на ПУ: ребёнок будет готов'),
+        ('Хвостов Александр','2024-08-13','2026-11-23T10:30',False,'ПУ не состоялось, ребёнок не смог отойти от родителей','reinvite','2026-11-30','Предложить адаптационное повторное ПУ с родителем'),
+    ]
+    for index,(name,birth,trial,came,note,outcome,due,title) in enumerate(cases,1):
+        sid=services.create_student(con,{'name':name,'birth':birth,'parent_name':'Родитель','phone':f'+7 900 000-10-0{index}'},user)
+        con.execute('UPDATE students SET group_id=?,trial_group_id=?,trial_at=? WHERE id=?',(group,group,trial,sid))
+        event={'source_id':f'sz:case:{index}','source_chat':'Служба заботы','source_at':trial[:10]+'T20:00:00','student_name':name,'event_kind':'trial_result','event_date':trial[:10],'came':came,'outcome':outcome,'note':note}
+        if outcome=='reinvite':event|={'followup_due':'2026-11-30T11:00','followup_title':'Предложить адаптационное повторное ПУ с родителем'}
+        result=chatdaytransfer.apply(con,{'events':[event]},user)
+        assert len(result['applied'])==1 and not result['errors']
+        student=con.execute('SELECT stage,trial_came FROM students WHERE id=?',(sid,)).fetchone()
+        assert student['stage']==('reinvite_pu' if outcome=='reinvite' else 'later') and student['trial_came']==int(came)
+        task=con.execute("SELECT title,due_at FROM tasks WHERE student_id=? AND status='open' AND kind='rebook'",(sid,)).fetchone()
+        assert task and task['due_at'][:10]==due and task['title']==title
+
+
+def test_confirmed_paid_sale_does_not_leave_manual_renewal_duplicate():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'sale.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    branch=schedule.save_branch(con,{'name':'ТЦ «Небо»'})
+    group=schedule.save_group(con,{'name':'Небо Ср Вс','branch_id':branch,'weekdays':[2,6],'time':'16:45','age':'4–5'})
+    sid=services.create_student(con,{'name':'Микаладзе Леон','birth':'2022-01-01','parent_name':'Мама','phone':'+7 900 555-44-33'},user)
+    con.execute("UPDATE students SET group_id=?,trial_group_id=?,trial_at='2026-11-22T16:45' WHERE id=?",(group,group,sid))
+    for month in ('2026-11','2026-12'):
+        con.execute("""INSERT INTO subscriptions(student_id,month,tariff,lessons,per_lesson,price,status,created_at,paid_at)
+            VALUES (?,?,?,?,?,?,?,?,?)""",(sid,month,'flex',6,1000,6000,'paid','2026-11-22T20:15','2026-11-22T20:15'))
+    event={'source_id':'sz:22891:микаладзе-леон','source_chat':'Служба заботы','source_at':'2026-11-22T20:32:01','student_name':'Микаладзе Леон','event_kind':'trial_result','event_date':'2026-11-22','came':True,'outcome':'purchased','subscription_months':['2026-11','2026-12'],'note':'ПРОДАЖА НОЯ+ДЕК, группа ср/вс 16:45','task_title':'Проверить продление после декабря','task_due':'2026-12-20T12:00'}
+    result=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(result['applied'])==1 and not result['errors']
+    assert not con.execute("SELECT 1 FROM tasks WHERE student_id=? AND auto_key='chat-day:sz:22891:микаладзе-леон' AND status='open'",(sid,)).fetchone()
+
