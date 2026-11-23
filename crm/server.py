@@ -3435,6 +3435,12 @@ def import_telegram(con, h, user, body, q):
     return tgarchive.import_(con, body, user)
 
 
+@route("POST", "/api/import/chat-day", role="admin")
+def import_chat_day(con,h,user,body,q):
+    from . import chatdaytransfer
+    return chatdaytransfer.apply(con,body,user)
+
+
 @route("GET", "/api/alerts", role="operator")
 def alerts_list(con, h, user, body, q):
     from . import pu

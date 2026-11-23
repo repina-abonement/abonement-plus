@@ -194,6 +194,22 @@ function renderTgImport(box) {
   };
 }
 
+function renderChatDayImport(box) {
+  box.innerHTML = `<h3>📥 Проверенные факты из СЗ и отчётов тренеров</h3>
+    <div class="small muted" style="margin-bottom:8px">Загружает подготовленный файл одного дня. Платежи и баланс не изменяются. Существующие карточки ищутся по полному имени и телефону; неоднозначные или отсутствующие совпадения пропускаются. Повторная загрузка не создаёт записи повторно</div>
+    <label class="btn primary">Выбрать файл дня<input type="file" data-chat-day-file accept=".json,application/json" hidden></label>
+    <div data-chat-day-result class="small" style="margin-top:10px"></div>`;
+  box.querySelector('[data-chat-day-file]').onchange=async event=>{
+    const file=event.target.files[0],out=box.querySelector('[data-chat-day-result]');if(!file)return;
+    out.textContent='Переношу проверенные факты…';
+    try{
+      const payload=JSON.parse(await file.text()),r=await api('POST','/api/import/chat-day',payload);
+      const rows=(r.applied||[]).map(x=>`<div class="list-row"><div><b>${esc(x.name)}</b><div>${esc(x.added)}</div><div class="muted">${(x.tasks||[]).length?`Задача: ${esc(x.tasks[0].title)} · ${esc(dShort(x.tasks[0].due_at))}`:'Открытая задача создана автоматически'}</div></div></div>`).join('');
+      out.innerHTML=`<p>✅ Внесено: <b>${r.applied.length}</b> · уже было: ${r.already.length} · не найдено: ${r.unmatched.length} · неоднозначно: ${r.ambiguous.length} · ошибки: ${r.errors.length}</p>${rows}${r.unmatched.length?`<p class="error">Не создавались новые карточки: ${r.unmatched.map(x=>esc(x.name)).join(', ')}</p>`:''}${r.ambiguous.length?`<p class="error">Нужно сверить совпадения: ${r.ambiguous.map(x=>esc(x.name)).join(', ')}</p>`:''}${r.errors.length?`<p class="error">Ошибки: ${r.errors.map(x=>esc(x.name+': '+x.error)).join('; ')}</p>`:''}`;
+    }catch(error){out.innerHTML=`<span class="error">${esc(error.message||'Не удалось выполнить перенос')}</span>`}
+  };
+}
+
 let toastTimer;
 function toast(msg, err = false) {
   const t = $("#toast");
@@ -2943,6 +2959,7 @@ async function renderSettings(page) {
     ${S.user.role === "admin" ? `<div class="section" id="chains-settings" data-tab="chains"></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" id="erp-settings" data-tab="erp"></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" id="tg-import" data-tab="erp"></div>` : ""}
+    ${S.user.role === "admin" ? `<div class="section" id="chat-day-import" data-tab="erp"></div>` : ""}
     <div class="section" id="backup-settings" data-tab="backup"></div>
     ${isOwner() ? `<div class="section" id="diag-box" data-tab="diag"></div>` : ""}
     <div class="section" id="resp-settings" data-tab="resp"></div>
@@ -3052,6 +3069,7 @@ async function renderSettings(page) {
   else if ($("#offers-settings")) $("#offers-settings").remove();
   if ($("#erp-settings")) renderErp($("#erp-settings")).catch(fail);
   if ($("#tg-import")) renderTgImport($("#tg-import"));
+  if ($("#chat-day-import")) renderChatDayImport($("#chat-day-import"));
   if ($("#chains-settings")) renderChainsSettings($("#chains-settings")).catch(fail);
   if ($("#tips-settings")) renderTipsSettings($("#tips-settings")).catch(fail);
   if ($("#discount-settings")) renderDiscounts($("#discount-settings")).catch(() => $("#discount-settings").remove());

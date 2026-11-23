@@ -368,6 +368,8 @@ def init_db(con: sqlite3.Connection):
     pricing.init(con)
     from . import groupterms
     groupterms.init(con)
+    from . import chatdaytransfer
+    chatdaytransfer.init(con)
     groupterms.provision_nebo_morning(con)
     from . import mypay, coachreport
     mypay.init(con)
