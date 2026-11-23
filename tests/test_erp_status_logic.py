@@ -43,13 +43,16 @@ class ErpStatusLogicTest(unittest.TestCase):
 
     def test_all_purchase_system_statuses(self):
         new = self.child("members"); self.paid(new, "2026-11")
-        self.assertEqual(self.status(new), "Постоянный посетитель")
+        self.assertEqual(self.status(new), "Новый оплативший посетитель")
+
+        self.paid(new, "2026-12")
+        self.assertEqual(self.status(new), "Новый оплативший посетитель")
 
         regular = self.child("members"); self.paid(regular, "2026-10"); self.paid(regular, "2026-11")
         self.assertEqual(self.status(regular), "Постоянный посетитель")
 
         returned = self.child("members"); self.paid(returned, "2026-09"); self.paid(returned, "2026-11")
-        self.assertEqual(self.status(returned), "Постоянный посетитель")
+        self.assertEqual(self.status(returned), "Вернувшийся")
 
         unpaid = self.child("members"); self.paid(unpaid, "2026-10")
         self.assertEqual(self.status(unpaid), "Не оплачен текущий месяц")
@@ -76,7 +79,7 @@ class ErpStatusLogicTest(unittest.TestCase):
         self.con.execute("UPDATE students SET erp_id='84894',erp_status='Новый лид',stage='lead' WHERE id=?", (sid,))
         self.con.execute("""INSERT INTO tasks(student_id,kind,title,due_at,status,created_at)
                             VALUES (?,'call_lead','Новый лид','2026-11-21T10:00','open','2026-11-21T10:00')""", (sid,))
-        self.paid(sid, "2026-11"); self.paid(sid, "2026-12")
+        self.paid(sid, "2026-10"); self.paid(sid, "2026-11"); self.paid(sid, "2026-12")
         self.assertEqual(self.status(sid), "Постоянный посетитель")
         student = self.con.execute("SELECT funnel,stage,erp_status FROM students WHERE id=?", (sid,)).fetchone()
         self.assertEqual(tuple(student), ("members", "active", "Постоянный посетитель"))
@@ -90,7 +93,7 @@ class ErpStatusLogicTest(unittest.TestCase):
         self.con.execute("""INSERT INTO erp_history_subscriptions
             (source_id,student_id,group_id,month,valid_from,valid_until,lessons,source_payload,imported_at,imported_by)
             VALUES ('history-sub',?,?, '2026-11','2026-11-01','2026-11-30',4,'{}','2026-11-22','test')""", (sid, group))
-        self.assertEqual(self.status(sid), "Постоянный посетитель")
+        self.assertEqual(self.status(sid), "Новый оплативший посетитель")
         self.assertEqual(self.con.execute("SELECT funnel FROM students WHERE id=?", (sid,)).fetchone()[0], "members")
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM subscriptions WHERE student_id=?", (sid,)).fetchone()[0], 0)
         self.assertEqual(self.con.execute("SELECT COUNT(*) FROM payments WHERE student_id=?", (sid,)).fetchone()[0], 0)
@@ -108,14 +111,14 @@ class ErpStatusLogicTest(unittest.TestCase):
         erpstatus.sync_all(self.con, self.TODAY)
         self.assertEqual(self.con.execute("SELECT erp_status FROM students WHERE id=?", (preserved,)).fetchone()[0], "Думают")
         row = self.con.execute("SELECT funnel,stage,erp_status FROM students WHERE id=?", (active,)).fetchone()
-        self.assertEqual(tuple(row), ("members", "active", "Постоянный посетитель"))
+        self.assertEqual(tuple(row), ("members", "active", "Новый оплативший посетитель"))
 
     def test_targeted_kononenko_reconcile_keeps_renewal_task(self):
         self.child()
         sid = self.child()
         self.assertEqual(sid, 2)
         self.con.execute("UPDATE students SET name='Кононенко Иван',erp_id='92421',erp_status='Куплен на будущий период' WHERE id=2")
-        self.paid(2, "2026-11"); self.paid(2, "2026-12")
+        self.paid(2, "2026-10"); self.paid(2, "2026-11"); self.paid(2, "2026-12")
         self.con.execute("""INSERT INTO tasks(student_id,kind,title,due_at,status,created_at)
                             VALUES (2,'renew','Проверить продление','2026-12-24T23:59','open','2026-11-22T10:00')""")
         self.con.execute("DELETE FROM settings WHERE key=?", (targetedkononenkotask.PROFILE_KEY,))
