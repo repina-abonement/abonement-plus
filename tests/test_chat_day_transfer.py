@@ -399,6 +399,25 @@ def test_reshetnyak_two_month_sibling_sales_are_exact_and_idempotent():
     assert con.execute("SELECT COUNT(*) FROM payments WHERE student_id=? AND cancelled=0",(sid,)).fetchone()[0]==2
 
 
+def test_verified_new_child_reuses_the_only_family_with_parent_phone():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'family-reuse.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    older=services.create_student(con,{'name':'Решетняк Арсений','birth':'2020-01-01',
+        'parent_name':'Кристина','phone':'+7 963 616-19-67'},user)
+    family=con.execute('SELECT family_id FROM students WHERE id=?',(older,)).fetchone()[0]
+    event={'source_id':'sz:test:new-sibling','source_chat':'Служба заботы',
+        'source_at':'2026-11-16T10:00:00','student_name':'Решетняк Матвей','birth':'2025-03-10',
+        'parent_name':'Кристина','phone':'+79636161967','create_if_missing':True,
+        'event_kind':'note','note':'Подтверждён второй ребёнок этой семьи'}
+    first=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(first['applied'])==1 and not first['errors']
+    child=con.execute("SELECT family_id FROM students WHERE name='Решетняк Матвей'").fetchone()
+    assert child and child['family_id']==family
+    assert con.execute('SELECT COUNT(*) FROM families').fetchone()[0]==1
+    second=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(second['already'])==1 and con.execute('SELECT COUNT(*) FROM students').fetchone()[0]==2
+
+
 def test_kiselev_november_sale_is_exact_and_idempotent():
     con=db.connect(str(Path(tempfile.mkdtemp())/'kiselev.sqlite3'));db.init_db(con)
     user={'id':1,'role':'admin','name':'Руководитель'}

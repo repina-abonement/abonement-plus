@@ -9,7 +9,7 @@ from crm import chatdaytransfer, db, schedule, services, targetedverifiedcaregap
 
 class VerifiedCareGapsTest(unittest.TestCase):
     def test_revised_package_key_forces_one_safe_reconciliation(self):
-        self.assertTrue(batch.KEY.endswith("_v8"))
+        self.assertTrue(batch.KEY.endswith("_v9"))
 
     def test_sources_are_unique_and_incomplete_money_stays_non_financial(self):
         events = batch.events()
@@ -71,7 +71,7 @@ class VerifiedCareGapsTest(unittest.TestCase):
         self.assertEqual((15120, "card_branch", 20),
                          (rakhman["amount"], rakhman["payment_method"], rakhman["discount_percent"]))
         kustov = next(row for row in exact if row["student_name"] == "Кустов Павел")
-        self.assertEqual((10850, "flexible", "tochka_qr_link"),
+        self.assertEqual((10850, "flex", "tochka_qr_link"),
                          (kustov["amount"], kustov["tariff"], kustov["payment_method"]))
 
     def test_tournament_messenger_tags_are_not_payment_methods(self):

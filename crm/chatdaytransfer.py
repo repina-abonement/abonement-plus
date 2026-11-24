@@ -109,6 +109,16 @@ def _erp_group_for_event(profile,event):
     return groups[0] if len(groups)==1 else ''
 
 
+def _family_for_phone(con, phone):
+    """Reuse one existing family when the verified parent phone already belongs to it."""
+    normalized=comms.normalize_phone(str(phone or ''))
+    if not normalized:return None
+    rows=con.execute('''SELECT DISTINCT family_id FROM parents
+        WHERE phone_match(phone_norm,?) OR phone_match(phone,?) ORDER BY family_id''',
+        (normalized,normalized)).fetchall()
+    return rows[0]['family_id'] if len(rows)==1 else None
+
+
 def _reconcile_clarification_task(con,sid,event):
     resolved=str(event.get('resolved_clarification_note') or '').strip()
     if resolved:
@@ -162,7 +172,13 @@ def _reconcile_subscription_sale(con,sid,event,user):
     if not isinstance(components,list) or not components:raise sv.ApiError('В продаже не указаны месяцы и даты занятий')
     student=con.execute('SELECT group_id,trial_group_id FROM students WHERE id=?',(sid,)).fetchone()
     gid=int(event.get('group_id') or student['trial_group_id'] or student['group_id'] or 0)
-    if not gid and event.get('lesson_time') and event.get('weekdays') is not None:
+    current=con.execute('SELECT weekdays,time FROM groups WHERE id=? AND active=1 AND is_makeup=0',(gid,)).fetchone()
+    exact_current=bool(current)
+    if exact_current and event.get('lesson_time'):
+        exact_current=current['time']==event['lesson_time']
+    if exact_current and event.get('weekdays') is not None:
+        exact_current={int(x) for x in re.findall(r'\d',str(current['weekdays'] or ''))}=={int(x) for x in event['weekdays']}
+    if (not exact_current) and event.get('lesson_time') and event.get('weekdays') is not None:
         branch_hint=str(event.get('branch_hint') or '').strip()
         wanted={int(x) for x in event['weekdays']}
         candidates=[]
@@ -174,7 +190,7 @@ def _reconcile_subscription_sale(con,sid,event,user):
             if actual==wanted:candidates.append(row['id'])
         if len(candidates)==1:
             gid=int(candidates[0])
-            con.execute('''UPDATE students SET group_id=CASE WHEN COALESCE(group_id,0)=0 THEN ? ELSE group_id END,
+            con.execute('''UPDATE students SET group_id=?,
                 trial_group_id=CASE WHEN COALESCE(trial_group_id,0)=0 THEN ? ELSE trial_group_id END WHERE id=?''',(gid,gid,sid))
     group=con.execute('SELECT weekdays,time FROM groups WHERE id=? AND active=1 AND is_makeup=0',(gid,)).fetchone()
     if not group:raise sv.ApiError('Не определена действующая группа подтверждённой продажи')
@@ -368,6 +384,8 @@ def apply(con,data,user):
                         'parent_name':str(profile.get('parent_name') or ''),'phone':str(profile.get('phone') or ''),
                         'email':str(profile.get('email') or ''),'funnel':'members' if gid else 'sales',
                         'group_id':gid,'source':str(event.get('source') or 'ERP')}
+                    family_id=_family_for_phone(con,create_data['phone'])
+                    if family_id:create_data['family_id']=family_id
                     if not create_data['parent_name'] or not create_data['phone']:
                         create_data['family_id']=con.execute('INSERT INTO families(name) VALUES (?)',(name.split()[0],)).lastrowid
                     sid=sv.create_student(con,create_data,user)
@@ -398,8 +416,11 @@ def apply(con,data,user):
                 result['errors'].append({'source_id':source,'name':event.get('student_name'),'error':'Неверная дата рождения новой карточки'});continue
             con.execute('SAVEPOINT chat_day_event')
             try:
-                sid=sv.create_student(con,{'name':required[0],'birth':required[1],'parent_name':required[2],
-                    'phone':required[3],'funnel':'sales','source':str(event.get('source') or '')},user)
+                create_data={'name':required[0],'birth':required[1],'parent_name':required[2],
+                    'phone':required[3],'funnel':'sales','source':str(event.get('source') or '')}
+                family_id=_family_for_phone(con,required[3])
+                if family_id:create_data['family_id']=family_id
+                sid=sv.create_student(con,create_data,user)
                 if event.get('event_kind') in ('trial_booking','trial_result'):
                     trial_day=str(event.get('event_date') or '')[:10]
                     trial_time=str(event.get('trial_time') or '')[:5]

@@ -9,7 +9,7 @@ import json
 from . import chatdaytransfer
 
 
-KEY = "targeted_verified_care_sales_20261124_v2"
+KEY = "targeted_verified_care_sales_20261124_v3"
 
 
 def _sale(source_id, at, name, amount, method, components, **extra):
@@ -25,7 +25,7 @@ def sale_events():
             "card_branch", [{"month": "2026-11", "price": 5120,
                 "dates": ["2026-11-18", "2026-11-23", "2026-11-25", "2026-11-30"]}],
             birth="2025-03-10", parent_name="Кристина", phone="+79636161967",
-            create_if_missing=True, weekdays=[0, 2], tariff="fixed", discount_percent=20,
+            create_if_missing=True, lesson_time="10:30", branch_hint="Небо", weekdays=[0, 2], tariff="fixed", discount_percent=20,
             discount_rule="sibling", note="Четыре занятия ноября, скидка 20% за второго ребёнка"),
         _sale("sz:21662:никитина-продажа", "2026-11-16T11:11:14", "Никитина Софья", 10240,
             "online", [
@@ -34,7 +34,7 @@ def sale_events():
                 {"month": "2026-12", "price": 5120,
                  "dates": ["2026-12-02", "2026-12-07", "2026-12-09", "2026-12-14"]}],
             birth="2025-03-05", parent_name="Екатерина", phone="+79260327334",
-            create_if_missing=True, weekdays=[0, 2], tariff="fixed", discount_percent=20,
+            create_if_missing=True, lesson_time="10:30", branch_hint="Небо", weekdays=[0, 2], tariff="fixed", discount_percent=20,
             payment_method_needs_confirmation=True,
             clarification_task_title="Уточнить способ оплаты по QR: ссылка Точки или терминал Сбера",
             clarification_task_note="Уточнить только канал уже существующей оплаты; новую оплату не создавать",
@@ -43,7 +43,7 @@ def sale_events():
             "card", [{"month": "2026-11", "price": 5120,
                 "dates": ["2026-11-18", "2026-11-23", "2026-11-25", "2026-11-30"]}],
             birth="2025-04-01", parent_name="Мария", phone="+79191076540",
-            create_if_missing=True, weekdays=[0, 2], tariff="fixed", discount_percent=20,
+            create_if_missing=True, lesson_time="10:30", branch_hint="Небо", weekdays=[0, 2], tariff="fixed", discount_percent=20,
             note="Четыре занятия ноября; чек подтверждён, точный карточный канал не указан"),
         _sale("sz:22889:subscription-sale", "2026-11-22T20:15:29", "Микаладзе Леон", 9920,
             "card_branch", [
