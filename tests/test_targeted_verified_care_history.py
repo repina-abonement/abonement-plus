@@ -6,7 +6,7 @@ from crm import targetedverifiedcarehistory as batch
 class VerifiedCareHistoryTest(unittest.TestCase):
     def test_sources_are_unique_and_facts_have_required_fields(self):
         events = batch.events()
-        self.assertEqual(38, len(events))
+        self.assertEqual(55, len(events))
         self.assertEqual(len(events), len({row["source_id"] for row in events}))
         for row in events:
             self.assertTrue(row["student_name"].strip())
@@ -23,6 +23,13 @@ class VerifiedCareHistoryTest(unittest.TestCase):
             self.assertTrue(all(part["dates"] for part in sale["components"]))
         unresolved = [row for row in batch.events() if row["event_kind"] == "sale_fact"]
         self.assertTrue(all(row.get("clarification_task_title") for row in unresolved))
+
+    def test_all_cross_message_source_facts_are_explicit_and_unique(self):
+        sources = batch.source_events()
+        self.assertEqual(17, len(sources))
+        self.assertEqual(len(sources), len({row["source_id"] for row in sources}))
+        self.assertTrue(all(row["source"].strip() for row in sources))
+        self.assertTrue(all(row["event_kind"] == "source_fact" for row in sources))
 
 
 if __name__ == "__main__":
