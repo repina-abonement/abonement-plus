@@ -79,6 +79,8 @@ class VerifiedCareGapsTest(unittest.TestCase):
         self.assertEqual(1, first["created"])
         self.assertEqual(0, second["created"])
         self.assertEqual(1, con.execute("SELECT count(*) FROM tasks").fetchone()[0])
+        batch._sync_identity_tasks(con, {"unmatched": [], "ambiguous": [{"source_id": "sz:21768:дима-лид"}]})
+        self.assertEqual("open", con.execute("SELECT status FROM tasks").fetchone()[0])
         batch._sync_identity_tasks(con, {"unmatched": []})
         self.assertEqual("cancelled", con.execute("SELECT status FROM tasks").fetchone()[0])
 

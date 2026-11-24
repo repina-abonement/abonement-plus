@@ -81,7 +81,8 @@ def _sync_identity_tasks(con,result):
         'sz:21768:дима-лид':('Уточнить фамилию Димы','Дата рождения 23.01.2022, мама Ирина, +79163642574, ПУ 20.11 в 17:45; фамилии в СЗ нет.'),
         'sz:21948:арон-лид':('Уточнить фамилию Арона при следующем контакте','Дата рождения 27.08.2024, мама Анна, 89252051902; связаться не раньше 17.02.2027.'),
     }
-    missing={row.get('source_id') for row in result.get('unmatched',[])}
+    missing={row.get('source_id') for key in ('unmatched','ambiguous','errors')
+             for row in result.get(key,[]) if isinstance(row,dict)}
     created=closed=0
     for source,(title,note) in specs.items():
         key='chat-unmatched:'+source
