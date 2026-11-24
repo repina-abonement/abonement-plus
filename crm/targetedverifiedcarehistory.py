@@ -9,12 +9,13 @@ import json
 from . import chatdaytransfer
 
 
-KEY = "targeted_verified_care_history_20261124_v5"
+KEY = "targeted_verified_care_history_20261124_v6"
 
 
 def early_events():
     chat = "Служба заботы"
     return [
+        {"source_id":"sz:21928:кононенко-отработка","source_chat":chat,"source_at":"2026-11-17T15:40:55","student_name":"Кононенко Иван","event_kind":"makeup_booking","event_date":"2026-11-19","note":"Отработка назначена на 19.11 в 19:45"},
         {"source_id":"sz:21367:власов-отработки","source_chat":chat,"source_at":"2026-11-13T19:06:17","student_name":"Власов Захар","event_kind":"makeup_booking","event_date":"2026-11-18","note":"Назначены отработки 18, 25 и 29 ноября в 17:45"},
         {"source_id":"sz:21473:марков-пу","source_chat":chat,"source_at":"2026-11-14T11:55:50","student_name":"Марков Тимофей","birth":"2024-04-23","parent_name":"Вера","phone":"89261775474","create_if_missing":True,"event_kind":"trial_booking","event_date":"2026-11-18","trial_time":"16:45","note":"Записан на ПУ 18.11 в 16:45","task_title":"Проверить результат ПУ 18.11","task_due":"2026-11-18T18:00"},
         {"source_id":"sz:21476:тупота-отсутствие","source_chat":chat,"source_at":"2026-11-14T12:07:26","student_name":"Тупота Сергей","event_kind":"absence","event_date":"2026-12-22","note":"Не будет на тренировке 22.12; абонемент с переносами"},

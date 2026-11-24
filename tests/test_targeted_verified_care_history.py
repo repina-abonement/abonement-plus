@@ -6,13 +6,18 @@ from crm import targetedverifiedcarehistory as batch
 class VerifiedCareHistoryTest(unittest.TestCase):
     def test_sources_are_unique_and_facts_have_required_fields(self):
         events = batch.events()
-        self.assertEqual(55, len(events))
+        self.assertEqual(56, len(events))
         self.assertEqual(len(events), len({row["source_id"] for row in events}))
         for row in events:
             self.assertTrue(row["student_name"].strip())
             self.assertTrue(row["source_at"])
             self.assertTrue(row.get("event_date") or row.get("sale_date"))
             self.assertTrue(row["note"].strip())
+
+    def test_kononenko_makeup_is_preserved(self):
+        row = next(row for row in batch.events() if row["source_id"] == "sz:21928:кононенко-отработка")
+        self.assertEqual(("makeup_booking", "2026-11-19"), (row["event_kind"], row["event_date"]))
+        self.assertIn("19:45", row["note"])
 
     def test_only_fully_specified_sale_creates_financial_record(self):
         sales = [row for row in batch.events() if row["event_kind"] == "subscription_sale"]
