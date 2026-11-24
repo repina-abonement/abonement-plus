@@ -154,6 +154,7 @@ function openTaskEdit(t, onDone, focus) {
     <div class="need-err small"></div>
     <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap"><button class="btn primary" style="flex:1">Сохранить</button>
       ${t.kind === "rebook" ? `<button type="button" class="btn" data-rebook="${t.id}" data-tclose>Итог звонка</button>` : t.erp_outcomes?.length?'':`<button type="button" class="btn" data-tfinish>Выполнено</button>`}
+      <button type="button" class="btn danger" data-task-delete>Удалить</button>
       <button type="button" class="btn" data-tcancelf style="flex:0 0 auto">Отмена</button></div>
     ${erpOutcomePicker(t,false,'t')}</form>`;
   document.body.appendChild(wrap);
@@ -167,6 +168,12 @@ function openTaskEdit(t, onDone, focus) {
   const cl = wrap.querySelector("[data-tclose]"); if (cl) cl.addEventListener("click", () => setTimeout(()=>close(), 0));
   wrap.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
   const restore=wrap.querySelector('[data-task-restore]');if(restore)restore.onclick=()=>{f.elements.title.value=t.previous_text.title;f.elements.note.value=t.previous_text.note;f.elements.note.focus();toast('Предыдущий текст восстановлен в форме. Нажмите «Сохранить»')};
+  wrap.querySelector('[data-task-delete]').onclick=async()=>{
+    if(!confirm('Удалить задачу? Она исчезнет из планера и не будет отмечена выполненной.'))return;
+    const button=wrap.querySelector('[data-task-delete]');button.disabled=true;
+    try{await api('DELETE',`/api/tasks/${t.id}`);toast('Задача удалена');close(true);onDone&&onDone()}
+    catch(error){button.disabled=false;wrap.querySelector('.need-err').textContent=error.message;fail(error)}
+  };
   const fin = wrap.querySelector("[data-tfinish]");
   if (fin) fin.onclick = () => { const b = wrap.querySelector(".task-done"); b.hidden = false; b.querySelector("input").focus(); };
   const ok = wrap.querySelector("[data-tok]");

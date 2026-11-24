@@ -3385,6 +3385,14 @@ def task_edit(con, h, user, body, q, tid):
     return cx(tasks.edit, con, int(tid), body, user)
 
 
+@route("DELETE", "/api/tasks/{tid}", role="operator|client_ops:full")
+def task_delete(con, h, user, body, q, tid):
+    """Удалить открытую задачу без ложной отметки о выполнении."""
+    result = cx(tasks.remove, con, int(tid), user)
+    sv.audit(con, user, "task.delete", str(tid))
+    return result
+
+
 @route("POST", "/api/tasks/{tid}/assign", role="operator")
 def task_assign(con, h, user, body, q, tid):
     from . import pu

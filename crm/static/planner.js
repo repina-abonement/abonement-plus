@@ -331,6 +331,14 @@ async function loadPlannerTaskSettings(id) {
     const note=document.createElement('p');note.className='small muted';note.textContent='Повторы остановлены';host.before(note);
   }
   showTaskChecklist(id,d);
+  if(d.can_delete){
+    const controls=document.createElement('div');controls.className='row';controls.style.marginTop='16px';
+    controls.innerHTML='<button type="button" class="btn danger" data-delete-planner-task>Удалить задачу</button>';
+    host.before(controls);const button=controls.querySelector('button');button.onclick=async()=>{
+      if(!confirm('Удалить задачу? Она исчезнет из планера и не будет отмечена выполненной.'))return;
+      button.disabled=true;try{await api('DELETE',`/api/tasks/${id}`);toast('Задача удалена');closeDrawer();render()}catch(error){button.disabled=false;fail(error)}
+    };
+  }
   if (!d.can_edit) return;
   const t = d.task, repeat = d.repeat || {}, weekdays = repeat.weekdays || [];
   host.innerHTML = `<details class="planner-task-settings" style="margin-top:24px;padding-top:12px;border-top:1px solid var(--line)">

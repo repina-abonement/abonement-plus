@@ -483,6 +483,7 @@ def task_detail(con, tid: int, user: dict) -> dict:
     return {"task": task, "repeat": repeat, "staff": visible_staff(con, user),
             "subtask_template":json.loads(repeat.get("checklist_template") or "[]"),"can_check_subtasks":row["kind"]=="plan" and row["status"]=="open" and can_change_plan(con,user,row["assignee_id"]),
             "can_assign": can_manage(con, user), "can_edit": row["kind"] == "plan" and row["status"] == "open" and can_change_plan(con,user,row['assignee_id']),
+            "can_delete": row["status"] == "open" and user.get("role") in ("admin", "operator"),
             "can_stop_repeat": bool(recurring and recurring['active'] and can_change_plan(con,user,recurring['assignee_id']))}
 
 

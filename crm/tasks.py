@@ -1279,3 +1279,26 @@ def add_client_task(con,sid,data,user):
     tid=add_task(con,'manual',sid,due,title=title,source='manual',note=str(data.get('note') or '')[:1000],shared=True)
     con.execute('UPDATE tasks SET assignee_id=NULL,priority=? WHERE id=?',(int(bool(data.get('priority'))),tid))
     return tid
+
+
+def remove(con, tid: int, user: dict) -> dict:
+    """Remove an open task without recording it as completed.
+
+    Keep the cancelled row for audit and to prevent an imported ERP task with
+    the same auto_key from being recreated on the next import.
+    """
+    task = con.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
+    if not task:
+        raise comms.CommsError("Задача не найдена")
+    if task["status"] != "open":
+        raise comms.CommsError("Удалить можно только открытую задачу")
+    if user.get("role") not in ("admin", "operator"):
+        raise comms.CommsError("Удалять задачи могут администраторы")
+    now = _iso(_now())
+    con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by=?,
+                   result='Удалена администратором' WHERE id=?""",
+                (now, user.get("name", ""), tid))
+    if task["student_id"]:
+        from . import services as sv
+        sv.log(con, task["student_id"], f"Задача «{task['title']}» удалена", user, "task")
+    return {"id": tid, "status": "cancelled"}
