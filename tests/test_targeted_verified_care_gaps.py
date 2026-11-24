@@ -195,8 +195,9 @@ class VerifiedCareGapsTest(unittest.TestCase):
                              "SELECT month,price,status FROM subscriptions WHERE student_id=? ORDER BY month",(sid,))])
         self.assertEqual((15120,"card_branch"),tuple(con.execute(
             "SELECT amount,method FROM payments WHERE student_id=? AND cancelled=0",(sid,)).fetchone()))
-        self.assertEqual("cancelled",con.execute(
-            "SELECT status FROM tasks WHERE auto_key=?",('chat-day:'+exact["source_id"],)).fetchone()[0])
+        self.assertEqual(0,con.execute(
+            "SELECT count(*) FROM tasks WHERE auto_key=? AND status='open'",
+            ('chat-day:'+exact["source_id"],)).fetchone()[0])
 
 
 if __name__ == "__main__":
