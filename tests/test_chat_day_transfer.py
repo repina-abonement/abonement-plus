@@ -264,6 +264,25 @@ def test_new_trial_card_gets_only_unique_exact_group_before_confirmed_sale():
     assert payment and (payment['amount'],payment['method'])==(11880,'tochka_qr_link')
 
 
+def test_verified_ad_source_fills_card_and_closes_false_source_task():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'verified-source.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    sid=services.create_student(con,{'name':'Маматахунов Фирдавс','birth':'2023-11-10','parent_name':'Бобир','phone':'+79145882005'},user)
+    con.execute("UPDATE students SET created_at='2026-11-20T16:45:00' WHERE id=?",(sid,))
+    from crm import tasks
+    tasks.ensure_ad_source_tasks(con)
+    key=f'ad-source-required:{sid}'
+    assert con.execute("SELECT 1 FROM tasks WHERE auto_key=? AND status='open'",(key,)).fetchone()
+    event={'source_id':'sz:22467:маматахунов-источник','source_chat':'Служба заботы','source_at':'2026-11-20T17:50:31',
+        'student_name':'Маматахунов Фирдавс','phone':'+79145882005','source':'ТРЦ Небо — шли в Детский мир и зашли в клуб',
+        'event_kind':'source_fact','event_date':'2026-11-20','note':'Рекламный источник подтверждён СЗ'}
+    result=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(result['applied'])==1 and not result['errors'] and not result['unmatched']
+    assert con.execute('SELECT source FROM students WHERE id=?',(sid,)).fetchone()[0]=='ТРЦ Небо — шли в Детский мир и зашли в клуб'
+    task=con.execute("SELECT status,result FROM tasks WHERE auto_key=?",(key,)).fetchone()
+    assert task['status']=='cancelled' and 'источник заполнен' in task['result']
+
+
 def test_previously_saved_sale_is_completed_on_repeat_without_duplicates():
     con=db.connect(str(Path(tempfile.mkdtemp())/'saved-sale.sqlite3'));db.init_db(con)
     user={'id':1,'role':'admin','name':'Руководитель'}

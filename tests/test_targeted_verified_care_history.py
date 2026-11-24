@@ -6,7 +6,7 @@ from crm import targetedverifiedcarehistory as batch
 class VerifiedCareHistoryTest(unittest.TestCase):
     def test_sources_are_unique_and_facts_have_required_fields(self):
         events = batch.events()
-        self.assertEqual(37, len(events))
+        self.assertEqual(38, len(events))
         self.assertEqual(len(events), len({row["source_id"] for row in events}))
         for row in events:
             self.assertTrue(row["student_name"].strip())

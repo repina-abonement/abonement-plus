@@ -9,7 +9,7 @@ import json
 from . import chatdaytransfer
 
 
-KEY = "targeted_verified_care_history_20261124_v3"
+KEY = "targeted_verified_care_history_20261124_v4"
 
 
 def early_events():
@@ -45,6 +45,7 @@ def later_events():
         {"source_id":"sz:22281:привалов-пу","source_chat":chat,"source_at":"2026-11-19T19:35:13","student_name":"Привалов Даня","event_kind":"trial_booking","event_date":"2026-11-22","trial_time":"17:45","note":"Существующий клиент записан на ПУ 22.11 в 17:45"},
         {"source_id":"sz:22325:хасаханов-пу","source_chat":chat,"source_at":"2026-11-19T21:56:34","student_name":"Хасаханов Эмин","birth":"2022-09-24","phone":"+79995992010","source":"ранее ходили в Радужный","event_kind":"trial_booking","event_date":"2026-11-22","trial_time":"10:00","note":"Записан на ПУ 22.11 в 10:00"},
         {"source_id":"sz:22401:степаненко-отработка","source_chat":chat,"source_at":"2026-11-20T14:16:03","student_name":"Степаненко Даниил","event_kind":"makeup_booking","event_date":"2026-11-21","note":"За пропуск 19.11 назначена отработка 21.11 в 10:00"},
+        {"source_id":"sz:22467:маматахунов-источник","source_chat":chat,"source_at":"2026-11-20T17:50:31","student_name":"Маматахунов Фирдавс","phone":"+79145882005","source":"ТРЦ Небо — шли в Детский мир и зашли в клуб","event_kind":"source_fact","event_date":"2026-11-20","note":"Рекламный источник подтверждён СЗ: семья шла в Детский мир и зашла в филиал ТРЦ Небо"},
         {"source_id":"sz:22516:сафронов-отработка","source_chat":chat,"source_at":"2026-11-20T19:15:45","student_name":"Сафронов Владимир","event_kind":"makeup_booking","event_date":"2026-11-22","note":"Отработка назначена на 22.11 в 17:45"},
         {"source_id":"sz:22537:рыбин-пу","source_chat":chat,"source_at":"2026-11-20T20:18:23","student_name":"Рыбин Арсен","event_kind":"trial_booking","event_date":"2026-11-30","trial_time":"10:30","note":"После пропущенного по болезни ПУ перезаписан на 30.11 в 10:30","task_title":"Подтвердить повторное ПУ 30.11","task_due":"2026-11-30T09:00"},
         {"source_id":"sz:22539:маматахунов-продажа","source_chat":chat,"source_at":"2026-11-20T20:20:06","student_name":"Маматахунов Фирдавс","birth":"2023-11-10","parent_name":"Бобир","phone":"+79145882005","create_if_missing":True,"event_kind":"subscription_sale","sale_date":"2026-11-20","paid_at":"2026-11-20T20:20:06","amount":11880,"payment_method":"tochka_qr_link","tariff":"fixed","branch_hint":"Небо","lesson_time":"16:45","weekdays":[1,4],"discount_percent":20,"components":[{"month":"2026-11","price":2160,"dates":["2026-11-24","2026-11-27"]},{"month":"2026-12","price":9720,"dates":["2026-12-01","2026-12-04","2026-12-08","2026-12-11","2026-12-15","2026-12-18","2026-12-22","2026-12-25","2026-12-29"]}],"note":"После ПУ куплены 11 занятий до конца декабря, вт/пт 16:45, 11 880 ₽ по ссылке Точки"},
