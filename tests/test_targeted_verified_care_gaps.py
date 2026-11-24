@@ -8,6 +8,9 @@ from crm import chatdaytransfer, db, targetedverifiedcaregaps as batch, tasks
 
 
 class VerifiedCareGapsTest(unittest.TestCase):
+    def test_revised_package_key_forces_one_safe_reconciliation(self):
+        self.assertTrue(batch.KEY.endswith("_v2"))
+
     def test_sources_are_unique_and_incomplete_money_stays_non_financial(self):
         events = batch.events()
         self.assertEqual(48, len(events))
