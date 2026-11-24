@@ -14,22 +14,25 @@ class VerifiedCareGapsTest(unittest.TestCase):
         self.assertEqual(len(events), len({row["source_id"] for row in events}))
 
         incomplete = [row for row in events if row["event_kind"] == "sale_fact"]
-        self.assertEqual(20, len(incomplete))
+        self.assertEqual(19, len(incomplete))
         self.assertTrue(all(row.get("clarification_task_title") for row in incomplete))
         self.assertTrue(all("payment_method" not in row for row in incomplete))
 
     def test_exact_sales_balance_and_dates(self):
         exact = [row for row in batch.events() if row["event_kind"] == "subscription_sale"]
-        self.assertEqual(2, len(exact))
+        self.assertEqual(3, len(exact))
         for row in exact:
             self.assertEqual(row["amount"], sum(part["price"] for part in row["components"]))
             self.assertEqual(
                 sum(len(part["dates"]) for part in row["components"]),
-                9 if row["student_name"] == "Лобченко Константин" else 11,
+                11 if row["student_name"] == "Жегулин Севастьян" else 9,
             )
         zhegulin = next(row for row in exact if row["student_name"] == "Жегулин Севастьян")
         self.assertEqual("cash", zhegulin["payment_method"])
         self.assertEqual(20, zhegulin["discount_percent"])
+        gushcho = next(row for row in exact if row["student_name"] == "Гущо Михаил")
+        self.assertEqual(("2026-12", 10800, "tochka_qr_link"),
+                         (gushcho["components"][0]["month"], gushcho["amount"], gushcho["payment_method"]))
 
     def test_tournament_messenger_tags_are_not_payment_methods(self):
         rows = [row for row in batch.events() if row["source_id"].startswith("sz:20646:")]
