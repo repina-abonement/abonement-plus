@@ -10,7 +10,7 @@ from crm import chatdaytransfer, db, targetedverifiedcaregaps as batch, tasks
 class VerifiedCareGapsTest(unittest.TestCase):
     def test_sources_are_unique_and_incomplete_money_stays_non_financial(self):
         events = batch.events()
-        self.assertEqual(42, len(events))
+        self.assertEqual(48, len(events))
         self.assertEqual(len(events), len({row["source_id"] for row in events}))
 
         incomplete = [row for row in events if row["event_kind"] == "sale_fact"]
@@ -32,10 +32,16 @@ class VerifiedCareGapsTest(unittest.TestCase):
         self.assertEqual(20, zhegulin["discount_percent"])
 
     def test_tournament_messenger_tags_are_not_payment_methods(self):
-        rows = [row for row in batch.events() if "турнир" in row["source_id"]]
+        rows = [row for row in batch.events() if row["source_id"].startswith("sz:20646:")]
         self.assertEqual(3, len(rows))
         self.assertTrue(all(row["event_kind"] == "sale_fact" for row in rows))
         self.assertTrue(all("payment_method" not in row for row in rows))
+
+    def test_only_confirmed_refund_is_not_left_as_a_request(self):
+        refunds=[row for row in batch.events() if row["event_kind"] in ("refund_fact","refund_request")]
+        confirmed=[row for row in refunds if row["event_kind"]=="refund_fact"]
+        self.assertEqual([("Муртазин Тагир",6750)],[(row["student_name"],row["amount"]) for row in confirmed])
+        self.assertTrue(all(row.get("clarification_task_title") for row in refunds if row["event_kind"]=="refund_request"))
 
     def test_do_not_contact_request_is_not_a_future_trial_result(self):
         row = next(row for row in batch.events() if "печенкин" in row["source_id"])
