@@ -6,14 +6,14 @@ from crm import targetedverifiedcareearly as batch
 class VerifiedCareEarlyTest(unittest.TestCase):
     def test_consolidated_report_is_split_into_unique_safe_events(self):
         events=batch.events()
-        self.assertEqual(40,len(events))
+        self.assertEqual(41,len(events))
         self.assertEqual(len(events),len({row['source_id'] for row in events}))
         self.assertTrue(all(row['student_name'].strip() for row in events))
         self.assertTrue(all(row['note'].strip() for row in events))
 
     def test_incomplete_money_facts_never_claim_a_payment_method(self):
         incomplete=[row for row in batch.events() if row['event_kind']=='sale_fact']
-        self.assertEqual(13,len(incomplete))
+        self.assertEqual(14,len(incomplete))
         self.assertTrue(all('payment_method' not in row for row in incomplete))
         self.assertTrue(all(row.get('clarification_task_title') for row in incomplete))
 
@@ -41,6 +41,14 @@ class VerifiedCareEarlyTest(unittest.TestCase):
         self.assertEqual(('carry_fact','2026-11-14'),(carry['event_kind'],carry['event_date']))
         self.assertNotIn('amount',carry)
         self.assertIn('исходного абонемента',carry['clarification_task_note'])
+
+    def test_sergievsky_subscription_fact_uses_exact_erp_identity(self):
+        row=next(row for row in batch.events() if row['source_id']=='sz:20167:сергиевский-ноябрь')
+        self.assertEqual(('sale_fact','182330','16:45'),
+                         (row['event_kind'],row['erp_id'],row['erp_group_time']))
+        self.assertIn('ср/вс 16:45',row['note'])
+        self.assertNotIn('amount',row)
+        self.assertNotIn('payment_method',row)
 
 
 if __name__=='__main__':unittest.main()

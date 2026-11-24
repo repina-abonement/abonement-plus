@@ -4,7 +4,7 @@ import json
 from . import chatdaytransfer
 
 
-KEY = "targeted_verified_care_early_20261124_v3"
+KEY = "targeted_verified_care_early_20261124_v4"
 
 
 def events():
@@ -13,6 +13,7 @@ def events():
         {"source_id":"sz:20167:васильев-разовое-перенос","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Васильев Александр","event_kind":"single_change","event_date":"2026-12-02","note":"Разовое занятие перенесено с 04.11 на 02.12"},
         {"source_id":"sz:20167:бородин-ссылка","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Бородин Доброслав","event_kind":"payment_link_issue","event_date":"2026-11-02","note":"Семья сообщила, что ссылка на оплату не работает","task_title":"Проверить и обновить ссылку на оплату","task_due":"2026-11-02T23:59"},
         {"source_id":"sz:20167:лубяницкий-оплата","source_chat":chat,"source_at":"2026-11-12T17:59:09","student_name":"Лубяницкий","event_kind":"sale_fact","event_date":"2026-11-12","note":"Абонемент пн/чт 19:45 оплачен 12.11, сумма 12 150 ₽; ранее выслан QR, точный канал QR не указан","clarification_task_title":"Уточнить точный QR-канал оплаты 12 150 ₽","clarification_task_note":"Оплата уже подтверждена; не создавать повторный платёж"},
+        {"source_id":"sz:20167:сергиевский-ноябрь","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Сергиевский Евгений","erp_id":"182330","erp_create_if_missing":True,"erp_group_name":"Небо НУП ср/вс 16:45 возраст 3-4","erp_group_time":"16:45","erp_branch_hint":"Небо","event_kind":"sale_fact","event_date":"2026-11-11","note":"Подтверждён ноябрьский абонемент ср/вс 16:45 начиная с 11.11; сумма, способ оплаты и окончательный набор дат в сводке не указаны","clarification_task_title":"Сверить сумму, способ и даты ноября Сергиевского","clarification_task_note":"Группа и начало известны; повторный платёж или выдуманный состав не создавать"},
         {"source_id":"sz:20167:шишкарев-пропуск","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Шишкарев Лев","event_kind":"absence","event_date":"2026-11-03","note":"Пропуск 03.11 по болезни"},
         {"source_id":"sz:20167:кононенко-отработка","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Кононенко Иван","event_kind":"makeup_booking","event_date":"2026-11-12","note":"Отработка назначена на 12.11 в группе ПУП; точное время в сообщении не указано"},
         {"source_id":"sz:20167:кононенко-турнир","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Кононенко Иван","event_kind":"carry_fact","event_date":"2026-11-14","note":"Занятие 14.11 было оплачено, но ребёнок не мог прийти из-за турнира; сумму и конкретное назначение переноса СЗ не указывает","clarification_task_title":"Проверить перенос оплаченного занятия Кононенко 14.11","clarification_task_note":"Не создавать свободный баланс или новую оплату без проверки исходного абонемента"},
