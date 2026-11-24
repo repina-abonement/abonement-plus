@@ -1,7 +1,7 @@
 import unittest
 import sqlite3
 
-from crm import targetedverifiedcaregaps as batch
+from crm import chatdaytransfer, targetedverifiedcaregaps as batch
 
 
 class VerifiedCareGapsTest(unittest.TestCase):
@@ -56,6 +56,12 @@ class VerifiedCareGapsTest(unittest.TestCase):
         self.assertEqual({"added": 3, "already": 0, "error": ""}, first)
         self.assertEqual({"added": 0, "already": 3, "error": ""}, second)
         self.assertEqual(3, con.execute("SELECT count(*) FROM erp_history_unassigned_visits").fetchone()[0])
+
+    def test_unmatched_card_keeps_batch_retryable(self):
+        result = {"errors": [], "ambiguous": [], "unmatched": [{"name": "Новый ребёнок"}]}
+        self.assertFalse(chatdaytransfer.batch_is_complete(result))
+        self.assertFalse(chatdaytransfer.saved_batch_can_skip({"state": "complete", "unmatched": result["unmatched"]}))
+        self.assertTrue(chatdaytransfer.batch_is_complete({"errors": [], "ambiguous": [], "unmatched": []}))
 
 
 if __name__ == "__main__":

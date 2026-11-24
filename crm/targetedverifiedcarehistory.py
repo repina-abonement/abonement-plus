@@ -99,7 +99,7 @@ def apply(con):
     if old:
         try:
             saved = json.loads(old[0])
-            if saved.get("state") == "complete":
+            if chatdaytransfer.saved_batch_can_skip(saved):
                 return saved
         except (TypeError, ValueError):
             pass
@@ -108,7 +108,7 @@ def apply(con):
     if not actor:
         return {"state": "not_target_database"}
     result = chatdaytransfer.apply(con, {"events": events()}, dict(actor))
-    report = {"state": "complete" if not result["errors"] and not result["ambiguous"] else "partial",
+    report = {"state": "complete" if chatdaytransfer.batch_is_complete(result) else "partial",
               "counts": {key: len(value) for key, value in result.items()},
               "unmatched": result["unmatched"], "ambiguous": result["ambiguous"], "errors": result["errors"]}
     con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES (?,?)",

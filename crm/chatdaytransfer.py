@@ -74,6 +74,15 @@ def _current_tasks(con,sid):
     return [dict(r) for r in con.execute("SELECT id,title,due_at,note FROM tasks WHERE student_id=? AND status='open' ORDER BY due_at,id",(sid,))]
 
 
+def batch_is_complete(result, extra_error=False):
+    """A card that is missing today must remain eligible for a later retry."""
+    return not extra_error and not result.get('errors') and not result.get('ambiguous') and not result.get('unmatched')
+
+
+def saved_batch_can_skip(saved):
+    return isinstance(saved,dict) and saved.get('state')=='complete' and not saved.get('unmatched')
+
+
 def _reconcile_clarification_task(con,sid,event):
     title=str(event.get('clarification_task_title') or '').strip()
     if not title:return None

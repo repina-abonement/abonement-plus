@@ -55,13 +55,13 @@ def apply(con):
     if old:
         try:
             saved=json.loads(old[0])
-            if saved.get("state")=="complete":return saved
+            if chatdaytransfer.saved_batch_can_skip(saved):return saved
         except (TypeError,ValueError):pass
     actor=con.execute("""SELECT id,name,role FROM users WHERE active=1 AND role='admin'
         AND trim(name)='Юлия Репина' ORDER BY id LIMIT 1""").fetchone()
     if not actor:return {"state":"not_target_database"}
     result=chatdaytransfer.apply(con,{"events":events()},dict(actor))
-    report={"state":"complete" if not result["errors"] and not result["ambiguous"] else "partial",
+    report={"state":"complete" if chatdaytransfer.batch_is_complete(result) else "partial",
             "counts":{key:len(value) for key,value in result.items()},"unmatched":result["unmatched"],
             "ambiguous":result["ambiguous"],"errors":result["errors"]}
     con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES (?,?)",(KEY,json.dumps(report,ensure_ascii=False)))
