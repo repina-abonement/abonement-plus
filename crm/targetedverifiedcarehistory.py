@@ -9,7 +9,7 @@ import json
 from . import chatdaytransfer
 
 
-KEY = "targeted_verified_care_history_20261124_v9"
+KEY = "targeted_verified_care_history_20261124_v10"
 
 
 def early_events():
@@ -44,7 +44,7 @@ def later_events():
         {"source_id":"sz:22225:дюссек-пу","source_chat":chat,"source_at":"2026-11-18T20:54:27","student_name":"Дюссек Михаил","birth":"2024-01-26","parent_name":"Мария","phone":"89105416473","create_if_missing":True,"event_kind":"trial_booking","event_date":"2026-11-23","trial_time":"10:30","note":"Записан на ПУ 23.11 в 10:30","task_title":"Проверить результат ПУ 23.11","task_due":"2026-11-23T12:00"},
         {"source_id":"sz:22277:маматахунов-пу","source_chat":chat,"source_at":"2026-11-19T19:31:11","student_name":"Маматахунов Фирдавс","birth":"2023-11-10","parent_name":"Бобир","phone":"+79145882005","create_if_missing":True,"event_kind":"trial_booking","event_date":"2026-11-20","trial_time":"16:45","note":"Записан на ПУ 20.11 в 16:45; полное имя подтверждено последующим сообщением о покупке"},
         {"source_id":"sz:22281:привалов-пу","source_chat":chat,"source_at":"2026-11-19T19:35:13","student_name":"Привалов Даня","event_kind":"trial_booking","event_date":"2026-11-22","trial_time":"17:45","note":"Существующий клиент записан на ПУ 22.11 в 17:45"},
-        {"source_id":"sz:22325:хасаханов-пу","source_chat":chat,"source_at":"2026-11-19T21:56:34","student_name":"Хасаханов Эмин","birth":"2022-09-24","phone":"+79995992010","source":"ранее ходили в Радужный","event_kind":"trial_booking","event_date":"2026-11-22","trial_time":"10:00","note":"Записан на ПУ 22.11 в 10:00"},
+        {"source_id":"sz:22325:хасаханов-пу","source_chat":chat,"source_at":"2026-11-19T21:56:34","student_name":"Хасаханов Эмин","birth":"2022-09-24","phone":"+79995992010","parent_name":"Элита","create_if_missing":True,"source":"Заявка с сайта","event_kind":"trial_booking","event_date":"2026-11-22","trial_time":"10:00","note":"ПУ 22.11 в 10:00 на Чоботовской: пришёл и купил. СЗ №22323, №22325, №22655, №22850 и ТРЕНЕРЫ №27120; контакт Элита подтверждён ERP-лидом №69582. Ранее ходили в Радужный"},
         {"source_id":"sz:22401:степаненко-отработка","source_chat":chat,"source_at":"2026-11-20T14:16:03","student_name":"Степаненко Даниил","event_kind":"makeup_booking","event_date":"2026-11-21","note":"За пропуск 19.11 назначена отработка 21.11 в 10:00"},
         {"source_id":"sz:22467:маматахунов-источник","source_chat":chat,"source_at":"2026-11-20T17:50:31","student_name":"Маматахунов Фирдавс","phone":"+79145882005","source":"ТРЦ Небо — шли в Детский мир и зашли в клуб","event_kind":"source_fact","event_date":"2026-11-20","note":"Рекламный источник подтверждён СЗ: семья шла в Детский мир и зашла в филиал ТРЦ Небо"},
         {"source_id":"sz:22516:сафронов-отработка","source_chat":chat,"source_at":"2026-11-20T19:15:45","student_name":"Сафронов Владимир","event_kind":"makeup_booking","event_date":"2026-11-22","note":"Отработка назначена на 22.11 в 17:45"},
