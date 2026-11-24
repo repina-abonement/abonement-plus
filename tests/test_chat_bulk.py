@@ -113,6 +113,20 @@ class ChatBulkTest(unittest.TestCase):
         self.assertEqual(self.ivan, row["student_id"])
 
     @patch("crm.chatbulk.date")
+    def test_single_first_name_does_not_match_existing_or_erp_card(self, fake_date):
+        from datetime import date
+        fake_date.today.return_value = date(2026, 11, 24)
+        erpimport.upload(self.con, "first-name.csv", (
+            "ID;ФИО посетителя;Телефон;Имя родителя;Статус;Дата рождения;Филиал;Группа\n"
+            "779;Замир Кадымов;79990000009;Амина;Постоянный посетитель;01.02.2020;Небо;Небо 16:45\n"
+        ).encode(), "clients")
+        exports = self.exports()
+        exports[1]["messages"].append({"id": 27, "date": "2026-11-03T20:00:00", "text": "16:45\nИван\nЗамир"})
+        plan = chatbulk.plan(self.con, exports)
+        unresolved = {x["name"] for x in plan["trainer"]["unresolved"] if x["message_id"] == "27"}
+        self.assertEqual({"Иван", "Замир"}, unresolved)
+
+    @patch("crm.chatbulk.date")
     def test_erp_homonyms_prefer_unique_active_group_hint(self, fake_date):
         from datetime import date
         fake_date.today.return_value = date(2026, 11, 24)
