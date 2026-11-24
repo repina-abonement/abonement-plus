@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from crm import chatbulk, db, services as sv
+from crm import chatbulk, db, erpimport, services as sv
 
 
 class ChatBulkTest(unittest.TestCase):
@@ -64,6 +64,26 @@ class ChatBulkTest(unittest.TestCase):
         self.assertEqual(1, self.con.execute(
             "SELECT count(*) FROM tasks WHERE auto_key='chat-bulk:trainers-unresolved:2026-11'"
         ).fetchone()[0])
+
+    @patch("crm.chatbulk.date")
+    def test_missing_card_is_created_from_complete_staged_erp_profile(self, fake_date):
+        from datetime import date
+        fake_date.today.return_value = date(2026, 11, 24)
+        erpimport.upload(self.con, "visitors.csv", (
+            "ID;ФИО посетителя;Телефон;Имя родителя;Статус;Дата рождения;Филиал;Группа\n"
+            "777;Пётр Петров;79990000003;Мария;Постоянный посетитель;01.02.2020;Небо;Небо ПУП\n"
+        ).encode(), "clients")
+        exports = self.exports()
+        exports[1]["messages"].append({"id": 21, "date": "2026-11-03T20:00:00", "text": "16:45\nПётр Петров"})
+        plan = chatbulk.plan(self.con, exports)
+        self.assertEqual(1, plan["trainer"]["create_from_erp"])
+        result = chatbulk.apply(self.con, exports, plan["token"], self.user)
+        self.assertEqual(1, result["created_from_erp"])
+        student = self.con.execute("SELECT id,birth,erp_status FROM students WHERE erp_id='777'").fetchone()
+        self.assertEqual(("2020-02-01", "Постоянный посетитель"), tuple(student)[1:])
+        parent = self.con.execute("""SELECT name,phone FROM parents
+            WHERE family_id=(SELECT family_id FROM students WHERE id=?)""", (student["id"],)).fetchone()
+        self.assertEqual(("Мария", "79990000003"), tuple(parent))
 
 
 if __name__ == "__main__":
