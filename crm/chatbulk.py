@@ -112,7 +112,7 @@ def _match_student(con, name, lesson_time):
     candidates = []
     for row in con.execute("SELECT id,name,group_id FROM students WHERE archived=0"):
         actual = _words(row["name"])
-        if (len(wanted) >= 2 and set(wanted) == set(actual)) or (len(wanted) == 1 and actual and wanted[0] == actual[-1]):
+        if (len(wanted) >= 2 and set(wanted) == set(actual)) or (len(wanted) == 1 and len(actual) >= 2 and wanted[0] == actual[-1]):
             candidates.append(dict(row))
     if len(candidates) > 1:
         timed = []
@@ -160,7 +160,7 @@ def _erp_match(profiles, name, lesson_time):
         exact = len(wanted) >= 2 and set(wanted) == set(actual)
         # ERP client names are normalized as "Имя Фамилия".  The relaxed
         # Telegram rule applies to a surname, never to an isolated first name.
-        single = len(wanted) == 1 and actual and wanted[0] == actual[-1]
+        single = len(wanted) == 1 and len(actual) >= 2 and wanted[0] == actual[-1]
         if not exact and not single:
             continue
         matches.append(profile)

@@ -127,6 +127,22 @@ class ChatBulkTest(unittest.TestCase):
         self.assertEqual({"Иван", "Замир"}, unresolved)
 
     @patch("crm.chatbulk.date")
+    def test_single_word_incomplete_cards_are_not_treated_as_surnames(self, fake_date):
+        from datetime import date
+        fake_date.today.return_value = date(2026, 11, 24)
+        sv.create_student(self.con, {"name": "Даня", "parent_name": "Ольга",
+            "phone": "+79990000010", "group_id": self.group}, self.user)
+        erpimport.upload(self.con, "incomplete-name.csv", (
+            "ID;ФИО посетителя;Телефон;Имя родителя;Статус;Дата рождения;Филиал;Группа\n"
+            "780;Марк;79990000011;Ирина;Постоянный посетитель;01.02.2020;Небо;Небо 16:45\n"
+        ).encode(), "clients")
+        exports = self.exports()
+        exports[1]["messages"].append({"id": 28, "date": "2026-11-03T20:00:00", "text": "16:45\nДаня\nМарк"})
+        plan = chatbulk.plan(self.con, exports)
+        unresolved = {x["name"] for x in plan["trainer"]["unresolved"] if x["message_id"] == "28"}
+        self.assertEqual({"Даня", "Марк"}, unresolved)
+
+    @patch("crm.chatbulk.date")
     def test_erp_homonyms_prefer_unique_active_group_hint(self, fake_date):
         from datetime import date
         fake_date.today.return_value = date(2026, 11, 24)
