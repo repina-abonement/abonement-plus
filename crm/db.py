@@ -391,10 +391,10 @@ def init_db(con: sqlite3.Connection):
     targetedverifiedcareearly.apply(con)
     from . import targetedverifiedlatesales
     targetedverifiedlatesales.apply(con)
-    from . import targetedtrainerresidual
-    targetedtrainerresidual.apply(con)
     from . import targetedverifiedcaregaps
     targetedverifiedcaregaps.apply(con)
+    from . import targetedtrainerresidual
+    targetedtrainerresidual.apply(con)
     groupterms.provision_nebo_morning(con)
     from . import mypay, coachreport
     mypay.init(con)
