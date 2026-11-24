@@ -4,7 +4,7 @@ import json
 from . import chatdaytransfer
 
 
-KEY = "targeted_verified_care_early_20261124_v9"
+KEY = "targeted_verified_care_early_20261124_v10"
 
 
 def events():
@@ -33,8 +33,8 @@ def events():
         {"source_id":"sz:20167:каримов-продажа","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Каримов Никита","birth":"2019-12-27","parent_name":"Талгат","phone":"+79199423853","create_if_missing":True,"event_kind":"sale_fact","event_date":"2026-11-08","note":"Сразу куплен абонемент на семь занятий за 7 560 ₽; в СЗ перечислены только шесть дат: 08, 10, 13, 14, 15 и 17.11 в группах 13:00 и 19:45; способ оплаты и седьмая дата не указаны","clarification_task_title":"Уточнить седьмую дату и способ оплаты 7 560 ₽","clarification_task_note":"Клиент, сумма и шесть дат известны; не создавать платёж или выдуманную дату"},
         {"source_id":"sz:20167:четвериков-продажа","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Четвериков Фёдор","event_kind":"sale_fact","event_date":"2026-11-05","note":"Абонемент на 7 тренировок с 05.11, чт 19:45/вс 13:00, сумма 9 450 ₽; 26.11 отсутствует; способ оплаты не указан","clarification_task_title":"Уточнить способ оплаты абонемента 9 450 ₽","clarification_task_note":"Не создавать повторный платёж"},
         {"source_id":"sz:20167:степанов-пу","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Степанов Степан","event_kind":"trial_booking","event_date":"2026-11-25","trial_time":"10:00","note":"ПУ в новой группе перенесено с 18.11 на 25.11 в 10:00"},
-        {"source_id":"sz:20167:крюкова-пу","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Крюкова Алена","parent_name":"Татьяна","phone":"+79152013018","source":"промо Никита","event_kind":"trial_booking","event_date":"2026-11-08","trial_time":"11:00","note":"Записана на ПУ 08.11 в 11:00 на Чоботовской"},
-        {"source_id":"sz:20167:кыймаштаев-пу","source_chat":chat,"source_at":"2026-11-09T17:59:09","student_name":"Кыймаштаев Дамир","parent_name":"Эмилия","phone":"+79858443323","source":"промо Никита","event_kind":"trial_result","event_date":"2026-11-09","trial_time":"16:45","came":True,"outcome":"followup","note":"ПУ понравилось, семья хочет купить абонемент именно в этой группе","followup_due":"2026-11-10T12:00","followup_title":"Оформить выбранный абонемент после ПУ"},
+        {"source_id":"sz:20167:крюкова-пу","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Крюкова Алена","parent_name":"Татьяна","phone":"+79152013018","source":"промо Никита","create_if_missing":True,"event_kind":"trial_booking","event_date":"2026-11-08","trial_time":"11:00","note":"Записана на ПУ 08.11 в 11:00 на Чоботовской"},
+        {"source_id":"sz:20167:кыймаштаев-пу","source_chat":chat,"source_at":"2026-11-09T17:59:09","student_name":"Кыймаштаев Дамир","parent_name":"Эмилия","phone":"+79858443323","source":"промо Никита","create_if_missing":True,"event_kind":"trial_result","event_date":"2026-11-09","trial_time":"16:45","came":True,"outcome":"followup","note":"ПУ понравилось, семья хочет купить абонемент именно в этой группе","followup_due":"2026-11-10T12:00","followup_title":"Оформить выбранный абонемент после ПУ"},
         {"source_id":"sz:20167:сергеенков-оплата","source_chat":chat,"source_at":"2026-11-06T17:59:09","student_name":"Сергеенков Коля","event_kind":"sale_fact","event_date":"2026-11-06","note":"После перехода из Арктики на Чоботовскую подтверждена оплата 9 450 ₽ через Точку; состав занятий в сообщении не указан","clarification_task_title":"Сверить состав абонемента 9 450 ₽","clarification_task_note":"Оплата через Точку подтверждена; повторный платёж не создавать"},
         {"source_id":"sz:20167:павлинов-пу","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Павлинов Пётр","parent_name":"Ася","phone":"+79060727385","event_kind":"trial_booking","event_date":"2026-11-08","trial_time":"11:00","note":"Записан на ПУ 08.11 в 11:00 на Чоботовской; СЗ №20594 и ТРЕНЕРЫ №26750","resolved_clarification_note":"Время 11:00 подтверждено двумя источниками"},
         {"source_id":"sz:20167:павлов-пу","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Павлов Матвей","birth":"2023-01-11","parent_name":"Никита Евсюнин","phone":"+79530113980","create_if_missing":True,"event_kind":"trial_booking","event_date":"2026-11-14","trial_time":"10:00","note":"Записан на ПУ 14.11 в 10:00 в ТРЦ Небо"},
@@ -67,7 +67,8 @@ def apply(con):
     actor=con.execute("""SELECT id,name,role FROM users WHERE active=1 AND role='admin'
         AND trim(name)='Юлия Репина' ORDER BY id LIMIT 1""").fetchone()
     if not actor:return {"state":"not_target_database"}
-    result=chatdaytransfer.apply(con,{"events":events()},dict(actor))
+    result=chatdaytransfer.apply(con,{"events":events()},dict(actor),
+        allow_missing_birth_for={'sz:20167:крюкова-пу','sz:20167:кыймаштаев-пу'})
     report={"state":"complete" if chatdaytransfer.batch_is_complete(result) else "partial",
             "counts":{key:len(value) for key,value in result.items()},"unmatched":result["unmatched"],
             "ambiguous":result["ambiguous"],"errors":result["errors"]}

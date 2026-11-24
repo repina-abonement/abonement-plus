@@ -9,7 +9,7 @@ import json
 from . import chatdaytransfer, tasks
 
 
-KEY = "targeted_verified_care_history_20261124_v11"
+KEY = "targeted_verified_care_history_20261124_v12"
 
 
 def early_events():
@@ -50,7 +50,7 @@ def later_events():
         {"source_id":"sz:22516:сафронов-отработка","source_chat":chat,"source_at":"2026-11-20T19:15:45","student_name":"Сафронов Владимир","event_kind":"makeup_booking","event_date":"2026-11-22","note":"Отработка назначена на 22.11 в 17:45"},
         {"source_id":"sz:22537:рыбин-пу","source_chat":chat,"source_at":"2026-11-20T20:18:23","student_name":"Рыбин Арсен","event_kind":"trial_booking","event_date":"2026-11-30","trial_time":"10:30","note":"После пропущенного по болезни ПУ перезаписан на 30.11 в 10:30","task_title":"Подтвердить повторное ПУ 30.11","task_due":"2026-11-30T09:00"},
         {"source_id":"sz:22539:маматахунов-продажа","source_chat":chat,"source_at":"2026-11-20T20:20:06","student_name":"Маматахунов Фирдавс","birth":"2023-11-10","parent_name":"Бобир","phone":"+79145882005","create_if_missing":True,"event_kind":"subscription_sale","sale_date":"2026-11-20","paid_at":"2026-11-20T20:20:06","amount":11880,"payment_method":"tochka_qr_link","tariff":"fixed","branch_hint":"Небо","lesson_time":"16:45","weekdays":[1,4],"discount_percent":20,"components":[{"month":"2026-11","price":2160,"dates":["2026-11-24","2026-11-27"]},{"month":"2026-12","price":9720,"dates":["2026-12-01","2026-12-04","2026-12-08","2026-12-11","2026-12-15","2026-12-18","2026-12-22","2026-12-25","2026-12-29"]}],"note":"После ПУ куплены 11 занятий до конца декабря, вт/пт 16:45, 11 880 ₽ по ссылке Точки"},
-        {"source_id":"sz:22544:недугов-пу","source_chat":chat,"source_at":"2026-11-20T20:25:24","student_name":"Недугов Макар","birth":"2024-04-24","phone":"+79266515801","source":"промо Никита 26","event_kind":"trial_booking","event_date":"2026-12-02","trial_time":"10:30","note":"Записан на ПУ 02.12 в 10:30 в ТРЦ Небо"},
+        {"source_id":"sz:22544:недугов-пу","source_chat":chat,"source_at":"2026-11-20T20:25:24","student_name":"Недугов Макар","birth":"2024-04-24","phone":"+79266515801","source":"промо Никита 26","parent_name":"Валерия","create_if_missing":True,"event_kind":"trial_booking","event_date":"2026-12-02","trial_time":"10:30","note":"Записан на ПУ 02.12 в 10:30 в ТРЦ Небо. Контакт Валерия подтверждён ERP-лидом №67867 по тому же телефону"},
         {"source_id":"sz:22567:ворожцов-перенос-пу","source_chat":chat,"source_at":"2026-11-21T10:22:40","student_name":"Ворожцов Миша","event_kind":"trial_booking","event_date":"2026-11-22","trial_time":"10:00","note":"21.11 ушёл с поля и не занимался; повторное ПУ назначено на 22.11 в 10:00"},
         {"source_id":"sz:22570:урюпина-перенос-пу","source_chat":chat,"source_at":"2026-11-21T10:45:08","student_name":"Урюпина Аглая","event_kind":"trial_booking","event_date":"2026-11-28","trial_time":"10:00","note":"Не пришла на ПУ 21.11 в 10:00; перезаписана на 28.11"},
         {"source_id":"sz:22577:лапин-переход","source_chat":chat,"source_at":"2026-11-21T11:24:34","student_name":"Лапин Иван","event_kind":"group_change","event_date":"2026-12-01","note":"С тренерами и мамой согласован переход с декабря из группы сб/вс 10:00 в группу 11:00; ноябрь заканчивает в прежней группе"},
