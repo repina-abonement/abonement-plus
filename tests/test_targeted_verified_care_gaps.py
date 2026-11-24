@@ -9,11 +9,11 @@ from crm import chatdaytransfer, db, schedule, services, targetedverifiedcaregap
 
 class VerifiedCareGapsTest(unittest.TestCase):
     def test_revised_package_key_forces_one_safe_reconciliation(self):
-        self.assertTrue(batch.KEY.endswith("_v7"))
+        self.assertTrue(batch.KEY.endswith("_v8"))
 
     def test_sources_are_unique_and_incomplete_money_stays_non_financial(self):
         events = batch.events()
-        self.assertEqual(53, len(events))
+        self.assertEqual(54, len(events))
         self.assertEqual(len(events), len({row["source_id"] for row in events}))
 
         incomplete = [row for row in events if row["event_kind"] == "sale_fact"]
@@ -122,6 +122,9 @@ class VerifiedCareGapsTest(unittest.TestCase):
         confirmed=[row for row in refunds if row["event_kind"]=="refund_fact"]
         self.assertEqual([("Муртазин Тагир",6750)],[(row["student_name"],row["amount"]) for row in confirmed])
         self.assertTrue(all(row.get("clarification_task_title") for row in refunds if row["event_kind"]=="refund_request"))
+        nechayev = next(row for row in refunds if row["student_name"] == "Нечхаев Андрей")
+        self.assertNotIn("amount", nechayev)
+        self.assertIn("одно занятие", nechayev["note"])
 
     def test_do_not_contact_request_is_not_a_future_trial_result(self):
         row = next(row for row in batch.events() if "печенкин" in row["source_id"])
