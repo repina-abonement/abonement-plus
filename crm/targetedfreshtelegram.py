@@ -1,10 +1,11 @@
 """Reviewed client facts from the incremental care-chat export, 23–24 Nov 2026."""
 import json
 
-from . import chatdaytransfer, tasks
+from . import chatdaytransfer, money, pricing, services, tasks
 
 
-KEY = "targeted_fresh_telegram_20261124_v4"
+KEY = "targeted_fresh_telegram_20261124_v5"
+DANEYKIN_DECEMBER_TASK = "chat-day:telegram:sz-23018:daneykin"
 
 TRAINER_ATTENDANCE = (
     ("Илья Морозов", "16:45"), ("Михаил Морозов", "16:45"),
@@ -202,6 +203,68 @@ def _trainer_attendance(con):
             "task_id": task["id"] if task else None, "assignee_id": varya_id}
 
 
+def _finish_daneykin_task(con, actor):
+    row = con.execute("SELECT id,status FROM tasks WHERE auto_key=? ORDER BY id DESC LIMIT 1",
+                      (DANEYKIN_DECEMBER_TASK,)).fetchone()
+    if row and row["status"] == "open":
+        tasks.complete(con, row["id"], actor,
+                       result="Декабрьский абонемент и карточная оплата 11 500 ₽ оформлены")
+
+
+def _daneykin_december_sale(con, actor):
+    """Apply the exact sale from care message 23018 without duplicate money."""
+    matches = con.execute("""SELECT id FROM students WHERE archived=0
+        AND (erp_id='88688' OR trim(name) IN ('Виктор Данейкин','Данейкин Виктор')) ORDER BY id""").fetchall()
+    if len(matches) != 1:
+        return {"state": "blocked", "reason": f"Карточка Данейкина определяется неоднозначно: {len(matches)} совпадений"}
+    sid = matches[0]["id"]
+    current = con.execute("""SELECT id,price,status,lessons,excluded_dates FROM subscriptions
+        WHERE student_id=? AND month='2026-12' AND status!='cancelled' AND COALESCE(kind,'month')='month'
+        ORDER BY id""", (sid,)).fetchall()
+    if len(current) > 1:
+        return {"state": "blocked", "student_id": sid,
+                "reason": "Уже существует несколько декабрьских абонементов"}
+    if current:
+        sub = current[0]
+        covered = money.balance(con, sid)["covered"].get(sub["id"], 0)
+        if sub["price"] == 11500 and covered >= 11500 and sub["status"] == "paid":
+            _finish_daneykin_task(con, actor)
+            return {"state": "already_complete", "student_id": sid, "subscription_id": sub["id"]}
+        return {"state": "blocked", "student_id": sid,
+                "reason": f"Найден другой декабрьский абонемент #{sub['id']}"}
+    groups = con.execute("""SELECT id,name FROM groups WHERE active=1 AND time='19:45'
+        AND name LIKE '%ПУП%' ORDER BY id""").fetchall()
+    if len(groups) != 1:
+        return {"state": "blocked", "student_id": sid,
+                "reason": f"Группа ПУП 19:45 определяется неоднозначно: {len(groups)} совпадений"}
+    con.execute("SAVEPOINT daneykin_december_sale")
+    try:
+        invoice = services.create_invoice(con, sid, "2026-12", actor, tariff="fixed",
+            excluded_dates=["2026-12-28"], group_id=groups[0]["id"], group_action="add",
+            paid_date="2026-11-23", exclusion_reason="СЗ №23018: исключено 28.12")
+        sub_id = invoice["id"]
+        sub = con.execute("SELECT price FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
+        if sub["price"] != 11500:
+            pricing.correct(con, sub_id, 11500,
+                "СЗ №23018 подтверждает негибкий декабрьский абонемент за 11 500 ₽", actor)
+        payment_id = money.pay_subscription(con, sub_id, "card_branch", actor, amount=11500,
+                                            paid_at="2026-11-23T20:45:42")
+        verified = con.execute("SELECT price,status,excluded_dates FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
+        payment = con.execute("SELECT amount,method,cancelled FROM payments WHERE id=?", (payment_id,)).fetchone()
+        exclusions = json.loads(verified["excluded_dates"] or "[]")
+        if verified["price"] != 11500 or verified["status"] != "paid" or "2026-12-28" not in exclusions:
+            raise ValueError("Итоговая проверка абонемента Данейкина не пройдена")
+        if tuple(payment) != (11500, "card_branch", 0):
+            raise ValueError("Итоговая проверка оплаты Данейкина не пройдена")
+        _finish_daneykin_task(con, actor)
+        con.execute("RELEASE daneykin_december_sale")
+        return {"state": "created", "student_id": sid, "subscription_id": sub_id, "payment_id": payment_id}
+    except Exception as error:
+        con.execute("ROLLBACK TO daneykin_december_sale")
+        con.execute("RELEASE daneykin_december_sale")
+        return {"state": "blocked", "student_id": sid, "reason": str(error)}
+
+
 def apply(con):
     previous = con.execute("SELECT value FROM settings WHERE key=?", (KEY,)).fetchone()
     if previous:
@@ -216,11 +279,12 @@ def apply(con):
         return {"state": "not_target_database"}
     result = chatdaytransfer.apply(con, {"events": events()}, dict(actor))
     attendance = _trainer_attendance(con)
+    daneykin_sale = _daneykin_december_sale(con, dict(actor))
     report = {"state": "complete" if not result["errors"] and not result["unmatched"] and not result["ambiguous"] else "verification_failed",
               "counts": {**{key: len(value) for key, value in result.items()},
                          "created_from_erp": sum(bool(item.get("created")) for item in result["applied"])},
               "unmatched": result["unmatched"], "ambiguous": result["ambiguous"], "errors": result["errors"],
-              "trainer_attendance": attendance}
+              "trainer_attendance": attendance, "daneykin_december_sale": daneykin_sale}
     con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES (?,?)", (KEY, json.dumps(report, ensure_ascii=False)))
     return report
 
