@@ -9,7 +9,7 @@ import json
 from . import chatdaytransfer
 
 
-KEY = "targeted_verified_care_history_20261124_v8"
+KEY = "targeted_verified_care_history_20261124_v9"
 
 
 def early_events():
@@ -40,7 +40,7 @@ def later_events():
     chat = "Служба заботы"
     return [
         {"source_id":"sz:22117:юрков-пу","source_chat":chat,"source_at":"2026-11-18T12:13:56","student_name":"Юрков Лев","birth":"2021-05-01","parent_name":"Марк","phone":"+79523231764","source":"Telegram @yurkovmark","event_kind":"lead_fact","event_date":"2026-11-18","note":"Хотели прийти на ПУ 18.11 в 17:45 или 19:45; точное время в сообщении не подтверждено","clarification_task_title":"Уточнить, состоялось ли ПУ Льва Юркова 18.11","clarification_task_note":"Не путать с действующим клиентом Иваном Юрковым; телефон Льва +79523231764"},
-        {"source_id":"sz:22224:хабибрахманов-пу","source_chat":chat,"source_at":"2026-11-18T20:46:17","student_name":"Хабибрахманов Малика","birth":"2022-06-02","phone":"+79177167165","source":"промо Никита","event_kind":"trial_booking","event_date":"2026-11-22","trial_time":"10:00","note":"Записан на ПУ 22.11 в 10:00 на Чоботовской"},
+        {"source_id":"sz:22224:хабибрахманов-пу","source_chat":chat,"source_at":"2026-11-18T20:46:17","student_name":"Хабибрахманов Малика","birth":"2022-06-02","phone":"+79177167165","source":"Промоутер Никита Евсюнин","parent_name":"Ильнур","create_if_missing":True,"event_kind":"decision_fact","event_date":"2026-11-22","note":"ERP-лид №68288: Малика, контакт Ильнур, Новопеределкино. СЗ №22224 и №22655: ПУ 22.11 в 10:00 на Чоботовской. ТРЕНЕРЫ №27120: взрослый пришёл один, решение обсудит с женой, посещение ребёнка и покупка не подтверждены","task_title":"Уточнить решение семьи Малики и предложить ПУ","task_due":"2026-11-25T18:00","task_note":"На встречу 22.11 пришёл взрослый без ребёнка. Уточнить, готовы ли записать Малику на пробное; проверить, не договорились ли уже в CRM"},
         {"source_id":"sz:22225:дюссек-пу","source_chat":chat,"source_at":"2026-11-18T20:54:27","student_name":"Дюссек Михаил","birth":"2024-01-26","parent_name":"Мария","phone":"89105416473","create_if_missing":True,"event_kind":"trial_booking","event_date":"2026-11-23","trial_time":"10:30","note":"Записан на ПУ 23.11 в 10:30","task_title":"Проверить результат ПУ 23.11","task_due":"2026-11-23T12:00"},
         {"source_id":"sz:22277:маматахунов-пу","source_chat":chat,"source_at":"2026-11-19T19:31:11","student_name":"Маматахунов Фирдавс","birth":"2023-11-10","parent_name":"Бобир","phone":"+79145882005","create_if_missing":True,"event_kind":"trial_booking","event_date":"2026-11-20","trial_time":"16:45","note":"Записан на ПУ 20.11 в 16:45; полное имя подтверждено последующим сообщением о покупке"},
         {"source_id":"sz:22281:привалов-пу","source_chat":chat,"source_at":"2026-11-19T19:35:13","student_name":"Привалов Даня","event_kind":"trial_booking","event_date":"2026-11-22","trial_time":"17:45","note":"Существующий клиент записан на ПУ 22.11 в 17:45"},
