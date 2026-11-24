@@ -385,10 +385,10 @@ def init_db(con: sqlite3.Connection):
     targetedfreshtelegram.apply(con)
     from . import targetedverifiedcarebatch
     targetedverifiedcarebatch.apply(con)
-    from . import targetedverifiedcarehistory
-    targetedverifiedcarehistory.apply(con)
     from . import targetedverifiedcareearly
     targetedverifiedcareearly.apply(con)
+    from . import targetedverifiedcarehistory
+    targetedverifiedcarehistory.apply(con)
     from . import targetedverifiedlatesales
     targetedverifiedlatesales.apply(con)
     from . import targetedverifiedcaregaps
