@@ -28,6 +28,15 @@ class TrainerResidualTest(unittest.TestCase):
         self.assertEqual([mamatakhunov],[r['id'] for r in residual._matches(self.con,'Фердавс Маматахунов')])
         self.assertEqual([magnin],[r['id'] for r in residual._matches(self.con,'Магин')])
 
+    def test_all_verified_report_typos_match_only_their_full_card(self):
+        cases=[('Захар Мартемьянов','Захар Мвртемьянов'),('Лев Абуталипов','Лев абдулталипов'),
+               ('Максим Сорманов','Макс сарманов'),('Артемий Паньков','Артемий Панькоа'),
+               ('Илья Оруджов','Иль Оруджов'),('Андрей Нечхаев','Андрей нехчаев'),
+               ('Максим Магнин','Максим Магин'),('Даниэль Бондарев','Даниель Бондарев')]
+        for index,(card,reported) in enumerate(cases,1):
+            sid=self.add(card,f'+790000001{index:02d}')
+            self.assertEqual([sid],[row['id'] for row in residual._matches(self.con,reported)])
+
     def test_first_name_is_rejected_and_namesakes_stay_ambiguous(self):
         self.add('Замир Кадымов','+79000000004')
         self.assertEqual([],residual._matches(self.con,'Замир'))
