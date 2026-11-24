@@ -380,6 +380,8 @@ def init_db(con: sqlite3.Connection):
     targetedsergievskytransfer.apply(con)
     from . import targetedpriorityclients
     targetedpriorityclients.apply(con)
+    from . import targetedfreshtelegram
+    targetedfreshtelegram.apply(con)
     groupterms.provision_nebo_morning(con)
     from . import mypay, coachreport
     mypay.init(con)

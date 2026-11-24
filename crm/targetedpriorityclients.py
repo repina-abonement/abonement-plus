@@ -539,6 +539,7 @@ def kononenko_sale_report(con):
 
 def attendance_report(con):
     """Read-only working-state check for the nine priority client cards."""
+    from . import targetedfreshtelegram
     rows = []
     for key, name in CLIENTS.items():
         matches = con.execute(
@@ -578,6 +579,7 @@ def attendance_report(con):
         "sharipov_december_sale": sharipov_sale_report(con),
         "miller": miller_report(con),
         "kononenko_december_sale": kononenko_sale_report(con),
+        "fresh_telegram": targetedfreshtelegram.report(con),
         "summary": {
             "cards": sum(row["matches"] == 1 for row in rows),
             "marks": sum(row["marks"] for row in rows),
