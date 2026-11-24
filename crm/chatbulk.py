@@ -18,6 +18,26 @@ SINCE = "2026-11-01"
 ALIASES = {"миша": "михаил", "женя": "евгений", "даня": "даниил", "дима": "дмитрий",
            "саша": "александр", "вова": "владимир", "ваня": "иван", "леша": "алексей",
            "лёша": "алексей"}
+# Exact recurring misspellings observed in the November trainer reports and
+# reconciled against one current ERP profile. These are deliberately whole-
+# name corrections, not fuzzy matching: any other near-spelling stays in review.
+NAME_CORRECTIONS = {
+    "андрей нехчаев": "андрей нечхаев",
+    "артем панькоа": "артемий паньков",
+    "артемий панькоа": "артемий паньков",
+    "даниель бондарев": "даниэль бондарев",
+    "захар мвртемьянов": "захар мартемьянов",
+    "иван баканов": "иван паканов",
+    "иван пеканов": "иван паканов",
+    "иван юркин": "иван юрков",
+    "иль оруджов": "илья оруджов",
+    "илья земковой": "илья замковой",
+    "лев абдулталипов": "лев абуталипов",
+    "макс сарманов": "максим сорманов",
+    "максим магин": "максим магнин",
+    "марат сайтулин": "марат сатиулин",
+    "эмильен абросимов": "эмильян абросимов",
+}
 FIRST_NAMES = {
     "александр", "алексей", "анатолий", "андрей", "антон", "артем", "артемий", "арсений",
     "богдан", "борис", "вадим", "валерий", "василий", "виктор", "виталий", "владимир",
@@ -61,7 +81,9 @@ def _text(value):
 
 
 def _words(value):
-    words = re.findall(r"[а-яё]+", str(value or "").casefold())
+    normalized = " ".join(re.findall(r"[а-я]+", str(value or "").casefold().replace("ё", "е")))
+    normalized = NAME_CORRECTIONS.get(normalized, normalized)
+    words = normalized.split()
     return [ALIASES.get(word, word.replace("ё", "е")) for word in words]
 
 

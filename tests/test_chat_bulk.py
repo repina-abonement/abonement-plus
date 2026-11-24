@@ -215,6 +215,20 @@ class ChatBulkTest(unittest.TestCase):
         plan = chatbulk.plan(self.con, exports)
         self.assertTrue(any(x["message_id"] == "26" for x in plan["trainer"]["unresolved"]))
 
+    def test_known_full_name_misspellings_match_exact_erp_profiles(self):
+        profiles = [
+            {"name": "Андрей Нечхаев", "group": "Чоботовская 16:45", "status": "Постоянный посетитель"},
+            {"name": "Артемий Паньков", "group": "Чоботовская 18:45", "status": "Постоянный посетитель"},
+            {"name": "Иван Паканов", "group": "Небо 18:45", "status": "Постоянный посетитель"},
+        ]
+        self.assertEqual("Андрей Нечхаев", chatbulk._erp_match(profiles, "Андрей нехчаев", "16:45")[0]["name"])
+        self.assertEqual("Артемий Паньков", chatbulk._erp_match(profiles, "Артём панькоа", "18:45")[0]["name"])
+        self.assertEqual("Иван Паканов", chatbulk._erp_match(profiles, "Иван Пеканов", "18:45")[0]["name"])
+
+    def test_unknown_near_spelling_is_not_fuzzy_matched(self):
+        profiles = [{"name": "Марк Ременюк", "group": "Чоботовская", "status": "Постоянный посетитель"}]
+        self.assertEqual([], chatbulk._erp_match(profiles, "Макс серменюк", "11:00"))
+
 
 if __name__ == "__main__":
     unittest.main()
