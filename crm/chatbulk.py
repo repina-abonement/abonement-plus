@@ -40,6 +40,12 @@ NON_NAMES = {"его", "ее", "её", "они", "он", "она", "мы", "вы
              "ребенок", "ребёнок", "детей", "плану", "факту", "всего", "итого", "новый", "новая"}
 OPERATIONAL = {"поле", "инвентарь", "диван", "ресепшен", "пейкипер", "смена", "ворота", "белые",
                "касса", "терминал", "отчет", "отчёт", "чек", "чеки"}
+# Narrow links explicitly present in the owner-approved pre-apply report. They
+# are scoped to one source message and slot; they never relax general surname
+# matching for another report.
+CONFIRMED_SOURCE_NAMES = {
+    ("27148", "2026-11-23", "16:45", "морозов"): "илья морозов",
+}
 
 
 class BulkError(ValueError):
@@ -161,6 +167,16 @@ def _previously_imported_match(con, row):
     return candidates if len(candidates) == 1 else []
 
 
+def _confirmed_source_match(con, row):
+    key = (str(row["message_id"]), row["date"], row["time"], " ".join(_words(row["name"])))
+    confirmed = CONFIRMED_SOURCE_NAMES.get(key)
+    if not confirmed:
+        return []
+    matches = [dict(student) for student in con.execute("SELECT id,name,group_id FROM students WHERE archived=0")
+               if " ".join(_words(student["name"])) == confirmed]
+    return matches if len(matches) == 1 else []
+
+
 def _erp_profiles(con):
     """Read staged visitor registers only; never read payment registers."""
     profiles = {}
@@ -264,7 +280,8 @@ def _plan(con, exports):
     erp_profiles = _erp_profiles(con)
     for chat in trainer_chats:
         for row in _trainer_rows(chat):
-            matches = _previously_imported_match(con, row) or _match_student(con, row["name"], row["time"])
+            matches = (_confirmed_source_match(con, row) or _previously_imported_match(con, row)
+                       or _match_student(con, row["name"], row["time"]))
             if len(matches) > 1:
                 # A surname that became ambiguous after new cards were created
                 # must keep the one child who already has the exact attendance

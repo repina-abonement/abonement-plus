@@ -58,6 +58,18 @@ class ChatBulkTest(unittest.TestCase):
                              for x in report["trainer"]["unresolved"]))
 
     @patch("crm.chatbulk.date")
+    def test_owner_approved_source_link_survives_later_homonym(self, fake_date):
+        from datetime import date
+        fake_date.today.return_value = date(2026, 11, 24)
+        exports = self.exports()
+        exports[1]["messages"].append({"id": 27148, "date": "2026-11-23T22:12:23",
+            "text": "16:45\nМорозов"})
+        report = chatbulk.plan(self.con, exports)
+        row = next(x for x in report["attendance"] if x["message_id"] == "27148")
+        self.assertEqual(self.ilya, row["student_id"])
+        self.assertEqual("Илья Морозов", row["student_name"])
+
+    @patch("crm.chatbulk.date")
     def test_apply_is_preview_guarded_and_idempotent(self, fake_date):
         from datetime import date
         fake_date.today.return_value = date(2026, 11, 24)
