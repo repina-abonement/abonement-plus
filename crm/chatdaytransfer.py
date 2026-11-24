@@ -311,8 +311,7 @@ def apply(con,data,user):
     # A reviewed day may mention a sale before the later line containing the
     # full trial result. Create-capable identity events must run first so the
     # remaining facts attach to that same card during one upload.
-    events=sorted(events,key=lambda event:0 if event.get('create_if_missing') is True
-                  and event.get('event_kind') in ('trial_booking','trial_result') else 1)
+    events=sorted(events,key=lambda event:0 if event.get('create_if_missing') is True else 1)
     result={'applied':[],'already':[],'unmatched':[],'ambiguous':[],'errors':[]}
     erp_profiles=None
     for event in events:
@@ -382,7 +381,7 @@ def apply(con,data,user):
                     con.execute('ROLLBACK TO chat_day_event');con.execute('RELEASE chat_day_event')
                     result['errors'].append({'source_id':source,'name':event.get('student_name'),'error':str(exc)});continue
         if not matches:
-            allowed=(event.get('create_if_missing') is True and event.get('event_kind') in ('trial_booking','trial_result')
+            allowed=(event.get('create_if_missing') is True
                      and str(event.get('source_chat') or '').casefold().startswith('служба заботы'))
             required=(str(event.get('student_name') or '').strip(),str(event.get('birth') or '').strip(),
                       str(event.get('parent_name') or '').strip(),str(event.get('phone') or '').strip())
@@ -395,12 +394,13 @@ def apply(con,data,user):
             try:
                 sid=sv.create_student(con,{'name':required[0],'birth':required[1],'parent_name':required[2],
                     'phone':required[3],'funnel':'sales','source':str(event.get('source') or '')},user)
-                trial_day=str(event.get('event_date') or '')[:10]
-                trial_time=str(event.get('trial_time') or '')[:5]
-                datetime.fromisoformat(trial_day+'T'+trial_time)
-                historical=int(trial_day < sv.today().isoformat())
-                con.execute("UPDATE students SET trial_at=?,historical_trial=?,stage='trial_booked',stage_changed_at=? WHERE id=?",
-                            (trial_day+'T'+trial_time,historical,sv.now_iso(),sid))
+                if event.get('event_kind') in ('trial_booking','trial_result'):
+                    trial_day=str(event.get('event_date') or '')[:10]
+                    trial_time=str(event.get('trial_time') or '')[:5]
+                    datetime.fromisoformat(trial_day+'T'+trial_time)
+                    historical=int(trial_day < sv.today().isoformat())
+                    con.execute("UPDATE students SET trial_at=?,historical_trial=?,stage='trial_booked',stage_changed_at=? WHERE id=?",
+                                (trial_day+'T'+trial_time,historical,sv.now_iso(),sid))
                 matches=[{'id':sid,'name':required[0]}];created=True
             except Exception as exc:
                 con.execute('ROLLBACK TO chat_day_event');con.execute('RELEASE chat_day_event')

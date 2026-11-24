@@ -125,6 +125,18 @@ class VerifiedCareGapsTest(unittest.TestCase):
         student=con.execute("SELECT erp_id,birth FROM students WHERE name='Проверкин Пётр'").fetchone()
         self.assertEqual(("9001","2020-02-03"),(student["erp_id"],student["birth"]))
 
+    def test_complete_care_identity_can_create_card_without_inventing_old_trial_time(self):
+        con=db.connect(str(Path(tempfile.mkdtemp())/"care-identity.sqlite3"));db.init_db(con)
+        event={"source_id":"sz:identity","source_chat":"Служба заботы","source_at":"2026-11-21T12:00:00",
+               "student_name":"Юрков Лев","birth":"2021-05-01","parent_name":"Марк",
+               "phone":"+79523231764","create_if_missing":True,"event_kind":"sale_fact",
+               "event_date":"2026-11-21","note":"Подтверждённый факт",
+               "clarification_task_title":"Закрепить точную группу"}
+        result=chatdaytransfer.apply(con,{"events":[event]},{"id":1,"role":"admin","name":"Юлия Репина"})
+        self.assertEqual(1,len(result["applied"]))
+        student=con.execute("SELECT name,birth,trial_at FROM students WHERE name='Юрков Лев'").fetchone()
+        self.assertEqual(("Юрков Лев","2021-05-01",None),(student["name"],student["birth"],student["trial_at"]))
+
 
 if __name__ == "__main__":
     unittest.main()
