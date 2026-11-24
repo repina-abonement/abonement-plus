@@ -6,7 +6,7 @@ from crm import targetedverifiedcareearly as batch
 class VerifiedCareEarlyTest(unittest.TestCase):
     def test_consolidated_report_is_split_into_unique_safe_events(self):
         events=batch.events()
-        self.assertEqual(41,len(events))
+        self.assertEqual(42,len(events))
         self.assertEqual(len(events),len({row['source_id'] for row in events}))
         self.assertTrue(all(row['student_name'].strip() for row in events))
         self.assertTrue(all(row['note'].strip() for row in events))
@@ -49,6 +49,14 @@ class VerifiedCareEarlyTest(unittest.TestCase):
         self.assertIn('ср/вс 16:45',row['note'])
         self.assertNotIn('amount',row)
         self.assertNotIn('payment_method',row)
+
+    def test_remenyuk_family_event_is_split_between_two_exact_children(self):
+        rows=[row for row in batch.events() if row['source_id'].startswith('sz:20167:ременюк-')]
+        self.assertEqual(2,len(rows))
+        self.assertEqual({'Ременюк Марк','Ременюк Максим'},{row['student_name'] for row in rows})
+        self.assertEqual({'2021-04-21','2024-04-13'},{row['birth'] for row in rows})
+        self.assertTrue(all(row['phone']=='+79057790163' for row in rows))
+        self.assertTrue(all(row['create_if_missing'] for row in rows))
 
 
 if __name__=='__main__':unittest.main()
