@@ -6,7 +6,7 @@ from crm import targetedverifiedcareearly as batch
 class VerifiedCareEarlyTest(unittest.TestCase):
     def test_consolidated_report_is_split_into_unique_safe_events(self):
         events=batch.events()
-        self.assertEqual(43,len(events))
+        self.assertEqual(44,len(events))
         self.assertEqual(len(events),len({row['source_id'] for row in events}))
         self.assertTrue(all(row['student_name'].strip() for row in events))
         self.assertTrue(all(row['note'].strip() for row in events))
@@ -14,7 +14,7 @@ class VerifiedCareEarlyTest(unittest.TestCase):
     def test_incomplete_money_facts_never_claim_a_payment_method(self):
         incomplete=[row for row in batch.events() if row['event_kind']=='sale_fact'
                     and not row.get('payment_method') and not row.get('resolved_clarification_note')]
-        self.assertEqual(13,len(incomplete))
+        self.assertEqual(12,len(incomplete))
         self.assertTrue(all('payment_method' not in row for row in incomplete))
         self.assertTrue(all(row.get('clarification_task_title') for row in incomplete))
 
@@ -41,6 +41,16 @@ class VerifiedCareEarlyTest(unittest.TestCase):
         self.assertIn('заменена',old['resolved_clarification_note'])
         self.assertEqual('card_branch',exact['payment_method'])
         self.assertIn('только даты',exact['clarification_task_title'].lower())
+
+    def test_later_lubyanitsky_thread_is_a_complete_november_sale(self):
+        rows={row['source_id']:row for row in batch.events()}
+        self.assertIn('ручная сверка',rows['sz:20167:лубяницкий-оплата']['resolved_clarification_note'])
+        exact=rows['sz:21200:лубяницкий-ноябрь']
+        self.assertEqual(('subscription_sale',12150,'card_branch'),
+                         (exact['event_kind'],exact['amount'],exact['payment_method']))
+        self.assertEqual(9,len(exact['components'][0]['dates']))
+        self.assertEqual(['2026-11-02','2026-11-30'],
+                         [exact['components'][0]['dates'][0],exact['components'][0]['dates'][-1]])
 
     def test_kononenko_makeup_and_tournament_carry_stay_separate(self):
         rows={row['source_id']:row for row in batch.events()}
