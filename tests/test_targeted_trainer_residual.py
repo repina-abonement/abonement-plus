@@ -15,7 +15,8 @@ class TrainerResidualTest(unittest.TestCase):
         return services.create_student(self.con,{'name':name,'parent_name':'Родитель','phone':phone},self.user)
 
     def test_rows_are_stable_and_source_fields_are_complete(self):
-        self.assertEqual(59,len(residual.ROWS))
+        self.assertEqual(84,len(residual.ROWS))
+        self.assertTrue(residual.KEY.endswith('_v2'))
         self.assertEqual(len(residual.ROWS),len(set(residual.ROWS)))
         self.assertTrue(all(message and day and tm and name for message,day,tm,name in residual.ROWS))
 
