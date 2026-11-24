@@ -142,6 +142,20 @@ def _plan(con, visitors, leads, erp_ids=None):
         sid = linked
         if not sid:
             sid, reason = matcher.find(rec, "clients")
+            # Both ERP records for this visitor were verified against the same family.
+            if not lead and not sid and eid == "76621" and not matcher.by_id.get(eid):
+                candidates_for_alias = [
+                    candidate for candidate in matcher.by_id.get("83867", ())
+                    if not matcher.students[candidate]["archived"]
+                    and sorted(ei._norm(matcher.students[candidate]["name"]).split()) == ["максим", "мастеренко"]
+                    and sorted(ei._norm(ei._split_name(rec)).split()) == ["максим", "мастеренко"]
+                    and str(matcher.students[candidate]["birth"])[:10] == "2020-03-27"
+                    and erpfull._date(rec.get("birth", "")) == "2020-03-27"
+                    and normalize_phone(rec.get("phone", ""))[-10:] == "9265555001"
+                    and {"9030083078", "9265555001"} <= matcher.phones[candidate]
+                ]
+                if len(candidates_for_alias) == 1:
+                    sid = candidates_for_alias[0]
             if not sid and (not lead or reason != "Не найдено однозначное совпадение"):
                 issues.append([where, reason])
                 continue
