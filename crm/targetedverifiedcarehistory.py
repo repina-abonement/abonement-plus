@@ -6,10 +6,10 @@ proved; otherwise the exact fact and one clarification task are retained.
 """
 import json
 
-from . import chatdaytransfer
+from . import chatdaytransfer, tasks
 
 
-KEY = "targeted_verified_care_history_20261124_v10"
+KEY = "targeted_verified_care_history_20261124_v11"
 
 
 def early_events():
@@ -109,6 +109,17 @@ def apply(con):
     if not actor:
         return {"state": "not_target_database"}
     result = chatdaytransfer.apply(con, {"events": events()}, dict(actor))
+    source = 'sz:22537:рыбин-пу'
+    task_key = 'chat-unmatched:' + source
+    if any(row.get('source_id') == source for kind in ('unmatched', 'ambiguous', 'errors')
+           for row in result[kind]):
+        tasks.add_task(con, 'plan', None, '2026-11-27T18:00', auto_key=task_key,
+            title='Найти карточку Арсена Рыбина до пробного 30.11', source='manual',
+            note='СЗ №21653: не пришёл 16.11 по болезни, возраст указан как 1.10. СЗ №22537: перезаписан на 30.11 в 10:30, просили напомнить. Найти контакт в диалоге записи, подтвердить карточку и запись, затем напомнить семье. Андрей и Егор Рыбины — другие дети.')
+    elif any(row.get('source_id') == source for kind in ('applied', 'already') for row in result[kind]):
+        con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',
+            result='Карточка найдена, факт перенесён' WHERE auto_key=? AND status='open'""",
+            (chatdaytransfer.sv.now_iso(), task_key))
     report = {"state": "complete" if chatdaytransfer.batch_is_complete(result) else "partial",
               "counts": {key: len(value) for key, value in result.items()},
               "unmatched": result["unmatched"], "ambiguous": result["ambiguous"], "errors": result["errors"]}
