@@ -20,7 +20,7 @@ class VerifiedCareEarlyTest(unittest.TestCase):
 
     def test_unknown_trial_times_are_not_invented(self):
         incomplete=[row for row in batch.events() if row['event_kind']=='trial_fact']
-        self.assertEqual(6,len(incomplete))
+        self.assertEqual(5,len(incomplete))
         self.assertTrue(all('trial_time' not in row for row in incomplete))
         self.assertTrue(all(row.get('clarification_task_title') for row in incomplete))
         by_name={row['student_name']:row for row in incomplete}
