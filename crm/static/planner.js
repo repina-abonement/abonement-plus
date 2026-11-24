@@ -161,8 +161,8 @@ function openPlannerEventForm(host,day,refresh,event={}){
 async function renderWeek(box) {
   const C = S.planner;
   if (!C.start) C.start = S.meta.today;
-  const w = await api("GET", `/api/planner/week?days=4&start=${C.start}${C.user ? "&user=" + C.user : ""}`);
-  const end = addDays(w.start, 3), today = S.meta.today;
+  const w = await api("GET", `/api/planner/week?days=7&start=${C.start}${C.user ? "&user=" + C.user : ""}`);
+  const end = addDays(w.start, 6), today = S.meta.today;
   C.readOnly=w.can_edit===false;C.user=w.user_id;
   const addButton=$('#pl-add');if(addButton)addButton.disabled=w.can_add===undefined?C.readOnly:!w.can_add;
   const visible = (t) => (C.status === "all" || t.status === C.status) && (!w.shifts_enabled || !C.shift || C.shift==='all' || !t.shift || t.shift==='common' || t.shift===C.shift);

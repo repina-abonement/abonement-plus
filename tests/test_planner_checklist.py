@@ -14,11 +14,12 @@ class PlannerChecklist(unittest.TestCase):
         self.assertEqual(day['days'][0]['tasks'][0]['id'],first)
         self.assertEqual(len(planner.week(self.con,self.varya,'2026-11-23',self.pool,rolling=True)['days']),7)
         self.assertEqual(self.con.execute('SELECT count(*) FROM tasks').fetchone()[0],2)
-    def test_workweek_view_is_always_monday_through_thursday(self):
-        view=planner.week(self.con,self.varya,'2026-11-26',self.pool,days=4)
+    def test_week_view_is_always_monday_through_sunday(self):
+        view=planner.week(self.con,self.varya,'2026-11-26',self.pool,days=7)
         self.assertEqual(view['start'],'2026-11-23')
         self.assertEqual([x['date'] for x in view['days']],
-                         ['2026-11-23','2026-11-24','2026-11-25','2026-11-26'])
+                         ['2026-11-23','2026-11-24','2026-11-25','2026-11-26',
+                          '2026-11-27','2026-11-28','2026-11-29'])
     def test_independent_checklists_per_shift_and_day(self):
         rid=self.create(shift_mode='both',repeat={'rule':'daily'})
         planner._materialize(self.con,date(2026,11,23));planner._materialize(self.con,date(2026,11,24))
