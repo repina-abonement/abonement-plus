@@ -54,7 +54,7 @@ function birthIso(value) {
   return iso <= S.meta.today ? iso : null;
 }
 const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
-const PAY_METHODS = {cash:"Наличные",paykeeper:"По ссылке PayKeeper",paykeeper_manual:"По ссылке PayKeeper",card_branch:"Эквайринговый терминал Сбера",sber_qr_branch:"По QR Сбера на филиале",tochka_qr_link:"По QR/ссылке Точки от администратора",card:"Картой (канал не уточнён)",sbp:"СБП (банк не уточнён)",online:"Онлайн-оплата (канал не уточнён)",transfer:"Перевод",unknown:"Перенесено",opening_balance:"Исторический остаток — оплачено ранее",balance:"Перенос с баланса",refund:"Возврат",refund_pending:"Ожидает возврата"};
+const PAY_METHODS = {cash:"Наличные",paykeeper:"По ссылке PayKeeper",paykeeper_manual:"По ссылке PayKeeper",card_branch:"Картой на филиале через терминал Сбера",sber_qr_branch:"По QR Сбера на филиале",tochka_qr_link:"По QR/ссылке Точки от администратора",card:"Картой (канал не уточнён)",sbp:"СБП (банк не уточнён)",online:"Онлайн-оплата (канал не уточнён)",transfer:"Перевод",unknown:"Перенесено",opening_balance:"Исторический остаток — оплачено ранее",balance:"Перенос с баланса",refund:"Возврат",refund_pending:"Ожидает возврата"};
 const PAY_MANUAL_METHODS = ['cash','paykeeper_manual','card_branch','sber_qr_branch','tochka_qr_link','transfer'];
 const PAY_INTERNAL = ["unknown", "opening_balance", "balance", "refund", "refund_pending"];  // ставит сама CRM, при приёме оплаты не выбираются
 

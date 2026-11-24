@@ -13,7 +13,7 @@ from datetime import date, datetime
 from . import logic
 
 METHODS = {"cash": "Наличные", "paykeeper": "По ссылке PayKeeper", "paykeeper_manual": "По ссылке PayKeeper (внесено вручную)",
-           "card_branch": "Эквайринговый терминал Сбера", "sber_qr_branch": "По QR Сбера на филиале",
+           "card_branch": "Картой на филиале через терминал Сбера", "sber_qr_branch": "По QR Сбера на филиале",
            "tochka_qr_link": "По QR/ссылке Точки от администратора",
            "card": "Картой (канал не уточнён)", "sbp": "СБП (банк не уточнён)",
            "online": "Онлайн-оплата (канал не уточнён)", "transfer": "Перевод",
