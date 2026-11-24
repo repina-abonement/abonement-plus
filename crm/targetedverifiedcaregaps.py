@@ -1,7 +1,7 @@
 """Client facts from marked care messages not covered by the primary batches."""
 import json
 
-from . import chatdaytransfer
+from . import chatdaytransfer, tasks
 
 
 KEY="targeted_verified_care_gaps_20261124_v1"
@@ -14,6 +14,7 @@ def events():
         {"source_id":"sz:20646:гмыря-турнир","source_chat":chat,"source_at":"2026-11-08T19:55:12","student_name":"Гмыря Артем","event_kind":"sale_fact","event_date":"2026-11-08","note":"Подтверждена оплата турнира 2 700 ₽; пометка «ТГ» обозначает канал сообщения, способ оплаты не указан","clarification_task_title":"Сверить способ оплаты турнира 2 700 ₽","clarification_task_note":"Оплата подтверждена; повторный платёж не создавать"},
         {"source_id":"sz:20646:шулежко-турнир","source_chat":chat,"source_at":"2026-11-08T19:55:12","student_name":"Шулежко Даниил","event_kind":"sale_fact","event_date":"2026-11-08","note":"Подтверждена оплата турнира 2 700 ₽; пометка «ТГ» обозначает канал сообщения, способ оплаты не указан","clarification_task_title":"Сверить способ оплаты турнира 2 700 ₽","clarification_task_note":"Оплата подтверждена; повторный платёж не создавать"},
         {"source_id":"sz:20651:павлинов-связь","source_chat":chat,"source_at":"2026-11-08T20:33:04","student_name":"Павлинов Петр","event_kind":"contact_fact","event_date":"2026-11-08","note":"После ПУ был недозвон и блокировка номера; чат семьи находился в WhatsApp, администратор не могла открыть его и отправить сообщение через CRM"},
+        {"source_id":"sz:20651:коля-без-данных","source_chat":chat,"source_at":"2026-11-08T20:33:04","student_name":"Коля","event_kind":"lead_fact","event_date":"2026-11-08","note":"В отчёте после ПУ указан только Коля; карточку и контактные данные в СЗ найти не удалось","clarification_task_title":"Установить семью ПУ Коли от 08.11","clarification_task_note":"В СЗ нет фамилии, телефона, времени или других точных данных; карточку по догадке не создавать"},
         {"source_id":"sz:21057:рахман-продажа","source_chat":chat,"source_at":"2026-11-11T21:15:04","student_name":"Рахман Альфаз","birth":"2022-12-16","phone":"+79854710937","source":"по рекомендации Хумидана Тимура","event_kind":"sale_fact","event_date":"2026-11-11","note":"Куплены ноябрь и декабрь, группа ср/вс 18:45, сумма 15 120 ₽; способ оплаты и состав по месяцам не указаны","clarification_task_title":"Сверить состав и способ оплаты 15 120 ₽","clarification_task_note":"Покупка подтверждена; повторный платёж не создавать"},
         {"source_id":"sz:21347:бородин-ноябрь","source_chat":chat,"source_at":"2026-11-13T18:06:40","student_name":"Бородин Доброслав","event_kind":"sale_fact","event_date":"2026-11-13","note":"Ноябрь вт/пт 17:45, сумма 6 750 ₽; требовалось пробить чек, способ оплаты не указан","clarification_task_title":"Сверить способ оплаты ноября 6 750 ₽","clarification_task_note":"Покупка подтверждена; повторный платёж не создавать"},
         {"source_id":"sz:21376:смирнов-разовое","source_chat":chat,"source_at":"2026-11-13T20:03:22","student_name":"Смирнов Эрик","event_kind":"sale_fact","event_date":"2026-11-14","note":"Разовое занятие 14.11 в 11:00, сумма 2 500 ₽; способ оплаты не указан","clarification_task_title":"Сверить способ оплаты разового 2 500 ₽","clarification_task_note":"Чек требовалось пробить; повторный платёж не создавать"},
@@ -73,6 +74,29 @@ def _apply_daneykin_visits(con):
     return {'added':added,'already':already,'error':''}
 
 
+def _sync_identity_tasks(con,result):
+    specs={
+        'sz:20651:коля-без-данных':('Установить семью ПУ Коли от 08.11','В СЗ нет фамилии, телефона и времени; карточку по догадке не создавать.'),
+        'sz:21667:федор-лид':('Уточнить фамилию и время ПУ Федора','Дата рождения 24.08.2024, мама Анастасия, 89168316324, ПУ 23.11; фамилии и времени в СЗ нет.'),
+        'sz:21768:дима-лид':('Уточнить фамилию Димы','Дата рождения 23.01.2022, мама Ирина, +79163642574, ПУ 20.11 в 17:45; фамилии в СЗ нет.'),
+        'sz:21948:арон-лид':('Уточнить фамилию Арона при следующем контакте','Дата рождения 27.08.2024, мама Анна, 89252051902; связаться не раньше 17.02.2027.'),
+    }
+    missing={row.get('source_id') for row in result.get('unmatched',[])}
+    created=closed=0
+    for source,(title,note) in specs.items():
+        key='chat-unmatched:'+source
+        if source in missing:
+            due='2027-02-17T12:00' if 'арон' in source else '2026-11-24T23:59'
+            if tasks.add_task(con,'plan',None,due,auto_key=key,title=title,note=note,source='manual'):
+                created+=1
+        else:
+            con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',
+                result='Карточка найдена, подтверждённый факт применён автоматически'
+                WHERE auto_key=? AND status='open'""",('2026-11-24T23:59:00',key))
+            closed+=con.execute('SELECT changes()').fetchone()[0]
+    return {'created':created,'closed':closed,'still_missing':sorted(missing & set(specs))}
+
+
 def apply(con):
     old=con.execute("SELECT value FROM settings WHERE key=?",(KEY,)).fetchone()
     if old:
@@ -84,9 +108,11 @@ def apply(con):
     if not actor:return {'state':'not_target_database'}
     result=chatdaytransfer.apply(con,{'events':events()},dict(actor))
     daneykin=_apply_daneykin_visits(con)
+    identity_tasks=_sync_identity_tasks(con,result)
     report={'state':'complete' if chatdaytransfer.batch_is_complete(result,daneykin['error']) else 'partial',
             'counts':{key:len(value) for key,value in result.items()},'unmatched':result['unmatched'],
-            'ambiguous':result['ambiguous'],'errors':result['errors'],'daneykin_visits':daneykin}
+            'ambiguous':result['ambiguous'],'errors':result['errors'],'daneykin_visits':daneykin,
+            'identity_tasks':identity_tasks}
     con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES (?,?)",(KEY,json.dumps(report,ensure_ascii=False)))
     return report
 

@@ -1,13 +1,13 @@
 import unittest
 import sqlite3
 
-from crm import chatdaytransfer, targetedverifiedcaregaps as batch
+from crm import chatdaytransfer, targetedverifiedcaregaps as batch, tasks
 
 
 class VerifiedCareGapsTest(unittest.TestCase):
     def test_sources_are_unique_and_incomplete_money_stays_non_financial(self):
         events = batch.events()
-        self.assertEqual(34, len(events))
+        self.assertEqual(35, len(events))
         self.assertEqual(len(events), len({row["source_id"] for row in events}))
 
         incomplete = [row for row in events if row["event_kind"] == "sale_fact"]
@@ -62,6 +62,25 @@ class VerifiedCareGapsTest(unittest.TestCase):
         self.assertFalse(chatdaytransfer.batch_is_complete(result))
         self.assertFalse(chatdaytransfer.saved_batch_can_skip({"state": "complete", "unmatched": result["unmatched"]}))
         self.assertTrue(chatdaytransfer.batch_is_complete({"errors": [], "ambiguous": [], "unmatched": []}))
+
+    def test_missing_identity_gets_one_planner_task_and_closes_after_match(self):
+        con = sqlite3.connect(":memory:")
+        con.row_factory = sqlite3.Row
+        con.executescript("""
+            CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT);
+            CREATE TABLE integrations(key TEXT PRIMARY KEY,value TEXT);
+            CREATE TABLE users(id INTEGER PRIMARY KEY,name TEXT,role TEXT,active INTEGER);
+            CREATE TABLE students(id INTEGER PRIMARY KEY);
+            INSERT INTO users VALUES(1,'Юлия Репина','admin',1);
+        """ + tasks.SCHEMA)
+        missing = {"unmatched": [{"source_id": "sz:21768:дима-лид"}]}
+        first = batch._sync_identity_tasks(con, missing)
+        second = batch._sync_identity_tasks(con, missing)
+        self.assertEqual(1, first["created"])
+        self.assertEqual(0, second["created"])
+        self.assertEqual(1, con.execute("SELECT count(*) FROM tasks").fetchone()[0])
+        batch._sync_identity_tasks(con, {"unmatched": []})
+        self.assertEqual("cancelled", con.execute("SELECT status FROM tasks").fetchone()[0])
 
 
 if __name__ == "__main__":
