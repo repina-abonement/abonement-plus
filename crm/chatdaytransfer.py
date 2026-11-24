@@ -151,7 +151,11 @@ def _reconcile_subscription_sale(con,sid,event,user):
     discount_id=None
     if event.get('discount_percent'):
         rule=str(event.get('discount_rule') or 'first_on_trial_day')
-        discount=con.execute("SELECT id,percent FROM discounts WHERE rule=? AND active=1 ORDER BY id LIMIT 1",(rule,)).fetchone()
+        if rule=='large_family':
+            discount=next((row for row in con.execute("SELECT * FROM discounts WHERE active=1 ORDER BY id")
+                           if money.large_family_discount(dict(row)) and int(row['percent'])==int(event['discount_percent'])),None)
+        else:
+            discount=con.execute("SELECT id,percent FROM discounts WHERE rule=? AND active=1 ORDER BY id LIMIT 1",(rule,)).fetchone()
         if not discount or int(discount['percent'])!=int(event['discount_percent']):
             raise sv.ApiError('Подтверждённая скидка не совпадает с действующим правилом CRM')
         discount_id=discount['id']
