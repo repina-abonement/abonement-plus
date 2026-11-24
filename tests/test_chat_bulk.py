@@ -75,8 +75,10 @@ class ChatBulkTest(unittest.TestCase):
         ).encode(), "clients")
         exports = self.exports()
         exports[1]["messages"].append({"id": 21, "date": "2026-11-03T20:00:00", "text": "16:45\nПётр Петров"})
+        exports[1]["messages"].append({"id": 24, "date": "2026-11-04T20:00:00", "text": "16:45\nПётр Петров"})
         plan = chatbulk.plan(self.con, exports)
         self.assertEqual(1, plan["trainer"]["create_from_erp"])
+        self.assertEqual(2, plan["trainer"]["erp_attendance_rows"])
         result = chatbulk.apply(self.con, exports, plan["token"], self.user)
         self.assertEqual(1, result["created_from_erp"])
         student = self.con.execute("SELECT id,birth,erp_status FROM students WHERE erp_id='777'").fetchone()
@@ -101,11 +103,11 @@ class ChatBulkTest(unittest.TestCase):
         self.assertEqual(0, plan["trainer"]["create_from_erp"])
 
     @patch("crm.chatbulk.date")
-    def test_single_surname_existing_card_requires_matching_group_time(self, fake_date):
+    def test_single_surname_never_matches_existing_card(self, fake_date):
         from datetime import date
         fake_date.today.return_value = date(2026, 11, 24)
         exports = self.exports()
-        exports[1]["messages"].append({"id": 23, "date": "2026-11-03T20:00:00", "text": "19:45\nИванов"})
+        exports[1]["messages"].append({"id": 23, "date": "2026-11-03T20:00:00", "text": "18:00\nИванов"})
         plan = chatbulk.plan(self.con, exports)
         self.assertTrue(any(x["message_id"] == "23" for x in plan["trainer"]["unresolved"]))
 

@@ -109,12 +109,16 @@ def _trainer_rows(chat):
 
 def _match_student(con, name, lesson_time):
     wanted = _words(name)
+    # A single word is never enough to identify a child automatically, even
+    # when only one current CRM group happens to match the reported time.
+    if len(wanted) < 2:
+        return []
     candidates = []
     for row in con.execute("SELECT id,name,group_id FROM students WHERE archived=0"):
         actual = _words(row["name"])
         if (len(wanted) >= 2 and set(wanted) == set(actual)) or (len(wanted) == 1 and wanted[0] in actual):
             candidates.append(dict(row))
-    if len(candidates) > 1 or len(wanted) == 1:
+    if len(candidates) > 1:
         timed = []
         for item in candidates:
             hit = con.execute("""SELECT 1 FROM groups g LEFT JOIN enrollments e ON e.group_id=g.id
@@ -122,7 +126,7 @@ def _match_student(con, name, lesson_time):
                 (lesson_time, item.get("group_id"), item["id"])).fetchone()
             if hit:
                 timed.append(item)
-        candidates = timed if len(wanted) == 1 else timed or candidates
+        candidates = timed or candidates
     return candidates
 
 
@@ -255,7 +259,10 @@ def _plan(con, exports):
             "messages": {"care": len(care["messages"]), "trainers": sum(len(x["messages"]) for x in trainer_chats)},
             "trainer": {"rows": len(attendance) + len(unresolved), "ready": sum(not x["already"] for x in attendance),
                         "already": sum(x["already"] for x in attendance), "unresolved": unresolved,
-                        "create_from_erp": sum(bool(x.get("create_from_erp")) for x in attendance)},
+                        "create_from_erp": len({x["create_from_erp"]["erp_id"] for x in attendance
+                                                if not x["already"] and x.get("create_from_erp")}),
+                        "erp_attendance_rows": sum(not x["already"] and bool(x.get("create_from_erp"))
+                                                   for x in attendance)},
             "erp": {"profiles": len(erp_profiles), "files": con.execute(
                 "SELECT count(*) FROM erp_uploads WHERE kind='clients'").fetchone()[0]},
             "care": {"significant": len(care_significant), "with_events": len(care_with_events),
