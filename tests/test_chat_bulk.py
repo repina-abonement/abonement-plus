@@ -85,6 +85,30 @@ class ChatBulkTest(unittest.TestCase):
             WHERE family_id=(SELECT family_id FROM students WHERE id=?)""", (student["id"],)).fetchone()
         self.assertEqual(("Мария", "79990000003"), tuple(parent))
 
+    @patch("crm.chatbulk.date")
+    def test_surname_alone_never_creates_a_card_from_erp(self, fake_date):
+        from datetime import date
+        fake_date.today.return_value = date(2026, 11, 24)
+        erpimport.upload(self.con, "visitors.csv", (
+            "ID;ФИО посетителя;Телефон;Имя родителя;Статус;Дата рождения;Филиал;Группа\n"
+            "778;София Степаненко;79990000004;Ольга;Постоянный посетитель;01.02.2020;Небо;Небо 16:45\n"
+        ).encode(), "clients")
+        exports = self.exports()
+        exports[1]["messages"].append({"id": 22, "date": "2026-11-03T20:00:00", "text": "16:45\nСтепаненко"})
+        plan = chatbulk.plan(self.con, exports)
+        item = next(x for x in plan["trainer"]["unresolved"] if x["message_id"] == "22")
+        self.assertEqual([], item["erp_matches"])
+        self.assertEqual(0, plan["trainer"]["create_from_erp"])
+
+    @patch("crm.chatbulk.date")
+    def test_single_surname_existing_card_requires_matching_group_time(self, fake_date):
+        from datetime import date
+        fake_date.today.return_value = date(2026, 11, 24)
+        exports = self.exports()
+        exports[1]["messages"].append({"id": 23, "date": "2026-11-03T20:00:00", "text": "19:45\nИванов"})
+        plan = chatbulk.plan(self.con, exports)
+        self.assertTrue(any(x["message_id"] == "23" for x in plan["trainer"]["unresolved"]))
+
 
 if __name__ == "__main__":
     unittest.main()

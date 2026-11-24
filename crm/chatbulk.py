@@ -114,7 +114,7 @@ def _match_student(con, name, lesson_time):
         actual = _words(row["name"])
         if (len(wanted) >= 2 and set(wanted) == set(actual)) or (len(wanted) == 1 and wanted[0] in actual):
             candidates.append(dict(row))
-    if len(candidates) > 1:
+    if len(candidates) > 1 or len(wanted) == 1:
         timed = []
         for item in candidates:
             hit = con.execute("""SELECT 1 FROM groups g LEFT JOIN enrollments e ON e.group_id=g.id
@@ -122,7 +122,7 @@ def _match_student(con, name, lesson_time):
                 (lesson_time, item.get("group_id"), item["id"])).fetchone()
             if hit:
                 timed.append(item)
-        candidates = timed or candidates
+        candidates = timed if len(wanted) == 1 else timed or candidates
     return candidates
 
 
@@ -154,14 +154,15 @@ def _erp_profiles(con):
 
 def _erp_match(profiles, name, lesson_time):
     wanted = _words(name)
+    # A surname or first name alone may refer to another child with the same
+    # word.  ERP is allowed to create a card only from a full explicit name.
+    if len(wanted) < 2:
+        return []
     matches = []
     for profile in profiles:
         actual = _words(profile["name"])
         exact = len(wanted) >= 2 and set(wanted) == set(actual)
-        surname = len(wanted) == 1 and wanted[0] in actual
-        if not exact and not surname:
-            continue
-        if surname and lesson_time not in profile["group"]:
+        if not exact:
             continue
         matches.append(profile)
     return matches
