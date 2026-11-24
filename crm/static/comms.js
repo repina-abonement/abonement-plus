@@ -1435,16 +1435,24 @@ function wireMessagePicker(selector, sendSticker, context={}) {
         if((input.value.trim()||input._attachmentFile)&&!confirm('Заменить текущий черновик выбранным скриптом?'))return;
         button.disabled=true;
         try{
-          if(context.channel&&context.channel()!==channel)throw Error('Мессенджер изменился. Откройте скрипты заново');
-          if(item.key==='rules'){
+          let selectedItem=item;
+          const currentChannel=context.channel?context.channel():channel;
+          if(currentChannel!==channel){
+            if(typeof memoSync==='function')await memoSync();
+            const refreshed=await api('GET','/api/chat-scripts?'+new URLSearchParams({student_id:sid||'',group_id:chosenGroup||'',channel:currentChannel}));
+            selectedItem=refreshed.items.find(candidate=>candidate.key===item.key);
+            if(!selectedItem)throw Error('Этот скрипт недоступен для выбранного мессенджера');
+            if(selectedItem.reason)throw Error(selectedItem.reason);
+          }
+          if(selectedItem.key==='rules'){
             const cid=await context.resolveConversation();
-            const staged=await api('POST',`/api/conversations/${cid}/rules-draft`,{student_id:+sid,group_id:item.group_id});
+            const staged=await api('POST',`/api/conversations/${cid}/rules-draft`,{student_id:+sid,group_id:selectedItem.group_id});
             input._attachmentUpload={id:staged.id,cid};input._attachmentFile={name:staged.filename,size:staged.size};
             preview.innerHTML='<span></span><br><img style="max-width:160px;max-height:210px" alt="Правила школы">';
-            preview.querySelector('span').textContent=staged.filename+' · вместе с текстом по кнопке «Отправить»';preview.querySelector('img').src=item.image;
+            preview.querySelector('span').textContent=staged.filename+' · вместе с текстом по кнопке «Отправить»';preview.querySelector('img').src=selectedItem.image;
             input.value=staged.text;
           }else{
-            input._attachmentFile=null;input._attachmentUpload=null;preview.replaceChildren();input.value=item.text;
+            input._attachmentFile=null;input._attachmentUpload=null;preview.replaceChildren();input.value=selectedItem.text;
           }
           input.focus();input.dispatchEvent(new Event('input',{bubbles:true}));root.hidden=true;panel.querySelector('[data-picker-tab="scripts"]').setAttribute('aria-expanded','false');
         }catch(e){fail(e)}finally{button.disabled=!!item.reason}
