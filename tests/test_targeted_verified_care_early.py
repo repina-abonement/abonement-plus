@@ -6,14 +6,15 @@ from crm import targetedverifiedcareearly as batch
 class VerifiedCareEarlyTest(unittest.TestCase):
     def test_consolidated_report_is_split_into_unique_safe_events(self):
         events=batch.events()
-        self.assertEqual(42,len(events))
+        self.assertEqual(43,len(events))
         self.assertEqual(len(events),len({row['source_id'] for row in events}))
         self.assertTrue(all(row['student_name'].strip() for row in events))
         self.assertTrue(all(row['note'].strip() for row in events))
 
     def test_incomplete_money_facts_never_claim_a_payment_method(self):
-        incomplete=[row for row in batch.events() if row['event_kind']=='sale_fact']
-        self.assertEqual(14,len(incomplete))
+        incomplete=[row for row in batch.events() if row['event_kind']=='sale_fact'
+                    and not row.get('payment_method') and not row.get('resolved_clarification_note')]
+        self.assertEqual(13,len(incomplete))
         self.assertTrue(all('payment_method' not in row for row in incomplete))
         self.assertTrue(all(row.get('clarification_task_title') for row in incomplete))
 
@@ -32,6 +33,14 @@ class VerifiedCareEarlyTest(unittest.TestCase):
         karimov=rows['sz:20167:каримов-продажа']
         self.assertIn('седьмую дату',karimov['clarification_task_title'].lower())
         self.assertIn('шесть дат',karimov['clarification_task_note'].lower())
+
+    def test_later_pavlov_report_resolves_method_but_not_unknown_dates(self):
+        rows={row['source_id']:row for row in batch.events()}
+        old=rows['sz:20167:павлов-продажа']
+        exact=rows['sz:21461:павлов-ноябрь']
+        self.assertIn('заменена',old['resolved_clarification_note'])
+        self.assertEqual('card_branch',exact['payment_method'])
+        self.assertIn('только даты',exact['clarification_task_title'].lower())
 
     def test_kononenko_makeup_and_tournament_carry_stay_separate(self):
         rows={row['source_id']:row for row in batch.events()}
