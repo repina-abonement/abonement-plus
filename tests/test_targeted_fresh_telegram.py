@@ -18,6 +18,8 @@ class FreshTelegramFactsTest(unittest.TestCase):
             VALUES (?,'Небо ПУП пн/чт 19:45','0,3','19:45',1)""", (branch,)).lastrowid
         self.group_1200 = self.con.execute("""INSERT INTO groups(branch_id,name,weekdays,time,active)
             VALUES (?,'Небо НУП сб/вс 12:00 возраст 5-6','5,6','12:00',1)""", (branch,)).lastrowid
+        self.group_chobot = self.con.execute("""INSERT INTO groups(branch_id,name,weekdays,time,active)
+            VALUES (?,'Чоботовская сб/вс 6-8','5,6','17:00',1)""", (branch,)).lastrowid
         for name in sorted({event["student_name"] for event in targetedfreshtelegram.events()}):
             family = self.con.execute("INSERT INTO families(name) VALUES (?)", (name,)).lastrowid
             self.con.execute("""INSERT INTO students(family_id,name,stage,stage_changed_at,created_at)
@@ -30,6 +32,10 @@ class FreshTelegramFactsTest(unittest.TestCase):
         self.con.execute("UPDATE students SET erp_id='105641',birth='2020-11-19' WHERE id=?", (pogosyan["id"],))
         self.con.execute("""INSERT INTO parents(family_id,name,phone,phone_norm,is_primary)
             VALUES (?,'Лена','+79613348693','79613348693',1)""", (pogosyan["family_id"],))
+        chernykh = self.con.execute("SELECT id,family_id FROM students WHERE name='Иван Черных'").fetchone()
+        self.con.execute("UPDATE students SET erp_id='133160',birth='2016-04-15' WHERE id=?", (chernykh["id"],))
+        self.con.execute("""INSERT INTO parents(family_id,name,phone,phone_norm,is_primary)
+            VALUES (?,'Елена','+79601333926','79601333926',1)""", (chernykh["family_id"],))
 
     def test_every_event_has_full_name_and_unique_source(self):
         events = targetedfreshtelegram.events()
@@ -72,6 +78,13 @@ class FreshTelegramFactsTest(unittest.TestCase):
         self.assertEqual(0, self.con.execute("""SELECT count(*) FROM tasks
             WHERE student_id=? AND auto_key='chat-day:telegram:sz-23043:pogosyan' AND status='open'""",
             (pogosyan,)).fetchone()[0])
+        chernykh = self.con.execute("SELECT id FROM students WHERE erp_id='133160'").fetchone()[0]
+        december = self.con.execute("""SELECT price,lessons,status,excluded_dates FROM subscriptions
+            WHERE student_id=? AND month='2026-12'""", (chernykh,)).fetchone()
+        self.assertEqual((7950, 6, "paid", '["2026-12-26", "2026-12-27"]'), tuple(december))
+        payment = self.con.execute("""SELECT amount,method,cancelled FROM payments
+            WHERE student_id=?""", (chernykh,)).fetchone()
+        self.assertEqual((7950, "tochka_qr_link", 0), tuple(payment))
 
     def test_missing_card_is_recreated_from_full_erp_profile(self):
         row = self.con.execute("SELECT id,family_id FROM students WHERE name='Виктор Данейкин'").fetchone()

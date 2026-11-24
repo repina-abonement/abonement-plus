@@ -4,7 +4,7 @@ import json
 from . import chatdaytransfer, money, pricing, services, tasks
 
 
-KEY = "targeted_fresh_telegram_20261124_v8"
+KEY = "targeted_fresh_telegram_20261124_v9"
 DANEYKIN_DECEMBER_TASK = "chat-day:telegram:sz-23018:daneykin"
 POGOSYAN_DECEMBER_TASK = "chat-day:telegram:sz-23043:pogosyan"
 
@@ -323,6 +323,64 @@ def _pogosyan_december_sale(con, actor):
         return {"state": "blocked", "student_id": sid, "reason": str(error)}
 
 
+def _chernykh_december_sale(con, actor):
+    """Apply the exact six-lesson sale from care message 22969."""
+    matches = con.execute("""SELECT id FROM students WHERE archived=0
+        AND (erp_id='133160' OR trim(name) IN ('Иван Черных','Черных Иван')) ORDER BY id""").fetchall()
+    if len(matches) != 1:
+        return {"state": "blocked", "reason": f"Карточка Черных определяется неоднозначно: {len(matches)} совпадений"}
+    sid = matches[0]["id"]
+    current = con.execute("""SELECT id,price,status,lessons FROM subscriptions
+        WHERE student_id=? AND month='2026-12' AND status!='cancelled' AND COALESCE(kind,'month')='month'
+        ORDER BY id""", (sid,)).fetchall()
+    if len(current) > 1:
+        return {"state": "blocked", "student_id": sid, "reason": "Уже существует несколько декабрьских абонементов"}
+    if current:
+        sub = current[0]
+        covered = money.balance(con, sid)["covered"].get(sub["id"], 0)
+        if (sub["price"], sub["lessons"], sub["status"]) == (7950, 6, "paid") and covered >= 7950:
+            task = con.execute("SELECT id,status FROM tasks WHERE auto_key=? ORDER BY id DESC LIMIT 1",
+                               ("chat-day:telegram:sz-22969:chernykh",)).fetchone()
+            if task and task["status"] == "open":
+                tasks.complete(con, task["id"], actor, result="Декабрьский абонемент и оплата 7 950 ₽ оформлены")
+            return {"state": "already_complete", "student_id": sid, "subscription_id": sub["id"]}
+        return {"state": "blocked", "student_id": sid, "reason": f"Найден другой декабрьский абонемент #{sub['id']}"}
+    groups = con.execute("""SELECT id,name FROM groups WHERE active=1 AND is_makeup=0
+        AND weekdays LIKE '%5%' AND weekdays LIKE '%6%' ORDER BY id""").fetchall()
+    exact = [row for row in groups if "Чобот" in row["name"] and "6-8" in row["name"]]
+    if len(exact) != 1:
+        return {"state": "blocked", "student_id": sid,
+                "reason": f"Группа Чоботовская сб/вс 6-8 определяется неоднозначно: {len(exact)} совпадений"}
+    con.execute("SAVEPOINT chernykh_december_sale")
+    try:
+        invoice = services.create_invoice(con, sid, "2026-12", actor, tariff="flex",
+            excluded_dates=["2026-12-26", "2026-12-27"], group_id=exact[0]["id"], group_action="add",
+            paid_date="2026-11-23", exclusion_reason="СЗ №22969: семья уезжает 26–27.12")
+        sub_id = invoice["id"]
+        sub = con.execute("SELECT price,lessons FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
+        if sub["lessons"] != 6:
+            raise ValueError("Календарь не дал шесть занятий Черных")
+        if sub["price"] != 7950:
+            pricing.correct(con, sub_id, 7950,
+                "СЗ №22969: 9 300 ₽ минус подтверждённый зачёт 1 350 ₽ за отменённое занятие", actor)
+        payment_id = money.pay_subscription(con, sub_id, "tochka_qr_link", actor, amount=7950,
+                                            paid_at="2026-11-23T15:22:04")
+        verified = con.execute("SELECT price,lessons,status FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
+        payment = con.execute("SELECT amount,method,cancelled FROM payments WHERE id=?", (payment_id,)).fetchone()
+        if tuple(verified) != (7950, 6, "paid") or tuple(payment) != (7950, "tochka_qr_link", 0):
+            raise ValueError("Итоговая проверка продажи Черных не пройдена")
+        task = con.execute("SELECT id,status FROM tasks WHERE auto_key=? ORDER BY id DESC LIMIT 1",
+                           ("chat-day:telegram:sz-22969:chernykh",)).fetchone()
+        if task and task["status"] == "open":
+            tasks.complete(con, task["id"], actor, result="Декабрьский абонемент и оплата 7 950 ₽ оформлены")
+        con.execute("RELEASE chernykh_december_sale")
+        return {"state": "created", "student_id": sid, "subscription_id": sub_id, "payment_id": payment_id}
+    except Exception as error:
+        con.execute("ROLLBACK TO chernykh_december_sale")
+        con.execute("RELEASE chernykh_december_sale")
+        return {"state": "blocked", "student_id": sid, "reason": str(error)}
+
+
 def _reconcile_missing_identity_tasks(con, result):
     """Keep one manual task only when the exports truly lack card identity."""
     key = "telegram:sz-22966:golushko-identity"
@@ -361,13 +419,16 @@ def apply(con):
     attendance = _trainer_attendance(con)
     daneykin_sale = _daneykin_december_sale(con, dict(actor))
     pogosyan_sale = _pogosyan_december_sale(con, dict(actor))
-    sales_ok = all(row.get("state") in ("created", "already_complete") for row in (daneykin_sale, pogosyan_sale))
+    chernykh_sale = _chernykh_december_sale(con, dict(actor))
+    sales_ok = all(row.get("state") in ("created", "already_complete")
+                   for row in (daneykin_sale, pogosyan_sale, chernykh_sale))
     report = {"state": "complete" if sales_ok and not result["errors"] and not result["unmatched"] and not result["ambiguous"] else "verification_failed",
               "counts": {**{key: len(value) for key, value in result.items()},
                          "created_from_erp": sum(bool(item.get("created")) for item in result["applied"])},
               "unmatched": result["unmatched"], "ambiguous": result["ambiguous"], "errors": result["errors"],
               "trainer_attendance": attendance, "daneykin_december_sale": daneykin_sale,
-              "pogosyan_december_sale": pogosyan_sale, "identity_tasks": identity_tasks}
+              "pogosyan_december_sale": pogosyan_sale, "chernykh_december_sale": chernykh_sale,
+              "identity_tasks": identity_tasks}
     con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES (?,?)", (KEY, json.dumps(report, ensure_ascii=False)))
     return report
 
