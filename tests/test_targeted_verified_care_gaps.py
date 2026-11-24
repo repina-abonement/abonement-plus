@@ -7,7 +7,7 @@ from crm import chatdaytransfer, targetedverifiedcaregaps as batch, tasks
 class VerifiedCareGapsTest(unittest.TestCase):
     def test_sources_are_unique_and_incomplete_money_stays_non_financial(self):
         events = batch.events()
-        self.assertEqual(36, len(events))
+        self.assertEqual(38, len(events))
         self.assertEqual(len(events), len({row["source_id"] for row in events}))
 
         incomplete = [row for row in events if row["event_kind"] == "sale_fact"]
