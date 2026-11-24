@@ -85,6 +85,7 @@ def _events():
         _event("kononenko", "sz-21928", "2026-11-17T15:40:55", "Служба заботы", "СЗ: назначена отработка 19.11 в 19:45"),
         _event("kononenko", "sz-22845", "2026-11-22T13:16:30", "Служба заботы", "СЗ: оплачен декабрьский абонемент Арктика + ОФП по субботам — 16 400 ₽ через PayKeeper; отпуск с 29.12"),
         _event("sharipov", "sz-22955", "2026-11-23T12:44:19", "Служба заботы", "СЗ: оплачено продление на декабрь — Арктика + ОФП, три раза в неделю, 20 400 ₽ через PayKeeper. Сотрудник сообщил, что абонемент не появился в CRM"),
+        _event("sharipov", "sz-23039", "2026-11-23T21:11:18", "Служба заботы", "СЗ: подтверждён платёж Шарипова 20 400 ₽ в PayKeeper в 12:13; оба чека присутствуют в PayKeeper"),
         _event("minibaev", "sz-22662", "2026-11-21T18:34:17", "Служба заботы", "СЗ: семья в MAX попросила заменить субботнее занятие на четверг; предупреждены, далее ходили по четвергам"),
         _event("miller", "sz-22317", "2026-11-19T21:36:20", "Служба заботы", "СЗ: Матвею выдан кубок за наклейки; дополнительно нужен вымпел"),
         _event("yamroz_artemiy", "sz-20270", "2026-11-03T19:05:20", "Служба заботы", "СЗ: Артемий включён в список оплат за ноябрьский турнир"),
@@ -246,7 +247,7 @@ def ensure_sharipov_december_sale(con, actor):
             raise ValueError("Существующий платёж 20 400 ₽ после сверки не зачёлся в декабрьский абонемент")
         else:
             payment_id = money.pay_subscription(con, sub_id, "paykeeper_manual", actor, amount=20400,
-                                                paid_at="2026-11-23T12:44:19")
+                                                paid_at="2026-11-23T12:13:00")
         verified = con.execute("SELECT price,lessons,status FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
         payment = con.execute("SELECT amount,method,cancelled FROM payments WHERE id=?", (payment_id,)).fetchone() if payment_id else None
         payment_ok = payment and tuple(payment) in ((20400, "paykeeper_manual", 0), (20400, "paykeeper", 0))
