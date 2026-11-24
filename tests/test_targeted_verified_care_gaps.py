@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from crm import chatdaytransfer, db, targetedverifiedcaregaps as batch, tasks
+from crm import chatdaytransfer, db, schedule, services, targetedverifiedcaregaps as batch, tasks
 
 
 class VerifiedCareGapsTest(unittest.TestCase):
@@ -168,6 +168,35 @@ class VerifiedCareGapsTest(unittest.TestCase):
         self.assertEqual(("Юрков Лев","2021-05-01",None),(student["name"],student["birth"],student["trial_at"]))
         self.assertEqual(1,con.execute("SELECT count(*) FROM students WHERE name='Юрков Лев'").fetchone()[0])
         self.assertEqual(1,con.execute("SELECT count(*) FROM chat_day_transfer_events WHERE source_id='sz:identity'").fetchone()[0])
+
+    def test_old_incomplete_rakhman_fact_upgrades_to_exact_sale_without_duplicate_source(self):
+        con=db.connect(str(Path(tempfile.mkdtemp())/"rakhman-upgrade.sqlite3"));db.init_db(con)
+        user={"id":1,"role":"admin","name":"Юлия Репина"}
+        branch=schedule.save_branch(con,{"name":"ТРЦ Небо"})
+        group=schedule.save_group(con,{"name":"Небо ср/вс 18:45","branch_id":branch,
+                                      "weekdays":[2,6],"time":"18:45","age":"3–4"})
+        sid=services.create_student(con,{"name":"Рахман Альфаз","birth":"2022-12-16",
+            "parent_name":"Елена","parent_role":"мама","phone":"+79854710937","group_id":group},user)
+        con.execute("UPDATE students SET trial_at='2026-11-11T18:45',trial_came=1,trial_group_id=? WHERE id=?",
+                    (group,sid))
+        exact=next(row for row in batch.events() if row["student_name"]=="Рахман Альфаз")
+        legacy={"source_id":exact["source_id"],"source_chat":"Служба заботы",
+                "source_at":exact["source_at"],"student_name":"Рахман Альфаз",
+                "event_kind":"sale_fact","event_date":"2026-11-11","note":"Старый неполный факт",
+                "clarification_task_title":"Сверить старую продажу"}
+        first=chatdaytransfer.apply(con,{"events":[legacy]},user)
+        self.assertEqual(1,len(first["applied"]))
+        upgraded=chatdaytransfer.apply(con,{"events":[exact]},user)
+        self.assertEqual(1,len(upgraded["already"]))
+        self.assertEqual(1,con.execute("SELECT count(*) FROM chat_day_transfer_events WHERE source_id=?",
+                                      (exact["source_id"],)).fetchone()[0])
+        self.assertEqual([("2026-11",5400,"paid"),("2026-12",9720,"paid")],
+                         [tuple(row) for row in con.execute(
+                             "SELECT month,price,status FROM subscriptions WHERE student_id=? ORDER BY month",(sid,))])
+        self.assertEqual((15120,"card_branch"),tuple(con.execute(
+            "SELECT amount,method FROM payments WHERE student_id=? AND cancelled=0",(sid,)).fetchone()))
+        self.assertEqual("cancelled",con.execute(
+            "SELECT status FROM tasks WHERE auto_key=?",('chat-day:'+exact["source_id"],)).fetchone()[0])
 
 
 if __name__ == "__main__":
