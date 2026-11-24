@@ -387,6 +387,8 @@ def init_db(con: sqlite3.Connection):
     targetedverifiedcarebatch.apply(con)
     from . import targetedverifiedcarehistory
     targetedverifiedcarehistory.apply(con)
+    from . import targetedverifiedcareearly
+    targetedverifiedcareearly.apply(con)
     groupterms.provision_nebo_morning(con)
     from . import mypay, coachreport
     mypay.init(con)

@@ -283,6 +283,20 @@ def test_verified_ad_source_fills_card_and_closes_false_source_task():
     assert task['status']=='cancelled' and 'источник заполнен' in task['result']
 
 
+def test_care_surname_only_matches_one_existing_card_but_never_guesses_namesakes():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'surname-care.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    sid=services.create_student(con,{'name':'Семен Кушнарев','parent_name':'Анна','phone':'+79000000001'},user)
+    event={'source_id':'sz:surname:one','source_chat':'Служба заботы','source_at':'2026-11-16T17:52:34',
+           'student_name':'Кушнарев','event_kind':'note','note':'Подтверждённый факт из СЗ'}
+    one=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(one['applied'])==1 and one['applied'][0]['student_id']==sid
+    services.create_student(con,{'name':'Илья Иванов','parent_name':'Ольга','phone':'+79000000002'},user)
+    services.create_student(con,{'name':'Дмитрий Иванов','parent_name':'Мария','phone':'+79000000003'},user)
+    ambiguous=chatdaytransfer.apply(con,{'events':[event|{'source_id':'sz:surname:two','student_name':'Иванов'}]},user)
+    assert len(ambiguous['ambiguous'])==1 and not ambiguous['applied']
+
+
 def test_previously_saved_sale_is_completed_on_repeat_without_duplicates():
     con=db.connect(str(Path(tempfile.mkdtemp())/'saved-sale.sqlite3'));db.init_db(con)
     user={'id':1,'role':'admin','name':'Руководитель'}

@@ -57,7 +57,11 @@ def _match(con,event):
     candidates=[]
     for row in con.execute('''SELECT s.id,s.name,s.erp_id,f.id family_id FROM students s JOIN families f ON f.id=s.family_id
                               WHERE s.archived=0'''):
-        if name and set(name)==set(_words(row['name'])):candidates.append(dict(row))
+        row_words=_words(row['name'])
+        exact=name and set(name)==set(row_words)
+        care_surname=(len(name)==1 and str(event.get('source_chat') or '').casefold().startswith('служба заботы')
+                      and name[0] in row_words)
+        if exact or care_surname:candidates.append(dict(row))
     if phone:
         by_phone={r['student_id'] for r in con.execute('''SELECT s.id student_id FROM students s JOIN parents p ON p.family_id=s.family_id
              WHERE s.archived=0 AND (phone_match(p.phone_norm,?) OR phone_match(p.phone,?))''',(phone,phone))}
