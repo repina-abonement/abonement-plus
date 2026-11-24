@@ -9,7 +9,7 @@ from crm import chatdaytransfer, db, targetedverifiedcaregaps as batch, tasks
 
 class VerifiedCareGapsTest(unittest.TestCase):
     def test_revised_package_key_forces_one_safe_reconciliation(self):
-        self.assertTrue(batch.KEY.endswith("_v2"))
+        self.assertTrue(batch.KEY.endswith("_v3"))
 
     def test_sources_are_unique_and_incomplete_money_stays_non_financial(self):
         events = batch.events()
@@ -17,18 +17,20 @@ class VerifiedCareGapsTest(unittest.TestCase):
         self.assertEqual(len(events), len({row["source_id"] for row in events}))
 
         incomplete = [row for row in events if row["event_kind"] == "sale_fact"]
-        self.assertEqual(19, len(incomplete))
+        self.assertEqual(17, len(incomplete))
         self.assertTrue(all(row.get("clarification_task_title") for row in incomplete))
         self.assertTrue(all("payment_method" not in row for row in incomplete))
 
     def test_exact_sales_balance_and_dates(self):
         exact = [row for row in batch.events() if row["event_kind"] == "subscription_sale"]
-        self.assertEqual(3, len(exact))
+        self.assertEqual(5, len(exact))
+        lesson_counts={"Лобченко Константин":9,"Жегулин Севастьян":11,"Гущо Михаил":9,
+                       "Рахман Альфаз":14,"Кустов Павел":9}
         for row in exact:
             self.assertEqual(row["amount"], sum(part["price"] for part in row["components"]))
             self.assertEqual(
                 sum(len(part["dates"]) for part in row["components"]),
-                11 if row["student_name"] == "Жегулин Севастьян" else 9,
+                lesson_counts[row["student_name"]],
             )
         zhegulin = next(row for row in exact if row["student_name"] == "Жегулин Севастьян")
         self.assertEqual("cash", zhegulin["payment_method"])
@@ -36,6 +38,12 @@ class VerifiedCareGapsTest(unittest.TestCase):
         gushcho = next(row for row in exact if row["student_name"] == "Гущо Михаил")
         self.assertEqual(("2026-12", 10800, "tochka_qr_link"),
                          (gushcho["components"][0]["month"], gushcho["amount"], gushcho["payment_method"]))
+        rakhman = next(row for row in exact if row["student_name"] == "Рахман Альфаз")
+        self.assertEqual((15120, "card_branch", 20),
+                         (rakhman["amount"], rakhman["payment_method"], rakhman["discount_percent"]))
+        kustov = next(row for row in exact if row["student_name"] == "Кустов Павел")
+        self.assertEqual((10850, "flexible", "tochka_qr_link"),
+                         (kustov["amount"], kustov["tariff"], kustov["payment_method"]))
 
     def test_tournament_messenger_tags_are_not_payment_methods(self):
         rows = [row for row in batch.events() if row["source_id"].startswith("sz:20646:")]
