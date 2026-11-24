@@ -46,6 +46,8 @@ class FreshTelegramFactsTest(unittest.TestCase):
         self.assertIn("8 640 ₽", by_name["Михаил Морозов"]["note"])
         self.assertNotIn("распределение", by_name["Илья Морозов"]["task_title"].lower())
         self.assertNotIn("распределение", by_name["Михаил Морозов"]["task_title"].lower())
+        self.assertEqual("Сверить только даты декабря 12 650 ₽", by_name["Владимир Сафронов"]["task_title"])
+        self.assertEqual("Сверить только даты декабря 9 450 ₽", by_name["Илья Оруджов"]["task_title"])
 
     def test_facts_and_tasks_apply_once(self):
         first = targetedfreshtelegram.apply(self.con)
