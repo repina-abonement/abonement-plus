@@ -23,6 +23,9 @@ class VerifiedCareEarlyTest(unittest.TestCase):
         self.assertEqual(6,len(incomplete))
         self.assertTrue(all('trial_time' not in row for row in incomplete))
         self.assertTrue(all(row.get('clarification_task_title') for row in incomplete))
+        by_name={row['student_name']:row for row in incomplete}
+        self.assertTrue(all(by_name[name].get('create_if_missing') for name in
+                            ('Муравицкий Макар','Рыбин Андрей','Иванов Дмитрий')))
 
     def test_petushkov_refund_is_confirmed_and_karimov_keeps_missing_date_open(self):
         rows={row['source_id']:row for row in batch.events()}
