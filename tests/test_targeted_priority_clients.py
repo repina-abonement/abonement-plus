@@ -71,6 +71,10 @@ class PriorityClientFactsTest(unittest.TestCase):
         payments = self.con.execute("SELECT amount,method,cancelled FROM payments WHERE subscription_id=?", (rows[0]["id"],)).fetchall()
         self.assertEqual([(20400, "paykeeper_manual", 0)], [tuple(row) for row in payments])
         self.assertEqual(20400, money.balance(self.con, sid)["covered"][rows[0]["id"]])
+        report = targetedpriorityclients.sharipov_sale_report(self.con)
+        self.assertTrue(report["complete"])
+        self.assertEqual(1, report["subscriptions"])
+        self.assertEqual(1, len(report["payments"]))
 
     def test_sharipov_reuses_existing_unallocated_paykeeper_payment(self):
         sid = self.con.execute("SELECT id FROM students WHERE name='Даниил Шарипов'").fetchone()[0]
@@ -101,6 +105,7 @@ class PriorityClientFactsTest(unittest.TestCase):
         self.assertEqual("created", result["state"], result)
         self.assertEqual(existing, result["payment_id"])
         self.assertEqual(1, self.con.execute("SELECT count(*) FROM payments WHERE student_id=? AND cancelled=0", (sid,)).fetchone()[0])
+        self.assertTrue(targetedpriorityclients.sharipov_sale_report(self.con)["complete"])
 
 
 if __name__ == "__main__":

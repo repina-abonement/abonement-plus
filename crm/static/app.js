@@ -1260,9 +1260,12 @@ function erpPriorityAttendanceSetup(box) {
     button.disabled = true; out.textContent = "Проверяю рабочие карточки…";
     try {
       const report = await api("GET", "/api/erp/priority-attendance/report"), s = report.summary;
+      const sale = report.sharipov_december_sale || {};
+      const saleTask = sale.manual_task ? (sale.manual_task.status === "open" ? "открыта" : "закрыта") : "нет";
       out.innerHTML = `<div class="note" style="margin-top:12px"><b>Результат проверки</b>
         <div>Карточки: <b>${s.cards} из 9</b> · отметки: <b>${s.marks}</b> · открытые задачи на сверку: <b>${s.open_tasks}</b></div>
         ${s.missing_tasks ? `<div class="danger-text">Нет задачи на сверку: ${s.missing_tasks}</div>` : ""}
+        <div style="margin-top:10px" class="${sale.complete ? "" : "danger-text"}"><b>Шарипов · декабрь:</b> ${sale.complete ? "✅ оформлен" : "⚠️ не подтверждён"} · абонементов: ${sale.subscriptions ?? 0} · занятий: ${sale.lessons ?? "—"} · сумма: ${sale.price == null ? "—" : `${sale.price.toLocaleString("ru-RU")} ₽`} · покрыто: ${(sale.covered || 0).toLocaleString("ru-RU")} ₽ · платежей PayKeeper 23.11: ${sale.payments?.length || 0} · ручная задача: ${saleTask}</div>
         <div style="margin-top:8px">${report.clients.map(c => `<div style="margin-top:7px"><b>${esc(c.name)}</b> — отметок: ${c.marks}; ${c.task ? `задача: ${esc(c.task.status === "open" ? "открыта" : c.task.status)} (${esc(c.task.due_at.slice(0,10))})` : "задачи нет"}${c.mark_dates?.length ? `<div class="small muted">Даты: ${c.mark_dates.map(dShort).join(", ")}</div>` : ""}</div>`).join("")}</div></div>`;
     } catch (error) { out.textContent = error.message; }
     finally { button.disabled = false; }

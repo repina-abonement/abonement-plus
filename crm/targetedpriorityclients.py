@@ -327,6 +327,40 @@ def report(con):
     return json.loads(row[0]) if row else {"state": "pending"}
 
 
+def sharipov_sale_report(con):
+    """Read the actual working rows; never trust only the saved migration state."""
+    matches = con.execute("""SELECT id FROM students WHERE archived=0
+        AND (erp_id=? OR trim(name) IN ('Даниил Шарипов','Шарипов Даниил')) ORDER BY id""",
+        (SHARIPOV_ERP_ID,)).fetchall()
+    result = {"card_matches": len(matches), "complete": False, "subscriptions": 0,
+              "subscription_id": None, "lessons": None, "price": None, "status": None,
+              "covered": 0, "payments": [], "manual_task": None}
+    if len(matches) != 1:
+        return result
+    sid = matches[0]["id"]
+    rows = con.execute("""SELECT id,lessons,price,status FROM subscriptions
+        WHERE student_id=? AND month='2026-12' AND status!='cancelled' AND COALESCE(kind,'month')='month'
+        ORDER BY id""", (sid,)).fetchall()
+    result["subscriptions"] = len(rows)
+    task = con.execute("SELECT id,status,due_at,result FROM tasks WHERE auto_key=? ORDER BY id DESC LIMIT 1",
+                       (SHARIPOV_DECEMBER_TASK,)).fetchone()
+    result["manual_task"] = dict(task) if task else None
+    if len(rows) != 1:
+        return result
+    sub = rows[0]
+    covered = money.balance(con, sid)["covered"].get(sub["id"], 0)
+    payments = [dict(row) for row in con.execute("""SELECT id,amount,method,paid_at,cancelled
+        FROM payments WHERE student_id=? AND cancelled=0 AND amount=20400
+          AND method IN ('paykeeper','paykeeper_manual') AND substr(paid_at,1,10)='2026-11-23'
+        ORDER BY id""", (sid,))]
+    result.update(subscription_id=sub["id"], lessons=sub["lessons"], price=sub["price"],
+                  status=sub["status"], covered=covered, payments=payments)
+    result["complete"] = (sub["lessons"] == 13 and sub["price"] == 20400 and
+                          sub["status"] == "paid" and covered >= 20400 and len(payments) == 1 and
+                          (not task or task["status"] != "open"))
+    return result
+
+
 def attendance_report(con):
     """Read-only working-state check for the nine priority client cards."""
     rows = []
@@ -365,6 +399,7 @@ def attendance_report(con):
     return {
         "period": {"from": "2026-11-01", "to": "2026-11-22"},
         "clients": rows,
+        "sharipov_december_sale": sharipov_sale_report(con),
         "summary": {
             "cards": sum(row["matches"] == 1 for row in rows),
             "marks": sum(row["marks"] for row in rows),
