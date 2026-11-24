@@ -9,11 +9,11 @@ from crm import chatdaytransfer, db, schedule, services, targetedverifiedcaregap
 
 class VerifiedCareGapsTest(unittest.TestCase):
     def test_revised_package_key_forces_one_safe_reconciliation(self):
-        self.assertTrue(batch.KEY.endswith("_v5"))
+        self.assertTrue(batch.KEY.endswith("_v6"))
 
     def test_sources_are_unique_and_incomplete_money_stays_non_financial(self):
         events = batch.events()
-        self.assertEqual(49, len(events))
+        self.assertEqual(51, len(events))
         self.assertEqual(len(events), len({row["source_id"] for row in events}))
 
         incomplete = [row for row in events if row["event_kind"] == "sale_fact"]
@@ -29,6 +29,17 @@ class VerifiedCareGapsTest(unittest.TestCase):
                          (row["event_kind"], row["amount"], row["payment_method"]))
         self.assertNotIn("components", row)
         self.assertNotIn("clarification_task_title", row)
+
+    def test_early_client_decisions_do_not_invent_a_sale(self):
+        rows = {row["source_id"]: row for row in batch.events()}
+        refused = rows["sz:20253:костюченко-решение"]
+        self.assertEqual("decision_fact", refused["event_kind"])
+        self.assertIn("отказалась", refused["note"])
+        yakunin = rows["sz:20253:якунин-второй-визит"]
+        self.assertEqual("sale_lead", yakunin["event_kind"])
+        self.assertIn("не подтверждены", yakunin["note"])
+        self.assertNotIn("amount", yakunin)
+        self.assertNotIn("payment_method", yakunin)
 
     def test_exact_sales_balance_and_dates(self):
         exact = [row for row in batch.events() if row["event_kind"] == "subscription_sale"]
