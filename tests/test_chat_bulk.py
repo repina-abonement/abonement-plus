@@ -88,7 +88,7 @@ class ChatBulkTest(unittest.TestCase):
         self.assertEqual(("Мария", "79990000003"), tuple(parent))
 
     @patch("crm.chatbulk.date")
-    def test_surname_alone_never_creates_a_card_from_erp(self, fake_date):
+    def test_unique_surname_creates_a_card_from_complete_erp_profile(self, fake_date):
         from datetime import date
         fake_date.today.return_value = date(2026, 11, 24)
         erpimport.upload(self.con, "visitors.csv", (
@@ -98,33 +98,46 @@ class ChatBulkTest(unittest.TestCase):
         exports = self.exports()
         exports[1]["messages"].append({"id": 22, "date": "2026-11-03T20:00:00", "text": "16:45\nСтепаненко"})
         plan = chatbulk.plan(self.con, exports)
-        item = next(x for x in plan["trainer"]["unresolved"] if x["message_id"] == "22")
-        self.assertEqual([], item["erp_matches"])
-        self.assertEqual(0, plan["trainer"]["create_from_erp"])
+        row = next(x for x in plan["attendance"] if x["message_id"] == "22")
+        self.assertEqual("София Степаненко", row["student_name"])
+        self.assertEqual(1, plan["trainer"]["create_from_erp"])
 
     @patch("crm.chatbulk.date")
-    def test_single_surname_never_matches_existing_card(self, fake_date):
+    def test_single_surname_matches_unique_existing_card(self, fake_date):
         from datetime import date
         fake_date.today.return_value = date(2026, 11, 24)
         exports = self.exports()
         exports[1]["messages"].append({"id": 23, "date": "2026-11-03T20:00:00", "text": "18:00\nИванов"})
         plan = chatbulk.plan(self.con, exports)
-        self.assertTrue(any(x["message_id"] == "23" for x in plan["trainer"]["unresolved"]))
+        row = next(x for x in plan["attendance"] if x["message_id"] == "23")
+        self.assertEqual(self.ivan, row["student_id"])
 
     @patch("crm.chatbulk.date")
-    def test_owner_confirmed_single_surname_matches_only_named_child_and_time(self, fake_date):
+    def test_erp_homonyms_prefer_unique_active_group_hint(self, fake_date):
         from datetime import date
         fake_date.today.return_value = date(2026, 11, 24)
-        group = self.con.execute("""INSERT INTO groups(branch_id,name,weekdays,time,active)
-            SELECT branch_id,'Небо 19:45','0,3','19:45',1 FROM groups WHERE id=?""", (self.group,)).lastrowid
-        mikhail = sv.create_student(self.con, {"name": "Михаил Гущо", "parent_name": "Ольга",
-            "phone": "+79990000004", "group_id": group}, self.user)
+        erpimport.upload(self.con, "homonyms.csv", (
+            "ID;ФИО посетителя;Телефон;Имя родителя;Статус;Дата рождения;Филиал;Группа\n"
+            "801;Михаил Гущо;79990000005;Ольга;Постоянный посетитель;01.02.2020;Небо;Небо 19:45\n"
+            "802;Павел Гущо;79990000006;Ирина;Архив;01.03.2020;Небо;Группа не выбрана\n"
+        ).encode(), "clients")
         exports = self.exports()
         exports[1]["messages"].append({"id": 25, "date": "2026-11-05T20:00:00", "text": "19:45\nГущо"})
         plan = chatbulk.plan(self.con, exports)
         row = next(x for x in plan["attendance"] if x["message_id"] == "25")
-        self.assertEqual(mikhail, row["student_id"])
-        exports[1]["messages"].append({"id": 26, "date": "2026-11-06T20:00:00", "text": "18:45\nГущо"})
+        self.assertEqual("Михаил Гущо", row["student_name"])
+
+    @patch("crm.chatbulk.date")
+    def test_erp_homonym_tie_stays_unresolved(self, fake_date):
+        from datetime import date
+        fake_date.today.return_value = date(2026, 11, 24)
+        erpimport.upload(self.con, "ties.csv", (
+            "ID;ФИО посетителя;Телефон;Имя родителя;Статус;Дата рождения;Филиал;Группа\n"
+            "811;Михаил Гущо;79990000007;Ольга;Постоянный посетитель;01.02.2020;Небо;Небо 19:45\n"
+            "812;Павел Гущо;79990000008;Ирина;Постоянный посетитель;01.03.2020;Небо;Небо 19:45\n"
+        ).encode(), "clients")
+        exports = self.exports()
+        exports[1]["messages"].append({"id": 26, "date": "2026-11-05T20:00:00", "text": "19:45\nГущо"})
         plan = chatbulk.plan(self.con, exports)
         self.assertTrue(any(x["message_id"] == "26" for x in plan["trainer"]["unresolved"]))
 

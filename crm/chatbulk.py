@@ -18,9 +18,6 @@ SINCE = "2026-11-01"
 ALIASES = {"миша": "михаил", "женя": "евгений", "даня": "даниил", "дима": "дмитрий",
            "саша": "александр", "вова": "владимир", "ваня": "иван", "леша": "алексей",
            "лёша": "алексей"}
-# Explicit identities confirmed by the owner from the source report.  This is
-# intentionally not a generic surname rule.
-VERIFIED_SINGLE_NAMES = {("гущо", "19:45"): "Михаил Гущо"}
 SIGNIFICANT = re.compile(
     r"\b(?:пу|пробн|оплат|продл|абонем|отработ|пропуск|перезапис|записан|не\s+куп|"
     r"ссылк|чек|возврат|баланс|уезжа|боле|групп|турнир)\w*", re.I)
@@ -112,16 +109,10 @@ def _trainer_rows(chat):
 
 def _match_student(con, name, lesson_time):
     wanted = _words(name)
-    verified = VERIFIED_SINGLE_NAMES.get((wanted[0], lesson_time)) if len(wanted) == 1 else None
-    # A single word is accepted only through an explicit owner-confirmed
-    # identity.  Matching group time alone is never treated as confirmation.
-    if len(wanted) < 2 and not verified:
-        return []
-    target = _words(verified) if verified else wanted
     candidates = []
     for row in con.execute("SELECT id,name,group_id FROM students WHERE archived=0"):
         actual = _words(row["name"])
-        if set(target) == set(actual):
+        if (len(wanted) >= 2 and set(wanted) == set(actual)) or (len(wanted) == 1 and wanted[0] in actual):
             candidates.append(dict(row))
     if len(candidates) > 1:
         timed = []
@@ -163,18 +154,32 @@ def _erp_profiles(con):
 
 def _erp_match(profiles, name, lesson_time):
     wanted = _words(name)
-    # A surname or first name alone may refer to another child with the same
-    # word.  ERP is allowed to create a card only from a full explicit name.
-    if len(wanted) < 2:
-        return []
     matches = []
     for profile in profiles:
         actual = _words(profile["name"])
         exact = len(wanted) >= 2 and set(wanted) == set(actual)
-        if not exact:
+        single = len(wanted) == 1 and wanted[0] in actual
+        if not exact and not single:
             continue
         matches.append(profile)
-    return matches
+    if len(matches) <= 1:
+        return matches
+
+    def active_score(profile):
+        group = str(profile.get("group") or "").casefold()
+        status = str(profile.get("status") or "").casefold()
+        score = 0
+        if lesson_time and lesson_time in group:
+            score += 4
+        if group and not re.search(r"не\s+выбран|без\s+групп|нет\s+групп", group):
+            score += 2
+        if re.search(r"постоян|действ|актив|посетител", status) and not re.search(r"неактив|архив|бывш", status):
+            score += 1
+        return score
+
+    best = max(active_score(profile) for profile in matches)
+    # Preference is safe only when it leaves one clearly best candidate.
+    return [profile for profile in matches if active_score(profile) == best]
 
 
 def _erp_group(con, profile, lesson_time):
