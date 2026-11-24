@@ -1,13 +1,13 @@
 """Exact late-November sales and non-cash referral credit from care reports."""
 import json
 
-from . import chatdaytransfer
+from . import chatdaytransfer, tasks
 
 
-KEY="targeted_verified_late_sales_20261124_v7"
+KEY="targeted_verified_late_sales_20261124_v8"
 
 
-def _sharikova_attendance(con, sid):
+def _sharikova_attendance(con, sid, erp_id='78877'):
     # Each of these single session lists includes both sisters.
     for message, day in [('26693', '05'), ('26795', '09'), ('26907', '12'),
                          ('27071', '16'), ('27093', '19')]:
@@ -22,7 +22,7 @@ def _sharikova_attendance(con, sid):
                 (source_id,student_id,visit_date,visit_time,kind,status,source_group,
                  source_payload,imported_at,imported_by)
                 VALUES (?,?,?,'19:45','subscription','present','Небо 19:45',?,?,'Перенос ТРЕНЕРЫ')""",
-                (f'trainers:{message}:erp:78877', sid, visit_date,
+                (f'trainers:{message}:erp:{erp_id}', sid, visit_date,
                  json.dumps({'source':'ТРЕНЕРЫ','message_id':message},ensure_ascii=False),
                  chatdaytransfer.sv.now_iso()))
 
@@ -90,6 +90,39 @@ def apply(con):
         elif not con.execute("SELECT 1 FROM erp_history_subscriptions WHERE source_id='726405' AND student_id=?",(sid,)).fetchone():
             identity['errors'].append({'source_id':profile_event['source_id'],'name':profile_event['student_name'],
                                        'error':'Для ноября сохранён факт ERP; исходная группа не определена однозначно'})
+    profile_event={
+        'source_id':'erp:78875:726406:november', 'source_chat':'ERP',
+        'source_at':'2026-11-05T00:00:00', 'student_name':'Мария Шарикова',
+        'erp_id':'78875', 'erp_create_if_missing':True, 'event_kind':'note',
+        'erp_profile':{'name':'Мария Шарикова','birth':'2020-04-28',
+                       'parent_name':'Ольга','phone':'+79309613965','email':'olgavin90@mail.ru',
+                       'erp_status':'Вернувшийся'},
+        'note':'ERP №726406: ноябрьский стандартный абонемент на 8 занятий, 05–30.11, историческая стоимость 8 640 ₽.',
+    }
+    maria=chatdaytransfer.apply(con,{'events':[profile_event]},dict(actor))
+    found=maria['applied'] or maria['already']
+    if found:
+        sid=found[0]['student_id']
+        _sharikova_attendance(con, sid, '78875')
+        groups=con.execute('SELECT id FROM groups WHERE name=?',
+            ('СТОП Небо ПУП пн/чт/сб 19:45 возраст 6-8',)).fetchall()
+        if len(groups)==1:
+            con.execute("""INSERT OR IGNORE INTO erp_history_subscriptions
+                (source_id,student_id,group_id,month,valid_from,valid_until,lessons,
+                 revenue_amount,source_payload,imported_at,imported_by)
+                VALUES ('726406',?,?,'2026-11','2026-11-05','2026-11-30',8,8640,?,?,'Перенос ERP')""",
+                (sid,groups[0]['id'],json.dumps({'erp_id':'78875'}),chatdaytransfer.sv.now_iso()))
+        elif not con.execute("SELECT 1 FROM erp_history_subscriptions WHERE source_id='726406' AND student_id=?",(sid,)).fetchone():
+            maria['errors'].append({'source_id':profile_event['source_id'],'name':profile_event['student_name'],
+                                       'error':'Для ноября сохранён факт ERP; исходная группа не определена однозначно'})
+        task_id = tasks.add_task(con, 'manual', sid, '2026-11-25T10:00',
+            auto_key='manual:78875:december-payment-check', source='manual', shared=True,
+            title='Сверить декабрьскую оплату сестёр Шариковых',
+            note='В СЗ №22847 оплата 9 720 ₽ через PayKeeper от 22.11 подтверждена только для Евгении. Проверить PayKeeper и CRM по обеим сёстрам и выяснить статус декабрьской оплаты Марии.')
+        if task_id:
+            con.execute('UPDATE tasks SET priority=1 WHERE id=?', (task_id,))
+    for key in identity:
+        identity[key].extend(maria[key])
     result=chatdaytransfer.apply(con,{'events':events()},dict(actor))
     for key in result:
         result[key].extend(identity[key])
