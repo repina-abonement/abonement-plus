@@ -333,7 +333,7 @@ def _reconcile_confirmed_sale(con,sid,event):
     return False
 
 
-def apply(con,data,user):
+def apply(con,data,user,*,allow_missing_birth_for=()):
     events=data.get('events') if isinstance(data,dict) else None
     if not isinstance(events,list) or not events:raise sv.ApiError('В файле нет событий переноса')
     # A reviewed day may mention a sale before the later line containing the
@@ -415,9 +415,11 @@ def apply(con,data,user):
                      and str(event.get('source_chat') or '').casefold().startswith('служба заботы'))
             required=(str(event.get('student_name') or '').strip(),str(event.get('birth') or '').strip(),
                       str(event.get('parent_name') or '').strip(),str(event.get('phone') or '').strip())
-            if not allowed or not all(required):
+            if not allowed or not all((required[0],required[2],required[3])) or (
+                    not required[1] and source not in allow_missing_birth_for):
                 result['unmatched'].append({'source_id':source,'name':event.get('student_name'),'phone':event.get('phone','')});continue
-            try:datetime.fromisoformat(required[1])
+            try:
+                if required[1]:datetime.fromisoformat(required[1])
             except ValueError:
                 result['errors'].append({'source_id':source,'name':event.get('student_name'),'error':'Неверная дата рождения новой карточки'});continue
             con.execute('SAVEPOINT chat_day_event')

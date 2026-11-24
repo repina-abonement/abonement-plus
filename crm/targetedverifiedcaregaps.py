@@ -4,7 +4,7 @@ import json
 from . import chatdaytransfer, tasks
 
 
-KEY="targeted_verified_care_gaps_20261124_v11"
+KEY="targeted_verified_care_gaps_20261124_v12"
 
 
 def events():
@@ -40,7 +40,7 @@ def events():
         {"source_id":"sz:21608:орехин-условия","source_chat":chat,"source_at":"2026-11-15T20:41:10","student_name":"Орехин Александр","phone":"+79019040449","event_kind":"discount_fact","event_date":"2026-11-15","note":"Родственник тренера Ивакина: первая покупка со скидкой 20%, далее постоянная скидка 10%; ПУ на Чоботовской 08.11","clarification_task_title":"Проверить сохранение индивидуальной скидки 10% после первой покупки","clarification_task_note":"Не применять дополнительную скидку поверх согласованной"},
         {"source_id":"sz:21667:федор-лид","source_chat":chat,"source_at":"2026-11-16T11:35:32","student_name":"Федор","birth":"2024-08-24","parent_name":"Анастасия","phone":"89168316324","event_kind":"lead_fact","event_date":"2026-11-23","note":"Запись на ПУ 23.11; фамилия и время не указаны, предпочтительный канал MAX","clarification_task_title":"Уточнить фамилию и время ПУ Федора","clarification_task_note":"Дата рождения, мама, телефон и дата ПУ известны; не создавать карточку только по имени"},
         {"source_id":"sz:21714:данейкин-посещения","source_chat":chat,"source_at":"2026-11-16T14:50:32","student_name":"Данейкин Виктор","event_kind":"attendance_fact","event_date":"2026-11-16","note":"СЗ поручила добавить занятия 16, 19 и 21 ноября; время 18:45 берётся из подтверждённой группы карточки"},
-        {"source_id":"sz:21718:печенкин-не-беспокоить","source_chat":chat,"source_at":"2026-11-16T15:05:53","student_name":"Печенкин Артём","parent_name":"Анастасия","phone":"89261000207","event_kind":"decision_fact","event_date":"2026-11-16","note":"Семья попросила не писать часто; готова вернуться к записи не ранее января, утреннее время неудобно из-за работы","task_due":"2027-01-10T12:00","task_title":"Связаться один раз после праздников и предложить вечернее ПУ","task_note":"Утреннее время неудобно; семья просила не беспокоить до января"},
+        {"source_id":"sz:21718:печенкин-не-беспокоить","source_chat":chat,"source_at":"2026-11-16T15:05:53","student_name":"Печенкин Артём","parent_name":"Анастасия","phone":"89261000207","create_if_missing":True,"event_kind":"decision_fact","event_date":"2026-11-16","note":"СЗ №21578 и №21718: мама Анастасия, Telegram un_known_Miss, возраст «1,9», точная дата рождения неизвестна. ПУ 07.12 в 10:00 обсуждалось до уточнения семьи. В списке 16.11 указан, приход не подтверждён. Семья попросила не писать часто; готова вернуться к записи не ранее января, утреннее время неудобно из-за работы","task_due":"2027-01-10T12:00","task_title":"Связаться один раз после праздников и предложить вечернее ПУ","task_note":"Утреннее время неудобно; семья просила не беспокоить до января"},
         {"source_id":"sz:21768:дима-лид","source_chat":chat,"source_at":"2026-11-16T17:41:54","student_name":"Дима","birth":"2022-01-23","parent_name":"Ирина","phone":"+79163642574","event_kind":"lead_fact","event_date":"2026-11-20","note":"Новый лид записан на ПУ в пятницу в 17:45; фамилия не указана","clarification_task_title":"Уточнить фамилию Димы","clarification_task_note":"Дата рождения, мама, телефон, дата и время ПУ известны; не создавать карточку только по имени"},
         {"source_id":"sz:21819:королев-продажа","source_chat":chat,"source_at":"2026-11-16T19:32:23","student_name":"Королев Дима","event_kind":"sale_fact","event_date":"2026-11-16","note":"Мама вернулась и оплатила 5 400 ₽ картой; период и состав покупки не указаны","clarification_task_title":"Сверить состав покупки 5 400 ₽","clarification_task_note":"Карточная оплата подтверждена; повторный платёж не создавать"},
         {"source_id":"sz:21801:королев-вторая-группа","source_chat":chat,"source_at":"2026-11-16T18:55:06","student_name":"Королев Дима","event_kind":"group_trial","event_date":"2026-11-22","note":"После занятия 16.11 в 17:45 семья купила остаток ноября и попросила записать Диму на просмотр воскресной группы 22.11 в 12:00; постоянную группу планировали выбрать после просмотра"},
@@ -129,7 +129,8 @@ def apply(con):
         except (TypeError,ValueError):pass
     actor=con.execute("SELECT id,name,role FROM users WHERE active=1 AND role='admin' AND trim(name)='Юлия Репина' ORDER BY id LIMIT 1").fetchone()
     if not actor:return {'state':'not_target_database'}
-    result=chatdaytransfer.apply(con,{'events':events()},dict(actor))
+    result=chatdaytransfer.apply(con,{'events':events()},dict(actor),
+        allow_missing_birth_for={'sz:21718:печенкин-не-беспокоить'})
     daneykin=_apply_daneykin_visits(con)
     identity_tasks=_sync_identity_tasks(con,result)
     report={'state':'complete' if chatdaytransfer.batch_is_complete(result,daneykin['error']) else 'partial',
