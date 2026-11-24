@@ -11,6 +11,8 @@ class FreshTelegramFactsTest(unittest.TestCase):
         db.init_db(self.con)
         self.con.execute("DELETE FROM settings WHERE key=?", (targetedfreshtelegram.KEY,))
         self.con.execute("INSERT INTO users(name,login,pw_hash,role,active) VALUES ('Юлия Репина','owner-fresh','x','admin',1)")
+        self.varya = self.con.execute("""INSERT INTO users(name,login,pw_hash,role,active,is_senior)
+            VALUES ('Варвара Батарева','varya-fresh','x','operator',1,1)""").lastrowid
         for name in sorted({event["student_name"] for event in targetedfreshtelegram.events()}):
             family = self.con.execute("INSERT INTO families(name) VALUES (?)", (name,)).lastrowid
             self.con.execute("""INSERT INTO students(family_id,name,stage,stage_changed_at,created_at)
@@ -61,6 +63,9 @@ class FreshTelegramFactsTest(unittest.TestCase):
         second = targetedfreshtelegram.apply(self.con)
         self.assertEqual(0, second["trainer_attendance"]["added"])
         self.assertEqual(count, second["trainer_attendance"]["already"])
+        task = self.con.execute("""SELECT title,assignee_id,due_at FROM tasks
+            WHERE auto_key='trainers:27148:identify-missing-clients'""").fetchone()
+        self.assertEqual(("Уточнить восьмого ребёнка группы 18:45", self.varya, "2026-11-24T23:59"), tuple(task))
 
 
 if __name__ == "__main__":

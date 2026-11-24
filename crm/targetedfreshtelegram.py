@@ -4,7 +4,7 @@ import json
 from . import chatdaytransfer, tasks
 
 
-KEY = "targeted_fresh_telegram_20261124_v3"
+KEY = "targeted_fresh_telegram_20261124_v4"
 
 TRAINER_ATTENDANCE = (
     ("Илья Морозов", "16:45"), ("Михаил Морозов", "16:45"),
@@ -19,9 +19,11 @@ TRAINER_ATTENDANCE = (
     ("Даниил Мамедов", "19:45"), ("Алексей Калинин", "19:45"),
     ("Михаил Гущо", "19:45"), ("Илья Оруджов", "19:45"),
     ("Даниил Тарасюк", "19:45"), ("Андрей Лубяницкий", "19:45"),
+    ("Артем Кожевников", "19:45"),
 )
 
 ERP_PROFILES = {
+    "Артем Кожевников": dict(erp_id="87888", birth="2019-11-28", parent_name="Елена", phone="+79852611161", email="kozhevnikovmm@mail.ru", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 19:45 возраст 6-8", history=[dict(at="2026-11-02T00:00",text="абонемент, группа СТОП Небо ПУП пн/чт/сб 19:45, период 02.11–30.11")]),
     "Даниил Бородин": dict(erp_id="96240", birth="2020-12-08", parent_name="Анна", phone="+79259367897", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 18:45 возраст 5-6", history=[dict(at="2026-11-02T00:00",text="абонемент, группа СТОП Небо ПУП пн/чт/сб 18:45, период 02.11–30.11")]),
     "Антон Деменев": dict(erp_id="103975", birth="2020-05-28", parent_name="Майя", phone="+79854352626", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 18:45 возраст 5-6", history=[dict(at="2026-11-01T00:00",text="абонемент, группа СТОП Небо ПУП пн/чт/сб 18:45, период 02.11–30.11")]),
     "Иван Черных": dict(erp_id="133160", birth="2016-04-15", parent_name="Елена", phone="+79601333926", erp_status="Постоянный посетитель", group="Чоботовская сб/вс 6-8", history=[dict(at="2026-11-07T00:00",text="абонемент, группа Чоботовская сб/вс 6-8, период 07.11–29.11")]),
@@ -182,12 +184,22 @@ def _trainer_attendance(con):
     # The report also says one more child in the 18:45 total, but does not name
     # that child.  Never turn a headcount discrepancy into a guessed visit.
     unresolved.append({"name": "Не названный ребёнок 18:45", "reason": "в отчёте указано 8, перечислено 7"})
-    unresolved.append({"name": "Кожевников", "reason": "в отчёте нет имени"})
-    task_id = tasks.add_task(con, "manual", None, "2026-11-24T23:59",
-        auto_key="trainers:27148:identify-missing-clients", title="Уточнить двух детей в отчёте тренера 23.11",
-        note="В группе 18:45 указано 8 детей, но перечислено 7 — уточнить восьмого. В группе 19:45 указан Кожевников без имени — уточнить полное ФИО и привязать отметку 23.11 19:45 к правильной карточке. Остальные полные ФИО перенесены автоматически.",
-        source="manual", shared=True)
-    return {"added": added, "already": already, "unresolved": unresolved, "task_id": task_id}
+    varya = con.execute("""SELECT id FROM users WHERE active=1 AND role='operator'
+        AND (name LIKE '%Варвар%' OR trim(name)='Варя') ORDER BY is_senior DESC,id LIMIT 1""").fetchone()
+    varya_id = varya["id"] if varya else None
+    task_key = "trainers:27148:identify-missing-clients"
+    title = "Уточнить восьмого ребёнка группы 18:45"
+    note = ("В отчёте тренера №27148 за 23.11 в сводке указано 8 детей в группе 18:45, "
+            "но перечислены только 7: Бородин, Деменев, Чугунов, Горбачёв, Мастеренко, Решетняк и Варновский. "
+            "Уточнить восьмого и привязать отметку посещения 23.11 18:45 к правильной карточке.")
+    tasks.add_task(con, "manual", None, "2026-11-24T23:59", auto_key=task_key,
+        title=title, note=note, source="manual", assignee=varya_id, shared=not bool(varya_id))
+    task = con.execute("SELECT id FROM tasks WHERE auto_key=?", (task_key,)).fetchone()
+    if task:
+        con.execute("""UPDATE tasks SET title=?,note=?,due_at='2026-11-24T23:59',assignee_id=?
+            WHERE id=? AND status='open'""", (title, note, varya_id, task["id"]))
+    return {"added": added, "already": already, "unresolved": unresolved,
+            "task_id": task["id"] if task else None, "assignee_id": varya_id}
 
 
 def apply(con):
