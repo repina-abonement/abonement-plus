@@ -37,6 +37,9 @@ class PriorityClientFactsTest(unittest.TestCase):
         self.assertEqual(38, report["summary"]["marks"])
         self.assertEqual(9, report["summary"]["open_tasks"])
         self.assertEqual(0, report["summary"]["missing_tasks"])
+        self.assertEqual(1, report["miller"]["card_matches"])
+        self.assertIsNotNone(report["miller"]["pennant_task"])
+        self.assertGreaterEqual(report["miller"]["telegram_events"], 1)
 
     def test_sharipov_confirmed_december_sale_is_created_once(self):
         sid = self.con.execute("SELECT id FROM students WHERE name='Даниил Шарипов'").fetchone()[0]

@@ -361,6 +361,42 @@ def sharipov_sale_report(con):
     return result
 
 
+def miller_report(con):
+    """Read Matvey Miller's transferred facts and all current open actions."""
+    matches = con.execute("""SELECT id,name,birth,erp_id,erp_status FROM students WHERE archived=0
+        AND (erp_id='79204' OR trim(name) IN ('Матвей Миллер','Миллер Матвей')) ORDER BY id""").fetchall()
+    result = {"card_matches": len(matches), "student": None, "parents": [], "history_subscriptions": 0,
+              "history_visits": 0, "telegram_events": 0, "december_invoices": [], "open_tasks": [],
+              "pennant_task": None}
+    if len(matches) != 1:
+        return result
+    student = matches[0]
+    sid = student["id"]
+    result["student"] = dict(student)
+    result["parents"] = [dict(row) for row in con.execute("""SELECT name,phone,email
+        FROM parents WHERE family_id=(SELECT family_id FROM students WHERE id=?) ORDER BY id""", (sid,))]
+    result["history_subscriptions"] = con.execute(
+        "SELECT count(*) FROM erp_history_subscriptions WHERE student_id=? AND month='2026-11'", (sid,)).fetchone()[0]
+    result["history_visits"] = con.execute("""SELECT count(*) FROM (
+        SELECT visit_date,visit_time,status FROM erp_history_visits WHERE student_id=? AND visit_date BETWEEN '2026-11-01' AND '2026-11-30'
+        UNION SELECT visit_date,visit_time,status FROM erp_history_unassigned_visits WHERE student_id=? AND visit_date BETWEEN '2026-11-01' AND '2026-11-30')""",
+        (sid, sid)).fetchone()[0]
+    result["telegram_events"] = con.execute("""SELECT count(*) FROM chat_day_transfer_events
+        WHERE student_id=? AND source_id LIKE 'telegram:%' AND substr(source_at,1,10)>='2026-11-01'""", (sid,)).fetchone()[0]
+    covered = money.balance(con, sid)["covered"]
+    for row in con.execute("""SELECT id,lessons,price,status FROM subscriptions
+        WHERE student_id=? AND month='2026-12' AND status!='cancelled' ORDER BY id""", (sid,)):
+        item = dict(row)
+        item["covered"] = covered.get(row["id"], 0)
+        item["remaining"] = max(0, row["price"] - item["covered"])
+        result["december_invoices"].append(item)
+    result["open_tasks"] = [dict(row) for row in con.execute("""SELECT id,kind,title,due_at,source,auto_key
+        FROM tasks WHERE student_id=? AND status='open' ORDER BY due_at,id""", (sid,))]
+    result["pennant_task"] = next((task for task in result["open_tasks"]
+        if task["auto_key"] == "priority-clients:miller-pennant-2026-11"), None)
+    return result
+
+
 def attendance_report(con):
     """Read-only working-state check for the nine priority client cards."""
     rows = []
@@ -400,6 +436,7 @@ def attendance_report(con):
         "period": {"from": "2026-11-01", "to": "2026-11-22"},
         "clients": rows,
         "sharipov_december_sale": sharipov_sale_report(con),
+        "miller": miller_report(con),
         "summary": {
             "cards": sum(row["matches"] == 1 for row in rows),
             "marks": sum(row["marks"] for row in rows),
