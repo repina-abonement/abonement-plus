@@ -265,6 +265,15 @@ def _plan(con, exports):
     for chat in trainer_chats:
         for row in _trainer_rows(chat):
             matches = _previously_imported_match(con, row) or _match_student(con, row["name"], row["time"])
+            if len(matches) > 1:
+                # A surname that became ambiguous after new cards were created
+                # must keep the one child who already has the exact attendance
+                # fact for this report slot. Never choose if several do.
+                present = [candidate for candidate in matches if _attendance_exists(
+                    con, candidate["id"], row["date"], row["time"],
+                    f"trainers:{row['message_id']}:{candidate['id']}")]
+                if len(present) == 1:
+                    matches = present
             erp_profile = None
             if len(matches) != 1:
                 erp_matches = _erp_match(erp_profiles, row["name"], row["time"])

@@ -45,6 +45,19 @@ class ChatBulkTest(unittest.TestCase):
         self.assertEqual(1, report["care"]["without_events"])
 
     @patch("crm.chatbulk.date")
+    def test_ambiguous_surname_keeps_only_child_with_existing_exact_attendance(self, fake_date):
+        from datetime import date
+        fake_date.today.return_value = date(2026, 11, 24)
+        self.con.execute("INSERT INTO attendance(student_id,group_id,date,status) VALUES (?,?,?,'present')",
+                         (self.ilya, self.group, "2026-11-02"))
+        report = chatbulk.plan(self.con, self.exports())
+        row = next(x for x in report["attendance"] if x["message_id"] == "20" and x["name"] == "Морозов")
+        self.assertEqual(self.ilya, row["student_id"])
+        self.assertTrue(row["already"])
+        self.assertFalse(any(x["message_id"] == "20" and x["name"] == "Морозов"
+                             for x in report["trainer"]["unresolved"]))
+
+    @patch("crm.chatbulk.date")
     def test_apply_is_preview_guarded_and_idempotent(self, fake_date):
         from datetime import date
         fake_date.today.return_value = date(2026, 11, 24)
