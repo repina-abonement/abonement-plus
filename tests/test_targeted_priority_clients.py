@@ -110,6 +110,36 @@ class PriorityClientFactsTest(unittest.TestCase):
         self.assertEqual(1, self.con.execute("SELECT count(*) FROM payments WHERE student_id=? AND cancelled=0", (sid,)).fetchone()[0])
         self.assertTrue(targetedpriorityclients.sharipov_sale_report(self.con)["complete"])
 
+    def test_kononenko_confirmed_december_sale_is_created_once(self):
+        sid = self.con.execute("SELECT id FROM students WHERE name='Иван Кононенко'").fetchone()[0]
+        self.con.execute("UPDATE students SET erp_id='92421',birth='2018-01-01' WHERE id=?", (sid,))
+        branch = schedule.save_branch(self.con, {"name": "ТЦ Небо"})
+        pid = program.ensure_sbornaya(self.con)
+        arena = schedule.save_group(self.con, {"name": "Арктика Вт/Вс", "branch_id": branch, "weekdays": [1, 6]})
+        ofp = schedule.save_group(self.con, {"name": "ОФП Сб", "branch_id": branch, "weekdays": [5]})
+        self.con.execute("UPDATE groups SET program_id=?,lesson_kind='arena' WHERE id=?", (pid, arena))
+        self.con.execute("UPDATE groups SET program_id=?,lesson_kind='ofp' WHERE id=?", (pid, ofp))
+        actor = dict(self.con.execute("SELECT id,name,role FROM users WHERE login='owner-test'").fetchone())
+        old_require = smart.REQUIRE
+        smart.REQUIRE = False
+        try:
+            services.add_enrollment(self.con, sid, arena, None, "fixed", actor)
+            for source_id, group_id, start, end, lessons, revenue in (
+                    ("825986", arena, "2026-11-01", "2026-11-29", 6, 9000),
+                    ("825983", ofp, "2026-11-07", "2026-11-28", 4, 4800)):
+                self.con.execute("""INSERT INTO erp_history_subscriptions
+                    (source_id,student_id,group_id,month,valid_from,valid_until,lessons,revenue_amount,source_payload,imported_at,imported_by)
+                    VALUES (?,?,?,'2026-11',?,?,?,?,?,'2026-11-23','test')""",
+                    (source_id, sid, group_id, start, end, lessons, revenue, "{}"))
+            first = targetedpriorityclients.ensure_kononenko_december_sale(self.con, actor)
+            second = targetedpriorityclients.ensure_kononenko_december_sale(self.con, actor)
+        finally:
+            smart.REQUIRE = old_require
+        self.assertEqual("created", first["state"], first)
+        self.assertEqual("already_complete", second["state"], second)
+        self.assertTrue(targetedpriorityclients.kononenko_sale_report(self.con)["complete"])
+        self.assertEqual(1, self.con.execute("SELECT count(*) FROM payments WHERE student_id=? AND amount=16400", (sid,)).fetchone()[0])
+
 
 if __name__ == "__main__":
     unittest.main()

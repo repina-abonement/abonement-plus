@@ -16,6 +16,8 @@ from . import chatdaytransfer, money, pricing, services, tasks
 KEY = "targeted_priority_clients_telegram_20261123_v1"
 SHARIPOV_ERP_ID = "85160"
 SHARIPOV_DECEMBER_TASK = "priority-clients:sharipov-december-sale-2026-11-23"
+KONONENKO_ERP_ID = "92421"
+KONONENKO_DECEMBER_TASK = "priority-clients:kononenko-december-sale-2026-11-22"
 
 
 CLIENTS = {
@@ -210,7 +212,6 @@ def ensure_sharipov_december_sale(con, actor):
         reason = f"Найден конфликтующий декабрьский абонемент #{sub['id']}: {sub['lessons']} занятий, {sub['price']} ₽, статус {sub['status']}"
         _sharipov_manual_task(con, sid, reason)
         return {"state": "blocked", "student_id": sid, "reason": reason}
-
     groups, reason = _sharipov_groups(con, sid)
     if reason:
         _sharipov_manual_task(con, sid, reason)
@@ -218,15 +219,13 @@ def ensure_sharipov_december_sale(con, actor):
     exact_payment = con.execute("""SELECT id,subscription_id FROM payments
         WHERE student_id=? AND amount=20400 AND cancelled=0
           AND method IN ('paykeeper','paykeeper_manual') AND substr(paid_at,1,10)='2026-11-23'""", (sid,)).fetchall()
-
     enrollment = con.execute("SELECT id FROM enrollments WHERE student_id=? AND group_id=? AND active=1 ORDER BY id LIMIT 1",
                              (sid, groups["arena"]["group_id"])).fetchone()
     con.execute("SAVEPOINT sharipov_december_sale")
     try:
         eid = enrollment["id"] if enrollment else services.add_enrollment(
             con, sid, groups["arena"]["group_id"], None, "fixed", actor)
-        invoice = services.create_invoice(
-            con, sid, "2026-12", actor, enrollment_id=eid,
+        invoice = services.create_invoice(con, sid, "2026-12", actor, enrollment_id=eid,
             tariff="pkg", ofp_group_id=groups["ofp"]["group_id"], paid_date="2026-11-23")
         sub_id = invoice["id"]
         sub = con.execute("SELECT price,lessons FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
@@ -246,8 +245,8 @@ def ensure_sharipov_december_sale(con, actor):
         elif exact_payment:
             raise ValueError("Существующий платёж 20 400 ₽ после сверки не зачёлся в декабрьский абонемент")
         else:
-            payment_id = money.pay_subscription(
-                con, sub_id, "paykeeper_manual", actor, amount=20400, paid_at="2026-11-23T12:44:19")
+            payment_id = money.pay_subscription(con, sub_id, "paykeeper_manual", actor, amount=20400,
+                                                paid_at="2026-11-23T12:44:19")
         verified = con.execute("SELECT price,lessons,status FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
         payment = con.execute("SELECT amount,method,cancelled FROM payments WHERE id=?", (payment_id,)).fetchone() if payment_id else None
         payment_ok = payment and tuple(payment) in ((20400, "paykeeper_manual", 0), (20400, "paykeeper", 0))
@@ -265,6 +264,110 @@ def ensure_sharipov_december_sale(con, actor):
         return {"state": "blocked", "student_id": sid, "reason": reason}
 
 
+def _kononenko_manual_task(con, student_id, reason):
+    task_id = tasks.add_task(
+        con, "payment_check", student_id, "2026-11-24T23:59",
+        auto_key=KONONENKO_DECEMBER_TASK,
+        title="Проверить декабрьский абонемент Кононенко",
+        note=("СЗ 22.11: Арктика + ОФП по субботам, отпуск с 29.12, 16 400 ₽ через PayKeeper. "
+              "Автоматическое оформление остановлено: " + reason), source="manual")
+    row = con.execute("SELECT id FROM tasks WHERE auto_key=?", (KONONENKO_DECEMBER_TASK,)).fetchone()
+    return task_id or (row[0] if row else None)
+
+
+def _finish_kononenko_task(con, actor):
+    row = con.execute("SELECT id,status FROM tasks WHERE auto_key=? ORDER BY id DESC LIMIT 1",
+                      (KONONENKO_DECEMBER_TASK,)).fetchone()
+    if row and row["status"] == "open":
+        tasks.complete(con, row["id"], actor, result="Декабрьский пакет и оплата PayKeeper оформлены")
+
+
+def ensure_kononenko_december_sale(con, actor):
+    """Apply the exact Telegram-confirmed December package without duplicate money."""
+    matches = con.execute("""SELECT id FROM students WHERE archived=0
+        AND (erp_id=? OR trim(name) IN ('Иван Кононенко','Кононенко Иван')) ORDER BY id""",
+        (KONONENKO_ERP_ID,)).fetchall()
+    if len(matches) != 1:
+        return {"state": "blocked", "reason": f"Карточка Кононенко определяется неоднозначно: {len(matches)} совпадений"}
+    sid = matches[0]["id"]
+    history = con.execute("""SELECT h.source_id,h.group_id,g.program_id,g.lesson_kind
+        FROM erp_history_subscriptions h JOIN groups g ON g.id=h.group_id
+        WHERE h.student_id=? AND h.month='2026-11' AND h.source_id IN ('825986','825983')""", (sid,)).fetchall()
+    arena = [row for row in history if row["lesson_kind"] == "arena"]
+    ofp = [row for row in history if row["lesson_kind"] == "ofp"]
+    if len(arena) != 1 or len(ofp) != 1 or not arena[0]["program_id"] or arena[0]["program_id"] != ofp[0]["program_id"]:
+        reason = "Не найдена однозначная пара групп ERP 825986/825983 для Арктики и ОФП"
+        _kononenko_manual_task(con, sid, reason)
+        return {"state": "blocked", "student_id": sid, "reason": reason}
+    invoices = con.execute("""SELECT id,price,lessons,status FROM subscriptions WHERE student_id=?
+        AND month='2026-12' AND status!='cancelled' AND COALESCE(kind,'month')='month' ORDER BY id""", (sid,)).fetchall()
+    if len(invoices) > 1 or invoices and (invoices[0]["price"] != 16400 or invoices[0]["lessons"] != 12):
+        reason = "Декабрьский счёт конфликтует с подтверждением СЗ: ожидаются 12 занятий и 16 400 ₽"
+        _kononenko_manual_task(con, sid, reason)
+        return {"state": "blocked", "student_id": sid, "reason": reason}
+    exact = con.execute("""SELECT id,subscription_id FROM payments WHERE student_id=? AND amount=16400
+        AND cancelled=0 AND method IN ('paykeeper','paykeeper_manual') AND substr(paid_at,1,10)='2026-11-22' ORDER BY id""", (sid,)).fetchall()
+    if len(exact) > 1:
+        reason = "Найдено несколько платежей PayKeeper по 16 400 ₽ от 22.11"
+        _kononenko_manual_task(con, sid, reason)
+        return {"state": "blocked", "student_id": sid, "reason": reason}
+    if invoices:
+        sub_id = invoices[0]["id"]
+        if exact and exact[0]["subscription_id"] is None:
+            con.execute("UPDATE payments SET subscription_id=? WHERE id=?", (sub_id, exact[0]["id"]))
+        money.reconcile(con, sid)
+        covered = money.balance(con, sid)["covered"].get(sub_id, 0)
+        if covered < 16400:
+            if exact:
+                reason = "Существующий платёж PayKeeper не зачёлся в декабрьский счёт"
+                _kononenko_manual_task(con, sid, reason)
+                return {"state": "blocked", "student_id": sid, "reason": reason}
+            payment_id = money.pay_subscription(con, sub_id, "paykeeper_manual", actor, amount=16400,
+                                                paid_at="2026-11-22T13:16:30")
+        else:
+            payment_id = exact[0]["id"] if exact else None
+        _finish_kononenko_task(con, actor)
+        tasks.sync_subscription_payment_tasks(con, sid)
+        tasks.schedule_renewal(con, sid)
+        return {"state": "already_complete" if covered >= 16400 else "completed_existing",
+                "student_id": sid, "subscription_id": sub_id, "payment_id": payment_id}
+
+    enrollment = con.execute("SELECT id FROM enrollments WHERE student_id=? AND group_id=? AND active=1 ORDER BY id LIMIT 1",
+                             (sid, arena[0]["group_id"])).fetchone()
+    con.execute("SAVEPOINT kononenko_december_sale")
+    try:
+        eid = enrollment["id"] if enrollment else services.add_enrollment(con, sid, arena[0]["group_id"], None, "fixed", actor)
+        invoice = services.create_invoice(con, sid, "2026-12", actor, enrollment_id=eid, tariff="pkg",
+            ofp_group_id=ofp[0]["group_id"], excluded_dates=["2026-12-29"], paid_date="2026-11-22")
+        sub_id = invoice["id"]
+        sub = con.execute("SELECT price,lessons FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
+        if sub["lessons"] != 12:
+            raise ValueError(f"Расчёт дал {sub['lessons']} занятий вместо подтверждённых 12")
+        if sub["price"] != 16400:
+            pricing.correct(con, sub_id, 16400,
+                "СЗ 22.11 подтверждает Арктику + ОФП по субботам, отпуск с 29.12, 16 400 ₽ PayKeeper", actor)
+        if exact and exact[0]["subscription_id"] is None:
+            con.execute("UPDATE payments SET subscription_id=? WHERE id=?", (sub_id, exact[0]["id"]))
+            money.reconcile(con, sid)
+            payment_id = exact[0]["id"]
+        elif exact:
+            raise ValueError("Существующий платёж уже привязан к другому абонементу")
+        else:
+            payment_id = money.pay_subscription(con, sub_id, "paykeeper_manual", actor, amount=16400,
+                                                paid_at="2026-11-22T13:16:30")
+        verified = con.execute("SELECT price,lessons,status FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
+        if tuple(verified) != (16400, 12, "paid"):
+            raise ValueError("Итоговая проверка декабрьского абонемента не пройдена")
+        _finish_kononenko_task(con, actor)
+        tasks.schedule_renewal(con, sid)
+        con.execute("RELEASE kononenko_december_sale")
+        return {"state": "created", "student_id": sid, "subscription_id": sub_id, "payment_id": payment_id}
+    except Exception as error:
+        con.execute("ROLLBACK TO kononenko_december_sale")
+        con.execute("RELEASE kononenko_december_sale")
+        reason = str(error)
+        _kononenko_manual_task(con, sid, reason)
+        return {"state": "blocked", "student_id": sid, "reason": reason}
 def apply(con):
     actor = con.execute("SELECT id,name,role FROM users WHERE active=1 AND role='admin' AND trim(name)='Юлия Репина' ORDER BY id LIMIT 1").fetchone()
     if not actor:
@@ -277,6 +380,7 @@ def apply(con):
             if saved.get("state") == "complete":
                 ensure_attendance_control(con)
                 saved["sharipov_december_sale"] = ensure_sharipov_december_sale(con, actor)
+                saved["kononenko_december_sale"] = ensure_kononenko_december_sale(con, actor)
                 _save(con, saved)
                 return saved
         except (TypeError, ValueError):
@@ -307,6 +411,7 @@ def apply(con):
             note="19.11 кубок уже выдан; в сообщении СЗ указано, что дополнительно нужен вымпел",
             source="manual")
     sharipov_sale = ensure_sharipov_december_sale(con, actor)
+    kononenko_sale = ensure_kononenko_december_sale(con, actor)
     if sharipov_sale.get("state") == "blocked" and "sharipov" in ids:
         task_ids["sharipov"] = _sharipov_manual_task(con, ids["sharipov"], sharipov_sale["reason"])
     complete = not result["errors"] and not result["unmatched"] and not result["ambiguous"] and not unresolved
@@ -319,6 +424,7 @@ def apply(con):
         "task_ids": task_ids,
         "attendance_control": attendance_control,
         "sharipov_december_sale": sharipov_sale,
+        "kononenko_december_sale": kononenko_sale,
     })
 
 
@@ -397,6 +503,39 @@ def miller_report(con):
     return result
 
 
+def kononenko_sale_report(con):
+    matches = con.execute("""SELECT id FROM students WHERE archived=0
+        AND (erp_id=? OR trim(name) IN ('Иван Кононенко','Кононенко Иван')) ORDER BY id""",
+        (KONONENKO_ERP_ID,)).fetchall()
+    result = {"card_matches": len(matches), "complete": False, "subscriptions": 0,
+              "subscription_id": None, "lessons": None, "price": None, "status": None,
+              "covered": 0, "payments": [], "open_tasks": []}
+    if len(matches) != 1:
+        return result
+    sid = matches[0]["id"]
+    rows = con.execute("""SELECT id,lessons,price,status,excluded_dates FROM subscriptions WHERE student_id=?
+        AND month='2026-12' AND status!='cancelled' AND COALESCE(kind,'month')='month' ORDER BY id""", (sid,)).fetchall()
+    result["subscriptions"] = len(rows)
+    result["open_tasks"] = [dict(row) for row in con.execute(
+        "SELECT id,kind,title,due_at,auto_key FROM tasks WHERE student_id=? AND status='open' ORDER BY due_at,id", (sid,))]
+    if len(rows) != 1:
+        return result
+    sub = rows[0]
+    covered = money.balance(con, sid)["covered"].get(sub["id"], 0)
+    payments = [dict(row) for row in con.execute("""SELECT id,amount,method,paid_at FROM payments
+        WHERE student_id=? AND cancelled=0 AND amount=16400 AND method IN ('paykeeper','paykeeper_manual')
+          AND substr(paid_at,1,10)='2026-11-22' ORDER BY id""", (sid,))]
+    try:
+        excluded = json.loads(sub["excluded_dates"] or "[]")
+    except (TypeError, ValueError):
+        excluded = []
+    result.update(subscription_id=sub["id"], lessons=sub["lessons"], price=sub["price"],
+                  status=sub["status"], covered=covered, payments=payments, excluded_dates=excluded)
+    result["complete"] = (sub["lessons"] == 12 and sub["price"] == 16400 and sub["status"] == "paid"
+                          and covered >= 16400 and len(payments) == 1 and "2026-12-29" in excluded)
+    return result
+
+
 def attendance_report(con):
     """Read-only working-state check for the nine priority client cards."""
     rows = []
@@ -437,6 +576,7 @@ def attendance_report(con):
         "clients": rows,
         "sharipov_december_sale": sharipov_sale_report(con),
         "miller": miller_report(con),
+        "kononenko_december_sale": kononenko_sale_report(con),
         "summary": {
             "cards": sum(row["matches"] == 1 for row in rows),
             "marks": sum(row["marks"] for row in rows),
