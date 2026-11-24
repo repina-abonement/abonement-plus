@@ -35,6 +35,11 @@ class FreshTelegramFactsTest(unittest.TestCase):
         events = targetedfreshtelegram.events()
         self.assertEqual(len(events), len({event["source_id"] for event in events}))
         self.assertTrue(all(len(event["student_name"].split()) >= 2 for event in events))
+        by_name = {event["student_name"]: event for event in events}
+        self.assertIn("10 800 ₽", by_name["Илья Морозов"]["note"])
+        self.assertIn("8 640 ₽", by_name["Михаил Морозов"]["note"])
+        self.assertNotIn("распределение", by_name["Илья Морозов"]["task_title"].lower())
+        self.assertNotIn("распределение", by_name["Михаил Морозов"]["task_title"].lower())
 
     def test_facts_and_tasks_apply_once(self):
         first = targetedfreshtelegram.apply(self.con)
