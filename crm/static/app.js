@@ -1588,6 +1588,18 @@ function wireViewAs(page) {
   if (me) me.onclick = () => { sel.value = S.user.id; sel.onchange(); };
 }
 
+function todayTrialsPlaque(items) {
+  const monthPart=(q)=>`<span><b>${esc(monthLabel(q.month))}</b><em>${q.lessons} ${plural(q.lessons,"занятие","занятия","занятий")}</em><strong>${rub(q.total)}</strong></span>`;
+  return `<section class="trial-desk" aria-label="Сегодня ждём на пробное">
+    <div class="trial-desk-head"><div><h2>⚽ Сегодня ждём на пробное</h2><p>Расчёт при покупке сразу после ПУ · скидки применены автоматически</p></div><b class="trial-desk-count">${items.length}</b></div>
+    ${items.length?`<div class="trial-desk-list">${items.map(child=>`<details class="trial-desk-child" open>
+      <summary><span class="trial-desk-time">${esc(child.time||"—")}</span><span><b>${esc(child.name)}</b><small>${esc(child.branch)} · ${esc(child.group)}${child.age?` · ${esc(child.age)}`:""}${child.came?" · ПУ отмечено":" · ждём"}</small></span><button type="button" class="btn sm" data-trial-card="${child.id}">Карточка</button></summary>
+      <div class="trial-desk-contact">Родитель: <b>${esc(child.parent||"не указан")}</b>${child.phone?` · <a href="tel:${esc(child.phone)}">${esc(child.phone)}</a>`:""}</div>
+      ${child.offers.length?`<div class="trial-offers">${child.offers.map(offer=>`<article><h3>${esc(offer.label)}</h3><div class="trial-offer-months">${monthPart(offer.current)}${monthPart(offer.next)}<span class="trial-offer-total"><b>Вместе</b><em>два месяца</em><strong>${rub(offer.bundle_total)}</strong></span></div>${offer.current.discount?`<p>Скидка: ${esc(offer.current.discount)} · ${offer.current.discount_percent}%</p>`:""}</article>`).join("")}</div>`:`<p class="need-err">Расчёт пока недоступен — откройте карточку и проверьте группу.</p>`}
+    </details>`).join("")}</div>`:`<p class="trial-desk-empty">Сегодня записанных на пробное нет.</p>`}
+  </section>`;
+}
+
 async function renderWorkdesk(page) {
   if (S.user.role !== "admin") S.viewAs = null;
   const bar = await viewAsBar().catch(() => "");
@@ -1719,7 +1731,8 @@ async function renderWorkdesk(page) {
   // Временно оставляем на администраторском рабочем столе только единый центр
   // клиентских воронок. Остальные готовые виджеты не удаляем: они сохранены в
   // коде и очереди разработки до отдельного решения по составу нового стола.
-  page.innerHTML = bar + pipelineHub;
+  page.innerHTML = bar + todayTrialsPlaque(d.today_trials || []) + pipelineHub;
+  page.querySelectorAll("[data-trial-card]").forEach(button=>button.onclick=event=>{event.preventDefault();event.stopPropagation();openStudent(+button.dataset.trialCard)});
   page.querySelectorAll("[data-rvclose]").forEach((b) => (b.onclick = async () => { try { await api("POST", `/api/reviews/${b.dataset.rvclose}/close`, {}); render(); } catch (e) { fail(e); } }));
   const dateInput=page.querySelector("[data-pipeline-date]");
   if(dateInput)dateInput.onchange=()=>{if(!dateInput.value)return;S.workdeskDate=dateInput.value;S.etDay=dateInput.value===S.meta.today?'today':dateInput.value;render()};

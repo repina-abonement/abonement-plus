@@ -1275,6 +1275,7 @@ def workdesk(con, h, user, body, q):
     except ValueError:
         raise ApiError("Некорректная дата", 400)
     result = {"urgent": reds + rest, "board": board,
+            "today_trials": part("today_trials", lambda: __import__("crm.trialdesk",fromlist=["today_offers"]).today_offers(con,user), []),
             "refund_requests": part("refund_requests", lambda: __import__("crm.refundapproval",fromlist=["listing"]).listing(con), []) if user["role"]=="admin" else [],
             "new_cards_today": part("new_cards_today", lambda: sv.new_cards_today(con, selected_ref, not selected_day or selected_day == date.today().isoformat()), []),
             "birthdays": part("birthdays", lambda: sv.birthdays(con), []),
