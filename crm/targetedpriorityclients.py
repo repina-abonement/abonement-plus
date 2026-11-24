@@ -215,13 +215,9 @@ def ensure_sharipov_december_sale(con, actor):
     if reason:
         _sharipov_manual_task(con, sid, reason)
         return {"state": "blocked", "student_id": sid, "reason": reason}
-    exact_payment = con.execute("""SELECT id FROM payments
+    exact_payment = con.execute("""SELECT id,subscription_id FROM payments
         WHERE student_id=? AND amount=20400 AND cancelled=0
           AND method IN ('paykeeper','paykeeper_manual') AND substr(paid_at,1,10)='2026-11-23'""", (sid,)).fetchall()
-    if exact_payment:
-        reason = "Платёж 20 400 ₽ уже есть без однозначной привязки к декабрьскому абонементу"
-        _sharipov_manual_task(con, sid, reason)
-        return {"state": "blocked", "student_id": sid, "reason": reason}
 
     enrollment = con.execute("SELECT id FROM enrollments WHERE student_id=? AND group_id=? AND active=1 ORDER BY id LIMIT 1",
                              (sid, groups["arena"]["group_id"])).fetchone()
@@ -239,11 +235,23 @@ def ensure_sharipov_december_sale(con, actor):
         if sub["price"] != 20400:
             pricing.correct(con, sub_id, 20400,
                 "СЗ 23.11 подтверждает пакет Арктика + ОФП за 20 400 ₽ через PayKeeper", actor)
-        payment_id = money.pay_subscription(
-            con, sub_id, "paykeeper_manual", actor, amount=20400, paid_at="2026-11-23T12:44:19")
+        if exact_payment and exact_payment[0]["subscription_id"] is None:
+            con.execute("UPDATE payments SET subscription_id=? WHERE id=?", (sub_id, exact_payment[0]["id"]))
+        elif exact_payment and exact_payment[0]["subscription_id"] != sub_id:
+            raise ValueError("Существующий платёж 20 400 ₽ уже привязан к другому абонементу")
+        money.reconcile(con, sid)
+        covered = money.balance(con, sid)["covered"].get(sub_id, 0)
+        if covered >= 20400:
+            payment_id = exact_payment[0]["id"] if exact_payment else None
+        elif exact_payment:
+            raise ValueError("Существующий платёж 20 400 ₽ после сверки не зачёлся в декабрьский абонемент")
+        else:
+            payment_id = money.pay_subscription(
+                con, sub_id, "paykeeper_manual", actor, amount=20400, paid_at="2026-11-23T12:44:19")
         verified = con.execute("SELECT price,lessons,status FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
-        payment = con.execute("SELECT amount,method,cancelled FROM payments WHERE id=?", (payment_id,)).fetchone()
-        if tuple(verified) != (20400, 13, "paid") or tuple(payment) != (20400, "paykeeper_manual", 0):
+        payment = con.execute("SELECT amount,method,cancelled FROM payments WHERE id=?", (payment_id,)).fetchone() if payment_id else None
+        payment_ok = payment and tuple(payment) in ((20400, "paykeeper_manual", 0), (20400, "paykeeper", 0))
+        if tuple(verified) != (20400, 13, "paid") or not payment_ok:
             raise ValueError("Итоговая проверка абонемента или платежа не пройдена")
         _finish_sharipov_task(con, actor, "Декабрьский пакет Арктика + ОФП и оплата PayKeeper оформлены")
         tasks.schedule_renewal(con, sid)
