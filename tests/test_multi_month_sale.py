@@ -26,6 +26,17 @@ class MultiMonthTest(unittest.TestCase):
         self.assertEqual(self.con.execute('SELECT SUM(amount) FROM payments').fetchone()[0],q['due'])
         self.assertEqual(len(rows),2)
 
+    def test_first_atomic_current_and_next_month_both_keep_trial_day_discount(self):
+        body,q=self.order()
+        self.assertEqual(2,len(q['months']))
+        self.assertTrue(all(r['quote']['discount']['name']=='Первый абонемент в день пробного' for r in q['months']))
+        self.assertTrue(all(r['quote']['discount']['percent']==20 for r in q['months']))
+        body.update(mode='pay',amount=q['due'],method='card_branch')
+        with patch.object(smart,'REQUIRE',False):result=multimonth.create(self.con,self.sid,body,self.u)
+        self.assertEqual(q['total'],result['total'])
+        later=money.auto_discounts(self.con,self.sid,sv.sale_payment_day('2026-11-16'))
+        self.assertFalse(any(d['rule']=='first_on_trial_day' for d in later))
+
     def test_existing_month_blocks_whole_sale(self):
         body,q=self.order()
         with patch.object(smart,'REQUIRE',False):

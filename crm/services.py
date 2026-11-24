@@ -372,6 +372,7 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
     if special:pr=dict(pr,fixed=special['per_lesson'],flex=special['per_lesson'])
     ms, me = logic.month_bounds(ym)
     newcomer = pricing.is_newcomer(con, sid, ym, on) or bool(cutoff and ym==on.strftime("%Y-%m"))
+    first_purchase = pricing.is_first_purchase(con, sid)
     closed = closures.closed_dates(con, e["group_id"], ms, me)
     weekdays = enrollment_days(e)
     from . import schedule
@@ -401,13 +402,14 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
     q["credit_absence_ids"] = [a["id"] for a in eligible[:q["credit_lessons"]]]
     q["credit_absence_dates"] = [a["date"] for a in eligible[:q["credit_lessons"]]]
     dl = pricing.deadline(con, ym)
-    late = on > dl and not newcomer and pr["late_pct"] > 0
+    late = on > dl and not newcomer and not first_purchase and pr["late_pct"] > 0
     total, fee = q["total"], 0
     if late:  # после срока: надбавка со всей суммы, скидок нет
         fee = pricing.late_fee(q["total"], pr["late_pct"])
         total += fee
     q["late_fee"] = fee
     q["pricing"] = {"late": late, "late_pct": pr["late_pct"], "deadline": dl.isoformat(), "newcomer": newcomer,
+                    "first_purchase": first_purchase,
                     "late_total": q["total"] + pricing.late_fee(q["total"], pr["late_pct"])}
     from . import money
     disc=money.choose_discount(con,sid,on,discount_id,user)

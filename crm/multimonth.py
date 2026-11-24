@@ -24,12 +24,9 @@ def preview(con, sid, data, user):
             AND COALESCE(x.kind,'month')='month' ''',(sid,gid,month)).fetchone()
         if existing:raise sv.ApiError(f'На {logic.month_label(month)} в выбранную группу уже есть абонемент — уберите этот месяц')
         args=dict(group_id=gid,tariff=data.get('tariff'),discount_id=data.get('discount_id'),ofp_group_id=data.get('ofp_group_id'),paid_date=data.get('paid_date'),user=user)
-        # The first purchase discount cannot recur after the first invoice exists.
-        if index and data.get('discount_id') in (None,''):
-            on=sv.sale_payment_day(data.get('paid_date')) or sv.today()
-            candidates=[d for d in money.auto_discounts(con,sid,on) if d['rule']!='first_on_trial_day']
-            chosen=money.choose_discount(con,sid,on,user=user,candidates=candidates)
-            args['discount_id']=chosen['id'] if chosen else 'none'
+        # All months in one atomic first purchase share the trial-day discount.
+        # A later separate purchase sees the completed/part-paid first purchase
+        # through pricing.is_first_purchase and cannot receive it again.
         excluded=exclusions.get(month)
         quote=sv.quote_for(con,sid,month,excluded_dates=excluded,**args)
         if excluded is None and quote.get('trial_cutoff'):

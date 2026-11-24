@@ -107,6 +107,38 @@ def is_newcomer(con, sid: int, ym: str, on: date) -> bool:
                            (sid, ym)).fetchone()
 
 
+def is_first_purchase(con, sid: int) -> bool:
+    """The first regular monthly purchase belongs to the child, not to the payment month.
+
+    Trial visits, single lessons and bare invoice drafts do not consume it. A
+    confirmed partial payment does, as do imported historical memberships.
+    """
+    student = con.execute("SELECT funnel,trial_at,converted_at,erp_id FROM students WHERE id=?", (sid,)).fetchone()
+    if not student or not (student["trial_at"] or student["converted_at"] or
+                           (student["funnel"] == "sales" and not student["erp_id"])):
+        # A card created directly as a member (not a lead/trial conversion) is
+        # an existing client unless imported history proves otherwise.
+        return False
+    native = con.execute("""SELECT 1 FROM subscriptions x
+        LEFT JOIN enrollments e ON e.id=x.enrollment_id
+        LEFT JOIN groups g ON g.id=e.group_id
+        WHERE x.student_id=? AND COALESCE(x.kind,'month')='month' AND x.status!='cancelled'
+          AND g.program_id IS NULL
+          AND (x.status='paid' OR EXISTS (SELECT 1 FROM payments p
+                WHERE p.subscription_id=x.id AND p.cancelled=0 AND p.confirmed=1 AND p.amount>0))
+        LIMIT 1""", (sid,)).fetchone()
+    if native:
+        return False
+    tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "erp_history_subscriptions" in tables and con.execute(
+            "SELECT 1 FROM erp_history_subscriptions WHERE student_id=? LIMIT 1", (sid,)).fetchone():
+        return False
+    if "erp_prior_memberships" in tables and con.execute(
+            "SELECT 1 FROM erp_prior_memberships WHERE student_id=? LIMIT 1", (sid,)).fetchone():
+        return False
+    return True
+
+
 def newcomer_start(con, sid: int, on: date) -> date:
     s = con.execute("SELECT trial_at FROM students WHERE id=?", (sid,)).fetchone()
     if s and s["trial_at"] and s["trial_at"][:10] >= on.isoformat():
@@ -128,6 +160,8 @@ def reprice(con, sub_id: int, on: date | None = None) -> bool:
         return False
     if money.balance(con, s["student_id"])["covered"].get(sub_id, 0):
         return False  # уже частично оплачен до срока: не трогаем
+    if is_first_purchase(con, s["student_id"]):
+        return False  # первая месячная покупка ребёнка сохраняет обычную цену независимо от месяца оплаты
     base = max(0, s["lessons"] - s["credit_lessons"]) * s["per_lesson"]
     fee = late_fee(base, pr["late_pct"])
     price = base + fee

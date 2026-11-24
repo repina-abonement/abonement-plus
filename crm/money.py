@@ -546,9 +546,9 @@ def auto_discounts(con, sid: int, today: date | None = None) -> list[dict]:
     out = []
     d = next((r for r in con.execute("SELECT * FROM discounts WHERE rule='first_on_trial_day' AND active=1 ORDER BY id") if not large_family_discount(dict(r))),None)
     if d:
+        from . import pricing
         s = con.execute("SELECT trial_at FROM students WHERE id=?", (sid,)).fetchone()
-        had = con.execute("SELECT 1 FROM subscriptions WHERE student_id=? AND status != 'cancelled'", (sid,)).fetchone()
-        if s and s["trial_at"] and s["trial_at"][:10] == today.isoformat() and not had:
+        if s and s["trial_at"] and s["trial_at"][:10] == today.isoformat() and pricing.is_first_purchase(con, sid):
             out.append(dict(d))
     d = next((r for r in con.execute("SELECT * FROM discounts WHERE rule='sibling' AND active=1 ORDER BY id") if not large_family_discount(dict(r))),None)
     if d and _sibling_applies(con, sid):

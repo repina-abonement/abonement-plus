@@ -60,8 +60,20 @@ class ScriptsTest(unittest.TestCase):
         self.assertTrue(next(i for i in items if i['key']=='msg_booked')['reason'])
     def test_offers_are_separate_and_unsafe_links_rejected(self):
         p=scripts.profiles(self.con);self.assertEqual(len({p[k]['offer'] for k in ('nebo','western','arctic')}),3)
+        self.assertEqual(scripts.NEBO_OFFER,p['nebo']['offer']);self.assertEqual(scripts.NEBO_OFFER,p['toddlers']['offer'])
         with self.assertRaises(comms.CommsError):scripts.save_profiles(self.con,{'nebo':{'telegram':'https://evil.example/x'}})
         with self.assertRaises(comms.CommsError):scripts.save_profiles(self.con,{'nebo':{'offer':'javascript:alert(1)'}})
+    def test_old_saved_nebo_offers_migrate_without_touching_other_profiles(self):
+        scripts.save_profiles(self.con,{'nebo':{'offer':scripts.OLD_NEBO_OFFER},'toddlers':{'offer':scripts.OLD_NEBO_OFFER},
+            'western':{'offer':'https://msk.footbolika.ru/assets/images/offer/3867/8of3k6.pdf'}})
+        profiles=scripts.profiles(self.con)
+        self.assertEqual(scripts.NEBO_OFFER,profiles['nebo']['offer']);self.assertEqual(scripts.NEBO_OFFER,profiles['toddlers']['offer'])
+        self.assertEqual('https://msk.footbolika.ru/assets/images/offer/3867/8of3k6.pdf',profiles['western']['offer'])
+        saved=comms.get(self.con,'school_rules_profiles')
+        self.assertNotIn('dgw2m3.pdf',saved);self.assertIn('j1k2f6.pdf',saved)
+        with patch.object(memos,'image',return_value=b'PNG'):
+            self.assertIn('j1k2f6.pdf',scripts.rules(self.con,self.sid,'telegram')['text'])
+            self.assertIn('j1k2f6.pdf',scripts.rules(self.con,self.sid,'max')['text'])
     def test_changed_rule_links_block_staged_send_before_network(self):
         with patch.object(memos,'image',return_value=b'\x89PNG\r\n\x1a\nTEST'):
             draft=scripts.stage_rules(self.con,self.cid,self.user,self.sid)

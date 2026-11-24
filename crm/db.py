@@ -277,7 +277,7 @@ def init_db(con: sqlite3.Connection):
     from . import saleinfo
     saleinfo.init(con)
     sync_enrollments(con)
-    from . import ai, calldigest, capacity, closures, comms, program, pu, staffdocs, waitlist, expenses, fakegen, legal, merch, money, offers, planner, revenuecarry, schedule, sources, staff, tasks, fiscal
+    from . import ai, calldigest, capacity, closures, comms, program, pu, staffdocs, waitlist, expenses, fakegen, legal, merch, money, offers, planner, revenuecarry, schedule, sources, staff, tasks, fiscal, chatscripts
     from . import recents
     recents.init(con)
     legal.init(con)
@@ -310,6 +310,7 @@ def init_db(con: sqlite3.Connection):
     subcomposition.init(con)
     money.init(con)
     comms.init(con)
+    chatscripts.migrate(con)
     legal.provision_school_phone(con)
     from . import chatattachments
     chatattachments.init(con)
