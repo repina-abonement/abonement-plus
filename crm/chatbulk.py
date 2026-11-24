@@ -244,14 +244,14 @@ def _plan(con, exports):
         for row in _trainer_rows(chat):
             matches = _match_student(con, row["name"], row["time"])
             erp_profile = None
-            if not matches:
+            if len(matches) != 1:
                 erp_matches = _erp_match(erp_profiles, row["name"], row["time"])
                 if len(erp_matches) == 1:
                     linked = con.execute("SELECT id,name,group_id FROM students WHERE archived=0 AND erp_id=?",
                                          (erp_matches[0]["erp_id"],)).fetchall()
                     if len(linked) == 1:
                         matches = [dict(linked[0])]
-                    elif _erp_ready(erp_matches[0]):
+                    elif not matches and _erp_ready(erp_matches[0]):
                         erp_profile = erp_matches[0]
             if len(matches) != 1:
                 if erp_profile:

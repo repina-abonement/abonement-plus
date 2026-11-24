@@ -93,6 +93,15 @@ class ChatBulkTest(unittest.TestCase):
         self.assertEqual(("Мария", "79990000003"), tuple(parent))
         self.assertEqual(family_id, self.con.execute("SELECT family_id FROM students WHERE id=?", (student["id"],)).fetchone()[0])
         self.assertEqual(1, self.con.execute("SELECT count(*) FROM parents WHERE family_id=?", (family_id,)).fetchone()[0])
+        # A later same-name CRM card must not make the already imported ERP
+        # visits appear unresolved in the repeated report.
+        sv.create_student(self.con, {"name": "Пётр Петров", "parent_name": "Другой родитель",
+            "phone": "+79990000999", "group_id": self.group}, self.user)
+        repeated = chatbulk.plan(self.con, exports)
+        imported = [x for x in repeated["attendance"] if x["message_id"] in {"21", "24"}]
+        self.assertEqual(2, len(imported))
+        self.assertTrue(all(x["already"] and x["student_id"] == student["id"] for x in imported))
+        self.assertFalse(any(x["message_id"] in {"21", "24"} for x in repeated["trainer"]["unresolved"]))
 
     @patch("crm.chatbulk.date")
     def test_unique_surname_creates_a_card_from_complete_erp_profile(self, fake_date):
