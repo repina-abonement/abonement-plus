@@ -933,6 +933,12 @@ def erp_priority_attendance_report(con, h, user, body, q):
     return targetedpriorityclients.attendance_report(con)
 
 
+@route("GET", "/api/erp/care-migration/report", role="admin")
+def erp_care_migration_report(con, h, user, body, q):
+    from . import caremigration
+    return caremigration.report(con)
+
+
 @route("POST", "/api/erp/full/plan", role="admin")
 def erp_full_plan(con, h, user, body, q):
     from . import erpfull, erpimport
