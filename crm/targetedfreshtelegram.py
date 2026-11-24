@@ -1,10 +1,25 @@
 """Reviewed client facts from the incremental care-chat export, 23–24 Nov 2026."""
 import json
 
-from . import chatdaytransfer
+from . import chatdaytransfer, tasks
 
 
-KEY = "targeted_fresh_telegram_20261124_v2"
+KEY = "targeted_fresh_telegram_20261124_v3"
+
+TRAINER_ATTENDANCE = (
+    ("Илья Морозов", "16:45"), ("Михаил Морозов", "16:45"),
+    ("Максим Магин", "16:45"), ("Даниил Степаненко", "16:45"),
+    ("Владимир Прохоренко", "17:45"), ("Владимир Сафронов", "17:45"),
+    ("Кирилл Мун", "17:45"), ("Вася Артамонов", "17:45"),
+    ("Демид Яньков", "17:45"), ("Дмитрий Королёв", "17:45"),
+    ("Даниил Бородин", "18:45"), ("Антон Деменев", "18:45"),
+    ("Егор Чугунов", "18:45"), ("Арсений Горбачёв", "18:45"),
+    ("Максим Мастеренко", "18:45"), ("Арсений Решетняк", "18:45"),
+    ("Родион Варновский", "18:45"), ("Виктор Данейкин", "19:45"),
+    ("Даниил Мамедов", "19:45"), ("Алексей Калинин", "19:45"),
+    ("Михаил Гущо", "19:45"), ("Илья Оруджов", "19:45"),
+    ("Даниил Тарасюк", "19:45"), ("Андрей Лубяницкий", "19:45"),
+)
 
 ERP_PROFILES = {
     "Даниил Бородин": dict(erp_id="96240", birth="2020-12-08", parent_name="Анна", phone="+79259367897", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 18:45 возраст 5-6", history=[dict(at="2026-11-02T00:00",text="абонемент, группа СТОП Небо ПУП пн/чт/сб 18:45, период 02.11–30.11")]),
@@ -123,6 +138,58 @@ def events():
     ]
 
 
+def _trainer_attendance(con):
+    """Apply only the 24 full-name rows explicitly listed in trainer report 27148."""
+    added = already = 0
+    unresolved = []
+    for name, tm in TRAINER_ATTENDANCE:
+        profile = ERP_PROFILES.get(name, {})
+        lookup_name = str(profile.get("name") or name)
+        if profile.get("erp_id"):
+            rows = con.execute("SELECT id,name FROM students WHERE archived=0 AND erp_id=?",
+                               (str(profile["erp_id"]),)).fetchall()
+        else:
+            rows = []
+        if not rows:
+            rows = con.execute("""SELECT id,name FROM students WHERE archived=0
+                AND (lower(trim(name))=lower(?) OR lower(trim(name))=lower(?))""",
+                (lookup_name, " ".join(reversed(lookup_name.split())))).fetchall()
+        if len(rows) != 1:
+            unresolved.append({"name": name, "reason": "карточка не найдена однозначно"})
+            continue
+        sid = rows[0]["id"]
+        exists = con.execute("""SELECT 1 FROM attendance
+            WHERE student_id=? AND date='2026-11-23' AND status='present'""", (sid,)).fetchone()
+        exists = exists or con.execute("""SELECT 1 FROM erp_history_visits
+            WHERE student_id=? AND visit_date='2026-11-23' AND visit_time=? AND status='present'""",
+            (sid, tm)).fetchone()
+        exists = exists or con.execute("""SELECT 1 FROM erp_history_unassigned_visits
+            WHERE student_id=? AND visit_date='2026-11-23' AND visit_time=? AND status='present'""",
+            (sid, tm)).fetchone()
+        if exists:
+            already += 1
+            continue
+        source_id = "trainers:27148:" + str(profile.get("erp_id") or sid)
+        payload = json.dumps({"source": "ТРЕНЕРЫ", "message_id": "27148", "confirmed": True}, ensure_ascii=False)
+        con.execute("""INSERT OR IGNORE INTO erp_history_unassigned_visits
+            (source_id,source_subscription_id,student_id,visit_date,visit_time,kind,status,source_group,source_payload,imported_at,imported_by)
+            VALUES (?,NULL,?,'2026-11-23',?,'subscription','present',?,?,?,?)""",
+            (source_id, sid, tm, f"ПУП, группа {tm}", payload, "2026-11-23T22:12:23", "Перенос ТРЕНЕРЫ"))
+        if con.execute("SELECT changes()").fetchone()[0]:
+            added += 1
+        else:
+            already += 1
+    # The report also says one more child in the 18:45 total, but does not name
+    # that child.  Never turn a headcount discrepancy into a guessed visit.
+    unresolved.append({"name": "Не названный ребёнок 18:45", "reason": "в отчёте указано 8, перечислено 7"})
+    unresolved.append({"name": "Кожевников", "reason": "в отчёте нет имени"})
+    task_id = tasks.add_task(con, "manual", None, "2026-11-24T23:59",
+        auto_key="trainers:27148:identify-missing-clients", title="Уточнить двух детей в отчёте тренера 23.11",
+        note="В группе 18:45 указано 8 детей, но перечислено 7 — уточнить восьмого. В группе 19:45 указан Кожевников без имени — уточнить полное ФИО и привязать отметку 23.11 19:45 к правильной карточке. Остальные полные ФИО перенесены автоматически.",
+        source="manual", shared=True)
+    return {"added": added, "already": already, "unresolved": unresolved, "task_id": task_id}
+
+
 def apply(con):
     previous = con.execute("SELECT value FROM settings WHERE key=?", (KEY,)).fetchone()
     if previous:
@@ -136,10 +203,12 @@ def apply(con):
     if not actor:
         return {"state": "not_target_database"}
     result = chatdaytransfer.apply(con, {"events": events()}, dict(actor))
+    attendance = _trainer_attendance(con)
     report = {"state": "complete" if not result["errors"] and not result["unmatched"] and not result["ambiguous"] else "verification_failed",
               "counts": {**{key: len(value) for key, value in result.items()},
                          "created_from_erp": sum(bool(item.get("created")) for item in result["applied"])},
-              "unmatched": result["unmatched"], "ambiguous": result["ambiguous"], "errors": result["errors"]}
+              "unmatched": result["unmatched"], "ambiguous": result["ambiguous"], "errors": result["errors"],
+              "trainer_attendance": attendance}
     con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES (?,?)", (KEY, json.dumps(report, ensure_ascii=False)))
     return report
 

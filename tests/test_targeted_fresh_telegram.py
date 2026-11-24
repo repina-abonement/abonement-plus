@@ -51,6 +51,17 @@ class FreshTelegramFactsTest(unittest.TestCase):
             "SELECT count(*) FROM history WHERE student_id=? AND kind='erp' AND text LIKE 'ERP с 01.11:%'", (student["id"],)
         ).fetchone()[0])
 
+    def test_explicit_trainer_names_become_idempotent_attendance_facts(self):
+        first = targetedfreshtelegram.apply(self.con)
+        self.assertGreater(first["trainer_attendance"]["added"], 0)
+        count = self.con.execute("""SELECT count(*) FROM erp_history_unassigned_visits
+            WHERE source_id LIKE 'trainers:27148:%' AND visit_date='2026-11-23' AND status='present'""").fetchone()[0]
+        self.assertEqual(first["trainer_attendance"]["added"], count)
+        self.con.execute("DELETE FROM settings WHERE key=?", (targetedfreshtelegram.KEY,))
+        second = targetedfreshtelegram.apply(self.con)
+        self.assertEqual(0, second["trainer_attendance"]["added"])
+        self.assertEqual(count, second["trainer_attendance"]["already"])
+
 
 if __name__ == "__main__":
     unittest.main()
