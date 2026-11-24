@@ -4,7 +4,7 @@ import json
 from . import chatdaytransfer, tasks
 
 
-KEY="targeted_verified_care_gaps_20261124_v3"
+KEY="targeted_verified_care_gaps_20261124_v4"
 
 
 def events():
@@ -12,7 +12,7 @@ def events():
     return [
         {"source_id":"sz:20646:чугунов-турнир","source_chat":chat,"source_at":"2026-11-08T19:55:12","student_name":"Чугунов Егор","event_kind":"sale_fact","event_date":"2026-11-08","note":"Подтверждена оплата турнира 2 700 ₽; пометка «MAX» обозначает канал сообщения, способ оплаты не указан","clarification_task_title":"Сверить способ оплаты турнира 2 700 ₽","clarification_task_note":"Оплата подтверждена; повторный платёж не создавать"},
         {"source_id":"sz:20646:гмыря-турнир","source_chat":chat,"source_at":"2026-11-08T19:55:12","student_name":"Гмыря Артем","event_kind":"sale_fact","event_date":"2026-11-08","note":"Подтверждена оплата турнира 2 700 ₽; пометка «ТГ» обозначает канал сообщения, способ оплаты не указан","clarification_task_title":"Сверить способ оплаты турнира 2 700 ₽","clarification_task_note":"Оплата подтверждена; повторный платёж не создавать"},
-        {"source_id":"sz:20646:шулежко-турнир","source_chat":chat,"source_at":"2026-11-08T19:55:12","student_name":"Шулежко Даниил","event_kind":"sale_fact","event_date":"2026-11-08","note":"Подтверждена оплата турнира 2 700 ₽; пометка «ТГ» обозначает канал сообщения, способ оплаты не указан","clarification_task_title":"Сверить способ оплаты турнира 2 700 ₽","clarification_task_note":"Оплата подтверждена; повторный платёж не создавать"},
+        {"source_id":"sz:20646:шулежко-турнир","source_chat":chat,"source_at":"2026-11-08T19:55:12","student_name":"Шулежко Даниил","event_kind":"sale_fact","event_date":"2026-11-08","payment_method":"paykeeper_manual","note":"Подтверждена оплата турнира 2 700 ₽ через PayKeeper: СЗ №20893 отдельно называет платёж Шулежко среди двух поступлений PayKeeper, №20924 подтверждает наличие чека. Пометка «ТГ» в №20646 обозначает только канал сообщения","resolved_clarification_note":"Способ оплаты найден в СЗ: PayKeeper; повторный платёж не создавать"},
         {"source_id":"sz:20651:павлинов-связь","source_chat":chat,"source_at":"2026-11-08T20:33:04","student_name":"Павлинов Петр","event_kind":"contact_fact","event_date":"2026-11-08","note":"После ПУ был недозвон и блокировка номера; чат семьи находился в WhatsApp, администратор не могла открыть его и отправить сообщение через CRM"},
         {"source_id":"sz:20651:коля-без-данных","source_chat":chat,"source_at":"2026-11-08T20:33:04","student_name":"Коля","event_kind":"lead_fact","event_date":"2026-11-08","note":"В отчёте после ПУ указан только Коля; карточку и контактные данные в СЗ найти не удалось","clarification_task_title":"Установить семью ПУ Коли от 08.11","clarification_task_note":"В СЗ нет фамилии, телефона, времени или других точных данных; карточку по догадке не создавать"},
         {"source_id":"sz:20554:тараченова-пу","source_chat":chat,"source_at":"2026-11-07T10:03:15","student_name":"Тарачанова Евангелина","event_kind":"trial_result","event_date":"2026-11-07","came":True,"outcome":"followup","note":"Пришла на ПУ 07.11 в 10:00 на Чоботовской без предварительного предупреждения; решение о покупке не указано"},

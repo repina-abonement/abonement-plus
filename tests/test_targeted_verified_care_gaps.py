@@ -9,7 +9,7 @@ from crm import chatdaytransfer, db, schedule, services, targetedverifiedcaregap
 
 class VerifiedCareGapsTest(unittest.TestCase):
     def test_revised_package_key_forces_one_safe_reconciliation(self):
-        self.assertTrue(batch.KEY.endswith("_v3"))
+        self.assertTrue(batch.KEY.endswith("_v4"))
 
     def test_sources_are_unique_and_incomplete_money_stays_non_financial(self):
         events = batch.events()
@@ -18,8 +18,10 @@ class VerifiedCareGapsTest(unittest.TestCase):
 
         incomplete = [row for row in events if row["event_kind"] == "sale_fact"]
         self.assertEqual(17, len(incomplete))
-        self.assertTrue(all(row.get("clarification_task_title") for row in incomplete))
-        self.assertTrue(all("payment_method" not in row for row in incomplete))
+        unresolved = [row for row in incomplete if not row.get("resolved_clarification_note")]
+        self.assertEqual(16, len(unresolved))
+        self.assertTrue(all(row.get("clarification_task_title") for row in unresolved))
+        self.assertTrue(all("payment_method" not in row for row in unresolved))
 
     def test_exact_sales_balance_and_dates(self):
         exact = [row for row in batch.events() if row["event_kind"] == "subscription_sale"]
@@ -49,7 +51,27 @@ class VerifiedCareGapsTest(unittest.TestCase):
         rows = [row for row in batch.events() if row["source_id"].startswith("sz:20646:")]
         self.assertEqual(3, len(rows))
         self.assertTrue(all(row["event_kind"] == "sale_fact" for row in rows))
-        self.assertTrue(all("payment_method" not in row for row in rows))
+        by_name = {row["student_name"]: row for row in rows}
+        self.assertNotIn("payment_method", by_name["Чугунов Егор"])
+        self.assertNotIn("payment_method", by_name["Гмыря Артем"])
+        self.assertEqual("paykeeper_manual", by_name["Шулежко Даниил"]["payment_method"])
+        self.assertIn("PayKeeper", by_name["Шулежко Даниил"]["resolved_clarification_note"])
+
+    def test_resolved_clarification_closes_previous_manual_task(self):
+        con = sqlite3.connect(":memory:")
+        con.row_factory = sqlite3.Row
+        con.executescript("""
+            CREATE TABLE tasks(id INTEGER PRIMARY KEY,student_id INTEGER,status TEXT,auto_key TEXT,
+              done_at TEXT,done_by TEXT,result TEXT);
+            INSERT INTO tasks(student_id,status,auto_key) VALUES
+              (7,'open','chat-clarify:sz:20646:шулежко-турнир');
+        """)
+        row = next(row for row in batch.events() if row["student_name"] == "Шулежко Даниил"
+                   and "турнир" in row["source_id"])
+        chatdaytransfer._reconcile_clarification_task(con, 7, row)
+        task = con.execute("SELECT status,done_by,result FROM tasks").fetchone()
+        self.assertEqual(("cancelled", "CRM"), (task["status"], task["done_by"]))
+        self.assertIn("PayKeeper", task["result"])
 
     def test_cross_message_trainer_groups_reduce_manual_scope_without_inventing_periods(self):
         rows = {row["student_name"]: row for row in batch.events() if row["student_name"] in {

@@ -110,6 +110,12 @@ def _erp_group_for_event(profile,event):
 
 
 def _reconcile_clarification_task(con,sid,event):
+    resolved=str(event.get('resolved_clarification_note') or '').strip()
+    if resolved:
+        con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',result=?
+            WHERE student_id=? AND status='open' AND auto_key=?""",
+            (sv.now_iso(),resolved[:1000],sid,'chat-clarify:'+str(event.get('source_id') or '')))
+        return None
     title=str(event.get('clarification_task_title') or '').strip()
     if not title:return None
     due=str(event.get('clarification_task_due') or (sv.today().isoformat()+'T23:59'))[:16]
