@@ -119,12 +119,14 @@ class ChatBulkTest(unittest.TestCase):
         erpimport.upload(self.con, "first-name.csv", (
             "ID;ФИО посетителя;Телефон;Имя родителя;Статус;Дата рождения;Филиал;Группа\n"
             "779;Замир Кадымов;79990000009;Амина;Постоянный посетитель;01.02.2020;Небо;Небо 16:45\n"
+            "781;Гониев Даниил;79990000012;Ольга;Постоянный посетитель;01.03.2020;Небо;Небо 16:45\n"
+            "782;Макаров Артемий;79990000013;Ирина;Постоянный посетитель;01.04.2020;Небо;Небо 16:45\n"
         ).encode(), "clients")
         exports = self.exports()
-        exports[1]["messages"].append({"id": 27, "date": "2026-11-03T20:00:00", "text": "16:45\nИван\nЗамир"})
+        exports[1]["messages"].append({"id": 27, "date": "2026-11-03T20:00:00", "text": "16:45\nИван\nЗамир\nДаня\nАртемий"})
         plan = chatbulk.plan(self.con, exports)
         unresolved = {x["name"] for x in plan["trainer"]["unresolved"] if x["message_id"] == "27"}
-        self.assertEqual({"Иван", "Замир"}, unresolved)
+        self.assertEqual({"Иван", "Замир", "Даня", "Артемий"}, unresolved)
 
     @patch("crm.chatbulk.date")
     def test_single_word_incomplete_cards_are_not_treated_as_surnames(self, fake_date):
