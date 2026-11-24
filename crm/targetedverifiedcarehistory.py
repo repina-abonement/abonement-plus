@@ -9,7 +9,7 @@ import json
 from . import chatdaytransfer
 
 
-KEY = "targeted_verified_care_history_20261124_v7"
+KEY = "targeted_verified_care_history_20261124_v8"
 
 
 def early_events():
@@ -32,7 +32,7 @@ def early_events():
         {"source_id":"sz:21778:кушнарев-декабрь","source_chat":chat,"source_at":"2026-11-16T17:52:34","student_name":"Кушнарев Семен","event_kind":"sale_fact","event_date":"2026-11-16","note":"Подтверждена оплата декабрьского абонемента 13 800 ₽ наличными; деньги положены в конверт. Группа и даты в сообщении не указаны","clarification_task_title":"Определить группу и даты декабрьского абонемента 13 800 ₽","clarification_task_note":"Оплата уже получена наличными; не создавать повторный платёж без сверки карточки"},
         {"source_id":"sz:21815:патрушев-отработка","source_chat":chat,"source_at":"2026-11-16T19:19:15","student_name":"Патрушев Григорий","event_kind":"makeup_booking","event_date":"2026-11-22","note":"Отработка назначена на 22.11 в 13:00 вместо 19.11"},
         {"source_id":"sz:21863:киреева-разовое","source_chat":chat,"source_at":"2026-11-17T11:23:14","student_name":"Киреева Ксюша","event_kind":"sale_fact","event_date":"2026-11-17","note":"Подтверждено разовое занятие 17.11 в 19:45 стоимостью 2 500 ₽; способ оплаты в сообщении не указан","clarification_task_title":"Уточнить способ оплаты разового занятия 2 500 ₽","clarification_task_note":"Не создавать вторую оплату; сначала проверить карточку и существующий платёж"},
-        {"source_id":"sz:22002:туманишвили-пу","source_chat":chat,"source_at":"2026-11-17T20:09:57","student_name":"Туманишвили Эрик","birth":"2024-07-07","phone":"+79108023909","event_kind":"trial_booking","event_date":"2026-12-07","trial_time":"10:30","note":"Записан на ПУ в ТРЦ Небо 07.12 в 10:30"},
+        {"source_id":"sz:22002:туманишвили-пу","source_chat":chat,"source_at":"2026-11-17T20:09:57","student_name":"Туманишвили Эрик","birth":"2024-07-07","phone":"+79108023909","parent_name":"Леван","create_if_missing":True,"source":"Промоутер Иван Ивакин","event_kind":"trial_booking","event_date":"2026-12-07","trial_time":"10:30","note":"ПУ в ТРЦ Небо 07.12 в 10:30 подтверждено СЗ №22002. Лид ERP №69091: Эрик, контакт Леван, тот же телефон, промо в Рассказовке 22.10"},
     ]
 
 
