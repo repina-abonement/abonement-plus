@@ -77,9 +77,12 @@ function newInboxAlert(what) {
 function chatDateLabel(day) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return "Дата не указана";
   const today = (S.meta && S.meta.today) || isoDate(new Date());
-  if (day === today) return "Сегодня";
-  if (day === addDays(today, -1)) return "Вчера";
-  return new Intl.DateTimeFormat("ru-RU", {day:"numeric",month:"long",year:"numeric"}).format(new Date(day + "T12:00:00"));
+  const at = new Date(day + "T12:00:00");
+  const weekday = new Intl.DateTimeFormat("ru-RU", {weekday:"long"}).format(at);
+  if (day === today) return `Сегодня (${weekday})`;
+  if (day === addDays(today, -1)) return `Вчера (${weekday})`;
+  const calendar = new Intl.DateTimeFormat("ru-RU", {day:"numeric",month:"long",year:"numeric"}).format(at);
+  return `${calendar} (${weekday})`;
 }
 
 function chatHistoryHtml(items) {
