@@ -9,11 +9,11 @@ from crm import chatdaytransfer, db, schedule, services, targetedverifiedcaregap
 
 class VerifiedCareGapsTest(unittest.TestCase):
     def test_revised_package_key_forces_one_safe_reconciliation(self):
-        self.assertTrue(batch.KEY.endswith("_v4"))
+        self.assertTrue(batch.KEY.endswith("_v5"))
 
     def test_sources_are_unique_and_incomplete_money_stays_non_financial(self):
         events = batch.events()
-        self.assertEqual(48, len(events))
+        self.assertEqual(49, len(events))
         self.assertEqual(len(events), len({row["source_id"] for row in events}))
 
         incomplete = [row for row in events if row["event_kind"] == "sale_fact"]
@@ -22,6 +22,13 @@ class VerifiedCareGapsTest(unittest.TestCase):
         self.assertEqual(16, len(unresolved))
         self.assertTrue(all(row.get("clarification_task_title") for row in unresolved))
         self.assertTrue(all("payment_method" not in row for row in unresolved))
+
+    def test_shulezhko_birthday_payment_stays_a_non_subscription_fact(self):
+        row = next(row for row in batch.events() if row["source_id"] == "sz:20410:шулежко-день-рождения")
+        self.assertEqual(("event_payment_fact", 6000, "tochka_qr_link"),
+                         (row["event_kind"], row["amount"], row["payment_method"]))
+        self.assertNotIn("components", row)
+        self.assertNotIn("clarification_task_title", row)
 
     def test_exact_sales_balance_and_dates(self):
         exact = [row for row in batch.events() if row["event_kind"] == "subscription_sale"]

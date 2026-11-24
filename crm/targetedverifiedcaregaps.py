@@ -4,12 +4,13 @@ import json
 from . import chatdaytransfer, tasks
 
 
-KEY="targeted_verified_care_gaps_20261124_v4"
+KEY="targeted_verified_care_gaps_20261124_v5"
 
 
 def events():
     chat="Служба заботы"
     return [
+        {"source_id":"sz:20410:шулежко-день-рождения","source_chat":chat,"source_at":"2026-11-05T10:00:44","student_name":"Шулежко Даниил","event_kind":"event_payment_fact","event_date":"2026-11-05","amount":6000,"payment_method":"tochka_qr_link","note":"Подтверждена оплата 6 000 ₽ за день рождения по ссылке Точки; это отдельное мероприятие, не абонемент и не турнир. Повторный платёж не создавать"},
         {"source_id":"sz:20646:чугунов-турнир","source_chat":chat,"source_at":"2026-11-08T19:55:12","student_name":"Чугунов Егор","event_kind":"sale_fact","event_date":"2026-11-08","note":"Подтверждена оплата турнира 2 700 ₽; пометка «MAX» обозначает канал сообщения, способ оплаты не указан","clarification_task_title":"Сверить способ оплаты турнира 2 700 ₽","clarification_task_note":"Оплата подтверждена; повторный платёж не создавать"},
         {"source_id":"sz:20646:гмыря-турнир","source_chat":chat,"source_at":"2026-11-08T19:55:12","student_name":"Гмыря Артем","event_kind":"sale_fact","event_date":"2026-11-08","note":"Подтверждена оплата турнира 2 700 ₽; пометка «ТГ» обозначает канал сообщения, способ оплаты не указан","clarification_task_title":"Сверить способ оплаты турнира 2 700 ₽","clarification_task_note":"Оплата подтверждена; повторный платёж не создавать"},
         {"source_id":"sz:20646:шулежко-турнир","source_chat":chat,"source_at":"2026-11-08T19:55:12","student_name":"Шулежко Даниил","event_kind":"sale_fact","event_date":"2026-11-08","payment_method":"paykeeper_manual","note":"Подтверждена оплата турнира 2 700 ₽ через PayKeeper: СЗ №20893 отдельно называет платёж Шулежко среди двух поступлений PayKeeper, №20924 подтверждает наличие чека. Пометка «ТГ» в №20646 обозначает только канал сообщения","resolved_clarification_note":"Способ оплаты найден в СЗ: PayKeeper; повторный платёж не создавать"},
