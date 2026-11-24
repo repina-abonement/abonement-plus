@@ -97,6 +97,7 @@ class ChatBulkTest(unittest.TestCase):
         # visits appear unresolved in the repeated report.
         sv.create_student(self.con, {"name": "Пётр Петров", "parent_name": "Другой родитель",
             "phone": "+79990000999", "group_id": self.group}, self.user)
+        self.con.execute("DELETE FROM erp_uploads")  # repeat must also work when staged ERP files later change
         repeated = chatbulk.plan(self.con, exports)
         imported = [x for x in repeated["attendance"] if x["message_id"] in {"21", "24"}]
         self.assertEqual(2, len(imported))

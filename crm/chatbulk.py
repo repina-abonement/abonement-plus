@@ -139,6 +139,28 @@ def _match_student(con, name, lesson_time):
     return candidates
 
 
+def _previously_imported_match(con, row):
+    """Prefer the exact child saved by an earlier approved application.
+
+    One trainer message can contain many children, so the message id alone is
+    not sufficient. Date, time and the source name must leave one student.
+    """
+    wanted = _words(row["name"])
+    if len(wanted) == 1 and wanted[0] in FIRST_NAMES:
+        return []
+    candidates = []
+    for student in con.execute("""SELECT DISTINCT s.id,s.name,s.group_id
+        FROM erp_history_unassigned_visits v JOIN students s ON s.id=v.student_id
+        WHERE v.source_id LIKE ? AND v.visit_date=? AND COALESCE(v.visit_time,'')=?
+          AND v.status='present' AND s.archived=0""",
+            (f"trainers:{row['message_id']}:%", row["date"], row["time"])):
+        actual = _words(student["name"])
+        if ((len(wanted) >= 2 and set(wanted) == set(actual)) or
+                (len(wanted) == 1 and len(actual) >= 2 and wanted[0] == actual[-1])):
+            candidates.append(dict(student))
+    return candidates if len(candidates) == 1 else []
+
+
 def _erp_profiles(con):
     """Read staged visitor registers only; never read payment registers."""
     profiles = {}
@@ -242,7 +264,7 @@ def _plan(con, exports):
     erp_profiles = _erp_profiles(con)
     for chat in trainer_chats:
         for row in _trainer_rows(chat):
-            matches = _match_student(con, row["name"], row["time"])
+            matches = _previously_imported_match(con, row) or _match_student(con, row["name"], row["time"])
             erp_profile = None
             if len(matches) != 1:
                 erp_matches = _erp_match(erp_profiles, row["name"], row["time"])
