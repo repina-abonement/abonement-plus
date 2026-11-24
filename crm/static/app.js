@@ -232,6 +232,17 @@ function renderChatDayImport(box) {
   };
 }
 
+function renderChatBulkImport(box) {
+  box.innerHTML = `<h3>📚 Массовый перенос СЗ и ТРЕНЕРЫ с 1 ноября</h3>
+    <div class="small muted" style="margin-bottom:8px">Выберите все имеющиеся result.json обоих чатов. CRM объединит пересекающиеся выгрузки, уберёт повторы и сначала покажет предпросмотр. Явные списки тренеров переносятся как посещения только при однозначной карточке. Неоднозначные фамилии не угадываются. Сообщения СЗ остаются в контроле до разбора и переноса</div>
+    <label class="btn primary">Выбрать все result.json<input type="file" data-chat-bulk-files accept=".json,application/json" multiple hidden></label>
+    <div data-chat-bulk-result class="small" style="margin-top:10px"></div>`;
+  let exports=[],plan=null;
+  const input=box.querySelector('[data-chat-bulk-files]'),out=box.querySelector('[data-chat-bulk-result]');
+  const summary=r=>`<div class="note"><b>Период ${dShort(r.period.from)}–${dShort(r.period.to)}</b><div>Сообщений: СЗ <b>${r.messages?.care ?? '—'}</b> · ТРЕНЕРЫ <b>${r.messages?.trainers ?? '—'}</b></div><div>Строк посещений: готово <b>${r.trainer.ready}</b> · уже было ${r.trainer.already} · требуют сверки ${r.trainer.unresolved.length}</div><div>Клиентских сообщений СЗ: есть хотя бы одно перенесённое событие <b>${r.care.with_events}</b> · пока без событий <b>${r.care.without_events}</b></div>${r.trainer.unresolved.length?`<details><summary>Кого нельзя привязать автоматически</summary>${r.trainer.unresolved.slice(0,100).map(x=>`<div>№${esc(x.message_id)} · ${esc(dShort(x.date))} ${esc(x.time)} · ${esc(x.name)}</div>`).join('')}</details>`:''}</div>`;
+  input.onchange=async event=>{exports=[];plan=null;const files=[...event.target.files];if(!files.length)return;out.textContent='Читаю и объединяю выгрузки…';try{exports=await Promise.all(files.map(async f=>JSON.parse(await f.text())));plan=await api('POST','/api/import/chat-bulk/plan',{exports});out.innerHTML=summary(plan)+`<button class="btn primary" data-chat-bulk-apply style="margin-top:10px" ${plan.trainer.ready?'':'disabled'}>Перенести ${plan.trainer.ready} подтверждённых посещений</button><p class="small muted">Кнопка переносит только однозначные посещения. Неразобранные сообщения СЗ не помечаются завершёнными</p>`;const apply=out.querySelector('[data-chat-bulk-apply]');if(apply)apply.onclick=async()=>{apply.disabled=true;try{const r=await api('POST','/api/import/chat-bulk/apply',{exports,token:plan.token});toast(`Добавлено посещений: ${r.added}`);plan=await api('POST','/api/import/chat-bulk/plan',{exports});out.innerHTML=summary(plan)+`<p>✅ Однозначные посещения перенесены. Остаток СЗ и спорные строки сохранены в контроле</p>`}catch(error){fail(error);apply.disabled=false}}}catch(error){out.innerHTML=`<span class="error">${esc(error.message||'Не удалось проверить выгрузки')}</span>`}};
+}
+
 function chatDayPayload(exports,day){
   const flat=value=>typeof value==='string'?value:Array.isArray(value)?value.map(x=>typeof x==='string'?x:(x&&x.text)||'').join(''):'';
   const allChats=exports.map(x=>({name:x.name||'',messages:(x.messages||[]).map(m=>({...m,text:flat(m.text)}))}));
@@ -3214,7 +3225,7 @@ async function renderSettings(page) {
     ${S.user.role === "admin" ? `<div class="section" id="chains-settings" data-tab="chains"></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" id="erp-settings" data-tab="erp"></div>` : ""}
     ${S.user.role === "admin" ? `<div class="section" id="tg-import" data-tab="erp"></div>` : ""}
-    ${S.user.role === "admin" ? `<div class="section" id="chat-day-import" data-tab="erp"></div>` : ""}
+    ${S.user.role === "admin" ? `<div class="section" id="chat-bulk-import" data-tab="erp"></div><div class="section" id="chat-day-import" data-tab="erp"></div>` : ""}
     <div class="section" id="backup-settings" data-tab="backup"></div>
     ${isOwner() ? `<div class="section" id="diag-box" data-tab="diag"></div>` : ""}
     <div class="section" id="resp-settings" data-tab="resp"></div>
@@ -3324,6 +3335,7 @@ async function renderSettings(page) {
   else if ($("#offers-settings")) $("#offers-settings").remove();
   if ($("#erp-settings")) renderErp($("#erp-settings")).catch(fail);
   if ($("#tg-import")) renderTgImport($("#tg-import"));
+  if ($("#chat-bulk-import")) renderChatBulkImport($("#chat-bulk-import"));
   if ($("#chat-day-import")) renderChatDayImport($("#chat-day-import"));
   if ($("#chains-settings")) renderChainsSettings($("#chains-settings")).catch(fail);
   if ($("#tips-settings")) renderTipsSettings($("#tips-settings")).catch(fail);

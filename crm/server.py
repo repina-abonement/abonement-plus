@@ -3481,6 +3481,18 @@ def import_chat_day(con,h,user,body,q):
     return chatdaytransfer.apply(con,body,user)
 
 
+@route("POST", "/api/import/chat-bulk/plan", role="admin")
+@route("POST", "/api/import/chat-bulk/apply", role="admin")
+def import_chat_bulk(con,h,user,body,q):
+    from . import chatbulk
+    try:
+        if h.path.split("?", 1)[0].endswith("/apply"):
+            return chatbulk.apply(con, body.get("exports"), body.get("token"), user)
+        return chatbulk.plan(con, body.get("exports"))
+    except chatbulk.BulkError as error:
+        raise ApiError(str(error))
+
+
 @route("GET", "/api/alerts", role="operator")
 def alerts_list(con, h, user, body, q):
     from . import pu
