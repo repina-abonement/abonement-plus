@@ -53,6 +53,13 @@ class VerifiedCareGapsTest(unittest.TestCase):
         self.assertTrue(all(row["event_kind"] == "sale_fact" for row in rows.values()))
         self.assertTrue(all("payment_method" not in row for row in rows.values()))
 
+    def test_known_sale_composition_leaves_only_payment_method_unresolved(self):
+        names={"Бородин Доброслав", "Смирнов Эрик", "Серегин Глеб", "Гянджунцев Артем"}
+        rows=[row for row in batch.events() if row["student_name"] in names]
+        self.assertEqual(4,len(rows))
+        self.assertTrue(all("только способ оплаты" in row["clarification_task_title"].lower() for row in rows))
+        self.assertTrue(all("payment_method" not in row for row in rows))
+
     def test_only_confirmed_refund_is_not_left_as_a_request(self):
         refunds=[row for row in batch.events() if row["event_kind"] in ("refund_fact","refund_request")]
         confirmed=[row for row in refunds if row["event_kind"]=="refund_fact"]
