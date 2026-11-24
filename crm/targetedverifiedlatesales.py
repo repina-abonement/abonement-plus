@@ -1,10 +1,19 @@
 """Exact late-November sales and non-cash referral credit from care reports."""
 import json
 
-from . import chatdaytransfer, tasks
+from . import chatdaytransfer, erphistory, tasks
 
 
-KEY="targeted_verified_late_sales_20261124_v8"
+KEY="targeted_verified_late_sales_20261124_v9"
+
+
+def _sharikova_november_groups(con):
+    source = 'СТОП Небо ПУП пн/чт/сб 19:45 возраст 6-8'
+    normalize = lambda name: erphistory._norm(name).removeprefix('стоп ')
+    source_name = normalize(source)
+    return [row for row in con.execute(
+        'SELECT id,name,source_name FROM groups WHERE is_makeup=0')
+        if any(normalize(row[field]) == source_name for field in ('name', 'source_name'))]
 
 
 def _sharikova_attendance(con, sid, erp_id='78877'):
@@ -79,8 +88,7 @@ def apply(con):
     if found:
         sid=found[0]['student_id']
         _sharikova_attendance(con, sid)
-        groups=con.execute('SELECT id FROM groups WHERE name=?',
-            ('СТОП Небо ПУП пн/чт/сб 19:45 возраст 6-8',)).fetchall()
+        groups=_sharikova_november_groups(con)
         if len(groups)==1:
             con.execute("""INSERT OR IGNORE INTO erp_history_subscriptions
                 (source_id,student_id,group_id,month,valid_from,valid_until,lessons,
@@ -104,8 +112,7 @@ def apply(con):
     if found:
         sid=found[0]['student_id']
         _sharikova_attendance(con, sid, '78875')
-        groups=con.execute('SELECT id FROM groups WHERE name=?',
-            ('СТОП Небо ПУП пн/чт/сб 19:45 возраст 6-8',)).fetchall()
+        groups=_sharikova_november_groups(con)
         if len(groups)==1:
             con.execute("""INSERT OR IGNORE INTO erp_history_subscriptions
                 (source_id,student_id,group_id,month,valid_from,valid_until,lessons,
