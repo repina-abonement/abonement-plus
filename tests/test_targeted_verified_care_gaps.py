@@ -1,7 +1,10 @@
 import unittest
 import sqlite3
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 
-from crm import chatdaytransfer, targetedverifiedcaregaps as batch, tasks
+from crm import chatdaytransfer, db, targetedverifiedcaregaps as batch, tasks
 
 
 class VerifiedCareGapsTest(unittest.TestCase):
@@ -83,6 +86,35 @@ class VerifiedCareGapsTest(unittest.TestCase):
         self.assertEqual("open", con.execute("SELECT status FROM tasks").fetchone()[0])
         batch._sync_identity_tasks(con, {"unmatched": []})
         self.assertEqual("cancelled", con.execute("SELECT status FROM tasks").fetchone()[0])
+
+    def test_unique_staged_erp_profile_is_used_for_full_care_name(self):
+        event={"source_chat":"Служба заботы","student_name":"Иван Иванов","phone":"+79990000001"}
+        profiles=[{"erp_id":"1","name":"Иванов Иван","phone":"+79990000001","status":"Постоянный посетитель"},
+                  {"erp_id":"2","name":"Иван Иванов","phone":"+79990000002","status":"Нет абонемента"}]
+        self.assertEqual("1",chatdaytransfer._staged_erp_profile(event,profiles)["erp_id"])
+        self.assertIsNone(chatdaytransfer._staged_erp_profile(
+            {"source_chat":"Служба заботы","student_name":"Иван"},profiles))
+
+    def test_namesake_without_phone_prefers_only_active_erp_profile(self):
+        event={"source_chat":"Служба заботы","student_name":"Иван Иванов"}
+        profiles=[{"erp_id":"1","name":"Иванов Иван","status":"Постоянный посетитель"},
+                  {"erp_id":"2","name":"Иван Иванов","status":"Архив, неактивен"}]
+        self.assertEqual("1",chatdaytransfer._staged_erp_profile(event,profiles)["erp_id"])
+        profile={"group":"Небо ср/вс 17:45;Небо вт/пт 18:45"}
+        self.assertEqual("Небо вт/пт 18:45",chatdaytransfer._erp_group_for_event(profile,{"lesson_time":"18:45"}))
+
+    def test_full_care_name_creates_card_from_staged_erp_profile(self):
+        con=db.connect(str(Path(tempfile.mkdtemp())/"erp-auto.sqlite3"));db.init_db(con)
+        profile={"erp_id":"9001","name":"Проверкин Пётр","birth":"2020-02-03","parent_name":"Анна",
+                 "phone":"+79990000001","email":"","status":"Постоянный посетитель","group":"","branch":"Небо"}
+        event={"source_id":"sz:erp-auto","source_chat":"Служба заботы","source_at":"2026-11-20T12:00:00",
+               "student_name":"Пётр Проверкин","event_kind":"contact_fact","event_date":"2026-11-20",
+               "note":"Точный факт из СЗ"}
+        with patch("crm.chatbulk._erp_profiles",return_value=[profile]):
+            result=chatdaytransfer.apply(con,{"events":[event]},{"id":1,"role":"admin","name":"Юлия Репина"})
+        self.assertEqual(1,len(result["applied"]))
+        student=con.execute("SELECT erp_id,birth FROM students WHERE name='Проверкин Пётр'").fetchone()
+        self.assertEqual(("9001","2020-02-03"),(student["erp_id"],student["birth"]))
 
 
 if __name__ == "__main__":

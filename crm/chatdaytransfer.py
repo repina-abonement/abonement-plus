@@ -83,6 +83,32 @@ def saved_batch_can_skip(saved):
     return isinstance(saved,dict) and saved.get('state')=='complete' and not saved.get('unmatched')
 
 
+def _staged_erp_profile(event,profiles):
+    """Use a unique staged ERP identity; for namesakes prefer the one that still looks active."""
+    if not str(event.get('source_chat') or '').casefold().startswith('служба заботы'):
+        return None
+    wanted=_words(event.get('student_name'))
+    if len(wanted)<2:return None
+    exact=[row for row in profiles if set(_words(row.get('name')))==set(wanted)]
+    phone=comms.normalize_phone(str(event.get('phone') or ''))
+    if phone:
+        by_phone=[row for row in exact if comms.normalize_phone(str(row.get('phone') or ''))==phone]
+        if len(by_phone)==1:return by_phone[0]
+    if len(exact)==1:return exact[0]
+    active=[row for row in exact if re.search(r'постоян|разов|оплачен|пробн|посетител',str(row.get('status') or ''),re.I)
+            and not re.search(r'архив|отказ|неактив',str(row.get('status') or ''),re.I)]
+    return active[0] if len(active)==1 else None
+
+
+def _erp_group_for_event(profile,event):
+    groups=[part.strip() for part in str(profile.get('group') or '').split(';') if part.strip()]
+    tm=str(event.get('lesson_time') or event.get('trial_time') or '').strip()
+    if tm:
+        timed=[group for group in groups if tm in group]
+        if len(timed)==1:return timed[0]
+    return groups[0] if len(groups)==1 else ''
+
+
 def _reconcile_clarification_task(con,sid,event):
     title=str(event.get('clarification_task_title') or '').strip()
     if not title:return None
@@ -288,6 +314,7 @@ def apply(con,data,user):
     events=sorted(events,key=lambda event:0 if event.get('create_if_missing') is True
                   and event.get('event_kind') in ('trial_booking','trial_result') else 1)
     result={'applied':[],'already':[],'unmatched':[],'ambiguous':[],'errors':[]}
+    erp_profiles=None
     for event in events:
         source=str(event.get('source_id') or '').strip()
         if not source:result['errors'].append({'name':event.get('student_name'),'error':'Нет ID сообщения источника'});continue
@@ -311,6 +338,13 @@ def apply(con,data,user):
         matches=_match(con,event)
         created=False
         if not matches:
+            if erp_profiles is None:
+                from . import chatbulk
+                erp_profiles=chatbulk._erp_profiles(con)
+            profile=_staged_erp_profile(event,erp_profiles)
+            if profile:
+                event=dict(event,erp_create_if_missing=True,erp_id=profile['erp_id'],erp_profile=profile,
+                           erp_group_name=_erp_group_for_event(profile,event))
             erp_allowed=(event.get('erp_create_if_missing') is True and str(event.get('erp_id') or '').strip()
                          and str(event.get('student_name') or '').strip())
             if erp_allowed:
@@ -328,7 +362,7 @@ def apply(con,data,user):
                     create_data={'name':name,'birth':str(profile.get('birth') or ''),
                         'parent_name':str(profile.get('parent_name') or ''),'phone':str(profile.get('phone') or ''),
                         'email':str(profile.get('email') or ''),'funnel':'members' if gid else 'sales',
-                        'group_id':gid,'source':'ERP'}
+                        'group_id':gid,'source':str(event.get('source') or 'ERP')}
                     if not create_data['parent_name'] or not create_data['phone']:
                         create_data['family_id']=con.execute('INSERT INTO families(name) VALUES (?)',(name.split()[0],)).lastrowid
                     sid=sv.create_student(con,create_data,user)
