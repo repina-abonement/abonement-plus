@@ -117,6 +117,20 @@ def _reconcile_subscription_sale(con,sid,event,user):
     if not isinstance(components,list) or not components:raise sv.ApiError('В продаже не указаны месяцы и даты занятий')
     student=con.execute('SELECT group_id,trial_group_id FROM students WHERE id=?',(sid,)).fetchone()
     gid=int(event.get('group_id') or student['trial_group_id'] or student['group_id'] or 0)
+    if not gid and event.get('lesson_time') and event.get('weekdays') is not None:
+        branch_hint=str(event.get('branch_hint') or '').strip()
+        wanted={int(x) for x in event['weekdays']}
+        candidates=[]
+        for row in con.execute('''SELECT g.id,g.weekdays FROM groups g JOIN branches b ON b.id=g.branch_id
+            WHERE g.active=1 AND g.is_makeup=0 AND g.time=?
+              AND (?='' OR lower(b.name) LIKE lower(?)) ORDER BY g.id''',
+            (str(event['lesson_time']),branch_hint,'%'+branch_hint+'%' if branch_hint else '')):
+            actual={int(x) for x in re.findall(r'\d',str(row['weekdays'] or ''))}
+            if actual==wanted:candidates.append(row['id'])
+        if len(candidates)==1:
+            gid=int(candidates[0])
+            con.execute('''UPDATE students SET group_id=CASE WHEN COALESCE(group_id,0)=0 THEN ? ELSE group_id END,
+                trial_group_id=CASE WHEN COALESCE(trial_group_id,0)=0 THEN ? ELSE trial_group_id END WHERE id=?''',(gid,gid,sid))
     group=con.execute('SELECT weekdays,time FROM groups WHERE id=? AND active=1 AND is_makeup=0',(gid,)).fetchone()
     if not group:raise sv.ApiError('Не определена действующая группа подтверждённой продажи')
     if event.get('lesson_time') and group['time']!=event['lesson_time']:

@@ -240,6 +240,30 @@ def test_confirmed_care_chat_sale_creates_two_subscriptions_and_one_payment():
     assert con.execute("SELECT COUNT(*) FROM payments WHERE student_id=?",(sid,)).fetchone()[0]==1
 
 
+def test_new_trial_card_gets_only_unique_exact_group_before_confirmed_sale():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'new-sale-group.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    branch=schedule.save_branch(con,{'name':'ТРЦ Небо'})
+    group=schedule.save_group(con,{'name':'Небо вт/пт 16:45','branch_id':branch,'weekdays':[1,4],'time':'16:45','age':'3–4'})
+    booking={'source_id':'sz:new:booking','source_chat':'Служба заботы','source_at':'2026-11-19T19:31:11',
+        'student_name':'Маматахунов Фирдавс','birth':'2023-11-10','parent_name':'Бобир','phone':'+79145882005',
+        'create_if_missing':True,'event_kind':'trial_booking','event_date':'2026-11-20','trial_time':'16:45','note':'Записан на ПУ'}
+    sale={'source_id':'sz:new:sale','source_chat':'Служба заботы','source_at':'2026-11-20T20:20:06',
+        'student_name':'Маматахунов Фирдавс','event_kind':'subscription_sale','sale_date':'2026-11-20',
+        'paid_at':'2026-11-20T20:20:06','amount':11880,'payment_method':'tochka_qr_link','tariff':'fixed',
+        'branch_hint':'Небо','lesson_time':'16:45','weekdays':[1,4],'discount_percent':20,
+        'components':[{'month':'2026-11','price':2160,'dates':['2026-11-24','2026-11-27']},
+                      {'month':'2026-12','price':9720,'dates':['2026-12-01','2026-12-04','2026-12-08','2026-12-11','2026-12-15','2026-12-18','2026-12-22','2026-12-25','2026-12-29']}],
+        'note':'Куплены 11 занятий до конца декабря'}
+    result=chatdaytransfer.apply(con,{'events':[booking,sale]},user)
+    assert len(result['applied'])==2 and not result['errors'] and not result['unmatched']
+    student=con.execute("SELECT id,group_id,trial_group_id FROM students WHERE name='Маматахунов Фирдавс'").fetchone()
+    assert student and student['group_id']==group and student['trial_group_id']==group
+    assert con.execute("SELECT COUNT(*) FROM subscriptions WHERE student_id=? AND status='paid'",(student['id'],)).fetchone()[0]==2
+    payment=con.execute("SELECT amount,method FROM payments WHERE student_id=?",(student['id'],)).fetchone()
+    assert payment and (payment['amount'],payment['method'])==(11880,'tochka_qr_link')
+
+
 def test_previously_saved_sale_is_completed_on_repeat_without_duplicates():
     con=db.connect(str(Path(tempfile.mkdtemp())/'saved-sale.sqlite3'));db.init_db(con)
     user={'id':1,'role':'admin','name':'Руководитель'}
