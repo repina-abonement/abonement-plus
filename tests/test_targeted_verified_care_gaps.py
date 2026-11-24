@@ -115,7 +115,10 @@ class VerifiedCareGapsTest(unittest.TestCase):
         names={"Бородин Доброслав", "Смирнов Эрик", "Серегин Глеб", "Гянджунцев Артем"}
         rows=[row for row in batch.events() if row["student_name"] in names]
         self.assertEqual(4,len(rows))
-        self.assertTrue(all("только способ оплаты" in row["clarification_task_title"].lower() for row in rows))
+        for row in rows:
+            expected = ("факт и способ оплаты" if row["student_name"] == "Серегин Глеб"
+                        else "только способ оплаты")
+            self.assertIn(expected, row["clarification_task_title"].lower())
         self.assertTrue(all("payment_method" not in row for row in rows))
 
     def test_only_confirmed_refund_is_not_left_as_a_request(self):
