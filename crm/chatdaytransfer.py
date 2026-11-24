@@ -235,9 +235,10 @@ def _reconcile_subscription_sale(con,sid,event,user):
                 'month':month,'group_id':gid,'tariff':str(event.get('tariff') or 'fixed'),
                 'price':price,'amount':0,'method':'','expected_balance':max(0,money.balance(con,sid)['deposit']),
                 'discount_id':discount_id,
+                'discount_percent':int(event.get('discount_percent') or 0),
                 'lessons':[{'group_id':gid,'date':day} for day in dates],
                 'dates_reason':str(item.get('dates_reason') or 'Состав занятий подтверждён сообщением СЗ')
-            },user)
+            },user,trusted_confirmed=True)
             subid=recorded['subscription_id'];created.append(subid)
         parts.append({'subscription_id':subid,'amount':price})
     if sum(x['amount'] for x in parts)!=total:raise sv.ApiError('Сумма по месяцам не равна подтверждённой оплате')

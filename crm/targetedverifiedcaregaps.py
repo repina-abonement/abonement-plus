@@ -4,7 +4,7 @@ import json
 from . import chatdaytransfer, tasks
 
 
-KEY="targeted_verified_care_gaps_20261124_v9"
+KEY="targeted_verified_care_gaps_20261124_v10"
 
 
 def events():

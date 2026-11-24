@@ -114,7 +114,7 @@ def _day(raw,label):
     return value
 
 
-def record(con,sid,data,user):
+def record(con,sid,data,user,*,trusted_confirmed=False):
     s=sv.get_student_row(con,sid)
     if s['archived']:raise sv.ApiError('Сначала восстановите карточку из архива')
     key=str(data.get('request_id') or '')
@@ -161,23 +161,31 @@ def record(con,sid,data,user):
             amount=int(data.get('amount') or 0);method=str(data.get('method') or '')
             if amount and paid_day<sale_day:raise sv.ApiError('Дата оплаты раньше продажи. Предоплату учтите отдельным существующим платежом')
             if amount and method not in ('cash','card','sbp','transfer','card_branch','sber_qr_branch','tochka_qr_link'):raise sv.ApiError('Онлайн-оплату нельзя дублировать вручную: используйте уже учтённый платёж')
-            quoted=options(con,sid,gid,ym,tariff,data.get('ofp_group_id'),paid_date=paid_day.isoformat(),trial_date=at.date().isoformat() if at else None,discount_id=data.get('discount_id'),user=user)
+            # Server-side verified chat imports preserve the historically
+            # agreed total instead of re-applying today's deadline/discount.
+            quoted=options(con,sid,gid,ym,tariff,data.get('ofp_group_id'),paid_date=paid_day.isoformat(),
+                trial_date=at.date().isoformat() if at else None,
+                discount_id=None if trusted_confirmed else data.get('discount_id'),user=user)
             available={(c['group_id'],d) for c in quoted['components'] for d in c['dates']}
             chosen=set()
             for item in data.get('lessons') or []:
                 chosen.add((int(item['group_id']),str(item['date'])))
-            if not chosen or not chosen<=available:raise sv.ApiError('Отметьте фактически проданные занятия по расписанию')
+            valid_confirmed=(trusted_confirmed and chosen and all(group_id==gid and day[:7]==ym for group_id,day in chosen))
+            if not chosen or (not chosen<=available and not valid_confirmed):
+                raise sv.ApiError('Отметьте фактически проданные занятия по расписанию')
             if trial and (trial_gid,at.date().isoformat()) in chosen:raise sv.ApiError('Пробное не включается в оплаченные занятия абонемента')
             trial_day=at.date().isoformat() if at else (s['trial_at'] or '')[:10]
             reason=selection_reason(quoted,chosen,trial_day,ym,data.get('dates_reason'),user)
-            price=calculated_total(quoted,chosen)
+            calculated=calculated_total(quoted,chosen)
+            price=int(data['price']) if trusted_confirmed and data.get('price') is not None else calculated
             available_balance=max(0,money.balance(con,sid)['deposit'])
             if data.get('expected_balance') is not None and int(data['expected_balance'])!=available_balance:
                 raise sv.ApiError('Баланс изменился. Обновите форму перед сохранением')
             if data.get('use_balance') and amount>max(0,price-available_balance):
                 raise sv.ApiError('С учётом баланса доплата меньше указанной суммы. Проверьте оплату')
             if price<=0 or amount<0 or amount>price:raise sv.ApiError('Оплата не должна превышать рассчитанную стоимость абонемента')
-            if data.get('price') is not None and int(data['price'])!=price:raise sv.ApiError('Стоимость изменилась. Обновите расчёт по календарю')
+            if not trusted_confirmed and data.get('price') is not None and int(data['price'])!=price:
+                raise sv.ApiError('Стоимость изменилась. Обновите расчёт по календарю')
             from . import subscriptiondates
             subscriptiondates.guard_duplicate(con,sid,gid,ym,chosen)
             g=con.execute('SELECT * FROM groups WHERE id=?',(gid,)).fetchone()
@@ -196,15 +204,19 @@ def record(con,sid,data,user):
                 raise sv.ApiError('Абонемент на этот месяц уже внесён. Откройте его, не создавайте повторный')
             if amount and con.execute("SELECT 1 FROM payments WHERE student_id=? AND amount=? AND substr(paid_at,1,10)=? AND cancelled=0",(sid,amount,paid_day.isoformat())).fetchone():
                 raise sv.ApiError('Похожая оплата уже есть в CRM. Выберите «Оплата уже учтена», чтобы не задвоить деньги')
-            components=[{**c,'dates':[d for d in c['dates'] if (c['group_id'],d) in chosen]} for c in quoted['components']]
+            components=[{**c,'dates':sorted(day for group_id,day in chosen if group_id==c['group_id'])}
+                        for c in quoted['components']]
             subid=con.execute('''INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,per_lesson,price,status,
                 created_at,corrected,ledger_managed,lesson_schedule,historical_sale) VALUES (?,?,?,?,?,?,?,'invoiced',?,1,1,?,1)''',
                 (sid,eid,ym,tariff,len(chosen),price//len(chosen),price,sale_day.isoformat(),json.dumps(components))).lastrowid
             from . import saleinfo
             con.execute('UPDATE subscriptions SET calculation_reason=? WHERE id=?',(reason,subid))
             undiscounted=calculated_total({**quoted,'calculation':{**quoted['calculation'],'discount_percent':0}},chosen)
+            if trusted_confirmed and data.get('discount_percent'):
+                undiscounted=max(price,round(price/(1-int(data['discount_percent'])/100)))
             con.execute('UPDATE subscriptions SET discount_name=?,discount_amount=? WHERE id=?',
-                (quoted['calculation']['discount_name'],undiscounted-price,subid))
+                ((str(data.get('discount_name') or 'Подтверждённая скидка СЗ') if trusted_confirmed and data.get('discount_percent')
+                  else quoted['calculation']['discount_name']),max(0,undiscounted-price),subid))
             all_dates={d for c in quoted['components'] for d in c['dates']}
             excluded=sorted(all_dates-{d for _,d in chosen})
             con.execute('UPDATE subscriptions SET excluded_dates=? WHERE id=?',(json.dumps(excluded),subid))

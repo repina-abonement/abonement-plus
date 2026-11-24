@@ -9,7 +9,7 @@ import json
 from . import chatdaytransfer
 
 
-KEY = "targeted_verified_care_history_20261124_v6"
+KEY = "targeted_verified_care_history_20261124_v7"
 
 
 def early_events():
@@ -23,7 +23,7 @@ def early_events():
         {"source_id":"sz:21483:маракаткин-отработка","source_chat":chat,"source_at":"2026-11-14T12:54:42","student_name":"Маракаткин Дима","event_kind":"makeup_booking","event_date":"2026-11-18","note":"Пропускает 14.11; записан на отработку 18.11 в 19:45"},
         {"source_id":"sz:21513:ахмедов-пу","source_chat":chat,"source_at":"2026-11-14T19:11:14","student_name":"Ахмедов Али","birth":"2018-12-21","parent_name":"Анна","phone":"+79261300620","source":"Иван Ивакин 26","create_if_missing":True,"event_kind":"trial_booking","event_date":"2026-11-21","trial_time":"10:00","note":"Записан на ПУ 21.11 на Чоботовской","task_title":"Проверить результат ПУ 21.11","task_due":"2026-11-21T12:00"},
         {"source_id":"sz:21525:меньшиков-отработки","source_chat":chat,"source_at":"2026-11-15T10:23:40","student_name":"Меньшиков Павел","event_kind":"makeup_booking","event_date":"2026-11-21","note":"За пропуски 04.11 и 08.11 назначены отработки 21.11 и 28.11 в 10:00"},
-        {"source_id":"sz:21543:абуталипов-ноябрь","source_chat":chat,"source_at":"2026-11-15T11:02:26","student_name":"Абуталипов Лев","event_kind":"subscription_sale","sale_date":"2026-11-01","paid_at":"2026-11-01T12:00:00","amount":12150,"payment_method":"paykeeper_manual","tariff":"fixed","lesson_time":"10:00","weekdays":[5,6],"components":[{"month":"2026-11","price":12150,"dates":["2026-11-01","2026-11-07","2026-11-08","2026-11-14","2026-11-15","2026-11-21","2026-11-22","2026-11-28","2026-11-29"]}],"note":"Ноябрьский абонемент Чоботовская, сб/вс 10:00, 12 150 ₽, оплачен 01.11 по PayKeeper"},
+        {"source_id":"sz:21543:абуталипов-ноябрь","source_chat":chat,"source_at":"2026-11-15T11:02:26","student_name":"Абуталипов Лев","event_kind":"subscription_sale","sale_date":"2026-11-01","paid_at":"2026-11-01T12:00:00","amount":12150,"payment_method":"paykeeper_manual","tariff":"fixed","branch_hint":"Чобот","lesson_time":"10:00","weekdays":[5,6],"components":[{"month":"2026-11","price":12150,"dates":["2026-11-01","2026-11-07","2026-11-08","2026-11-14","2026-11-15","2026-11-21","2026-11-22","2026-11-28","2026-11-29"]}],"note":"Ноябрьский абонемент Чоботовская, сб/вс 10:00, 12 150 ₽, оплачен 01.11 по PayKeeper"},
         {"source_id":"sz:21568:сафронов-отсутствие","source_chat":chat,"source_at":"2026-11-15T13:25:24","student_name":"Сафронов Владимир","event_kind":"absence","event_date":"2026-11-16","note":"Пропустит тренировку 16.11"},
         {"source_id":"sz:21577:михайленко-пу","source_chat":chat,"source_at":"2026-11-15T15:36:36","student_name":"Михайленко Михаил","event_kind":"trial_booking","event_date":"2026-11-15","trial_time":"18:45","note":"Записан на ПУ 15.11 в 18:45; источник — задачи 2025"},
         {"source_id":"sz:21578:печенкин-пу","source_chat":chat,"source_at":"2026-11-15T16:20:59","student_name":"Печенкин Артём","parent_name":"Анастасия","phone":"89261000207","event_kind":"trial_booking","event_date":"2026-12-07","trial_time":"10:00","note":"Была запись на ПУ 07.12 в 10:00; семья могла перенести на январь","task_title":"Уточнить актуальность ПУ и не отправлять лишние сообщения","task_due":"2026-12-01T12:00"},
