@@ -297,6 +297,24 @@ def test_care_surname_only_matches_one_existing_card_but_never_guesses_namesakes
     assert len(ambiguous['ambiguous'])==1 and not ambiguous['applied']
 
 
+def test_referral_credit_is_idempotent_free_balance_without_payment():
+    con=db.connect(str(Path(tempfile.mkdtemp())/'referral-credit.sqlite3'));db.init_db(con)
+    user={'id':1,'role':'admin','name':'Руководитель'}
+    sid=services.create_student(con,{'name':'Мамедов Даниил','parent_name':'Анна','phone':'+79000000001'},user)
+    event={'source_id':'sz:22891:мамедов-бонус','source_chat':'Служба заботы','source_at':'2026-11-22T20:32:01',
+           'student_name':'Мамедов Даня','event_kind':'balance_credit','event_date':'2026-11-22','amount':3000,
+           'credit_label':'Бонус 3 000 ₽ за рекомендацию Микаладзе Леона',
+           'note':'Начислить на свободный баланс 3 000 ₽; на счета автоматически не списывать'}
+    first=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(first['applied'])==1 and first['applied'][0]['balance_credit']['amount']==3000
+    fund=con.execute('SELECT amount,source_kind FROM balance_credit_funds WHERE student_id=?',(sid,)).fetchone()
+    assert fund and (fund['amount'],fund['source_kind'])==(3000,'existing_carry')
+    assert con.execute('SELECT COUNT(*) FROM payments WHERE student_id=?',(sid,)).fetchone()[0]==0
+    second=chatdaytransfer.apply(con,{'events':[event]},user)
+    assert len(second['already'])==1
+    assert con.execute('SELECT COUNT(*) FROM balance_credit_funds WHERE student_id=?',(sid,)).fetchone()[0]==1
+
+
 def test_previously_saved_sale_is_completed_on_repeat_without_duplicates():
     con=db.connect(str(Path(tempfile.mkdtemp())/'saved-sale.sqlite3'));db.init_db(con)
     user={'id':1,'role':'admin','name':'Руководитель'}

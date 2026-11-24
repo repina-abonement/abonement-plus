@@ -372,6 +372,7 @@ def apply(con,data,user):
                             (str(event['source']).strip()[:300],sid))
             single_sale=None
             subscription_sale=None
+            balance_credit=None
             if event.get('event_kind')=='single_sale':
                 from . import money, singles
                 day=str(event.get('event_date') or '')[:10]
@@ -395,6 +396,15 @@ def apply(con,data,user):
                 single_sale={'subscription_id':subid,'date':day,'group_id':gid}
             if event.get('event_kind')=='subscription_sale':
                 subscription_sale=_reconcile_subscription_sale(con,sid,event,user)
+            if event.get('event_kind')=='balance_credit':
+                from . import balancecredit
+                amount=int(event.get('amount') or 0)
+                if amount<=0:raise sv.ApiError('В подтверждённом бонусе не указана сумма')
+                ref='chat-credit:'+source
+                fundid=balancecredit.add_existing_fund(con,sid,amount,source_ref=ref,
+                    label=str(event.get('credit_label') or note)[:300],evidence_id=source,
+                    source_kind='existing_carry',user=user)
+                balance_credit={'fund_id':fundid,'amount':amount}
             con.execute('INSERT INTO history(student_id,ts,user_name,kind,text) VALUES (?,?,?,?,?)',(sid,at,'Перенос СЗ','chat_transfer',note))
             marked=False
             if event.get('event_kind')=='trial_result' and isinstance(event.get('came'),bool):
@@ -417,7 +427,7 @@ def apply(con,data,user):
             con.execute('INSERT INTO chat_day_transfer_events VALUES (?,?,?,?,?,?,?,?)',(source,sid,str(event.get('source_chat') or ''),at,str(event.get('event_kind') or 'note'),json.dumps(event,ensure_ascii=False),sv.now_iso(),user.get('name','')))
             tasks.ensure_client_task_coverage(con)
             con.execute('RELEASE chat_day_event')
-            result['applied'].append({'source_id':source,'student_id':sid,'name':matches[0]['name'],'created':created,'trial_marked':marked,'single_sale':single_sale,'subscription_sale':subscription_sale,'added':note,'tasks':_current_tasks(con,sid)})
+            result['applied'].append({'source_id':source,'student_id':sid,'name':matches[0]['name'],'created':created,'trial_marked':marked,'single_sale':single_sale,'subscription_sale':subscription_sale,'balance_credit':balance_credit,'added':note,'tasks':_current_tasks(con,sid)})
         except BaseException as error:
             con.execute('ROLLBACK TO chat_day_event');con.execute('RELEASE chat_day_event')
             result['errors'].append({'source_id':source,'name':event.get('student_name'),'error':str(error)})
