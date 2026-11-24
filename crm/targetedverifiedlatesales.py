@@ -4,7 +4,27 @@ import json
 from . import chatdaytransfer
 
 
-KEY="targeted_verified_late_sales_20261124_v6"
+KEY="targeted_verified_late_sales_20261124_v7"
+
+
+def _sharikova_attendance(con, sid):
+    # Each of these single session lists includes both sisters.
+    for message, day in [('26693', '05'), ('26795', '09'), ('26907', '12'),
+                         ('27071', '16'), ('27093', '19')]:
+        visit_date = f'2026-11-{day}'
+        exists = con.execute("""SELECT 1 FROM erp_history_visits
+            WHERE student_id=? AND visit_date=? AND visit_time='19:45'
+            UNION ALL SELECT 1 FROM erp_history_unassigned_visits
+            WHERE student_id=? AND visit_date=? AND visit_time='19:45'""",
+            (sid, visit_date, sid, visit_date)).fetchone()
+        if not exists:
+            con.execute("""INSERT OR IGNORE INTO erp_history_unassigned_visits
+                (source_id,student_id,visit_date,visit_time,kind,status,source_group,
+                 source_payload,imported_at,imported_by)
+                VALUES (?,?,?,'19:45','subscription','present','Небо 19:45',?,?,'Перенос ТРЕНЕРЫ')""",
+                (f'trainers:{message}:erp:78877', sid, visit_date,
+                 json.dumps({'source':'ТРЕНЕРЫ','message_id':message},ensure_ascii=False),
+                 chatdaytransfer.sv.now_iso()))
 
 
 def events():
@@ -58,6 +78,7 @@ def apply(con):
     found=identity['applied'] or identity['already']
     if found:
         sid=found[0]['student_id']
+        _sharikova_attendance(con, sid)
         groups=con.execute('SELECT id FROM groups WHERE name=?',
             ('СТОП Небо ПУП пн/чт/сб 19:45 возраст 6-8',)).fetchall()
         if len(groups)==1:
