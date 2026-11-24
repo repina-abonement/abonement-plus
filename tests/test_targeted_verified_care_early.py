@@ -6,7 +6,7 @@ from crm import targetedverifiedcareearly as batch
 class VerifiedCareEarlyTest(unittest.TestCase):
     def test_consolidated_report_is_split_into_unique_safe_events(self):
         events=batch.events()
-        self.assertEqual(38,len(events))
+        self.assertEqual(40,len(events))
         self.assertEqual(len(events),len({row['source_id'] for row in events}))
         self.assertTrue(all(row['student_name'].strip() for row in events))
         self.assertTrue(all(row['note'].strip() for row in events))
@@ -32,6 +32,15 @@ class VerifiedCareEarlyTest(unittest.TestCase):
         karimov=rows['sz:20167:каримов-продажа']
         self.assertIn('седьмую дату',karimov['clarification_task_title'].lower())
         self.assertIn('шесть дат',karimov['clarification_task_note'].lower())
+
+    def test_kononenko_makeup_and_tournament_carry_stay_separate(self):
+        rows={row['source_id']:row for row in batch.events()}
+        makeup=rows['sz:20167:кононенко-отработка']
+        self.assertEqual(('makeup_booking','2026-11-12'),(makeup['event_kind'],makeup['event_date']))
+        carry=rows['sz:20167:кононенко-турнир']
+        self.assertEqual(('carry_fact','2026-11-14'),(carry['event_kind'],carry['event_date']))
+        self.assertNotIn('amount',carry)
+        self.assertIn('исходного абонемента',carry['clarification_task_note'])
 
 
 if __name__=='__main__':unittest.main()

@@ -4,7 +4,7 @@ import json
 from . import chatdaytransfer
 
 
-KEY = "targeted_verified_care_early_20261124_v2"
+KEY = "targeted_verified_care_early_20261124_v3"
 
 
 def events():
@@ -14,6 +14,8 @@ def events():
         {"source_id":"sz:20167:бородин-ссылка","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Бородин Доброслав","event_kind":"payment_link_issue","event_date":"2026-11-02","note":"Семья сообщила, что ссылка на оплату не работает","task_title":"Проверить и обновить ссылку на оплату","task_due":"2026-11-02T23:59"},
         {"source_id":"sz:20167:лубяницкий-оплата","source_chat":chat,"source_at":"2026-11-12T17:59:09","student_name":"Лубяницкий","event_kind":"sale_fact","event_date":"2026-11-12","note":"Абонемент пн/чт 19:45 оплачен 12.11, сумма 12 150 ₽; ранее выслан QR, точный канал QR не указан","clarification_task_title":"Уточнить точный QR-канал оплаты 12 150 ₽","clarification_task_note":"Оплата уже подтверждена; не создавать повторный платёж"},
         {"source_id":"sz:20167:шишкарев-пропуск","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Шишкарев Лев","event_kind":"absence","event_date":"2026-11-03","note":"Пропуск 03.11 по болезни"},
+        {"source_id":"sz:20167:кононенко-отработка","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Кононенко Иван","event_kind":"makeup_booking","event_date":"2026-11-12","note":"Отработка назначена на 12.11 в группе ПУП; точное время в сообщении не указано"},
+        {"source_id":"sz:20167:кононенко-турнир","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Кононенко Иван","event_kind":"carry_fact","event_date":"2026-11-14","note":"Занятие 14.11 было оплачено, но ребёнок не мог прийти из-за турнира; сумму и конкретное назначение переноса СЗ не указывает","clarification_task_title":"Проверить перенос оплаченного занятия Кононенко 14.11","clarification_task_note":"Не создавать свободный баланс или новую оплату без проверки исходного абонемента"},
         {"source_id":"sz:20167:валюхов-оплата","source_chat":chat,"source_at":"2026-11-03T17:59:09","student_name":"Валюхов Ярослав","event_kind":"sale_fact","event_date":"2026-11-03","note":"Подтверждена оплата абонемента 10 800 ₽ от 03.11; способ оплаты и точный состав занятий в сообщении не указаны","clarification_task_title":"Сверить состав и способ оплаты абонемента 10 800 ₽","clarification_task_note":"Сначала проверить существующие абонемент и платёж; повторную оплату не создавать"},
         {"source_id":"sz:20167:мартемьянов-отработка","source_chat":chat,"source_at":"2026-11-02T17:59:09","student_name":"Мартемьянов Захар","event_kind":"makeup_booking","event_date":"2026-11-07","note":"Отработка назначена на 07.11 в 14:00"},
         {"source_id":"sz:20167:мартемьянов-оплата","source_chat":chat,"source_at":"2026-11-05T17:59:09","student_name":"Мартемьянов Захар","event_kind":"sale_fact","event_date":"2026-11-05","note":"Подтверждена оплата абонемента 10 800 ₽ от 05.11; способ и состав в сообщении не указаны","clarification_task_title":"Сверить состав и способ оплаты абонемента 10 800 ₽","clarification_task_note":"Не создавать повторный платёж до проверки карточки"},
