@@ -4,7 +4,7 @@ import json
 from . import chatdaytransfer
 
 
-KEY="targeted_verified_late_sales_20261124_v5"
+KEY="targeted_verified_late_sales_20261124_v6"
 
 
 def events():
@@ -20,7 +20,7 @@ def events():
         {"source_id":"sz:22891:мамедов-бонус","source_chat":chat,"source_at":"2026-11-22T20:32:01","student_name":"Мамедов Даня","event_kind":"balance_credit","event_date":"2026-11-22","amount":3000,"credit_label":"Бонус 3 000 ₽ за рекомендацию Микаладзе Леона","note":"Начислить на свободный баланс 3 000 ₽ за рекомендацию Микаладзе Леона; автоматически на счета не списывать"},
         {"source_id":"sz:22821:рябов-декабрь","source_chat":chat,"source_at":"2026-11-22T11:30:16","student_name":"Рябов Михаил","event_kind":"sale_fact","event_date":"2026-11-21","note":"Подтверждена оплата декабрьского абонемента 12 150 ₽ через PayKeeper от 21.11; группа и состав дат не указаны","clarification_task_title":"Сверить группу и даты декабря 12 150 ₽","clarification_task_note":"PayKeeper подтверждён; повторный платёж не создавать"},
         {"source_id":"sz:22845:кононенко-декабрь","source_chat":chat,"source_at":"2026-11-22T13:16:30","student_name":"Кононенко Иван","event_kind":"sale_fact","event_date":"2026-11-22","note":"Декабрь Арктика + ОФП по субботам, 16 400 ₽ через PayKeeper; отпуск с 29.12","clarification_task_title":"Сверить состав Арктика + ОФП на декабрь","clarification_task_note":"Оплата 16 400 ₽ PayKeeper подтверждена; сохранить оба вида занятий и не создавать повторный платёж"},
-        {"source_id":"sz:22847:шарикова-декабрь","source_chat":chat,"source_at":"2026-11-22T13:18:29","student_name":"Шарикова Евгения","erp_id":"78877","event_kind":"subscription_sale","sale_date":"2026-11-22","paid_at":"2026-11-22T13:18:29","amount":9720,"payment_method":"paykeeper_manual","tariff":"fixed","branch_hint":"Небо","lesson_time":"19:45","weekdays":[0,3,5],"discount_percent":10,"discount_rule":"large_family","components":[{"month":"2026-12","price":9720,"dates":["2026-12-03","2026-12-07","2026-12-10","2026-12-14","2026-12-17","2026-12-21","2026-12-24","2026-12-28","2026-12-31"]}],"note":"СЗ №22847: декабрь Евгении Шариковой, группа Небо пн/чт/сб 19:45, оплачены девять указанных занятий за 9 720 ₽ по PayKeeper, скидка 10% многодетной семье. Сестра-близняшка Мария — отдельная карточка ERP 78875"},
+        {"source_id":"sz:22847:шарикова-декабрь","source_chat":chat,"source_at":"2026-11-22T13:18:29","student_name":"Шарикова Евгения","erp_id":"78877","event_kind":"subscription_sale","sale_date":"2026-11-22","paid_at":"2026-11-22T13:18:29","amount":9720,"payment_method":"paykeeper_manual","tariff":"fixed","branch_hint":"Небо","lesson_time":"19:45","weekdays":[0,3],"discount_percent":10,"discount_rule":"large_family","components":[{"month":"2026-12","price":9720,"dates":["2026-12-03","2026-12-07","2026-12-10","2026-12-14","2026-12-17","2026-12-21","2026-12-24","2026-12-28","2026-12-31"]}],"note":"СЗ №22847: декабрь Евгении Шариковой, группа Небо пн/чт 19:45, оплачены девять указанных занятий за 9 720 ₽ по PayKeeper, скидка 10% многодетной семье. Сестра-близняшка Мария — отдельная карточка ERP 78875"},
         {"source_id":"sz:22850:хасаханов-продажа","source_chat":chat,"source_at":"2026-11-22T13:22:32","student_name":"Хасаханов Эмин","phone":"+79995992010","event_kind":"sale_fact","event_date":"2026-11-22","note":"После ПУ куплен абонемент Чоботовская сб/вс 10:00 со скидкой 20%, сумма 12 400 ₽; тренерский отчёт №27120 подтвердил наличные, десять занятий и тариф с переносом","resolved_clarification_note":"ТРЕНЕРЫ №27120 полностью подтвердил способ и состав; ручная сверка заменена точной продажей"},
         {"source_id":"trainers:27120:хасаханов-продажа","source_chat":"ТРЕНЕРЫ","source_at":"2026-11-22T12:19:45","student_name":"Хасаханов Эмин","phone":"+79995992010","event_kind":"subscription_sale","sale_date":"2026-11-22","paid_at":"2026-11-22T12:19:45","amount":12400,"payment_method":"cash","tariff":"flex","lesson_time":"10:00","weekdays":[5,6],"discount_percent":20,"components":[{"month":"2026-11","price":2480,"dates":["2026-11-28","2026-11-29"]},{"month":"2026-12","price":9920,"dates":["2026-12-05","2026-12-06","2026-12-12","2026-12-13","2026-12-19","2026-12-20","2026-12-26","2026-12-27"]}],"note":"СЗ №22850 и ТРЕНЕРЫ №27120: после ПУ куплены два занятия ноября и восемь декабря, гибкий тариф с переносом, скидка 20%, всего 12 400 ₽ наличными; повторный платёж не создавать"},
         {"source_id":"sz:22852:тупота-декабрь","source_chat":chat,"source_at":"2026-11-22T13:24:58","student_name":"Тупота Сергей","event_kind":"sale_fact","event_date":"2026-11-22","note":"Декабрь сб/вс 12:00, гибкий тариф с двумя переносами, 10 850 ₽ через PayKeeper","clarification_task_title":"Сверить даты и два переноса гибкого декабря","clarification_task_note":"PayKeeper 10 850 ₽ подтверждён; повторный платёж не создавать"},
@@ -45,7 +45,33 @@ def apply(con):
     actor=con.execute("""SELECT id,name,role FROM users WHERE active=1 AND role='admin'
         AND trim(name)='Юлия Репина' ORDER BY id LIMIT 1""").fetchone()
     if not actor:return {'state':'not_target_database'}
+    profile_event={
+        'source_id':'erp:78877:726405:november', 'source_chat':'ERP',
+        'source_at':'2026-11-05T00:00:00', 'student_name':'Евгения Шарикова',
+        'erp_id':'78877', 'erp_create_if_missing':True, 'event_kind':'note',
+        'erp_profile':{'name':'Евгения Шарикова','birth':'2020-04-28',
+                       'parent_name':'Ольга','phone':'+79309613965','email':'olgavin90@mail.ru',
+                       'erp_status':'Вернувшийся'},
+        'note':'ERP №726405: ноябрьский стандартный абонемент на 8 занятий, 05–30.11, историческая стоимость 8 640 ₽.',
+    }
+    identity=chatdaytransfer.apply(con,{'events':[profile_event]},dict(actor))
+    found=identity['applied'] or identity['already']
+    if found:
+        sid=found[0]['student_id']
+        groups=con.execute('SELECT id FROM groups WHERE name=?',
+            ('СТОП Небо ПУП пн/чт/сб 19:45 возраст 6-8',)).fetchall()
+        if len(groups)==1:
+            con.execute("""INSERT OR IGNORE INTO erp_history_subscriptions
+                (source_id,student_id,group_id,month,valid_from,valid_until,lessons,
+                 revenue_amount,source_payload,imported_at,imported_by)
+                VALUES ('726405',?,?,'2026-11','2026-11-05','2026-11-30',8,8640,?,?,'Перенос ERP')""",
+                (sid,groups[0]['id'],json.dumps({'erp_id':'78877'}),chatdaytransfer.sv.now_iso()))
+        elif not con.execute("SELECT 1 FROM erp_history_subscriptions WHERE source_id='726405' AND student_id=?",(sid,)).fetchone():
+            identity['errors'].append({'source_id':profile_event['source_id'],'name':profile_event['student_name'],
+                                       'error':'Для ноября сохранён факт ERP; исходная группа не определена однозначно'})
     result=chatdaytransfer.apply(con,{'events':events()},dict(actor))
+    for key in result:
+        result[key].extend(identity[key])
     report={'state':'complete' if chatdaytransfer.batch_is_complete(result) else 'partial',
             'counts':{key:len(value) for key,value in result.items()},'unmatched':result['unmatched'],
             'ambiguous':result['ambiguous'],'errors':result['errors']}

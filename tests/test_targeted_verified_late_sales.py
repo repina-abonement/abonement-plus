@@ -35,7 +35,7 @@ class VerifiedLateSalesTest(unittest.TestCase):
 
     def test_sharikova_twins_are_not_conflated(self):
         sale=next(row for row in batch.events() if row['source_id']=='sz:22847:шарикова-декабрь')
-        self.assertEqual(('Шарикова Евгения','78877',[0,3,5]),
+        self.assertEqual(('Шарикова Евгения','78877',[0,3]),
                          (sale['student_name'],sale['erp_id'],sale['weekdays']))
         self.assertIn('Мария',sale['note'])
 
