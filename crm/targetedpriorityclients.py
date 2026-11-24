@@ -2,17 +2,20 @@
 
 The source messages are group reports and care-chat summaries.  One Telegram
 message may describe several children, therefore every stored source key also
-contains the child identity.  This module never creates a client, payment or
-subscription; it only attaches evidence to one uniquely matching existing
-card and creates narrowly scoped follow-up tasks where the chat itself shows
-an unresolved operational action.
+contains the child identity.  This module never creates a client. It attaches
+evidence to one uniquely matching existing card and may repair a precisely
+confirmed sale when the client, groups, composition, price and payment are all
+unambiguous. A manual task is used only when one of those facts is missing or
+conflicts.
 """
 import json
 
-from . import chatdaytransfer, tasks
+from . import chatdaytransfer, money, pricing, services, tasks
 
 
 KEY = "targeted_priority_clients_telegram_20261123_v1"
+SHARIPOV_ERP_ID = "85160"
+SHARIPOV_DECEMBER_TASK = "priority-clients:sharipov-december-sale-2026-11-23"
 
 
 CLIENTS = {
@@ -150,20 +153,127 @@ def ensure_attendance_control(con):
     return {"student_ids": ids, "inserted_marks": inserted, "task_ids": audit_tasks}
 
 
+def _sharipov_groups(con, student_id):
+    """Return the unique November arena and OFP groups proved by ERP history."""
+    rows = con.execute("""SELECT h.source_id,h.group_id,g.name,g.program_id,g.lesson_kind
+        FROM erp_history_subscriptions h JOIN groups g ON g.id=h.group_id
+        WHERE h.student_id=? AND h.month='2026-11' AND h.source_id IN ('828113','828114')
+        ORDER BY h.source_id""", (student_id,)).fetchall()
+    if len(rows) != 2:
+        return None, "Не найдены обе подтверждённые строки ERP 828113 и 828114"
+    arena = [r for r in rows if r["lesson_kind"] == "arena"]
+    ofp = [r for r in rows if r["lesson_kind"] == "ofp"]
+    if len(arena) != 1 or len(ofp) != 1 or not arena[0]["program_id"] or arena[0]["program_id"] != ofp[0]["program_id"]:
+        return None, "Группы ERP не дают однозначную пару Арктика + ОФП одной сборной"
+    return {"arena": dict(arena[0]), "ofp": dict(ofp[0])}, None
+
+
+def _finish_sharipov_task(con, actor, result):
+    row = con.execute("SELECT id,status FROM tasks WHERE auto_key=? ORDER BY id DESC LIMIT 1",
+                      (SHARIPOV_DECEMBER_TASK,)).fetchone()
+    if row and row["status"] == "open":
+        tasks.complete(con, row["id"], actor, result=result)
+
+
+def _sharipov_manual_task(con, student_id, reason):
+    task_id = tasks.add_task(
+        con, "payment_check", student_id, "2026-11-24T23:59",
+        auto_key=SHARIPOV_DECEMBER_TASK,
+        title="Оформить подтверждённый декабрьский абонемент Шарипова",
+        note=("СЗ 23.11: Арктика + ОФП, 13 занятий, 20 400 ₽ через PayKeeper. "
+              "Автоматическое оформление остановлено: " + reason), source="manual")
+    row = con.execute("SELECT id FROM tasks WHERE auto_key=?", (SHARIPOV_DECEMBER_TASK,)).fetchone()
+    return task_id or (row[0] if row else None)
+
+
+def ensure_sharipov_december_sale(con, actor):
+    """Create the confirmed December package and payment once, or return an exact blocker."""
+    matches = con.execute("""SELECT DISTINCT id FROM students
+        WHERE archived=0 AND (erp_id=? OR trim(name) IN ('Даниил Шарипов','Шарипов Даниил'))
+        ORDER BY id""", (SHARIPOV_ERP_ID,)).fetchall()
+    if len(matches) != 1:
+        return {"state": "blocked", "reason": f"Карточка Шарипова определяется неоднозначно: {len(matches)} совпадений"}
+    sid = matches[0]["id"]
+    current = con.execute("""SELECT id,price,status,lessons FROM subscriptions
+        WHERE student_id=? AND month='2026-12' AND status!='cancelled' AND COALESCE(kind,'month')='month'
+        ORDER BY id""", (sid,)).fetchall()
+    if len(current) > 1:
+        reason = "Уже существует несколько декабрьских абонементов; нужна сверка дублей"
+        _sharipov_manual_task(con, sid, reason)
+        return {"state": "blocked", "student_id": sid, "reason": reason}
+    if current:
+        sub = current[0]
+        paid = money.balance(con, sid)["covered"].get(sub["id"], 0)
+        if sub["price"] == 20400 and sub["lessons"] == 13 and paid >= 20400 and sub["status"] == "paid":
+            _finish_sharipov_task(con, actor, "Декабрьский пакет Арктика + ОФП и оплата PayKeeper оформлены")
+            return {"state": "already_complete", "student_id": sid, "subscription_id": sub["id"]}
+        reason = f"Найден конфликтующий декабрьский абонемент #{sub['id']}: {sub['lessons']} занятий, {sub['price']} ₽, статус {sub['status']}"
+        _sharipov_manual_task(con, sid, reason)
+        return {"state": "blocked", "student_id": sid, "reason": reason}
+
+    groups, reason = _sharipov_groups(con, sid)
+    if reason:
+        _sharipov_manual_task(con, sid, reason)
+        return {"state": "blocked", "student_id": sid, "reason": reason}
+    exact_payment = con.execute("""SELECT id FROM payments
+        WHERE student_id=? AND amount=20400 AND cancelled=0
+          AND method IN ('paykeeper','paykeeper_manual') AND substr(paid_at,1,10)='2026-11-23'""", (sid,)).fetchall()
+    if exact_payment:
+        reason = "Платёж 20 400 ₽ уже есть без однозначной привязки к декабрьскому абонементу"
+        _sharipov_manual_task(con, sid, reason)
+        return {"state": "blocked", "student_id": sid, "reason": reason}
+
+    enrollment = con.execute("SELECT id FROM enrollments WHERE student_id=? AND group_id=? AND active=1 ORDER BY id LIMIT 1",
+                             (sid, groups["arena"]["group_id"])).fetchone()
+    con.execute("SAVEPOINT sharipov_december_sale")
+    try:
+        eid = enrollment["id"] if enrollment else services.add_enrollment(
+            con, sid, groups["arena"]["group_id"], None, "fixed", actor)
+        invoice = services.create_invoice(
+            con, sid, "2026-12", actor, enrollment_id=eid,
+            tariff="pkg", ofp_group_id=groups["ofp"]["group_id"], paid_date="2026-11-23")
+        sub_id = invoice["id"]
+        sub = con.execute("SELECT price,lessons FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
+        if sub["lessons"] != 13:
+            raise ValueError(f"Расчёт дал {sub['lessons']} занятий вместо подтверждённых 13")
+        if sub["price"] != 20400:
+            pricing.correct(con, sub_id, 20400,
+                "СЗ 23.11 подтверждает пакет Арктика + ОФП за 20 400 ₽ через PayKeeper", actor)
+        payment_id = money.pay_subscription(
+            con, sub_id, "paykeeper_manual", actor, amount=20400, paid_at="2026-11-23T12:44:19")
+        verified = con.execute("SELECT price,lessons,status FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
+        payment = con.execute("SELECT amount,method,cancelled FROM payments WHERE id=?", (payment_id,)).fetchone()
+        if tuple(verified) != (20400, 13, "paid") or tuple(payment) != (20400, "paykeeper_manual", 0):
+            raise ValueError("Итоговая проверка абонемента или платежа не пройдена")
+        _finish_sharipov_task(con, actor, "Декабрьский пакет Арктика + ОФП и оплата PayKeeper оформлены")
+        tasks.schedule_renewal(con, sid)
+        con.execute("RELEASE sharipov_december_sale")
+        return {"state": "created", "student_id": sid, "subscription_id": sub_id, "payment_id": payment_id}
+    except Exception as error:
+        con.execute("ROLLBACK TO sharipov_december_sale")
+        con.execute("RELEASE sharipov_december_sale")
+        reason = str(error)
+        _sharipov_manual_task(con, sid, reason)
+        return {"state": "blocked", "student_id": sid, "reason": reason}
+
+
 def apply(con):
+    actor = con.execute("SELECT id,name,role FROM users WHERE active=1 AND role='admin' AND trim(name)='Юлия Репина' ORDER BY id LIMIT 1").fetchone()
+    if not actor:
+        return {"state": "not_target_database"}
+    actor = dict(actor)
     previous = con.execute("SELECT value FROM settings WHERE key=?", (KEY,)).fetchone()
     if previous:
         try:
             saved = json.loads(previous[0])
             if saved.get("state") == "complete":
                 ensure_attendance_control(con)
+                saved["sharipov_december_sale"] = ensure_sharipov_december_sale(con, actor)
+                _save(con, saved)
                 return saved
         except (TypeError, ValueError):
             pass
-    actor = con.execute("SELECT id,name,role FROM users WHERE active=1 AND role='admin' AND trim(name)='Юлия Репина' ORDER BY id LIMIT 1").fetchone()
-    if not actor:
-        return {"state": "not_target_database"}
-    result = chatdaytransfer.apply(con, {"events": _events()}, dict(actor))
+    result = chatdaytransfer.apply(con, {"events": _events()}, actor)
     unresolved = []
     ids = {}
     for key, name in CLIENTS.items():
@@ -188,13 +298,9 @@ def apply(con):
             title="Передать Матвею вымпел за наклейки",
             note="19.11 кубок уже выдан; в сообщении СЗ указано, что дополнительно нужен вымпел",
             source="manual")
-    if "sharipov" in ids:
-        task_ids["sharipov"] = tasks.add_task(
-            con, "payment_check", ids["sharipov"], "2026-11-23T23:59",
-            auto_key="priority-clients:sharipov-december-sale-2026-11-23",
-            title="Оформить подтверждённый декабрьский абонемент Шарипова",
-            note="СЗ 23.11: Арктика + ОФП, три раза в неделю, 20 400 ₽ через PayKeeper; сотрудник прямо указал, что абонемент не появился в CRM. Перед оформлением проверить существующие декабрьские строки и не создавать дубль оплаты",
-            source="manual")
+    sharipov_sale = ensure_sharipov_december_sale(con, actor)
+    if sharipov_sale.get("state") == "blocked" and "sharipov" in ids:
+        task_ids["sharipov"] = _sharipov_manual_task(con, ids["sharipov"], sharipov_sale["reason"])
     complete = not result["errors"] and not result["unmatched"] and not result["ambiguous"] and not unresolved
     attendance_control = ensure_attendance_control(con)
     return _save(con, {
@@ -204,6 +310,7 @@ def apply(con):
         "unresolved": unresolved,
         "task_ids": task_ids,
         "attendance_control": attendance_control,
+        "sharipov_december_sale": sharipov_sale,
     })
 
 
