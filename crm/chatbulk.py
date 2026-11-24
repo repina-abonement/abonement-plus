@@ -18,6 +18,9 @@ SINCE = "2026-11-01"
 ALIASES = {"миша": "михаил", "женя": "евгений", "даня": "даниил", "дима": "дмитрий",
            "саша": "александр", "вова": "владимир", "ваня": "иван", "леша": "алексей",
            "лёша": "алексей"}
+# Explicit identities confirmed by the owner from the source report.  This is
+# intentionally not a generic surname rule.
+VERIFIED_SINGLE_NAMES = {("гущо", "19:45"): "Михаил Гущо"}
 SIGNIFICANT = re.compile(
     r"\b(?:пу|пробн|оплат|продл|абонем|отработ|пропуск|перезапис|записан|не\s+куп|"
     r"ссылк|чек|возврат|баланс|уезжа|боле|групп|турнир)\w*", re.I)
@@ -109,14 +112,16 @@ def _trainer_rows(chat):
 
 def _match_student(con, name, lesson_time):
     wanted = _words(name)
-    # A single word is never enough to identify a child automatically, even
-    # when only one current CRM group happens to match the reported time.
-    if len(wanted) < 2:
+    verified = VERIFIED_SINGLE_NAMES.get((wanted[0], lesson_time)) if len(wanted) == 1 else None
+    # A single word is accepted only through an explicit owner-confirmed
+    # identity.  Matching group time alone is never treated as confirmation.
+    if len(wanted) < 2 and not verified:
         return []
+    target = _words(verified) if verified else wanted
     candidates = []
     for row in con.execute("SELECT id,name,group_id FROM students WHERE archived=0"):
         actual = _words(row["name"])
-        if (len(wanted) >= 2 and set(wanted) == set(actual)) or (len(wanted) == 1 and wanted[0] in actual):
+        if set(target) == set(actual):
             candidates.append(dict(row))
     if len(candidates) > 1:
         timed = []

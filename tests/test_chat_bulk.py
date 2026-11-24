@@ -111,6 +111,23 @@ class ChatBulkTest(unittest.TestCase):
         plan = chatbulk.plan(self.con, exports)
         self.assertTrue(any(x["message_id"] == "23" for x in plan["trainer"]["unresolved"]))
 
+    @patch("crm.chatbulk.date")
+    def test_owner_confirmed_single_surname_matches_only_named_child_and_time(self, fake_date):
+        from datetime import date
+        fake_date.today.return_value = date(2026, 11, 24)
+        group = self.con.execute("""INSERT INTO groups(branch_id,name,weekdays,time,active)
+            SELECT branch_id,'Небо 19:45','0,3','19:45',1 FROM groups WHERE id=?""", (self.group,)).lastrowid
+        mikhail = sv.create_student(self.con, {"name": "Михаил Гущо", "parent_name": "Ольга",
+            "phone": "+79990000004", "group_id": group}, self.user)
+        exports = self.exports()
+        exports[1]["messages"].append({"id": 25, "date": "2026-11-05T20:00:00", "text": "19:45\nГущо"})
+        plan = chatbulk.plan(self.con, exports)
+        row = next(x for x in plan["attendance"] if x["message_id"] == "25")
+        self.assertEqual(mikhail, row["student_id"])
+        exports[1]["messages"].append({"id": 26, "date": "2026-11-06T20:00:00", "text": "18:45\nГущо"})
+        plan = chatbulk.plan(self.con, exports)
+        self.assertTrue(any(x["message_id"] == "26" for x in plan["trainer"]["unresolved"]))
+
 
 if __name__ == "__main__":
     unittest.main()
