@@ -1602,6 +1602,14 @@ def payment_add(con, h, user, body, q, sid):
                      comment=body.get("comment") or "")}
 
 
+@route("POST", "/api/students/{sid}/balance-topup", role="operator")
+def balance_topup(con, h, user, body, q, sid):
+    sv.get_student_row(con, int(sid))
+    return mx(money.top_up_balance, con, int(sid), int(body.get("amount") or 0),
+              body.get("basis") or "", body.get("method") or "", body.get("paid_at") or "",
+              body.get("comment") or "", body.get("request_key") or "", user)
+
+
 @route("GET", "/api/students/{sid}/single-quote", role="operator|client_sales:full")
 def single_quote(con, h, user, body, q, sid):
     from . import singles

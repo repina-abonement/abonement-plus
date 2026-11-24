@@ -13,14 +13,15 @@ from datetime import date, datetime
 from . import logic
 
 METHODS = {"cash": "Наличные", "paykeeper": "По ссылке PayKeeper", "paykeeper_manual": "По ссылке PayKeeper (внесено вручную)",
-           "card_branch": "Картой на филиале", "sber_qr_branch": "По QR Сбера на филиале",
+           "card_branch": "Эквайринговый терминал Сбера", "sber_qr_branch": "По QR Сбера на филиале",
            "tochka_qr_link": "По QR/ссылке Точки от администратора",
            "card": "Картой (канал не уточнён)", "sbp": "СБП (банк не уточнён)",
            "online": "Онлайн-оплата (канал не уточнён)", "transfer": "Перевод",
-           "unknown": "Перенесено", "balance": "Перенос с баланса", "refund": "Возврат", "refund_pending": "Зарезервировано для возврата"}
+           "unknown": "Перенесено", "opening_balance": "Исторический остаток — оплачено ранее",
+           "balance": "Перенос с баланса", "refund": "Возврат", "refund_pending": "Зарезервировано для возврата"}
 MANUAL_METHODS = ('cash','paykeeper_manual','card_branch','sber_qr_branch','tochka_qr_link','transfer')
 
-INTERNAL = ("unknown", "balance", "refund", "refund_pending")  # их не выбирают при приёме оплаты: ставит сама CRM
+INTERNAL = ("unknown", "opening_balance", "balance", "refund", "refund_pending")  # их не выбирают при приёме оплаты: ставит сама CRM
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS manual_payment_requests(request_key TEXT PRIMARY KEY,signature TEXT NOT NULL,payment_id INTEGER,created_at TEXT NOT NULL);
@@ -232,6 +233,68 @@ def add_payment(con, sid: int, amount: int, method: str, user: dict, *, subscrip
                 (sid, _now(), user.get("name", ""), "payment",
                  f"Принята оплата {amount} ₽, {METHODS[method].lower()}" + (f": {comment.strip()}" if comment.strip() else "")))
     return pid
+
+
+def top_up_balance(con, sid: int, amount: int, basis: str, method: str, paid_at: str,
+                   comment: str, request_key: str, user: dict) -> dict:
+    """Record either genuinely new money or a reviewed opening balance.
+
+    Both are held as free balance and never cover an invoice automatically.
+    Applying that balance to a chosen invoice is a separate explicit action.
+    Historical opening money is dated in the past and cannot masquerade as
+    today's revenue or require a new receipt.
+    """
+    amount = int(amount)
+    basis = str(basis or "")
+    comment = str(comment or "").strip()
+    request_key = str(request_key or "").strip()
+    if amount <= 0:
+        raise ValueError("Сумма должна быть больше нуля")
+    if basis not in ("payment", "historical"):
+        raise ValueError("Выберите основание пополнения")
+    try:
+        paid_day = date.fromisoformat(str(paid_at or "")[:10])
+    except ValueError:
+        raise ValueError("Укажите фактическую дату")
+    if paid_day > date.today():
+        raise ValueError("Дата не может быть в будущем")
+    if basis == "historical" and paid_day >= date.today():
+        raise ValueError("Для старых данных укажите прошедшую дату")
+    if basis == "historical" and not comment:
+        raise ValueError("Для старых данных напишите, откуда известен остаток")
+    if not request_key or len(request_key) > 160:
+        raise ValueError("Обновите карточку и повторите пополнение")
+    actual_method = "opening_balance" if basis == "historical" else method
+    if basis == "payment" and (actual_method not in MANUAL_METHODS):
+        raise ValueError("Выберите способ получения денег")
+    signature = f"{sid}|{amount}|{basis}|{actual_method}|{paid_day.isoformat()}|{comment}"
+    previous = con.execute("SELECT signature,payment_id FROM manual_payment_requests WHERE request_key=?",
+                           (request_key,)).fetchone()
+    if previous:
+        if previous["signature"] != signature:
+            raise ValueError("Форма уже использована с другими данными. Обновите карточку")
+        row = con.execute("SELECT id FROM payments WHERE id=? AND cancelled=0", (previous["payment_id"],)).fetchone()
+        if not row:
+            raise ValueError("Предыдущее пополнение отменено. Обновите карточку")
+        return {"id": row["id"], "duplicate": True, "balance": balance(con, sid)}
+    confirmed = 1 if basis == "historical" or user.get("role") == "admin" or actual_method in (
+        "sber_qr_branch", "tochka_qr_link") else 0
+    pid = con.execute("""INSERT INTO payments(student_id,amount,method,paid_at,comment,user_name,confirmed,
+        confirmed_by,confirmed_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (sid, amount, actual_method, paid_day.isoformat()+"T12:00", comment, user.get("name", ""), confirmed,
+         user.get("name", "") if confirmed else "", _now() if confirmed else None, _now())).lastrowid
+    from . import balancecredit
+    balancecredit.hold_payment_as_balance(con, pid, source_ref="manual-balance:"+request_key,
+        label="Исторический остаток" if basis == "historical" else "Ручное пополнение баланса", user=user)
+    reconcile(con, sid)
+    text = (f"Добавлен исторический остаток {amount} ₽ от {paid_day.strftime('%d.%m.%Y')}: {comment}"
+            if basis == "historical" else
+            f"Баланс пополнен на {amount} ₽, {METHODS[actual_method].lower()}" + (f": {comment}" if comment else ""))
+    con.execute("INSERT INTO history(student_id,ts,user_name,kind,text) VALUES (?,?,?,?,?)",
+                (sid, _now(), user.get("name", ""), "payment", text))
+    con.execute("INSERT INTO manual_payment_requests(request_key,signature,payment_id,created_at) VALUES (?,?,?,?)",
+                (request_key, signature, pid, _now()))
+    return {"id": pid, "duplicate": False, "balance": balance(con, sid)}
 
 
 def _row(con, sid: int, amount: int, method: str, user: dict, comment: str, batch: str = "") -> int:

@@ -29,6 +29,9 @@ CREATE TABLE IF NOT EXISTS balance_credit_funds (
  id INTEGER PRIMARY KEY,student_id INTEGER NOT NULL REFERENCES students(id),amount INTEGER NOT NULL CHECK(amount>0),
  source_kind TEXT NOT NULL,source_ref TEXT NOT NULL UNIQUE,label TEXT NOT NULL,evidence_id TEXT NOT NULL,
  snapshot_id INTEGER REFERENCES balance_account_snapshots(id),created_at TEXT NOT NULL,created_by TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS balance_payment_holds (
+ payment_id INTEGER PRIMARY KEY REFERENCES payments(id),source_ref TEXT NOT NULL UNIQUE,
+ label TEXT NOT NULL,created_at TEXT NOT NULL,created_by TEXT NOT NULL DEFAULT '');
 '''
 
 
@@ -103,7 +106,7 @@ def target_payment(con, pid, subid, amount, *, allow_cancelled=False, allow_zero
 def context(con, sid):
     """Read accounting metadata only; usable before these optional tables exist."""
     tables = _tables(con)
-    result = {'protected': set(), 'direct': [], 'uses': [], 'funds': {}, 'snapshot': None,
+    result = {'protected': set(), 'direct': [], 'uses': [], 'funds': {}, 'holds': set(), 'snapshot': None,
               'reviewed': set(), 'frozen': {}, 'conflicts': []}
     if 'invoice_funding_policies' in tables:
         result['protected'] = {r[0] for r in con.execute('''SELECT f.subscription_id FROM invoice_funding_policies f
@@ -137,6 +140,9 @@ def context(con, sid):
         snapshot_id = result['snapshot']['id'] if result['snapshot'] else None
         result['funds'] = {r['id']: dict(r) for r in con.execute('''SELECT * FROM balance_credit_funds
             WHERE student_id=? AND (snapshot_id IS NULL OR snapshot_id=?) ORDER BY id''', (sid, snapshot_id))}
+    if 'balance_payment_holds' in tables:
+        result['holds'] = {r['payment_id'] for r in con.execute('''SELECT h.payment_id FROM balance_payment_holds h
+            JOIN payments p ON p.id=h.payment_id WHERE p.student_id=? AND p.cancelled=0 ORDER BY h.payment_id''', (sid,))}
     return result
 
 
@@ -152,9 +158,28 @@ def snapshot_state(con, sid):
         'uses': ('invoice_balance_uses', '''SELECT u.* FROM invoice_balance_uses u
             JOIN subscriptions s ON s.id=u.subscription_id WHERE s.student_id=? ORDER BY u.subscription_id'''),
         'snapshots': ('balance_account_snapshots', 'SELECT * FROM balance_account_snapshots WHERE student_id=? ORDER BY id'),
-        'funds': ('balance_credit_funds', 'SELECT * FROM balance_credit_funds WHERE student_id=? ORDER BY id')}
+        'funds': ('balance_credit_funds', 'SELECT * FROM balance_credit_funds WHERE student_id=? ORDER BY id'),
+        'payment_holds': ('balance_payment_holds', '''SELECT h.* FROM balance_payment_holds h JOIN payments p ON p.id=h.payment_id
+            WHERE p.student_id=? ORDER BY h.payment_id''')}
     return {key: [dict(r) for r in con.execute(query, (sid, sid) if key == 'payment_targets' else (sid,))]
             if table in tables else [] for key, (table, query) in queries.items()}
+
+
+def hold_payment_as_balance(con, payment_id, *, source_ref, label, user=None):
+    payment = con.execute('SELECT * FROM payments WHERE id=?', (payment_id,)).fetchone()
+    if not payment or payment['cancelled'] or payment['amount'] <= 0:
+        raise ValueError('Поступление для баланса не найдено')
+    values = (payment_id, str(source_ref).strip(), str(label).strip())
+    if not values[1] or not values[2]:
+        raise ValueError('Укажите основание пополнения баланса')
+    old = con.execute('SELECT * FROM balance_payment_holds WHERE payment_id=? OR source_ref=?',
+                      (payment_id, values[1])).fetchall()
+    if old:
+        if len(old) != 1 or tuple(old[0][k] for k in ('payment_id','source_ref','label')) != values:
+            raise ValueError('Пополнение баланса уже сохранено с другими данными')
+        return
+    con.execute('INSERT INTO balance_payment_holds VALUES (?,?,?,?,?)',
+                (*values, _now(), (user or {}).get('name', '')))
 
 
 def preview(con, sid, invoice_total, use_balance=False, subscription_id=None):

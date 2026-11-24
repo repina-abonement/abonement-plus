@@ -131,6 +131,7 @@ def allocation(con, sid):
               'fund_sources': {s['id']: [] for s in obligations}, 'historical_sources': {},
               'fund_remaining': {}, 'fund_labels': [], 'cash_free_deposit': 0, 'fund_free_deposit': 0,
               'active_snapshot': bool(meta['snapshot']), 'reviewed_payment_ids': sorted(reviewed),
+              'balance_hold_payment_ids': sorted(meta.get('holds', set())),
               'quarantined_historical_payment_ids': sorted(quarantined)}
     by_id = {s['id']: s for s in obligations}
     conflicts = result['conflicts']
@@ -340,7 +341,7 @@ def allocation(con, sid):
                 direct(pid, subid, amount, True)
         elif subid in meta['protected'] and pid not in targeted and pid not in locked:
             direct(pid, subid, remaining[pid], False)
-    dedicated = targeted | {pid for pid, p in positives.items() if p.get('subscription_id') in meta['protected']}
+    dedicated = targeted | set(meta.get('holds', set())) | {pid for pid, p in positives.items() if p.get('subscription_id') in meta['protected']}
     # Unattributed old negatives retain the old budget rule for ordinary
     # payments. They may consume a released locked balance, never a proved
     # allocation to another purchase.
@@ -356,7 +357,7 @@ def allocation(con, sid):
             take = min(remaining[pid], overflow)
             remaining[pid] -= take
             overflow -= take
-    extended = bool(meta['protected'] or meta['direct'] or meta['uses'] or meta['funds'] or meta['snapshot'])
+    extended = bool(meta['protected'] or meta['direct'] or meta['uses'] or meta['funds'] or meta.get('holds') or meta['snapshot'])
     if overflow and (locked or extended):
         conflicts.append('Непривязанный возврат затрагивает подтверждённые зачёты; нужна сверка источника')
     for p in cash:

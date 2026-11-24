@@ -54,9 +54,9 @@ function birthIso(value) {
   return iso <= S.meta.today ? iso : null;
 }
 const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
-const PAY_METHODS = {cash:"Наличные",paykeeper:"По ссылке PayKeeper",paykeeper_manual:"По ссылке PayKeeper",card_branch:"Картой на филиале",sber_qr_branch:"По QR Сбера на филиале",tochka_qr_link:"По QR/ссылке Точки от администратора",card:"Картой (канал не уточнён)",sbp:"СБП (банк не уточнён)",online:"Онлайн-оплата (канал не уточнён)",transfer:"Перевод",unknown:"Перенесено",balance:"Перенос с баланса",refund:"Возврат",refund_pending:"Ожидает возврата"};
+const PAY_METHODS = {cash:"Наличные",paykeeper:"По ссылке PayKeeper",paykeeper_manual:"По ссылке PayKeeper",card_branch:"Эквайринговый терминал Сбера",sber_qr_branch:"По QR Сбера на филиале",tochka_qr_link:"По QR/ссылке Точки от администратора",card:"Картой (канал не уточнён)",sbp:"СБП (банк не уточнён)",online:"Онлайн-оплата (канал не уточнён)",transfer:"Перевод",unknown:"Перенесено",opening_balance:"Исторический остаток — оплачено ранее",balance:"Перенос с баланса",refund:"Возврат",refund_pending:"Ожидает возврата"};
 const PAY_MANUAL_METHODS = ['cash','paykeeper_manual','card_branch','sber_qr_branch','tochka_qr_link','transfer'];
-const PAY_INTERNAL = ["unknown", "balance", "refund", "refund_pending"];  // ставит сама CRM, при приёме оплаты не выбираются
+const PAY_INTERNAL = ["unknown", "opening_balance", "balance", "refund", "refund_pending"];  // ставит сама CRM, при приёме оплаты не выбираются
 
 async function api(method, url, body) {
   const opt = { method, headers: {}, credentials: "same-origin" };
@@ -2363,7 +2363,7 @@ async function confirmSubscriptionRefund(rid,button,d,reload) {
 function clientBalanceHtml(d) {
   return `<h3>Оплаты и баланс</h3><div class="balance-summary"><div class="${d.balance.debt?'has-debt':''}"><small>Задолженность</small><b>${rub(d.balance.debt)}</b><span>По прошедшим и текущим счетам</span></div><div><small>Будущие занятия</small><b>${rub(d.balance.upcoming)}</b><span>К оплате за следующий месяц</span></div><div><small>Деньги на балансе</small><b>${rub(d.balance.deposit)}</b><span>Доступны для оплаты занятий</span>${balanceLabelsHtml(d.balance.balance_labels)}</div></div>
     ${(d.unpaid_cur||[]).length?`<div class="finance-note">Нужно проверить оплату текущих занятий: ${(d.unpaid_cur||[]).map(esc).join(', ')}</div>`:''}
-    ${subscriptionCancellationsHtml(d)}<div id="pay-form"></div><div id="pay-links"></div>
+    ${subscriptionCancellationsHtml(d)}<div class="sc-actions"><button class="btn primary sm" id="bal-topup">+ Пополнить баланс</button></div><div id="pay-form"></div><div id="pay-links"></div>
     <h4 class="finance-history-title">История денег</h4>${d.payments.length?`<ul class="pay-list ${d.payments.length>4?'folded':''}">${d.payments.map(p=>`<li class="payment-card ${p.cancelled?'is-cancelled':''}"><div class="finance-card-head"><div><b class="payment-amount ${p.amount<0?'refund':''}">${p.amount<0?'−':'+'}${rub(Math.abs(p.amount))}</b><div class="small muted">${p.method==='refund_pending'?'Зарезервировано для возврата':p.amount<0?'Возврат':'Поступление'} · ${esc(p.method_label||PAY_METHODS[p.method]||p.method)}</div></div><time>${dtShort(p.paid_at)}</time></div>${p.comment?`<div class="payment-comment">${esc(p.comment)}</div>`:''}<div class="small muted">${esc(p.user_name||'')}${p.cancelled?' · отменён':p.confirmed?'':' · ждёт подтверждения'}</div>${S.user.role==='admin'&&!p.cancelled&&!['unknown','refund_pending','refund'].includes(p.method)?`<details class="finance-detail"><summary>Действия с платежом</summary>${p.confirmed?'':`<button class="btn sm" data-pconf="${p.id}">Подтвердить</button>`}<button class="btn sm danger" data-pcancel="${p.id}">Отменить платёж</button></details>`:''}</li>`).join('')}</ul>`:'<p class="muted">Платежей пока нет</p>'}${d.payments.length>4?`<button class="linkish" id="pay-more">Показать всю историю (${d.payments.length})</button>`:''}
     ${d.family_kids.length||d.balance.deposit?`<details class="finance-detail"><summary>Другие операции</summary><div class="sc-actions">${d.family_kids.length?'<button class="btn sm" id="pay-fam">Оплата за семью</button>':''}${d.balance.deposit&&d.family_kids.length?'<button class="btn sm" id="bal-move">Перенести баланс другому ребёнку</button>':''}${d.balance.deposit&&can('payments','view')?'<button class="btn sm" id="bal-refund">Вернуть деньги с баланса</button>':''}</div></details>`:''}`;
 }
@@ -2708,6 +2708,24 @@ async function openStudent(id, options = {}) {
   body.querySelectorAll("[data-cert]").forEach((x) => (x.onchange = async () => {
     try { await api("POST", `/api/attendance/${x.dataset.cert}/cert`, { cert: x.checked }); toast(x.checked ? "Справка отмечена" : "Справка снята"); } catch (e) { fail(e); x.checked = !x.checked; }
   }));
+  if ($("#bal-topup")) $("#bal-topup").onclick = () => {
+    const requestKey=window.crypto?.randomUUID?.()||Date.now()+"-"+Math.random().toString(36).slice(2);
+    $("#pay-form").innerHTML=`<form class="quote balance-topup-form" style="margin-top:10px">
+      <div class="row"><b class="grow">Пополнение баланса</b><button type="button" class="icon-btn" data-balance-topup-close aria-label="Закрыть">✕</button></div>
+      <div class="field"><label>Основание</label><select name="basis"><option value="payment">Новая оплата — деньги получены сейчас</option><option value="historical">Старые данные — было оплачено ранее</option></select></div>
+      <div class="row"><div class="field"><label>Сумма, ₽</label><input name="amount" type="number" min="1" step="1" required></div>
+        <div class="field"><label>Фактическая дата</label><input name="paid_at" type="date" value="${S.meta.today}" max="${S.meta.today}" required></div></div>
+      <div class="field" data-topup-method><label>Как получены деньги</label><select name="method">${Object.entries(PAY_METHODS).filter(([k])=>PAY_MANUAL_METHODS.includes(k)).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join("")}</select></div>
+      <div class="field"><label>Комментарий</label><textarea name="comment" rows="2" maxlength="1000" placeholder="Для старых данных обязательно укажите источник информации"></textarea></div>
+      <p class="small muted" data-topup-hint>Это новая оплата. Она попадёт в реестр на указанную дату и потребует обычного подтверждения/чека по выбранному способу</p>
+      <p class="small">Вся сумма останется на свободном балансе. Выставленные счета не оплачиваются автоматически — зачесть баланс можно только отдельным явным действием</p>
+      <p class="need-err small" data-topup-error></p><button class="btn primary" type="submit">Пополнить баланс</button></form>`;
+    const form=$("#pay-form form"),basis=form.elements.basis,method=form.querySelector("[data-topup-method]"),hint=form.querySelector("[data-topup-hint]");
+    const sync=()=>{const historical=basis.value==="historical";method.hidden=historical;form.elements.comment.required=historical;form.elements.paid_at.max=historical?addDays(S.meta.today,-1):S.meta.today;if(historical&&form.elements.paid_at.value>=S.meta.today)form.elements.paid_at.value=addDays(S.meta.today,-1);hint.textContent=historical?"Новая оплата и новый чек не создаются. Запись сохраняется прошедшей датой и не входит в сегодняшнюю выручку":"Это новая оплата. Она попадёт в реестр на указанную дату и потребует обычного подтверждения/чека по выбранному способу"};
+    basis.onchange=sync;sync();form.querySelector("[data-balance-topup-close]").onclick=()=>$("#pay-form").replaceChildren();
+    form.onsubmit=async e=>{e.preventDefault();const button=form.querySelector("[type=submit]"),error=form.querySelector("[data-topup-error]");button.disabled=true;error.textContent="";try{const r=await api("POST",`/api/students/${id}/balance-topup`,{basis:basis.value,amount:+form.elements.amount.value,paid_at:form.elements.paid_at.value,method:form.elements.method.value,comment:form.elements.comment.value,request_key:requestKey});toast(`Сохранено. Свободный баланс: ${rub(r.balance.deposit)}`);reload()}catch(err){error.textContent=err.message;button.disabled=false}};
+    form.scrollIntoView({block:"center",behavior:"smooth"});form.elements.amount.focus();
+  };
   if ($("#pay-fam")) $("#pay-fam").onclick = () => payForm("Оплата за семью: закроет счета всех детей, остаток на баланс", 0,
     async (amount, method, comment) => { const r = await api("POST", `/api/students/${id}/pay-family`, { amount, method, comment });
       toast(r.parts.map((p) => `${p.name} ${rub(p.amount)}`).join(", ")); });
