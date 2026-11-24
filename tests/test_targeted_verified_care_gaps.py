@@ -40,6 +40,16 @@ class VerifiedCareGapsTest(unittest.TestCase):
         self.assertTrue(all(row["event_kind"] == "sale_fact" for row in rows))
         self.assertTrue(all("payment_method" not in row for row in rows))
 
+    def test_cross_message_trainer_groups_reduce_manual_scope_without_inventing_periods(self):
+        rows = {row["student_name"]: row for row in batch.events() if row["student_name"] in {
+            "Мамедов Даниил", "Замковой Илья", "Гмыря Артем", "Малышев Артем"}}
+        self.assertIn("пн/чт 19:45", rows["Мамедов Даниил"]["note"])
+        self.assertIn("вт/пт 17:45", rows["Замковой Илья"]["note"])
+        self.assertIn("вт/пт 18:45", rows["Гмыря Артем"]["note"])
+        self.assertIn("вт/пт 18:45", rows["Малышев Артем"]["note"])
+        self.assertTrue(all(row["event_kind"] == "sale_fact" for row in rows.values()))
+        self.assertTrue(all("payment_method" not in row for row in rows.values()))
+
     def test_only_confirmed_refund_is_not_left_as_a_request(self):
         refunds=[row for row in batch.events() if row["event_kind"] in ("refund_fact","refund_request")]
         confirmed=[row for row in refunds if row["event_kind"]=="refund_fact"]
