@@ -255,10 +255,16 @@ def _plan(con, exports):
                         erp_profile = erp_matches[0]
             if len(matches) != 1:
                 if erp_profile:
+                    families = sv.find_families_by_phone(con, erp_profile["phone"])
+                    if len(families) > 1:
+                        unresolved.append({**row, "reason": "по телефону ERP найдено несколько семей CRM",
+                                           "matches": [], "erp_matches": [erp_profile["name"]]})
+                        continue
                     group_id = _erp_group(con, erp_profile, row["time"])
                     attendance.append({**row, "student_id": None, "student_name": erp_profile["name"],
                         "source_id": f"{row['source_id']}:erp:{erp_profile['erp_id']}", "already": False,
-                        "create_from_erp": {**erp_profile, "group_id": group_id}})
+                        "create_from_erp": {**erp_profile, "group_id": group_id,
+                                            "family_id": families[0]["id"] if families else None}})
                     continue
                 erp_matches = _erp_match(erp_profiles, row["name"], row["time"])
                 reason = "карточка и однозначная полная запись ERP не найдены"
@@ -322,8 +328,15 @@ def apply(con, exports, token, user):
                 else:
                     sid = sv.create_student(con, {"name": profile["name"], "birth": profile["birth"],
                         "parent_name": profile["parent_name"], "phone": profile["phone"], "email": profile["email"],
+                        "family_id": profile.get("family_id"),
                         "group_id": profile.get("group_id"), "funnel": "members" if profile.get("group_id") else "sales",
                         "source": "ERP"}, user)
+                    if profile.get("family_id"):
+                        con.execute("""UPDATE parents SET
+                            name=CASE WHEN trim(COALESCE(name,''))='' THEN ? ELSE name END,
+                            email=CASE WHEN trim(COALESCE(email,''))='' THEN ? ELSE email END
+                            WHERE id=(SELECT id FROM parents WHERE family_id=? ORDER BY is_primary DESC,id LIMIT 1)""",
+                            (profile["parent_name"], profile["email"], profile["family_id"]))
                     con.execute("UPDATE students SET erp_id=?,erp_status=? WHERE id=?",
                                 (profile["erp_id"], profile["status"], sid))
                     sv.log(con, sid, "Карточка создана из ERP перед переносом подтверждённых сведений ТРЕНЕРЫ",

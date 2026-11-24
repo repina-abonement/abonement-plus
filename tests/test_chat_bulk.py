@@ -69,6 +69,9 @@ class ChatBulkTest(unittest.TestCase):
     def test_missing_card_is_created_from_complete_staged_erp_profile(self, fake_date):
         from datetime import date
         fake_date.today.return_value = date(2026, 11, 24)
+        sibling = sv.create_student(self.con, {"name": "Анна Петрова", "parent_name": "Мария",
+            "phone": "79990000003", "group_id": self.group}, self.user)
+        family_id = self.con.execute("SELECT family_id FROM students WHERE id=?", (sibling,)).fetchone()[0]
         erpimport.upload(self.con, "visitors.csv", (
             "ID;ФИО посетителя;Телефон;Имя родителя;Статус;Дата рождения;Филиал;Группа\n"
             "777;Пётр Петров;79990000003;Мария;Постоянный посетитель;01.02.2020;Небо;Небо ПУП\n"
@@ -79,6 +82,8 @@ class ChatBulkTest(unittest.TestCase):
         plan = chatbulk.plan(self.con, exports)
         self.assertEqual(1, plan["trainer"]["create_from_erp"])
         self.assertEqual(2, plan["trainer"]["erp_attendance_rows"])
+        profile = next(x["create_from_erp"] for x in plan["attendance"] if x.get("create_from_erp"))
+        self.assertEqual(family_id, profile["family_id"])
         result = chatbulk.apply(self.con, exports, plan["token"], self.user)
         self.assertEqual(1, result["created_from_erp"])
         student = self.con.execute("SELECT id,birth,erp_status FROM students WHERE erp_id='777'").fetchone()
@@ -86,6 +91,8 @@ class ChatBulkTest(unittest.TestCase):
         parent = self.con.execute("""SELECT name,phone FROM parents
             WHERE family_id=(SELECT family_id FROM students WHERE id=?)""", (student["id"],)).fetchone()
         self.assertEqual(("Мария", "79990000003"), tuple(parent))
+        self.assertEqual(family_id, self.con.execute("SELECT family_id FROM students WHERE id=?", (student["id"],)).fetchone()[0])
+        self.assertEqual(1, self.con.execute("SELECT count(*) FROM parents WHERE family_id=?", (family_id,)).fetchone()[0])
 
     @patch("crm.chatbulk.date")
     def test_unique_surname_creates_a_card_from_complete_erp_profile(self, fake_date):
