@@ -4,7 +4,31 @@ import json
 from . import chatdaytransfer
 
 
-KEY = "targeted_fresh_telegram_20261124_v1"
+KEY = "targeted_fresh_telegram_20261124_v2"
+
+ERP_PROFILES = {
+    "Даниил Бородин": dict(erp_id="96240", birth="2020-12-08", parent_name="Анна", phone="+79259367897", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 18:45 возраст 5-6", history=[dict(at="2026-11-02T00:00",text="абонемент, группа СТОП Небо ПУП пн/чт/сб 18:45, период 02.11–30.11")]),
+    "Антон Деменев": dict(erp_id="103975", birth="2020-05-28", parent_name="Майя", phone="+79854352626", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 18:45 возраст 5-6", history=[dict(at="2026-11-01T00:00",text="абонемент, группа СТОП Небо ПУП пн/чт/сб 18:45, период 02.11–30.11")]),
+    "Иван Черных": dict(erp_id="133160", birth="2016-04-15", parent_name="Елена", phone="+79601333926", erp_status="Постоянный посетитель", group="Чоботовская сб/вс 6-8", history=[dict(at="2026-11-07T00:00",text="абонемент, группа Чоботовская сб/вс 6-8, период 07.11–29.11")]),
+    "Илья Морозов": dict(erp_id="130752", birth="2021-07-08", parent_name="Наталья", phone="+79032090955", erp_status="Постоянный посетитель", group="Небо ПУП пн/чт/сб 16:45 возраст 3-4", history=[dict(at="2026-11-02T00:00",text="абонемент, группа Небо ПУП пн/чт/сб 16:45, период 02.11–30.11")]),
+    "Михаил Морозов": dict(name="Миша Морозов", erp_id="130753", birth="2022-11-25", parent_name="Наталья", phone="+79032090955", erp_status="Постоянный посетитель", group="Небо ПУП пн/чт/сб 16:45 возраст 3-4", history=[dict(at="2026-11-02T00:00",text="абонемент, группа Небо ПУП пн/чт/сб 16:45, период 02.11–30.11")]),
+    "Дмитрий Королёв": dict(erp_id="80953", birth="2021-04-22", parent_name="Наталья", phone="+79261834378", email="nsavkina81@mail.ru", erp_status="Был на пробном, не купил абонемент", group="СТОП Небо ПУП пн/чт/сб 17:45 возраст 4-5"),
+    "Владимир Прохоренко": dict(name="Вова Прохоренко", erp_id="128476", birth="2022-03-07", parent_name="Наталья", phone="+79264191683", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 17:45 возраст 4-5", history=[dict(at="2026-11-02T00:00",text="абонемент, группа СТОП Небо ПУП пн/чт/сб 17:45, период 02.11–30.11")]),
+    "Кирилл Мун": dict(erp_id="101579", birth="2022-03-04", parent_name="Дарья", phone="+79161108711", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 17:45 возраст 4-5", history=[dict(at="2026-11-02T00:00",text="абонемент, группа СТОП Небо ПУП пн/чт/сб 17:45, период 02.11–30.11")]),
+    "Вася Артамонов": dict(erp_id="112091", birth="2021-09-09", parent_name="Анастасия", phone="+79100876088", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 17:45 возраст 4-5", history=[dict(at="2026-11-02T00:00",text="абонемент, группа СТОП Небо ПУП пн/чт/сб 17:45, период 02.11–30.11")]),
+    "Владимир Сафронов": dict(erp_id="111692", birth="2022-03-26", parent_name="Виктория", phone="+79015138399", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 17:45 возраст 4-5", history=[dict(at="2026-11-02T00:00",text="абонемент, группа СТОП Небо ПУП пн/чт/сб 17:45, период 02.11–30.11")]),
+    "Арсений Горбачёв": dict(name="Арсений Горбачев", erp_id="116282", birth="2022-08-23", parent_name="Ксения", phone="+79998611901", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 17:45 возраст 4-5", history=[dict(at="2026-11-02T00:00",text="абонемент, группа СТОП Небо ПУП пн/чт/сб 17:45, период 02.11–30.11")]),
+    "Максим Мастеренко": dict(erp_id="83867", birth="2020-03-27", parent_name="Анна", phone="+79030083078", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 18:45 возраст 5-6"),
+    "Родион Варновский": dict(erp_id="86488", birth="2021-08-27", parent_name="Артем", phone="+79267081022", email="varnovsky@yandex.ru", erp_status="", group="СТОП Небо ПУП пн/чт/сб 18:45 возраст 5-6"),
+    "Егор Чугунов": dict(erp_id="129379", birth="2020-12-24", parent_name="Гузель", phone="+79629171342", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 18:45 возраст 5-6", history=[dict(at="2026-11-02T00:00",text="абонемент, группа СТОП Небо ПУП пн/чт/сб 18:45, период 02.11–30.11")]),
+    "Илья Оруджов": dict(erp_id="103859", birth="2020-08-28", parent_name="Анастасия", phone="+79037350736", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 19:45 возраст 6-8", history=[dict(at="2026-11-02T00:00",text="абонементы: СТОП Небо ПУП пн/чт/сб 19:45, период 02.11–30.11; Небо НУП ср/вс 19:45, период 04.11–25.11; отработка 14.11")]),
+    "Андрей Лубяницкий": dict(erp_id="68549", birth="2019-11-15", parent_name="Ирина", phone="+79272738446", email="lub-irina@yandex.ru", erp_status="Нет абонемента", group="СТОП Небо ПУП пн/чт/сб 19:45 возраст 6-8"),
+    "Алексей Калинин": dict(erp_id="110372", birth="2018-11-27", parent_name="Калинина Кристина Сергеевна", phone="+79264777614", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 19:45 возраст 6-8", history=[dict(at="2026-11-01T00:00",text="абонемент, группа СТОП Небо ПУП пн/чт/сб 19:45, период 02.11–30.11")]),
+    "Виктор Данейкин": dict(erp_id="88688", birth="2020-04-06", parent_name="Татьяна", phone="+79265241538", email="tiana2003@bk.ru", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 18:45 возраст 5-6", history=[dict(at="2026-11-02T00:00",text="абонемент, группа СТОП Небо ПУП пн/чт/сб 18:45, период 02.11–30.11")]),
+    "Михаил Гущо": dict(erp_id="117687", birth="2020-02-28", parent_name="Наталия", phone="+79645669815", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 19:45 возраст 6-8", history=[dict(at="2026-11-02T00:00",text="абонемент, группа СТОП Небо ПУП пн/чт/сб 19:45, период 02.11–30.11")]),
+    "Даниил Мамедов": dict(erp_id="88202", birth="2020-01-28", parent_name="Анастасия", phone="+79778500815", email="Stasia_93@inbox.ru", erp_status="Постоянный посетитель", group="СТОП Небо ПУП пн/чт/сб 19:45 возраст 6-8", history=[dict(at="2026-11-12T00:00",text="абонемент, группа СТОП Небо ПУП пн/чт/сб 19:45, период 12.11–30.11")]),
+    "Леон Погосян": dict(erp_id="105641", birth="2020-11-19", parent_name="Лена", phone="+79613348693", erp_status="Постоянный посетитель", group="Небо НУП сб/вс 12:00 возраст 5-6", history=[dict(at="2026-11-01T00:00",text="абонемент, группа Небо НУП сб/вс 12:00, период 01.11–29.11; отработка 04.11")]),
+}
 
 
 def _event(message, key, at, name, note, task_title="", task_due=""):
@@ -13,6 +37,10 @@ def _event(message, key, at, name, note, task_title="", task_due=""):
     if task_title:
         event.update(task_title=task_title, task_due=task_due,
                      task_note="Проверенный факт из СЗ: " + note)
+    profile = ERP_PROFILES.get(name)
+    if profile:
+        event.update(erp_create_if_missing=True, erp_id=profile["erp_id"],
+                     erp_group_name=profile.get("group", ""), erp_profile=profile)
     return event
 
 
@@ -50,7 +78,7 @@ def events():
         _event(22997,"mun","2026-11-23T18:16:12","Кирилл Мун",
                "СЗ: ребёнка привела няня; нужно написать маме об оплате",
                "Написать маме об оплате", "2026-11-24T23:59"),
-        _event(22997,"artamonov","2026-11-23T18:16:12","Василий Артамонов",
+        _event(22997,"artamonov","2026-11-23T18:16:12","Вася Артамонов",
                "СЗ: семья сомневается в продлении; причину выяснить не удалось, мама отвечала односложно",
                "Выяснить причину сомнений и отработать продление", "2026-11-24T23:59"),
         _event(22997,"safronov","2026-11-23T18:16:12","Владимир Сафронов",
@@ -109,7 +137,8 @@ def apply(con):
         return {"state": "not_target_database"}
     result = chatdaytransfer.apply(con, {"events": events()}, dict(actor))
     report = {"state": "complete" if not result["errors"] and not result["unmatched"] and not result["ambiguous"] else "verification_failed",
-              "counts": {key: len(value) for key, value in result.items()},
+              "counts": {**{key: len(value) for key, value in result.items()},
+                         "created_from_erp": sum(bool(item.get("created")) for item in result["applied"])},
               "unmatched": result["unmatched"], "ambiguous": result["ambiguous"], "errors": result["errors"]}
     con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES (?,?)", (KEY, json.dumps(report, ensure_ascii=False)))
     return report

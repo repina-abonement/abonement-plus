@@ -285,7 +285,8 @@ def apply(con,data,user):
             if erp_allowed:
                 con.execute('SAVEPOINT chat_day_event')
                 try:
-                    name=str(event['student_name']).strip();family=con.execute('INSERT INTO families(name) VALUES (?)',(name.split()[0],)).lastrowid
+                    profile=event.get('erp_profile') if isinstance(event.get('erp_profile'),dict) else {}
+                    name=str(profile.get('name') or event['student_name']).strip()
                     group=con.execute('SELECT id FROM groups WHERE name=? ORDER BY active DESC,id LIMIT 1',(str(event.get('erp_group_name') or ''),)).fetchone()
                     if not group and event.get('erp_group_time'):
                         rows=con.execute("""SELECT g.id FROM groups g JOIN branches b ON b.id=g.branch_id
@@ -293,9 +294,24 @@ def apply(con,data,user):
                             (str(event['erp_group_time']),'%'+str(event.get('erp_branch_hint') or '')+'%')).fetchall()
                         if len(rows)==1:group=rows[0]
                     gid=group['id'] if group else None
-                    sid=sv.create_student(con,{'name':name,'family_id':family,'funnel':'members' if gid else 'sales',
-                        'group_id':gid,'source':'ERP'},user)
-                    con.execute('UPDATE students SET erp_id=? WHERE id=?',(str(event['erp_id']).strip(),sid))
+                    create_data={'name':name,'birth':str(profile.get('birth') or ''),
+                        'parent_name':str(profile.get('parent_name') or ''),'phone':str(profile.get('phone') or ''),
+                        'email':str(profile.get('email') or ''),'funnel':'members' if gid else 'sales',
+                        'group_id':gid,'source':'ERP'}
+                    if not create_data['parent_name'] or not create_data['phone']:
+                        create_data['family_id']=con.execute('INSERT INTO families(name) VALUES (?)',(name.split()[0],)).lastrowid
+                    sid=sv.create_student(con,create_data,user)
+                    if profile.get('email'):
+                        con.execute("UPDATE parents SET email=? WHERE family_id=(SELECT family_id FROM students WHERE id=?)",
+                                    (str(profile['email']).strip(),sid))
+                    con.execute('UPDATE students SET erp_id=?,erp_status=? WHERE id=?',
+                                (str(event['erp_id']).strip(),str(profile.get('erp_status') or ''),sid))
+                    for item in profile.get('history',[]) if isinstance(profile.get('history'),list) else []:
+                        if not isinstance(item,dict):continue
+                        text='ERP с 01.11: '+str(item.get('text') or '').strip()
+                        if text!='ERP с 01.11: ':
+                            con.execute('INSERT INTO history(student_id,ts,user_name,kind,text) VALUES (?,?,?,?,?)',
+                                (sid,str(item.get('at') or '2026-11-01T00:00')[:19],'Перенос ERP','erp',text))
                     matches=[{'id':sid,'name':name}];created=True
                 except Exception as exc:
                     con.execute('ROLLBACK TO chat_day_event');con.execute('RELEASE chat_day_event')
@@ -383,7 +399,7 @@ def apply(con,data,user):
             con.execute('INSERT INTO chat_day_transfer_events VALUES (?,?,?,?,?,?,?,?)',(source,sid,str(event.get('source_chat') or ''),at,str(event.get('event_kind') or 'note'),json.dumps(event,ensure_ascii=False),sv.now_iso(),user.get('name','')))
             tasks.ensure_client_task_coverage(con)
             con.execute('RELEASE chat_day_event')
-            result['applied'].append({'source_id':source,'student_id':sid,'name':matches[0]['name'],'trial_marked':marked,'single_sale':single_sale,'subscription_sale':subscription_sale,'added':note,'tasks':_current_tasks(con,sid)})
+            result['applied'].append({'source_id':source,'student_id':sid,'name':matches[0]['name'],'created':created,'trial_marked':marked,'single_sale':single_sale,'subscription_sale':subscription_sale,'added':note,'tasks':_current_tasks(con,sid)})
         except BaseException as error:
             con.execute('ROLLBACK TO chat_day_event');con.execute('RELEASE chat_day_event')
             result['errors'].append({'source_id':source,'name':event.get('student_name'),'error':str(error)})

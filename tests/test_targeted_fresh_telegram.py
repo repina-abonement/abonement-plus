@@ -34,6 +34,23 @@ class FreshTelegramFactsTest(unittest.TestCase):
             "SELECT count(*) FROM tasks WHERE auto_key='chat-day:telegram:sz-23001:chugunov' AND status='open'"
         ).fetchone()[0])
 
+    def test_missing_card_is_recreated_from_full_erp_profile(self):
+        row = self.con.execute("SELECT id,family_id FROM students WHERE name='Виктор Данейкин'").fetchone()
+        self.con.execute("DELETE FROM students WHERE id=?", (row["id"],))
+        self.con.execute("DELETE FROM families WHERE id=?", (row["family_id"],))
+        result = targetedfreshtelegram.apply(self.con)
+        self.assertEqual("complete", result["state"], result)
+        self.assertEqual(1, result["counts"]["created_from_erp"])
+        student = self.con.execute("SELECT id,erp_id,birth,erp_status FROM students WHERE erp_id='88688'").fetchone()
+        self.assertIsNotNone(student)
+        self.assertEqual(("88688", "2020-04-06", "Постоянный посетитель"), tuple(student)[1:])
+        parent = self.con.execute("""SELECT name,phone,email FROM parents
+            WHERE family_id=(SELECT family_id FROM students WHERE id=?)""", (student["id"],)).fetchone()
+        self.assertEqual(("Татьяна", "+79265241538", "tiana2003@bk.ru"), tuple(parent))
+        self.assertEqual(1, self.con.execute(
+            "SELECT count(*) FROM history WHERE student_id=? AND kind='erp' AND text LIKE 'ERP с 01.11:%'", (student["id"],)
+        ).fetchone()[0])
+
 
 if __name__ == "__main__":
     unittest.main()
