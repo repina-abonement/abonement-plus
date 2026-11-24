@@ -147,8 +147,12 @@ class VerifiedCareGapsTest(unittest.TestCase):
                "clarification_task_title":"Закрепить точную группу"}
         result=chatdaytransfer.apply(con,{"events":[event]},{"id":1,"role":"admin","name":"Юлия Репина"})
         self.assertEqual(1,len(result["applied"]))
+        repeated=chatdaytransfer.apply(con,{"events":[event]},{"id":1,"role":"admin","name":"Юлия Репина"})
+        self.assertEqual(1,len(repeated["already"]))
         student=con.execute("SELECT name,birth,trial_at FROM students WHERE name='Юрков Лев'").fetchone()
         self.assertEqual(("Юрков Лев","2021-05-01",None),(student["name"],student["birth"],student["trial_at"]))
+        self.assertEqual(1,con.execute("SELECT count(*) FROM students WHERE name='Юрков Лев'").fetchone()[0])
+        self.assertEqual(1,con.execute("SELECT count(*) FROM chat_day_transfer_events WHERE source_id='sz:identity'").fetchone()[0])
 
 
 if __name__ == "__main__":
