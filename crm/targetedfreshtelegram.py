@@ -4,7 +4,7 @@ import json
 from . import chatdaytransfer, money, pricing, services, tasks
 
 
-KEY = "targeted_fresh_telegram_20261124_v7"
+KEY = "targeted_fresh_telegram_20261124_v8"
 DANEYKIN_DECEMBER_TASK = "chat-day:telegram:sz-23018:daneykin"
 POGOSYAN_DECEMBER_TASK = "chat-day:telegram:sz-23043:pogosyan"
 
@@ -72,7 +72,7 @@ def events():
                "СЗ: подтверждено продление на декабрь Пн/Чт/Сб, 12 занятий, 13 800 ₽ через Точка Банк; электронный чек подтверждён",
                "Оформить подтверждённый декабрьский абонемент", "2026-11-24T23:59"),
         _event(22966,"golushko","2026-11-23T15:14:35","Егор Голушко",
-               "СЗ: записан на пробное 29.11 в 16:45; рекламный источник — ТРЦ Небо, семья зашла и увидела филиал"),
+               "СЗ: Егор Голушко, дата рождения 08.04.2023, записан на пробное 29.11 в 16:45; рекламный источник — ТРЦ Небо, семья зашла и увидела филиал. Имя родителя и телефон в доступных источниках не найдены"),
         _event(22969,"chernykh","2026-11-23T15:22:04","Иван Черных",
                "СЗ: подтверждено продление на декабрь в Чоботовской, гибкий абонемент 6 тренировок; 26–27 декабря уезжают; оплачено 7 950 ₽ через Точка Банк с зачётом отменённого занятия 1 350 ₽; чек подтверждён",
                "Оформить подтверждённый декабрьский абонемент", "2026-11-24T23:59"),
@@ -323,6 +323,27 @@ def _pogosyan_december_sale(con, actor):
         return {"state": "blocked", "student_id": sid, "reason": str(error)}
 
 
+def _reconcile_missing_identity_tasks(con, result):
+    """Keep one manual task only when the exports truly lack card identity."""
+    key = "telegram:sz-22966:golushko-identity"
+    missing = any(row.get("source_id") == "telegram:sz-22966:golushko" for row in result.get("unmatched", []))
+    existing = con.execute("SELECT id,status FROM tasks WHERE auto_key=? ORDER BY id DESC LIMIT 1", (key,)).fetchone()
+    if missing:
+        varya = con.execute("""SELECT id FROM users WHERE active=1 AND role='operator'
+            AND (name LIKE '%Варвар%' OR trim(name)='Варя') ORDER BY is_senior DESC,id LIMIT 1""").fetchone()
+        assignee = varya["id"] if varya else None
+        task_id = tasks.add_task(con, "manual", None, "2026-11-24T23:59", auto_key=key,
+            title="Установить контакт семьи Егора Голушко",
+            note="СЗ №22966: Егор Голушко, 08.04.2023, ПУ 29.11 в 16:45, источник ТРЦ Небо. В СЗ и доступном ERP нет имени родителя и телефона; карточку по догадке не создавать. Найти контакт по записи филиала и после этого внести ПУ.",
+            source="manual", assignee=assignee, shared=not bool(assignee))
+        return {"state": "open", "task_id": task_id, "assignee_id": assignee}
+    if existing and existing["status"] == "open":
+        con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',
+            result='Карточка Голушко найдена, факт СЗ применён автоматически' WHERE id=?""",
+            (con.execute("SELECT datetime('now')").fetchone()[0], existing["id"]))
+    return {"state": "not_needed", "task_id": existing["id"] if existing else None}
+
+
 def apply(con):
     previous = con.execute("SELECT value FROM settings WHERE key=?", (KEY,)).fetchone()
     if previous:
@@ -336,6 +357,7 @@ def apply(con):
     if not actor:
         return {"state": "not_target_database"}
     result = chatdaytransfer.apply(con, {"events": events()}, dict(actor))
+    identity_tasks = _reconcile_missing_identity_tasks(con, result)
     attendance = _trainer_attendance(con)
     daneykin_sale = _daneykin_december_sale(con, dict(actor))
     pogosyan_sale = _pogosyan_december_sale(con, dict(actor))
@@ -345,7 +367,7 @@ def apply(con):
                          "created_from_erp": sum(bool(item.get("created")) for item in result["applied"])},
               "unmatched": result["unmatched"], "ambiguous": result["ambiguous"], "errors": result["errors"],
               "trainer_attendance": attendance, "daneykin_december_sale": daneykin_sale,
-              "pogosyan_december_sale": pogosyan_sale}
+              "pogosyan_december_sale": pogosyan_sale, "identity_tasks": identity_tasks}
     con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES (?,?)", (KEY, json.dumps(report, ensure_ascii=False)))
     return report
 

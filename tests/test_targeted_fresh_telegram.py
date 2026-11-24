@@ -104,6 +104,19 @@ class FreshTelegramFactsTest(unittest.TestCase):
             WHERE auto_key='trainers:27148:identify-missing-clients'""").fetchone()
         self.assertEqual(("Уточнить восьмого ребёнка группы 18:45", self.varya, "2026-11-24T23:59"), tuple(task))
 
+    def test_missing_golushko_identity_becomes_one_manual_task(self):
+        row = self.con.execute("SELECT id,family_id FROM students WHERE name='Егор Голушко'").fetchone()
+        self.con.execute("DELETE FROM students WHERE id=?", (row["id"],))
+        self.con.execute("DELETE FROM families WHERE id=?", (row["family_id"],))
+        result = targetedfreshtelegram.apply(self.con)
+        self.assertEqual("verification_failed", result["state"])
+        self.assertTrue(any(item["source_id"] == "telegram:sz-22966:golushko"
+                            for item in result["unmatched"]))
+        task = self.con.execute("""SELECT title,assignee_id,due_at,status FROM tasks
+            WHERE auto_key='telegram:sz-22966:golushko-identity'""").fetchone()
+        self.assertEqual(("Установить контакт семьи Егора Голушко", self.varya,
+                          "2026-11-24T23:59", "open"), tuple(task))
+
 
 if __name__ == "__main__":
     unittest.main()
