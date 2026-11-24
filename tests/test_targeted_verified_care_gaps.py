@@ -9,11 +9,11 @@ from crm import chatdaytransfer, db, schedule, services, targetedverifiedcaregap
 
 class VerifiedCareGapsTest(unittest.TestCase):
     def test_revised_package_key_forces_one_safe_reconciliation(self):
-        self.assertTrue(batch.KEY.endswith("_v6"))
+        self.assertTrue(batch.KEY.endswith("_v7"))
 
     def test_sources_are_unique_and_incomplete_money_stays_non_financial(self):
         events = batch.events()
-        self.assertEqual(51, len(events))
+        self.assertEqual(53, len(events))
         self.assertEqual(len(events), len({row["source_id"] for row in events}))
 
         incomplete = [row for row in events if row["event_kind"] == "sale_fact"]
@@ -40,6 +40,15 @@ class VerifiedCareGapsTest(unittest.TestCase):
         self.assertIn("не подтверждены", yakunin["note"])
         self.assertNotIn("amount", yakunin)
         self.assertNotIn("payment_method", yakunin)
+
+    def test_samoylov_siblings_use_exact_erp_identity_without_a_manual_guess(self):
+        rows = [row for row in batch.events() if row["source_id"].startswith("sz:20253:самойлов")]
+        self.assertEqual(2, len(rows))
+        self.assertEqual({"Самойлов Рома", "Самойлова Полина"}, {row["student_name"] for row in rows})
+        self.assertEqual({"2022-12-18", "2021-08-17"}, {row["birth"] for row in rows})
+        self.assertTrue(all(row["phone"] == "+79639242689" for row in rows))
+        self.assertTrue(all(row["create_if_missing"] for row in rows))
+        self.assertTrue(all(row["event_kind"] == "decision_fact" for row in rows))
 
     def test_exact_sales_balance_and_dates(self):
         exact = [row for row in batch.events() if row["event_kind"] == "subscription_sale"]
