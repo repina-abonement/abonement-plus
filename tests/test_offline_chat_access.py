@@ -37,7 +37,7 @@ class OfflineChatAccess(unittest.TestCase):
                 for token,user in users:
                     self.assertTrue(user['is_offline_admin']);self.assertEqual(perms.title(user),'Офлайн-администратор')
                     code,meta=call(token,'GET','/api/meta');self.assertEqual(code,200);self.assertEqual(meta['user']['perms']['inbox'],'full')
-                    self.assertEqual(set(meta['user']['perms']),{'sales','members','skips','schedule','inbox','planner','search','staffexpenses','client_sales','client_create','client_ops','merch_stock'})
+                    self.assertEqual(set(meta['user']['perms']),{'sales','members','skips','schedule','inbox','planner','search','staffexpenses','client_sales','client_create','client_ops','merch_stock','journal'})
                     self.assertEqual(call(token,'GET','/api/board/sales')[0],200)
                     for forbidden in ['/api/payments','/api/users']:
                         self.assertEqual(call(token,'GET',forbidden)[0],403,forbidden)
