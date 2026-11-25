@@ -30,9 +30,12 @@ def main():
         sv.mark_attendance(con, sid, group, '2026-11-13', 'present', actor)
         assert not con.execute("SELECT 1 FROM tasks WHERE auto_key LIKE 'life:unpaid_visit:%'").fetchone()
         options = {'tariff': 'flex', 'credit_requested': True, 'group_id': group}
-        quote = sv.quote_for(con, sid, '2026-12', **options)
-        assert quote['credit_absence_dates'] == [day] and quote['credit'] > 0, quote
-        sv.create_invoice(con, sid, '2026-12', actor, **options)
+        for tariff in ('flex', 'fixed'):
+            quote = sv.quote_for(con, sid, '2026-12', **dict(options, tariff=tariff))
+            assert quote['credit_absence_dates'] == [day] and quote['credit'] == quote['per_lesson'], quote
+        invoice = sv.create_invoice(con, sid, '2026-12', actor, **dict(options, tariff='fixed'))
+        saved = con.execute('SELECT tariff,credit_lessons FROM subscriptions WHERE id=?', (invoice['id'],)).fetchone()
+        assert tuple(saved) == ('fixed', 1)
         assert con.execute('SELECT resolved FROM attendance WHERE student_id=? AND date=?', (sid, day)).fetchone()[0] == 'credit'
         assert not con.execute('SELECT 1 FROM payments WHERE student_id=?', (sid,)).fetchone()
         assert sv.quote_for(con, sid, '2026-12', **options)['credit_available'] == 0

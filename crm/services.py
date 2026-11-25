@@ -392,15 +392,15 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
         else:
             e = dict(e, tariff=tariff)
     cert_from = (con.execute("SELECT value FROM settings WHERE key='cert_required_from'").fetchone() or ["9999"])[0]
-    # перерасчёт на «Гибком»: без справки (с 01.11.2026), не больше 3 и только при оплате следующего месяца
+    # Право на перерасчёт определяется тарифом прошлого месяца.
     prev_abs = unresolved_absences_in_month(con, sid, logic.shift_month(ym, -1), e["group_id"], cert_only=ym >= cert_from)
     prev_flex = con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND enrollment_id=? AND month=?
         AND tariff='flex' AND status='paid' AND COALESCE(kind,'month')='month'""", (sid, e["id"], logic.shift_month(ym, -1))).fetchone()
-    historical_flex = e["tariff"] == "flex" and prev_abs and not prev_flex and con.execute(
+    historical_flex = prev_abs and not prev_flex and con.execute(
         """SELECT 1 FROM erp_history_subscriptions
            WHERE student_id=? AND group_id=? AND month=? AND manual_tariff='flex'""",
         (sid, e["group_id"], logic.shift_month(ym, -1))).fetchone()
-    eligible = prev_abs if (prev_flex or historical_flex) and e["tariff"] == "flex" else []
+    eligible = prev_abs if prev_flex or historical_flex else []
     from . import groupterms
     special=groupterms.terms(con,e['group_id'],ym)
     credit_limit=special['credit_limit'] if special else logic.MAX_FLEX_CREDIT
@@ -438,7 +438,7 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
     exceptions = subscriptiondates.validate(excluded_dates, available)
     closed = closed | set(exceptions)
     q = logic.quote(weekdays=weekdays, ym=ym, tariff=e["tariff"], prices={"fixed": pr["fixed"], "flex": pr["flex"]},
-                    vacations=vacations_of(con, sid), prev_unresolved_absences=min(len(eligible), len(available) - len(exceptions)) if requested else 0, closed=closed,credit_limit=credit_limit)
+                    vacations=vacations_of(con, sid), prev_unresolved_absences=min(len(eligible), len(available) - len(exceptions)) if requested else 0, closed=closed,credit_limit=credit_limit,allow_fixed_credit=True)
     q['trial_cutoff']=cutoff
     q['pricing_date']=on.isoformat()
     q["calendar_dates"] = available

@@ -25,7 +25,8 @@ def main():
     assert normal['credit_lessons'] == 0 and normal['credit_available'] == 3
     requested = sv.quote_for(con, sid, '2026-12', credit_requested=True)
     assert requested['credit_lessons'] == 3 and requested['total'] == normal['total'] - 4650
-    assert sv.quote_for(con,sid,'2026-12',tariff='fixed',credit_requested=True)['credit_lessons'] == 0
+    fixed = sv.quote_for(con, sid, '2026-12', tariff='fixed', credit_requested=True)
+    assert fixed['credit_lessons'] == 3 and fixed['credit'] == 3 * fixed['per_lesson']
     con.execute("UPDATE subscriptions SET tariff='fixed' WHERE id=?", (previous,))
     assert sv.quote_for(con,sid,'2026-12',credit_requested=True)['credit_lessons'] == 0
     con.execute("UPDATE subscriptions SET tariff='flex' WHERE id=?", (previous,))
