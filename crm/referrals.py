@@ -56,17 +56,8 @@ def award(con, sid, friend_id, user):
             raise ValueError('Бонус за эту рекомендацию уже начислен другой семье')
         return {'already_awarded': True, 'balance': money.balance(con, sid)}
 
-    from . import paymentallocation
-
-    allocation = paymentallocation.allocation(con, friend_id)
-    bonuses = invoice_amounts(allocation)
-    paid_months = con.execute("""SELECT id,price FROM subscriptions WHERE student_id=?
-        AND status='paid' AND COALESCE(kind,'month')='month' AND price>0 ORDER BY month,id""", (friend_id,))
-    bill = next((row for row in paid_months if row['price'] > bonuses.get(row['id'], 0)), None)
-    if not bill or allocation['conflicts']:
-        raise ValueError('У друга пока нет подтверждённого оплаченного абонемента')
     label = f'{LABEL} · {friend["name"]}'
     balancecredit.add_existing_fund(con, sid, AMOUNT, source_ref=ref, label=label,
-        evidence_id=f'subscription:{bill["id"]}', source_kind='referral_bonus', user=user)
+        evidence_id=f'referred-student:{friend_id}', source_kind='referral_bonus', user=user)
     sv.log(con, sid, f'Начислено {AMOUNT:,} ₽ за рекомендацию · {friend["name"]}'.replace(',', ' '), user, 'system')
     return {'already_awarded': False, 'balance': money.balance(con, sid)}
