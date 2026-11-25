@@ -392,15 +392,19 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
         else:
             e = dict(e, tariff=tariff)
     cert_from = (con.execute("SELECT value FROM settings WHERE key='cert_required_from'").fetchone() or ["9999"])[0]
-    # Право на перерасчёт определяется тарифом прошлого месяца.
-    prev_abs = unresolved_absences_in_month(con, sid, logic.shift_month(ym, -1), e["group_id"], cert_only=ym >= cert_from)
-    prev_flex = con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND enrollment_id=? AND month=?
-        AND tariff='flex' AND status='paid' AND COALESCE(kind,'month')='month'""", (sid, e["id"], logic.shift_month(ym, -1))).fetchone()
-    historical_flex = prev_abs and not prev_flex and con.execute(
-        """SELECT 1 FROM erp_history_subscriptions
-           WHERE student_id=? AND group_id=? AND month=? AND manual_tariff='flex'""",
-        (sid, e["group_id"], logic.shift_month(ym, -1))).fetchone()
-    eligible = prev_abs if prev_flex or historical_flex else []
+    previous_month = logic.shift_month(ym, -1)
+    flexible_groups = {row[0] for row in con.execute("""
+        SELECT COALESCE(e.group_id,s.group_id) FROM subscriptions x
+        JOIN students s ON s.id=x.student_id LEFT JOIN enrollments e ON e.id=x.enrollment_id
+        WHERE x.student_id=? AND x.month=? AND x.tariff='flex' AND x.status='paid'
+          AND COALESCE(x.kind,'month')='month'
+        UNION
+        SELECT group_id FROM erp_history_subscriptions
+        WHERE student_id=? AND month=? AND manual_tariff='flex'
+        """, (sid, previous_month, sid, previous_month))}
+    eligible = [absence for absence in unresolved_absences_in_month(
+        con, sid, previous_month, cert_only=ym >= cert_from
+    ) if absence["group_id"] in flexible_groups] if flexible_groups else []
     from . import groupterms
     special=groupterms.terms(con,e['group_id'],ym)
     credit_limit=special['credit_limit'] if special else logic.MAX_FLEX_CREDIT
@@ -680,8 +684,10 @@ def cancel_subscription(con, sub_id: int, user, refund: bool = False, comment: s
     revenuecarry.cancel_invoice(con,sub_id,user)
     con.execute("""UPDATE attendance SET resolved=NULL, resolved_month=NULL
                    WHERE student_id=? AND resolved='credit' AND resolved_month=?
-                     AND (? IS NULL OR group_id = (SELECT group_id FROM enrollments WHERE id = ?))""",
-                (sub["student_id"], sub["month"], sub["enrollment_id"], sub["enrollment_id"]))
+                     AND (id IN (SELECT absence_id FROM revenue_carries WHERE target_subscription_id=?)
+                          OR (NOT EXISTS (SELECT 1 FROM revenue_carries r WHERE r.absence_id=attendance.id)
+                              AND (? IS NULL OR group_id=(SELECT group_id FROM enrollments WHERE id=?))))""",
+                (sub["student_id"], sub["month"], sub_id, sub["enrollment_id"], sub["enrollment_id"]))
     money.reconcile(con, sub["student_id"])
     log(con, sub["student_id"], f"Счёт на {logic.month_label(sub['month'])} отменён, пропуски возвращены"
         + (" (оплата сохранена в учёте)" if paid else ""), user, "payment")

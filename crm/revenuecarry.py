@@ -37,13 +37,13 @@ def _source(con, absence, source_month):
       LEFT JOIN enrollments e ON e.id=x.enrollment_id
       WHERE x.student_id=? AND x.month=? AND x.status='paid'
         AND COALESCE(e.group_id,(SELECT group_id FROM students WHERE id=x.student_id))=?
-      ORDER BY x.id LIMIT 1""", (absence['student_id'], source_month, absence['group_id'])).fetchone()
+      ORDER BY (x.tariff='flex' AND COALESCE(x.kind,'month')='month') DESC,x.id LIMIT 1""", (absence['student_id'], source_month, absence['group_id'])).fetchone()
     if native:
         return native['id'], None, 1
     if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
         historical = con.execute("""SELECT source_id FROM erp_history_subscriptions
           WHERE student_id=? AND group_id=? AND month=? AND revenue_amount IS NOT NULL
-          ORDER BY id LIMIT 1""", (absence['student_id'], absence['group_id'], source_month)).fetchone()
+          ORDER BY (manual_tariff IS 'flex') DESC,id LIMIT 1""", (absence['student_id'], absence['group_id'], source_month)).fetchone()
         if historical:
             return None, historical['source_id'], 1
     return None, None, 0
@@ -59,19 +59,25 @@ def record_invoice(con, subscription_id: int, absence_ids: list[int], amount_eac
     source_month = logic.shift_month(target['month'], -1)
     for absence_id in absence_ids:
         absence = con.execute("SELECT * FROM attendance WHERE id=?", (absence_id,)).fetchone()
-        if not absence or absence['student_id'] != target['student_id'] or absence['group_id'] != target['group_id']:
+        if not absence or absence['student_id'] != target['student_id'] or absence['status'] != 'absent' or absence['date'][:7] != source_month:
             raise ValueError('Пропуск не относится к этому абонементу')
         existing = con.execute("SELECT * FROM revenue_carries WHERE absence_id=?", (absence_id,)).fetchone()
-        if existing:
+        if existing and existing['active']:
             if existing['target_subscription_id'] != subscription_id or existing['amount'] != amount_each:
                 raise ValueError('Пропуск уже связан с другим переносом выручки')
-            con.execute("UPDATE revenue_carries SET active=1,cancelled_at=NULL,cancelled_by='' WHERE id=?", (existing['id'],))
             continue
         source_id, source_erp_id, loaded = _source(con, absence, source_month)
+        if existing:
+            con.execute("""UPDATE revenue_carries SET target_subscription_id=?,amount=?,target_month=?,group_id=?,
+                          source_subscription_id=?,source_erp_subscription_id=?,source_loaded=?,
+                          active=1,cancelled_at=NULL,cancelled_by='' WHERE id=?""",
+                        (subscription_id, amount_each, target['month'], absence['group_id'],
+                         source_id, source_erp_id, loaded, existing['id']))
+            continue
         con.execute("""INSERT INTO revenue_carries(absence_id,student_id,group_id,source_month,target_month,amount,
           target_subscription_id,source_subscription_id,source_erp_subscription_id,basis,source_loaded,created_at,created_by)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-          (absence_id,target['student_id'],target['group_id'],source_month,target['month'],amount_each,
+          (absence_id,target['student_id'],absence['group_id'],source_month,target['month'],amount_each,
            subscription_id,source_id,source_erp_id,'Зачёт пропуска в оплату следующего месяца',loaded,
            datetime.now().isoformat(timespec='seconds'),user.get('name','')))
 
@@ -86,13 +92,18 @@ def adjustments(con, month: str, group_id: int | None = None, branch_id: int | N
     """Paired recognized adjustments, grouped by student and group."""
     scope = " AND r.group_id=?" if group_id else " AND g.branch_id=?" if branch_id else ""
     args = (group_id,) if group_id else (branch_id,) if branch_id else ()
-    rows = con.execute("""SELECT r.student_id,r.group_id,
-      SUM(CASE WHEN r.target_month=? THEN r.amount ELSE -r.amount END) amount
-      FROM revenue_carries r JOIN subscriptions x ON x.id=r.target_subscription_id
-      JOIN groups g ON g.id=r.group_id
-      WHERE r.active=1 AND r.source_loaded=1 AND x.status='paid'
-        AND (r.source_month=? OR r.target_month=?)""" + scope + " GROUP BY r.student_id,r.group_id",
-      (month,month,month,*args)).fetchall()
+    rows = con.execute("""WITH monthly AS (
+        SELECT r.student_id,
+          CASE WHEN r.target_month=? THEN COALESCE(e.group_id,r.group_id) ELSE r.group_id END group_id,
+          CASE WHEN r.target_month=? THEN r.amount ELSE -r.amount END amount
+        FROM revenue_carries r JOIN subscriptions x ON x.id=r.target_subscription_id
+        LEFT JOIN enrollments e ON e.id=x.enrollment_id
+        WHERE r.active=1 AND r.source_loaded=1 AND x.status='paid'
+          AND (r.source_month=? OR r.target_month=?)
+      )
+      SELECT r.student_id,r.group_id,SUM(r.amount) amount
+      FROM monthly r JOIN groups g ON g.id=r.group_id WHERE 1=1""" + scope + " GROUP BY r.student_id,r.group_id",
+      (month,month,month,month,*args)).fetchall()
     return [dict(row) for row in rows]
 
 

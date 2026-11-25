@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from crm import db, schedule, services as sv, smart
+from crm import db, money, revenuecarry, schedule, services as sv, smart
 
 
 def main():
@@ -33,12 +33,24 @@ def main():
         for tariff in ('flex', 'fixed'):
             quote = sv.quote_for(con, sid, '2026-12', **dict(options, tariff=tariff))
             assert quote['credit_absence_dates'] == [day] and quote['credit'] == quote['per_lesson'], quote
-        invoice = sv.create_invoice(con, sid, '2026-12', actor, **dict(options, tariff='fixed'))
+        new_branch = schedule.save_branch(con, {'name': 'Второй филиал'})
+        new_group = schedule.save_group(con, {'name': 'Пн и Ср', 'branch_id': new_branch, 'weekdays': [0, 2]})
+        moved = dict(options, tariff='fixed', group_id=new_group)
+        transferable = sv.quote_for(con, sid, '2026-12', **moved)
+        assert transferable['credit_absence_dates'] == [day]
+        invoice = sv.create_invoice(con, sid, '2026-12', actor, **moved)
+        sv.cancel_subscription(con, invoice['id'], actor)
+        assert sv.quote_for(con, sid, '2026-12', **moved)['credit_absence_dates'] == [day]
+        invoice = sv.create_invoice(con, sid, '2026-12', actor, **moved)
         saved = con.execute('SELECT tariff,credit_lessons FROM subscriptions WHERE id=?', (invoice['id'],)).fetchone()
         assert tuple(saved) == ('fixed', 1)
         assert con.execute('SELECT resolved FROM attendance WHERE student_id=? AND date=?', (sid, day)).fetchone()[0] == 'credit'
         assert not con.execute('SELECT 1 FROM payments WHERE student_id=?', (sid,)).fetchone()
-        assert sv.quote_for(con, sid, '2026-12', **options)['credit_available'] == 0
+        assert sv.quote_for(con, sid, '2026-12', **moved)['credit_available'] == 0
+        money.pay_subscription(con, invoice['id'], 'cash', actor | {'role': 'admin'}, paid_at='2026-11-25')
+        assert revenuecarry.adjustments(con, '2026-11', group_id=group)[0]['amount'] == -transferable['credit']
+        assert revenuecarry.adjustments(con, '2026-12', group_id=new_group)[0]['amount'] == transferable['credit']
+        assert not revenuecarry.adjustments(con, '2026-12', group_id=group)
         # Особые условия группы могут ограничивать число переносов, но не меняют тариф.
         con.execute("INSERT INTO group_terms VALUES (?,'2026-11',1600,2)", (group,))
         for index, manual in enumerate((False, True)):
