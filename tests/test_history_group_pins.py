@@ -52,9 +52,9 @@ def main():
         before=tuple(con.execute('SELECT * FROM subscriptions WHERE id=?',(subid,)).fetchone())
         for day in (16,18,23):con.execute("INSERT INTO attendance(student_id,group_id,date,status) VALUES (?,?,?,'absent')",(sid,gid,f'2026-11-{day}'))
         q=sv.quote_for(con,sid,'2026-12',eid,credit_requested=True)
-        assert q['per_lesson']==1600 and q['lessons_paid']==9 and q['base']==14400 and q['credit_lessons']==2 and q['credit']==3200,q
+        assert q['per_lesson']==1600 and q['lessons_paid']==9 and q['base']==14400 and q['credit_limit']==2 and q['credit_lessons']==0 and q['credit']==0,q
         groupterms.provision_nebo_morning(con)
         assert tuple(con.execute('SELECT * FROM subscriptions WHERE id=?',(subid,)).fetchone())==before
-    print('PASS human ERP summary/raw source, personal pins/filter/order/idempotence; unique group guard, Nov16 start/Nov18 time, rate1600*dates, cap2, saved invoice preserved')
+    print('PASS human ERP summary/raw source, personal pins/filter/order/idempotence; unique group guard, Nov16 start/Nov18 time, rate1600*dates, cap2, no credit on fixed tariff, saved invoice preserved')
 
 if __name__=='__main__':main()

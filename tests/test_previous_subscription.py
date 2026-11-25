@@ -36,6 +36,29 @@ def main():
         assert con.execute('SELECT resolved FROM attendance WHERE student_id=? AND date=?', (sid, day)).fetchone()[0] == 'credit'
         assert not con.execute('SELECT 1 FROM payments WHERE student_id=?', (sid,)).fetchone()
         assert sv.quote_for(con, sid, '2026-12', **options)['credit_available'] == 0
+        # Особые условия группы могут ограничивать число переносов, но не меняют тариф.
+        con.execute("INSERT INTO group_terms VALUES (?,'2026-11',1600,2)", (group,))
+        for index, manual in enumerate((False, True)):
+            fixed_child = sv.create_student(con, {'name': 'Другой Ребёнок', 'parent_name': 'Анна',
+                'phone': f'+7900000113{index}', 'funnel': 'members', 'group_id': group}, actor)
+            if manual:
+                sv.add_previous_subscription(con, fixed_child, dict(data, tariff='fixed'), actor)
+            else:
+                enrollment = sv.enrollments_of(con, fixed_child)[0]['id']
+                con.execute("""INSERT INTO subscriptions
+                    (student_id,enrollment_id,month,tariff,lessons,per_lesson,price,status,created_at)
+                    VALUES (?,?,'2026-11','fixed',8,1600,12800,'paid','2026-11-01')""",
+                    (fixed_child, enrollment))
+            sv.mark_attendance(con, fixed_child, group, day, 'absent', actor)
+            for next_tariff in ('flex', 'fixed'):
+                fixed_quote = sv.quote_for(con, fixed_child, '2026-12', tariff=next_tariff,
+                                           credit_requested=True, group_id=group)
+                assert fixed_quote['credit_available'] == fixed_quote['credit'] == 0
+            invoice = sv.create_invoice(con, fixed_child, '2026-12', actor, **options)
+            assert con.execute('SELECT credit_lessons FROM subscriptions WHERE id=?',
+                               (invoice['id'],)).fetchone()[0] == 0
+            assert con.execute('SELECT resolved FROM attendance WHERE student_id=? AND date=?',
+                               (fixed_child, day)).fetchone()[0] is None
         con.close()
 
 
