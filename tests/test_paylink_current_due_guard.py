@@ -316,6 +316,7 @@ class PaylinkCurrentDueGuardTest(unittest.TestCase):
                     action()
                 paragraphs = str(caught.exception).split('\n\n')
                 self.assertEqual(len(paragraphs), 3)
+                self.assertNotIn('—', str(caught.exception))
                 self.assertTrue(all(not paragraph.endswith('.') for paragraph in paragraphs))
                 self.assertIn('12 150 ₽', paragraphs[1])
                 self.assertIn('12 758 ₽', paragraphs[1])
