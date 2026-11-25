@@ -302,6 +302,26 @@ class PaylinkCurrentDueGuardTest(unittest.TestCase):
             self.assertEqual(self.con.serialize(),before)
         self.assertEqual(self.con.execute('SELECT price FROM subscriptions WHERE id=?',(sub,)).fetchone()[0],12150)
 
+    def test_public_late_notice_uses_invoice_amounts_without_final_periods(self):
+        sub = self.invoice()['id']
+        link = self.link(sub)
+        self.con.execute('UPDATE price_list SET late_pct=5')
+        self.con.execute("UPDATE subscriptions SET created_at='2026-11-20T10:00' WHERE id=?", (sub,))
+        with patch.object(sv, 'today', return_value=date(2026, 11, 26)):
+            for action in (
+                lambda: paylinks.payment_page(self.con, self.token(link)),
+                lambda: paylinks.checkout(self.con, self.token(link), 'synthetic@example.com'),
+            ):
+                with self.assertRaises(paylinks.PayLinkError) as caught:
+                    action()
+                paragraphs = str(caught.exception).split('\n\n')
+                self.assertEqual(len(paragraphs), 3)
+                self.assertTrue(all(not paragraph.endswith('.') for paragraph in paragraphs))
+                self.assertIn('12 150 ₽', paragraphs[1])
+                self.assertIn('12 758 ₽', paragraphs[1])
+                self.assertIn('с 26-го числа', paragraphs[1])
+                self.assertIn('на 5%', paragraphs[1])
+
     def test_legacy_public_summary_uses_effective_price_fee_and_discount_without_writing_them(self):
         sub=self.invoice()['id'];link=self.link(sub)
         self.con.execute("UPDATE subscriptions SET price=10935,discount_name='Synthetic discount',discount_amount=1215,created_at='2026-11-20T10:00' WHERE id=?",(sub,))

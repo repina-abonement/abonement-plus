@@ -127,6 +127,21 @@ def receipt_link(con, token):
     from . import paylinkguard
     checked=paylinkguard.inspect(con,link)
     if not checked['valid']:
+        due = checked['current_due']
+        scopes = checked['invoice_scope']
+        if checked.get('amount_changed') and due > link['amount']:
+            old_amount = f"{link['amount']:,}".replace(',', ' ')
+            new_amount = f"{due:,}".replace(',', ' ')
+            changed = [scope for scope in scopes if scope['current_due'] != scope['amount']]
+            explanation = 'Сумма счёта изменилась'
+            if changed and all(scope['standard_late_fee'] for scope in changed):
+                explanation = 'По правилам школы с 26-го числа стоимость абонемента увеличивается на 5%'
+            raise PayLinkError(
+                'Поможем обновить ссылку на оплату 😊\n\n'
+                f'Эта ссылка была выставлена на {old_amount} ₽. {explanation}, и сейчас к оплате '
+                f'{new_amount} ₽. Ссылка со старой суммой больше не принимает оплату\n\n'
+                'Напишите нам в чат школы — пришлём ссылку с актуальной суммой'
+            )
         raise PayLinkError(checked['reason'])
     return link
 

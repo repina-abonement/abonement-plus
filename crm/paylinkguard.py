@@ -12,7 +12,7 @@ def _digest(value):
 
 
 def _scope(con,subid,sid):
-    from . import services as sv
+    from . import pricing, services as sv
     row=con.execute('SELECT * FROM subscriptions WHERE id=? AND student_id=?',(subid,sid)).fetchone()
     if not row or row['status']=='cancelled':
         return None
@@ -25,7 +25,12 @@ def _scope(con,subid,sid):
     fields['price']=q['price']
     fields['discount_name']=q['discount_name']
     fields['discount_amount']=q['discount_amount']
-    return {'subscription_id':subid,'current_due':q['total'],'price':q['price'],
+    standard_late_fee = (
+        q['late_fee'] > row['late_fee'] and not row['program_selection']
+        and pricing.deadline(con, row['month']).day == 25
+        and pricing.prices_for(con, row['month'])['late_pct'] == 5
+    )
+    return {'standard_late_fee': standard_late_fee, 'subscription_id':subid,'current_due':q['total'],'price':q['price'],
         'month':row['month'],'fingerprint':_digest(fields)}
 
 
@@ -37,6 +42,7 @@ def snapshot(con,sid,subscription_id=None,parts=None,full_payment=False):
         if scope is None:
             from .paylinks import PayLinkError
             raise PayLinkError('Абонемент не найден или отменён')
+        scope.pop('standard_late_fee')
         scopes.append(scope)
     return json.dumps({'kind':'bundle' if parts else 'invoice' if subscription_id else 'amount',
         'full_payment':full_payment,'scopes':scopes},ensure_ascii=False,sort_keys=True,
@@ -105,6 +111,7 @@ def inspect(con,link,*,student_id=None,subscription_id=None,subscription_ids=Non
             if sum(part['amount'] for part in parts)!=link['amount']:
                 return fail('Сумма ссылки не совпадает с её составом. Создайте новую ссылку')
             if any(item['amount']!=item['current_due'] for item in result['invoice_scope']):
+                result['amount_changed'] = True
                 return fail('Сумма одного из счетов изменилась. Обновите общую ссылку перед отправкой')
             covered=money.balance(con,link['student_id'])['covered']
             last=max(item['month'] for item in result['invoice_scope'])
@@ -113,6 +120,7 @@ def inspect(con,link,*,student_id=None,subscription_id=None,subscription_ids=Non
                 return fail('Есть другие неоплаченные абонементы. Обновите общую ссылку')
         elif (require_full or result['is_full_payment'] is not False or not previous):
             if link['amount']!=result['current_due']:
+                result['amount_changed'] = True
                 return fail('Сумма счёта изменилась: по ссылке '+str(link['amount'])+' ₽, сейчас к оплате '+str(result['current_due'])+' ₽. Обновите ссылку перед отправкой')
         elif link['amount']>result['current_due']:
             return fail('Сумма счёта изменилась. Обновите ссылку перед отправкой')
