@@ -681,6 +681,9 @@ def new_cards_today(con, ref=None, include_pending=True):
     day=(ref or datetime.now(tz)).astimezone(tz).date()
     cards=[]
     for row in con.execute("SELECT * FROM students WHERE archived=0 ORDER BY created_at DESC,id DESC"):
+        if con.execute("""SELECT 1 FROM tasks WHERE student_id=? AND kind='call_lead'
+            AND auto_key LIKE 'erp-lead:%' LIMIT 1""", (row['id'],)).fetchone():
+            continue
         try:
             created=datetime.fromisoformat(row['created_at'])
         except (ValueError,TypeError):

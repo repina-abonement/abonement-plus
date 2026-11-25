@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS erp_full_history_corrections (
  previous_student_id INTEGER NOT NULL REFERENCES students(id),
  assigned_student_id INTEGER REFERENCES students(id),
  file_id INTEGER NOT NULL, row_num INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS erp_lead_details (
+ source_id TEXT PRIMARY KEY, territory TEXT NOT NULL, branch TEXT NOT NULL, channel TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS erp_full_operations (
  operation_id TEXT PRIMARY KEY, payment_id INTEGER NOT NULL REFERENCES payments(id),
  signature TEXT NOT NULL);

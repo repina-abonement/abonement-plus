@@ -44,5 +44,31 @@ def main():
     print("ok")
 
 
+def test_lead_only_import_preserves_metadata_and_routes_task():
+    from crm import tasks
+
+    con = db.connect(":memory:")
+    db.init_db(con)
+    admin = {"id": 1, "name": "Admin"}
+    con.execute("INSERT INTO branches(name) VALUES ('Тестовый филиал')")
+    file_id = erpimport.upload(con, "leads.csv", (
+        "ID;Имя ребенка;Имя родителя;Телефон;Канал;Источник;Территория;Филиал;Комментарий;Дата создания лида;Задача\n"
+        "9001;Тестовый Ребёнок;Мария;79000000001;Тестовый канал;Тестовый источник;"
+        "Тестовая территория;Тестовый филиал;Комментарий;25.11.2026;26.11.2026"
+    ).encode(), "clients")["id"]
+    for _ in range(2):
+        preview = erppeople.transfer(con, [], [file_id], admin)
+        erppeople.transfer(con, [], [file_id], admin, preview["token"])
+    student = dict(con.execute("SELECT * FROM students").fetchone())
+    assert con.execute("SELECT count(*) FROM students").fetchone()[0] == 1
+    assert student["created_at"] == "2026-11-25" and student["branch_id"]
+    assert con.execute("SELECT territory FROM erp_lead_details WHERE source_id='9001'").fetchone()[0] == "Тестовая территория"
+    assert con.execute("SELECT student_id FROM erp_full_identities WHERE namespace='lead' AND source_id='9001'").fetchone()[0] == student["id"]
+    task = dict(con.execute("SELECT * FROM tasks WHERE auto_key='erp-lead:9001'").fetchone())
+    assert task["title"] == "Новый лид" and task["due_at"] == "2026-11-26T23:59"
+    assert tasks._erp_col(dict(task, student=student))[0] == "new_application"
+    assert not services.new_cards_today(con)["cards"]
+
+
 if __name__ == "__main__":
     main()

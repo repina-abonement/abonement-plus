@@ -1,7 +1,7 @@
 """Import visitor statuses and lead cards from selected ERP registers."""
 from collections import Counter, defaultdict
 
-from . import erpfull, erpimport as ei, services as sv, sources
+from . import erpfull, erpimport as ei, services as sv, sources, tasks
 from .db import normalize_phone
 
 
@@ -21,7 +21,7 @@ def _profile_preview(con, sid, rec):
     """Describe safe profile enrichment without changing an existing card."""
     from .smart import guess_relation
     source = {key: _clean(rec.get(key)) for key, _ in PROFILE_FIELDS}
-    _channel, source["source"] = sources.canonical_source("Другое", source["source"])
+    _channel, source["source"] = sources.canonical_source(rec.get("channel") or "Другое", source["source"])
     source["child_name"] = _clean(ei._split_name(rec))
     source["birth"] = (erpfull._date(rec.get("birth", "")) or "")[:10]
     source["phone"] = _clean(rec.get("phone"))
@@ -63,7 +63,7 @@ def _apply_profile(con, sid, rec, user):
     if source["birth"] and not student["birth"]:
         con.execute("UPDATE students SET birth=? WHERE id=?", (source["birth"], sid))
     if source["source"] and not student["source"]:
-        channel, name = sources.canonical_source("Другое", source["source"])
+        channel, name = sources.canonical_source(rec.get("channel") or "Другое", source["source"])
         source_id = sources.ensure_source(con, channel, name)
         con.execute("UPDATE students SET source=?,source_id=? WHERE id=?", (name, source_id, sid))
     parent_row = con.execute("SELECT * FROM parents WHERE family_id=? ORDER BY is_primary DESC,id LIMIT 1", (student["family_id"],)).fetchone()
@@ -88,7 +88,7 @@ def _apply_profile(con, sid, rec, user):
 
 
 def _plan(con, visitors, leads, erp_ids=None):
-    if not visitors or not leads or set(visitors) & set(leads):
+    if not (visitors or leads) or set(visitors) & set(leads):
         raise ei.ImportError_("Выберите отдельно файлы посетителей и лидов")
     files = erpfull._files(con, visitors + leads)
     matcher = erpfull.Matcher(con)
@@ -114,6 +114,10 @@ def _plan(con, visitors, leads, erp_ids=None):
         for index, row in enumerate(file["rows"], 2):
             where = f"{file['filename']}, строка {index}"
             rec = erpfull._record(file, row)
+            if lead:
+                fields = {ei._norm(h): v for h, v in zip(file["headers"], row)}
+                rec.update(channel=fields.get("канал", ""), territory=fields.get("территория", ""),
+                           created=fields.get("дата создания лида", ""), lead_due=fields.get("задача", ""))
             namespace = "lead" if lead else "student"
             rec["id_namespace"] = namespace
             eid = rec.get("erp_id", "").strip()
@@ -206,7 +210,7 @@ def transfer(con, visitors, leads, user, token=None, erp_ids=None):
                 family = con.execute("INSERT INTO families(name) VALUES (?)", (parent,)).lastrowid
                 con.execute("INSERT INTO parents(family_id,name,phone,phone_norm) VALUES (?,?,?,?)",
                             (family, parent, phone, normalized))
-            source_channel, source_name = sources.canonical_source("Другое", rec.get("source", ""))
+            source_channel, source_name = sources.canonical_source(rec.get("channel") or "Другое", rec.get("source", ""))
             sid = sv.create_student(con, {
                 "name": ei._split_name(rec) or ei.NO_NAME, "family_id": family,
                 "birth": (erpfull._date(rec.get("birth", "")) or "")[:10],
@@ -221,6 +225,21 @@ def transfer(con, visitors, leads, user, token=None, erp_ids=None):
             if comment:
                 sv.log(con, sid, comment, user, "note")
         _apply_profile(con, sid, rec, user)
+        if namespace == "lead":
+            con.execute("""INSERT OR IGNORE INTO erp_lead_details
+                (source_id, territory, branch, channel) VALUES (?,?,?,?)""",
+                (eid, rec.get("territory", ""), rec.get("branch", ""), rec.get("channel", "")))
+            branch = ei._norm(rec.get("branch", ""))
+            matches = [row["id"] for row in con.execute("SELECT id,name FROM branches WHERE active=1")
+                       if branch and ei._norm(row["name"]) == branch]
+            if len(matches) == 1:
+                con.execute("UPDATE students SET branch_id=? WHERE id=? AND branch_id IS NULL", (matches[0], sid))
+            due = erpfull._date(rec.get("lead_due", ""))
+            student = sv.get_student_row(con, sid)
+            if due and student["stage"] == "lead" and student["funnel"] == "sales" and not student["trial_at"] and not student["archived"]:
+                if not con.execute("SELECT 1 FROM tasks WHERE student_id=? AND kind='call_lead' LIMIT 1", (sid,)).fetchone():
+                    tasks.add_task(con, "call_lead", sid, due if "T" in due else due + "T23:59",
+                                   auto_key="erp-lead:" + eid, title="Новый лид", source="erp")
         if current != status:
             con.execute("UPDATE students SET erp_status=? WHERE id=?", (status, sid))
         con.execute("INSERT OR IGNORE INTO erp_full_identities(namespace,source_id,student_id) VALUES (?,?,?)",
