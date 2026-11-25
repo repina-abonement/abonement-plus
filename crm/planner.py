@@ -481,11 +481,28 @@ def task_detail(con, tid: int, user: dict) -> dict:
     repeat = dict(recurring) if recurring else {}
     if repeat:
         repeat["weekdays"] = [int(x) for x in repeat["weekdays"].split(",") if x]
-    return {"task": task, "repeat": repeat, "staff": visible_staff(con, user),
+    staff = visible_staff(con, user)
+    can_edit = row["kind"] == "plan" and row["status"] == "open" and can_change_plan(con,user,row["assignee_id"])
+    return {"task": task, "repeat": repeat, "staff": staff,
+            "reassign_staff": [person for person in staff if can_change_plan(con,user,person["id"])]
+            if can_edit and can_manage(con,user) else [],
             "subtask_template":json.loads(repeat.get("checklist_template") or "[]"),"can_check_subtasks":row["kind"]=="plan" and row["status"]=="open" and can_change_plan(con,user,row["assignee_id"]),
-            "can_assign": can_manage(con, user), "can_edit": row["kind"] == "plan" and row["status"] == "open" and can_change_plan(con,user,row['assignee_id']),
+            "can_assign": can_manage(con, user), "can_edit": can_edit,
             "can_delete": row["status"] == "open" and user.get("role") in ("admin", "operator"),
             "can_stop_repeat": bool(recurring and recurring['active'] and can_change_plan(con,user,recurring['assignee_id']))}
+
+
+def reassign_task(con, tid: int, user: dict, data: dict) -> dict:
+    detail = task_detail(con, tid, user)
+    task = detail["task"]
+    if data.get("expected_assignee_id") != task["assignee_id"]:
+        raise PlanError("Исполнитель уже изменился. Откройте задачу заново")
+    who = data.get("assignee_id")
+    if type(who) is not int or not any(person["id"] == who for person in detail["reassign_staff"]):
+        raise PlanError("Нельзя назначить задачу этому участнику команды")
+    shift = task["shift"] if who == offlineplanner.pool_id(con) else "common"
+    con.execute("UPDATE tasks SET assignee_id=?,shift=? WHERE id=?", (who, shift, tid))
+    return task_detail(con, tid, user)
 
 
 def edit_task(con, tid: int, user: dict, data: dict) -> dict:

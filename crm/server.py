@@ -1984,6 +1984,13 @@ def planner_task_edit(con, h, user, body, q, tid):
     return result
 
 
+@route("PATCH", "/api/planner/tasks/{tid}/assignee", role="planner")
+def planner_task_reassign(con, h, user, body, q, tid):
+    result = px(planner.reassign_task, con, int(tid), user, body)
+    sv.audit(con, user, "planner.task.reassign", str(tid))
+    return result
+
+
 @route("POST", "/api/planner/tasks/{tid}/move", role="planner")
 def planner_move(con, h, user, body, q, tid):
     px(planner.move, con, int(tid), user, body.get("date") or "",body.get("shift"))

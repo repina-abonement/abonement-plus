@@ -34,5 +34,14 @@ class VaryaAssignment(unittest.TestCase):
             for actor in (other,observer):
                 with self.assertRaises(planner.PlanError):planner.add(con,actor,{'title':'Denied','assignee_id':pool})
             self.assertTrue(planner.task_detail(con,existing,varya)['can_edit'])
+            renamed=planner.reassign_task(con,task,varya,{'expected_assignee_id':pool,'assignee_id':other['id']})
+            self.assertEqual(renamed['task']['assignee_id'],other['id'])
+            self.assertEqual(renamed['task']['title'],row['title'])
+            self.assertEqual(renamed['task']['due_at'],row['due_at'])
+            self.assertEqual(renamed['task']['note'],row['note'])
+            with self.assertRaises(planner.PlanError):
+                planner.reassign_task(con,task,varya,{'expected_assignee_id':pool,'assignee_id':varya['id']})
+            with self.assertRaises(planner.PlanError):
+                planner.reassign_task(con,existing,observer,{'expected_assignee_id':pool,'assignee_id':observer['id']})
             user('duplicate','Варвара Батарева')
             self.assertFalse(offlineplanner.can_assign(con,varya))

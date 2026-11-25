@@ -296,7 +296,7 @@ async function stopPlannerRepeat(id, button, done) {
 
 async function showPlannerTask(t) {
   if (!t) return;
-  openDrawer(`<div class="task-copyable"><h2>${esc(t.title)}</h2><div class="small muted">${esc(dtWhen(t.due_at))} · ${esc(t.assignee || "")}</div><div class="row" style="align-items:center;justify-content:space-between;gap:10px;margin-top:14px"><h3>Описание</h3>${t.note ? `<button type="button" class="btn sm" data-copy-task-description>Скопировать описание</button>` : ""}</div><div class="task-copyable" style="white-space:pre-wrap">${esc(t.note || "Описание не добавлено")}</div>${renewalReasonHtml(t)}<h3>Комментарии</h3>${t.returned_note ? `<p style="white-space:pre-wrap"><b>Возврат на доработку:</b> ${esc(t.returned_note)}</p>` : ""}${t.result ? `<p style="white-space:pre-wrap"><b>Результат:</b> ${esc(t.result)}</p>` : ""}${!t.returned_note && !t.result ? `<p class="muted">Комментариев пока нет</p>` : ""}</div><div data-task-checklist="${t.id}"></div><div data-task-settings="${t.id}"></div>`);
+  openDrawer(`<div class="task-copyable"><h2>${esc(t.title)}</h2><div class="small muted">${esc(dtWhen(t.due_at))} · ${esc(t.assignee || "")}</div><div data-task-assignee="${t.id}"></div><div class="row" style="align-items:center;justify-content:space-between;gap:10px;margin-top:14px"><h3>Описание</h3>${t.note ? `<button type="button" class="btn sm" data-copy-task-description>Скопировать описание</button>` : ""}</div><div class="task-copyable" style="white-space:pre-wrap">${esc(t.note || "Описание не добавлено")}</div>${renewalReasonHtml(t)}<h3>Комментарии</h3>${t.returned_note ? `<p style="white-space:pre-wrap"><b>Возврат на доработку:</b> ${esc(t.returned_note)}</p>` : ""}${t.result ? `<p style="white-space:pre-wrap"><b>Результат:</b> ${esc(t.result)}</p>` : ""}${!t.returned_note && !t.result ? `<p class="muted">Комментариев пока нет</p>` : ""}</div><div data-task-checklist="${t.id}"></div><div data-task-settings="${t.id}"></div>`);
   const copy = $("[data-copy-task-description]");
   if (copy) copy.onclick = () => copyTaskDescription(t.note);
   loadPlannerTaskSettings(t.id);
@@ -320,6 +320,39 @@ async function loadPlannerTaskSettings(id) {
   try { d = await api("GET", `/api/planner/tasks/${id}`); }
   catch (e) { if (host.isConnected) host.textContent = e.message; return; }
   if (!host.isConnected) return;
+  const assigneeHost = $(`[data-task-assignee="${id}"]`);
+  const assignees = (d.reassign_staff || []).filter(person => person.id !== d.task.assignee_id);
+  if (assigneeHost && assignees.length) {
+    assigneeHost.innerHTML = `<form class="row planner-assignee-form">
+      <div class="field"><label for="planner-current-assignee">Кому</label><select id="planner-current-assignee">
+        <option value="${d.task.assignee_id}">${esc(d.task.assignee)}</option>
+        ${assignees.map(person => `<option value="${person.id}">${esc(person.name)}</option>`).join("")}
+      </select></div><button type="submit" class="btn sm" disabled>Сменить исполнителя</button>
+    </form><p class="need-err small" role="alert" hidden></p>`;
+    const form = assigneeHost.querySelector("form");
+    const select = form.querySelector("select");
+    const button = form.querySelector("button");
+    const error = assigneeHost.querySelector('[role="alert"]');
+    select.onchange = () => { button.disabled = +select.value === d.task.assignee_id; error.hidden = true; };
+    form.onsubmit = async event => {
+      event.preventDefault();
+      if (button.disabled) return;
+      button.disabled = select.disabled = true;
+      try {
+        const fresh = await api("PATCH", `/api/planner/tasks/${id}/assignee`, {
+          assignee_id: +select.value, expected_assignee_id: d.task.assignee_id
+        });
+        toast("Исполнитель изменён");
+        if (assigneeHost.isConnected) showPlannerTask(fresh.task);
+        await render();
+      } catch (e) {
+        if (!assigneeHost.isConnected) return;
+        error.textContent = e.message;
+        error.hidden = false;
+        button.disabled = select.disabled = false;
+      }
+    };
+  }
   if (d.merch_stock) {
     host.parentElement?.querySelector('.planner-merch-stock')?.remove();
     const section=document.createElement('section');
