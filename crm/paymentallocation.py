@@ -287,7 +287,7 @@ def allocation(con, sid):
                 funds[fid] -= amount
                 fund = meta['funds'][fid]
                 result['fund_sources'][target].append({'fund_id': fid, 'amount': amount,
-                    'label': fund['label'], 'source_ref': fund['source_ref'], 'evidence_id': fund['evidence_id']})
+                    'label': fund['label'], 'source_kind': fund['source_kind'], 'source_ref': fund['source_ref'], 'evidence_id': fund['evidence_id']})
             result['covered'][target] += amount
 
     def direct(pid, subid, amount, strict):

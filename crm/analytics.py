@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from . import logic, sources
+from . import logic, referrals, sources
 
 
 def _pct(a, b):
@@ -17,14 +17,15 @@ def _pct(a, b):
 def _holders(con, ym: str, branch_id: int | None = None) -> dict[int, dict]:
     """student_id -> {group_id, branch_id, revenue}"""
     out = {}
-    for r in con.execute("""SELECT x.student_id, x.price, COALESCE(e.group_id, s.group_id) AS gid, g.branch_id
+    bonuses = referrals.used(con, ym)
+    for r in con.execute("""SELECT x.id, x.student_id, x.price, COALESCE(e.group_id, s.group_id) AS gid, g.branch_id
                             FROM subscriptions x JOIN students s ON s.id=x.student_id
                             LEFT JOIN enrollments e ON e.id=x.enrollment_id LEFT JOIN groups g ON g.id=COALESCE(e.group_id, s.group_id)
                             WHERE x.month=? AND x.status='paid'""", (ym,)):
         if branch_id and r["branch_id"] != branch_id:
             continue
         h = out.setdefault(r["student_id"], {"group_id": r["gid"], "branch_id": r["branch_id"], "revenue": 0})
-        h["revenue"] += r["price"]
+        h["revenue"] += r["price"] - bonuses.get(r["id"], 0)
     if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
         for r in con.execute("""SELECT h.student_id,h.group_id AS gid,g.branch_id,h.revenue_amount AS price
                                 FROM erp_history_subscriptions h JOIN groups g ON g.id=h.group_id
@@ -117,6 +118,12 @@ def churn_report(con, ym: str, branch_id: int | None = None) -> dict:
     first = {r[0]: r[1] for r in con.execute("SELECT student_id, MIN(month) FROM subscriptions WHERE status='paid' GROUP BY student_id")}
     months_paid = {r[0]: (r[1], r[2]) for r in con.execute(
         "SELECT student_id, COUNT(DISTINCT month), SUM(price) FROM subscriptions WHERE status='paid' GROUP BY student_id")}
+    bonuses = referrals.used(con)
+    for sid, sub_id in con.execute("""SELECT student_id,id FROM subscriptions
+        WHERE id IN (SELECT subscription_id FROM invoice_balance_uses)"""):
+        if sub_id in bonuses:
+            count, amount = months_paid[sid]
+            months_paid[sid] = (count, amount - bonuses[sub_id])
     names = {r["id"]: dict(r) for r in con.execute(
         """SELECT s.id, s.name, s.stage, s.refusal_reason, s.family_id, g.name AS grp FROM students s LEFT JOIN groups g ON g.id=s.group_id
            WHERE s.funnel='members'""")}
@@ -190,11 +197,12 @@ def sources_report(con, ym: str) -> dict:
         names = {}
     by_name = {names.get(k): v for k, v in spend.items()}
     revenue = {}
-    for r in con.execute("""SELECT COALESCE(src.name, NULLIF(s.source,''), 'Без источника') AS nm, SUM(x.price)
+    bonuses = referrals.used(con)
+    for r in con.execute("""SELECT COALESCE(src.name, NULLIF(s.source,''), 'Без источника') AS nm, x.id, x.price
                             FROM students s JOIN subscriptions x ON x.student_id=s.id AND x.status='paid'
                             LEFT JOIN ad_sources src ON src.id=s.source_id
-                            WHERE s.converted_at BETWEEN ? AND ? GROUP BY nm""", (a.isoformat(), b.isoformat() + "T23:59")):
-        revenue[r[0]] = r[1]
+                            WHERE s.converted_at BETWEEN ? AND ?""", (a.isoformat(), b.isoformat() + "T23:59")):
+        revenue[r["nm"]] = revenue.get(r["nm"], 0) + r["price"] - bonuses.get(r["id"], 0)
     for x in rep["sources"]:
         x["conv"] = _pct(x["bought"], x["leads"])
         x["spend"] = by_name.get(x["source"], 0)
@@ -294,11 +302,13 @@ def program_report(con, ym: str, slug: str = "sbornaya") -> dict:
     for x in subs:
         kids.setdefault(x["student_id"], x["name"])
     paid = [x for x in subs if x["status"] == "paid"]
-    actual = sum(x["price"] for x in paid)
+    bonuses = referrals.used(con, ym)
+    actual = sum(x["price"] - bonuses.get(x["id"], 0) for x in paid)
     debts = sum(x["price"] for x in subs if x["status"] == "invoiced")
     with_sub = {x["student_id"] for x in subs}
     potential = full_pkg * len(kids)
-    loss = {"partial": 0, "no_ofp": 0, "discounts": 0, "debts": debts, "not_bought": 0}
+    loss = {"partial": 0, "no_ofp": 0, "discounts": 0, "debts": debts, "not_bought": 0,
+            "bonuses": sum(bonuses.get(x["id"], 0) for x in paid)}
     late_gain = 0
     for x in subs:
         plan = program.plan_of(con, x["student_id"], pid)

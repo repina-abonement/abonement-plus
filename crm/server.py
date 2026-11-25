@@ -1623,6 +1623,12 @@ def balance_topup(con, h, user, body, q, sid):
               body.get("comment") or "", body.get("request_key") or "", user)
 
 
+@route("POST", "/api/students/{sid}/referral-bonus", role="operator")
+def referral_bonus(con, h, user, body, q, sid):
+    from . import referrals
+    return mx(referrals.award, con, int(sid), int(body.get("friend_id") or 0), user)
+
+
 @route("GET", "/api/students/{sid}/single-quote", role="operator|client_sales:full")
 def single_quote(con, h, user, body, q, sid):
     from . import singles
@@ -3063,6 +3069,13 @@ def my_pay_set(con, h, user, body, q):
             raise ApiError("Контакты вписывает промоутер", 403)
         mypay.set_contacts(con, user["id"], ym, body["contacts"])
     return mypay.view(con, user, ym)
+
+
+@route("GET", "/api/revenue-losses", role="dashboard")
+def revenue_losses(con, h, user, body, q):
+    from . import revenuelosses
+    return mx(revenuelosses.report, con, q.get("month") or sv.today().isoformat()[:7],
+              int(q.get("branch_id") or 0), int(q.get("group_id") or 0))
 
 
 @route("GET", "/api/dashboard", role="admin")

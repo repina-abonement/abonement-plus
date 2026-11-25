@@ -107,7 +107,7 @@ def _apply(con, eid: int, new_gid: int, start: str, user, weekdays=None, tariff=
                          part(x.get("discount_amount"), m["keep_lessons"]), x["id"]))
             row = x | {"enrollment_id": new_eid, "lessons": m["new_lessons"], "price": m["new_price"], "credit_lessons": 0,
                        "late_fee": share(x.get("late_fee")), "discount_amount": share(x.get("discount_amount")),
-                       "status": "invoiced", "paid_at": None, "created_at": now_iso()}
+                       "incomplete_value": 0, "status": "invoiced", "paid_at": None, "created_at": now_iso()}
             con.execute(f"INSERT INTO subscriptions({','.join(cols)}) VALUES ({','.join('?' * len(cols))})", [row[c] for c in cols])
         else:
             con.execute("UPDATE subscriptions SET enrollment_id=?, lessons=?, price=?, late_fee=?, discount_amount=? WHERE id=?",

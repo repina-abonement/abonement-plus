@@ -104,7 +104,8 @@ def init(con):
                      {erp_guard}
                      AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.student_id=s.student_id
                                      AND p.cancelled=0 AND p.amount>0)
-                     AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.subscription_id = s.id)""")
+                     AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.subscription_id = s.id)
+                     AND NOT EXISTS (SELECT 1 FROM invoice_balance_uses u WHERE u.subscription_id=s.id)""")
     )
     con.executemany("""INSERT INTO payments(student_id,amount,method,paid_at,comment,user_name,
                         confirmed,subscription_id,created_at)
@@ -167,8 +168,11 @@ def balance(con, sid: int, today: date | None = None) -> dict:
     """Долг — неоплаченное за прошлые и текущий месяц. К оплате — счета на будущие месяцы. Депозит — переплата."""
     today = today or date.today()
     cur = logic.month_of(today)
-    from . import paymentallocation
+    from . import balancecredit, paymentallocation, referrals
     allocated = paymentallocation.allocation(con, sid)
+    funds = balancecredit.context(con, sid)['funds'] if allocated.get('fund_remaining') else {}
+    referral_balance = sum(amount for fid, amount in allocated.get('fund_remaining', {}).items()
+                           if referrals.is_bonus(funds[fid]))
     debt, upcoming = 0, 0
     for sub in allocated['obligations']:
         covered = allocated['covered'][sub['id']]
@@ -178,7 +182,8 @@ def balance(con, sid: int, today: date | None = None) -> dict:
         else:
             upcoming += left
     return {"paid_total": allocated['paid_total'], "debt": debt, "upcoming": upcoming,
-            "deposit": allocated['free_deposit'], "covered": allocated['covered'],
+            "deposit": allocated['free_deposit'], "referral_balance": referral_balance,
+            "referral_by_invoice": referrals.invoice_amounts(allocated), "covered": allocated['covered'],
             "restricted_deposit": allocated['restricted_deposit'],
             "allocation_conflicts": allocated['conflicts'],
             "cash_free_deposit": allocated.get('cash_free_deposit', allocated['free_deposit']),
@@ -661,7 +666,7 @@ def payment_receipt_info(con,payment):
 
 def subscription_payment_details(con,sid):
     """Explain the shared allocation, including proved historical sources."""
-    from . import reconciliation, paymentallocation
+    from . import reconciliation, paymentallocation, referrals
     allocated = paymentallocation.allocation(con, sid)
     payments={p['id']:dict(p) for p in con.execute('SELECT * FROM payments WHERE student_id=? AND cancelled=0',(sid,))}
     details={}
@@ -674,6 +679,8 @@ def subscription_payment_details(con,sid):
                     'paid_at':p['paid_at'],'created_at':p['created_at'],'receipt':payment_receipt_info(con,p),
                     'reconciliation':reconciliation.payment_state(con,p)})
         for source in allocated.get('fund_sources',{}).get(sub['id'],[]):
+            if referrals.is_bonus(source):
+                continue
             rows.append({'record_kind':'balance_credit','payment_id':None,'fund_id':source['fund_id'],
                 'amount':source['amount'],'payment_total':source['amount'],'method':'balance',
                 'method_label':'Зачтено с баланса','fund_label':source['label'],

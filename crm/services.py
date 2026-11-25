@@ -433,6 +433,7 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
         real = {d.isoformat() for d in schedule.month_dates(con, g, e["weekdays"], ym)}
         weekdays = sorted({date.fromisoformat(x).weekday() for x in real} | set(weekdays))
         closed = closed | {d.isoformat() for d in logic.lesson_dates(weekdays, ym) if d.isoformat() not in real}
+    full_dates = [d for d in logic.lesson_dates(weekdays, ym) if d.isoformat() not in closed]
     if newcomer and not cutoff:  # новичок в текущем месяце: только оставшиеся занятия
         start = pricing.newcomer_start(con, sid, on)
         closed = closed | {d.isoformat() for d in logic.lesson_dates(weekdays, ym) if d < start}
@@ -447,6 +448,7 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
     q['pricing_date']=on.isoformat()
     q["calendar_dates"] = available
     q["excluded_dates"] = exceptions
+    q["incomplete_value"] = max(0, len(full_dates) - q["lessons_paid"]) * q["per_lesson"]
     q["credit_available"] = min(len(eligible), credit_limit)
     q['credit_limit']=credit_limit
     if special:q['group_terms']={'per_lesson':special['per_lesson'],'credit_limit':credit_limit}
@@ -1699,14 +1701,16 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
     holder_args=(group_id,) if group_id else ((branch_id,) if branch_id else ())
 
     def holders(m):
+        from . import referrals
+        bonuses = referrals.used(con, m)
         out = {}
-        for sid_, price in con.execute(
-                "SELECT s.id, x.price FROM subscriptions x JOIN students s ON s.id = x.student_id "
+        for sid_, price, sub_id in con.execute(
+                "SELECT s.id, x.price, x.id FROM subscriptions x JOIN students s ON s.id = x.student_id "
                 "LEFT JOIN enrollments e ON e.id = x.enrollment_id "
                 "WHERE x.month = ? AND x.status = 'paid'"
                 + holder_sql,
                 (m, *holder_args)):
-            out.setdefault(sid_, []).append(price)
+            out.setdefault(sid_, []).append(price - bonuses.get(sub_id, 0))
         if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
             history_scope = " AND h.group_id=?" if group_id else (" AND g.branch_id=?" if branch_id else "")
             for sid_, price in con.execute(

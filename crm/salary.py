@@ -31,14 +31,15 @@ def _dates(con, g, ym: str) -> list[str]:
 
 
 def _revenue(con, ym: str) -> dict[int, int]:
+    from . import referrals, revenuecarry
     rev = {}
-    for r in con.execute("""SELECT COALESCE(e.group_id, s.group_id) AS gid, SUM(x.price) AS rub
+    bonuses = referrals.used(con, ym)
+    for r in con.execute("""SELECT x.id, COALESCE(e.group_id, s.group_id) AS gid, x.price
                             FROM subscriptions x JOIN students s ON s.id=x.student_id
                             LEFT JOIN enrollments e ON e.id=x.enrollment_id
-                            WHERE x.month=? AND x.status='paid' GROUP BY gid""", (ym,)):
+                            WHERE x.month=? AND x.status='paid'""", (ym,)):
         if r["gid"]:
-            rev[r["gid"]] = int(r["rub"] or 0)
-    from . import revenuecarry
+            rev[r["gid"]] = rev.get(r["gid"], 0) + r["price"] - bonuses.get(r["id"], 0)
     for row in revenuecarry.adjustments(con,ym):
         rev[row['group_id']] = rev.get(row['group_id'],0) + row['amount']
     return rev

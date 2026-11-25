@@ -123,7 +123,7 @@ function anSources(box, d) {
 function anProgram(box, d) {
   if (!d.program || d.empty) { box.innerHTML = `<div class="muted" style="padding:20px">Группы сборной пока не настроены</div>`; return; }
   const L = d.loss, C = d.costs, P = d.program;
-  const lossRows = [["Не купили абонемент", L.not_bought], ["Неполный месяц (пришли в середине)", L.partial], ["Отказ от ОФП (только Арктика)", L.no_ofp],
+  const lossRows = [["Не купили абонемент", L.not_bought], ["Неполный месяц (пришли в середине)", L.partial], ["Отказ от ОФП (только Арктика)", L.no_ofp], ["Бонусы за рекомендации", L.bonuses],
     ["Скидки", L.discounts], ["Долги (выставлено, не оплачено)", L.debts]].filter(([, v]) => v);
   box.innerHTML = `
     <div class="kpis">

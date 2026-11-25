@@ -226,6 +226,8 @@ def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = N
     newcomer = False
     available = sorted({d.isoformat() for d in arena_dates + ofp_dates})
     exceptions = subscriptiondates.validate(excluded_dates, available)
+    omitted_arena = sum(d.isoformat() in exceptions for d in arena_dates)
+    omitted_ofp = sum(d.isoformat() in exceptions for d in ofp_dates)
     arena_dates = [d for d in arena_dates if d.isoformat() not in exceptions]
     ofp_dates = [d for d in ofp_dates if d.isoformat() not in exceptions]
     deadline = _deadline(ym, prog["deadline_day"])
@@ -265,6 +267,7 @@ def quote(con, sid: int, ym: str, e: dict, discount_id=None, on: date | None = N
         "discount": {"id": disc["id"], "name": disc["name"], "percent": disc["percent"], "amount": off, "auto": discount_id in (None,'')} if disc else None,
         "tariff": tariff, "group": e.get("group_name") or g["name"], "enrollment_id": e["id"], "days_label": "",
         "calendar_dates": available, "excluded_dates": exceptions,
+        "incomplete_value": omitted_arena * pa + omitted_ofp * po,
         "components": [{"kind":"arena","group_id":g["id"],"rate":pa,"dates":[d.isoformat() for d in arena_dates]},
                        {"kind":"ofp","group_id":ofp_gid,"rate":po,"dates":[d.isoformat() for d in ofp_dates]}],
         "dates": [d.isoformat() for d in sorted(arena_dates + ofp_dates)], "vacation_dates": [],

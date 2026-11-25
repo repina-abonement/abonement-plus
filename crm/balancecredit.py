@@ -348,7 +348,7 @@ def add_existing_fund(con, sid, amount, *, source_ref, label, evidence_id=None, 
     evidence_id = source_ref if evidence_id is None else evidence_id
     if not all(isinstance(v, str) and v.strip() for v in (source_ref, label, evidence_id)):
         raise ValueError('Для существующих средств нужны подтверждение и назначение')
-    if source_kind not in ('existing_carry', 'opening_balance'):
+    if source_kind not in ('existing_carry', 'opening_balance', 'referral_bonus'):
         raise ValueError('Неизвестный источник существующего баланса')
     if snapshot_id is not None:
         snap = con.execute('SELECT student_id FROM balance_account_snapshots WHERE id=?', (snapshot_id,)).fetchone()
