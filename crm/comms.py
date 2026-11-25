@@ -1763,7 +1763,8 @@ def conversation(con, cid: int, mark_read: bool = True, user=None) -> dict:
         for c in convs:
             if c['unread']:
                 con.execute('UPDATE conversations SET unread=0 WHERE id=?',(c['id'],))
-    return {"conversation": _conv_out(con, r), "messages": msgs, "history": items, "preferred_reply_id":preferred_reply(con,dict(r),convs),
+    reply_id = preferred_telegram_reply(con, dict(r), convs) if r["channel"] == "telegram" else cid
+    return {"conversation": _conv_out(con, r), "messages": msgs, "history": items, "preferred_reply_id":reply_id,
             "targets": [{"id": c["id"], "channel":c["channel"], "same_contact":True, "label": c["channel_label"] + (" · " + c["title"] if c["title"] else "")} for c in convs
                         if c["channel"] != "tg_archive"]}
 
@@ -1870,7 +1871,20 @@ def family_comms(con, family_id: int, mark_read=True) -> dict:
                                         (family_id,))]
     phones = [phone for phone in phones if family_by_phone(con, phone) == family_id]
     convs, items = history(con, family_id, phones, mark_read)
-    return {"conversations": convs, "items": items, "status": status(con)}
+    by_id = {c["id"]: c for c in convs if c["channel"] != "tg_archive"}
+    preferred = None
+    if by_id:
+        placeholders = ",".join("?" for _ in by_id)
+        latest = con.execute(f"""SELECT conversation_id FROM messages
+            WHERE conversation_id IN ({placeholders}) AND direction='in' AND status!='error'
+            ORDER BY replace(ts,' ','T') DESC,id DESC LIMIT 1""", tuple(by_id)).fetchone()
+        if latest:
+            current = by_id[latest["conversation_id"]]
+            preferred = current["id"]
+            if current["channel"] == "telegram":
+                bridge = preferred_telegram_reply(con, current, by_id.values())
+                preferred = bridge if bridge != current["id"] else 0
+    return {"conversations": convs, "items": items, "status": status(con), "preferred_reply_id": preferred}
 
 
 # ---------------- тестовые данные ----------------

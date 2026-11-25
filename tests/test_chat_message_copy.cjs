@@ -36,6 +36,9 @@ const messages = [
 const conversation = {id:7, title:'Тестовая семья', channel:'wazzup_max', channel_label:'MAX', phone_norm:'79990000001', students:[], last_at:'2026-11-20T12:55:56', last_text:outgoing, unread:0};
 const family = {status:{wazzup_max:true}, conversations:[conversation], items:messages};
 const conversationDetail = {conversation, targets:[{id:7,channel:'wazzup_max',label:'MAX · Тестовая семья'}], preferred_reply_id:7, history:messages};
+const telegram = {...conversation,id:8,channel:'wazzup_telegram',channel_label:'Telegram через Wazzup'};
+const replyChannels = process.argv.includes('--reply-channel');
+const choices = [conversation,telegram].map(chat=>({id:chat.id,channel:chat.channel,label:chat.channel_label,same_contact:true}));
 
 (async () => {
   let browser;
@@ -57,8 +60,9 @@ const conversationDetail = {conversation, targets:[{id:7,channel:'wazzup_max',la
       if (url.pathname.startsWith('/api/')) {
         if (/^\/api\/messages\/\d+\/media$/.test(url.pathname)) return route.fulfill({status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="#cfe5d4"/></svg>'});
         let data;
-        if (url.pathname === '/api/conversations/7') data = conversationDetail;
-        else if (url.pathname === '/api/families/42/comms') data = family;
+        if (replyChannels && /^\/api\/conversations\/[78]$/.test(url.pathname)) data = {...conversationDetail,conversation:url.pathname.endsWith('/8')?telegram:conversation,targets:choices,preferred_reply_id:8};
+        else if (url.pathname === '/api/conversations/7') data = conversationDetail;
+        else if (url.pathname === '/api/families/42/comms') data = replyChannels ? {...family,conversations:[telegram,conversation],preferred_reply_id:7} : family;
         else if (url.pathname === '/api/inbox') data = {conversations:[conversation],unread:0,incoming_delayed:0,incoming_storage_error:0};
         else if (url.pathname === '/api/inbox/counts') data = {unread:0,missed:0};
         else data = {rows:[],items:[],links:[],threads:[],channels:[],messages:[],total:0};
@@ -124,6 +128,28 @@ const conversationDetail = {conversation, targets:[{id:7,channel:'wazzup_max',la
       ok(await menu.locator('summary').evaluate(node=>node===document.activeElement),'Successful copy restores menu-summary focus');
       eq(await page.locator('#toast').innerText(),'Текст скопирован');
     };
+
+    if (replyChannels) {
+      await openSurface('operator', 'family');
+      eq(await page.locator('#cm-to').inputValue(),'c7');
+      await page.locator('[data-reply-choice="c8"]').click();
+      await page.evaluate(()=>document.querySelector('#comms-box')._reloadComms());
+      eq(await page.locator('#cm-to').inputValue(),'c8','Refresh keeps a manual choice');
+      await page.evaluate(()=>{const box=document.querySelector('#comms-box');box.removeAttribute('data-family-id');return box._reloadComms()});
+      eq(await page.locator('#cm-to').inputValue(),'c7','Reopening uses the latest incoming channel');
+      await openSurface('operator', 'chat');
+      eq(await page.locator('#chat-to').inputValue(),'7','Opening MAX stays in MAX');
+      await page.evaluate(()=>{const target=document.querySelector('#chat-to');target.value='8';target.dispatchEvent(new Event('change'))});
+      await page.evaluate(()=>openChat(7,true));
+      eq(await page.locator('#chat-to').inputValue(),'8','Refreshing the open chat keeps the manual choice');
+      await page.evaluate(()=>openChat(7));
+      eq(await page.locator('#chat-to').inputValue(),'7','Reopening MAX resets the choice');
+      await page.evaluate(()=>openChat(8));
+      eq(await page.locator('#chat-to').inputValue(),'8','Opening Telegram stays in Telegram');
+      eq(mutations.length,0,'Channel selection does not send a message');
+      console.log('Reply channel defaults and manual switching verified');
+      return;
+    }
 
     if (process.argv.includes('--family-layout')) {
       for (const width of [1280, 390]) {

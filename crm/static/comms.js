@@ -395,8 +395,9 @@ function resizeMessageInput(input) {
 function clientChannelPriority(channel) {
   return ({wazzup_telegram:0,telegram:0,wazzup_max:1,max:1,whatsapp:2})[channel] ?? 3;
 }
-function preferredFamilyTarget(conversations,targets,primary,status) {
-  // Уже начатую Telegram-переписку продолжаем там же; MAX первый только для нового контакта.
+function preferredFamilyTarget(conversations,targets,primary,preferredReplyId) {
+  if (preferredReplyId != null) return targets.find(t=>t.v==='c'+preferredReplyId)?.v || '';
+  // Без входящих сохраняем обычный порядок первого контакта.
   const existing=conversations.filter(c=>c.established&&!['tg_archive','telegram'].includes(c.channel)&&targets.some(t=>t.v==='c'+c.id));
   existing.sort((a,b)=>clientChannelPriority(a.channel)-clientChannelPriority(b.channel)||(b.last_at||'').localeCompare(a.last_at||'')||b.id-a.id);
   if(existing.length)return 'c'+existing[0].id;
@@ -418,7 +419,7 @@ function replyTargetSummary(label) {
   const parts=String(label||'').split(' · ').map(part=>part.trim()).filter(Boolean);
   const channel=parts.shift()||'';
   const recipient=parts.pop()||'Получатель';
-  return `<span class="reply-target-caption">Сообщение получит</span><strong class="reply-target-recipient">${esc(recipient)}</strong><span class="reply-target-details"><span class="reply-target-channel" title="${esc(channel)}" aria-label="${esc(channel)}">${messengerLogo(channel)}</span>${parts.length?`<span class="reply-target-context">${esc(parts.join(' · '))}</span>`:''}</span>`;
+  return `<span class="reply-target-caption">Сообщение получит</span><strong class="reply-target-recipient">${esc(recipient)}</strong><span class="reply-target-details"><span class="reply-target-channel" title="${esc(channel)}" aria-label="${esc(channel)}">${messengerLogo(channel)}${esc(channel)}</span>${parts.length?`<span class="reply-target-context">${esc(parts.join(' · '))}</span>`:''}</span>`;
 }
 
 function replyTargetHtml(id,targets,selected) {
@@ -475,10 +476,10 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   S.familySendTargets = S.familySendTargets || {};
   const primary=parents.find(p=>p.is_primary);
   const targetKey = `${S.user.id}:${familyId}:${primary?.id||0}`;
-  const primaryTarget=preferredFamilyTarget(d.conversations,targets,primary,st);
-  const savedTarget=S.familySendTargets[targetKey],savedConversation=savedTarget?.[0]==='c'?d.conversations.find(c=>c.id===+savedTarget.slice(1)):null;
-  const savedIsUsable=targets.some(x=>x.v===savedTarget)&&(!savedConversation||savedConversation.established);
-  const selectedTarget = savedIsUsable ? savedTarget : primaryTarget;
+  const primaryTarget=preferredFamilyTarget(d.conversations,targets,primary,d.preferred_reply_id);
+  if (!sameFamily) delete S.familySendTargets[targetKey];
+  const savedTarget=S.familySendTargets[targetKey] || (sameFamily ? box.querySelector('#cm-to')?.value : '');
+  const selectedTarget = targets.some(x=>x.v===savedTarget) ? savedTarget : primaryTarget;
   const oq = d.conversations.filter((c) => c.open_q);
   box.innerHTML = `
     <div class="family-chat-header"><h3>Переписка</h3><details class="family-contacts"><summary>Контакты</summary><div class="family-contact-list">${parents.filter(p=>p.phone).map(p=>`<button class="btn sm" data-dial="${esc(p.phone)}">📞 ${esc(p.name)}${p.relation?` · ${esc(p.relation)}`:''}<span>${esc(fmtPhone(p.phone))}</span></button>`).join('')||'<span class="small muted">Телефон не указан</span>'}</div></details></div>
@@ -723,11 +724,13 @@ async function openChat(cid, keepScroll = false) {
   S.chatRows=S.chatRows||{};S.chatRows[c.id]=c;
   d.targets=(d.targets||[]).filter(x=>x.channel!=="telegram"&&(x.id===cid||x.same_contact===true)).sort((a,b)=>clientChannelPriority(a.channel)-clientChannelPriority(b.channel));
   S.chatSendTargets=S.chatSendTargets||{};
-  const replyKey=`${S.user.id}:${cid}`,savedReply=S.chatSendTargets[replyKey];
-  const validReply=id=>(d.targets||[]).some(x=>x.id===id);
-  const replyId=validReply(savedReply)?savedReply:validReply(d.preferred_reply_id)?d.preferred_reply_id:validReply(cid)?cid:0;
-  const reply=(d.targets||[]).find(x=>x.id===replyId)||{id:0,channel:'',label:'Выберите мессенджер для ответа'};
+  const replyKey=`${S.user.id}:${cid}`;
   const sameChat=+($('#chat-text')?.closest('[data-chat]')?.dataset.chat||0)===cid;
+  if (!keepScroll || !sameChat) delete S.chatSendTargets[replyKey];
+  const savedReply=S.chatSendTargets[replyKey];
+  const validReply=id=>(d.targets||[]).some(x=>x.id===id);
+  const replyId=validReply(savedReply)?savedReply:validReply(cid)?cid:validReply(d.preferred_reply_id)?d.preferred_reply_id:0;
+  const reply=(d.targets||[]).find(x=>x.id===replyId)||{id:0,channel:'',label:'Выберите мессенджер для ответа'};
   const attachmentState=sameChat&&$('#chat-text')?{file:$('#chat-text')._attachmentFile,upload:$('#chat-text')._attachmentUpload,preview:$('#chat-text')._attachmentPreview?.innerHTML,uncertain:$('#chat-text')._uncertainBundle}:S.chatDrafts?.[cid]?.attachment;
   const draft = sameChat && $("#chat-text") ? $("#chat-text").value : S.chatDrafts?.[cid]?.text||"";
   const html = `
@@ -801,14 +804,14 @@ async function openChat(cid, keepScroll = false) {
     const to = $("#chat-to") ? +$("#chat-to").value : cid;
     if(!to)throw Error("Выберите мессенджер для ответа");
     await api("POST", `/api/conversations/${to}/send`, { sticker });
-    await openChat(cid);
+    await openChat(cid, true);
   },{students:c.students||[],channel:()=>{const id=$('#chat-to')?+$('#chat-to').value:cid;return (d.targets||[]).find(x=>x.id===id)?.channel||(id===cid?c.channel:'')},resolveConversation:async()=>$('#chat-to')?+$('#chat-to').value:cid});
   restoreAttachmentDraft($('#chat-text'),attachmentState);
   const editor=$('#chat-text');editor.rows=1;editor.addEventListener('input',()=>resizeMessageInput(editor));resizeMessageInput(editor);
   const sendBtn = $("#chat-send");
   sendBtn.onclick = async () => {
     if(!confirmPendingText($("#chat-text")))return;
-    if(await sendComposerAttachment($('#chat-text'),async()=>$('#chat-to')?+$('#chat-to').value:cid,async()=>openChat(cid)))return;
+    if(await sendComposerAttachment($('#chat-text'),async()=>$('#chat-to')?+$('#chat-to').value:cid,async()=>openChat(cid, true)))return;
     const text = $("#chat-text").value.trim(); if (!text) return;
     if(!$("#chat-to").value)return toast("Выберите мессенджер для ответа");
     sendBtn.disabled = true;
@@ -819,7 +822,7 @@ async function openChat(cid, keepScroll = false) {
       await api("POST", `/api/conversations/${to}/send`, { text,request_id:requestId,reply_message_id:input._replyMessageId||null });
       clearMessageRequest(input);
       S.chatDrafts=S.chatDrafts||{};
-      if(input.isConnected){clearSentComposerDraft(input,sentValue);S.chatDrafts[cid]={text:input.value,attachment:null};if(c.open_q&&confirm('В этом диалоге открытый вопрос — он решён?'))await api('POST',`/api/conversations/${cid}/question/close`,{});openChat(cid)}
+      if(input.isConnected){clearSentComposerDraft(input,sentValue);S.chatDrafts[cid]={text:input.value,attachment:null};if(c.open_q&&confirm('В этом диалоге открытый вопрос — он решён?'))await api('POST',`/api/conversations/${cid}/question/close`,{});openChat(cid, true)}
       else {if(S.chatDrafts[cid]?.text===sentValue)S.chatDrafts[cid]={text:'',attachment:null};S.inbox.refresh?.();}
     }
     catch (e) { fail(e); sendBtn.disabled = false; }
