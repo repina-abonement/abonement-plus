@@ -1623,7 +1623,7 @@ def balance_topup(con, h, user, body, q, sid):
               body.get("comment") or "", body.get("request_key") or "", user)
 
 
-@route("POST", "/api/students/{sid}/referral-bonus", role="operator")
+@route("POST", "/api/students/{sid}/referral-bonus", role="client_sales:full")
 def referral_bonus(con, h, user, body, q, sid):
     from . import referrals
     return mx(referrals.award, con, int(sid), int(body.get("friend_id") or 0), user)
