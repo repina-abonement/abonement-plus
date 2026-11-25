@@ -1,7 +1,7 @@
 """Import visitor statuses and lead cards from selected ERP registers."""
 from collections import Counter, defaultdict
 
-from . import erpfull, erpimport as ei, services as sv, sources, tasks
+from . import erpfull, erpimport as ei, schedule, services as sv, sources, tasks
 from .db import normalize_phone
 
 
@@ -15,6 +15,14 @@ PROFILE_FIELDS = (
 
 def _clean(value):
     return " ".join(str(value or "").split())
+
+
+def _lead_branches(con, label):
+    def key(value):
+        value = ei._norm(value).replace('«', '').replace('»', '')
+        return {'ск арктика': 'арктика', 'чоботовская 4с2': 'чоботовская'}.get(value, value)
+    return [dict(row) for row in con.execute("SELECT id,name,active FROM branches")
+            if key(row["name"]) == key(label)]
 
 
 def _profile_preview(con, sid, rec):
@@ -188,6 +196,11 @@ def _plan(con, visitors, leads, erp_ids=None):
         "missing": sorted(requested - found_requested)}, "profile": {
         "source_present": dict(profile["source_present"]), "source_missing": dict(profile["source_missing"]),
         "fill": dict(profile["fill"]), "conflicts": profile["conflicts"]}, "token": token}
+    labels = sorted({rec["branch"] for namespace, _, _, _, _, rec in actions
+                     if namespace == "lead" and rec.get("branch")})
+    report["lead_branches"] = [
+        {"label": label, "matches": _lead_branches(con, label)} for label in labels]
+    report["token"] = erpfull._hash([token, report["lead_branches"]])
     return report, actions
 
 
@@ -229,17 +242,20 @@ def transfer(con, visitors, leads, user, token=None, erp_ids=None):
             con.execute("""INSERT OR IGNORE INTO erp_lead_details
                 (source_id, territory, branch, channel) VALUES (?,?,?,?)""",
                 (eid, rec.get("territory", ""), rec.get("branch", ""), rec.get("channel", "")))
-            branch = ei._norm(rec.get("branch", ""))
-            matches = [row["id"] for row in con.execute("SELECT id,name FROM branches WHERE active=1")
-                       if branch and ei._norm(row["name"]) == branch]
-            if len(matches) == 1:
-                con.execute("UPDATE students SET branch_id=? WHERE id=? AND branch_id IS NULL", (matches[0], sid))
+            branch = _clean(rec.get("branch"))
+            if branch:
+                matches = _lead_branches(con, branch)
+                if len(matches) > 1:
+                    raise ei.ImportError_(f"Несколько филиалов соответствуют «{branch}». Сначала уточните соответствие.")
+                branch_id = matches[0]["id"] if matches else schedule.save_branch(con, {"name": branch})
+                con.execute("UPDATE students SET branch_id=? WHERE id=? AND branch_id IS NULL", (branch_id, sid))
             due = erpfull._date(rec.get("lead_due", ""))
             student = sv.get_student_row(con, sid)
-            if due and student["stage"] == "lead" and student["funnel"] == "sales" and not student["trial_at"] and not student["archived"]:
+            if student["stage"] == "lead" and student["funnel"] == "sales" and not student["trial_at"] and not student["archived"]:
                 if not con.execute("SELECT 1 FROM tasks WHERE student_id=? AND kind='call_lead' LIMIT 1", (sid,)).fetchone():
-                    tasks.add_task(con, "call_lead", sid, due if "T" in due else due + "T23:59",
-                                   auto_key="erp-lead:" + eid, title="Новый лид", source="erp")
+                    tasks.add_task(con, "call_lead", sid, (due if "T" in due else due + "T23:59") if due else "",
+                                   auto_key="erp-lead:" + eid, source="erp",
+                                   title="Новый лид" if due else "Новый лид. Даты задачи нет, надо создать")
         if current != status:
             con.execute("UPDATE students SET erp_status=? WHERE id=?", (status, sid))
         con.execute("INSERT OR IGNORE INTO erp_full_identities(namespace,source_id,student_id) VALUES (?,?,?)",

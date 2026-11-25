@@ -50,7 +50,6 @@ def test_lead_only_import_preserves_metadata_and_routes_task():
     con = db.connect(":memory:")
     db.init_db(con)
     admin = {"id": 1, "name": "Admin"}
-    con.execute("INSERT INTO branches(name) VALUES ('Тестовый филиал')")
     file_id = erpimport.upload(con, "leads.csv", (
         "ID;Имя ребенка;Имя родителя;Телефон;Канал;Источник;Территория;Филиал;Комментарий;Дата создания лида;Задача\n"
         "9001;Тестовый Ребёнок;Мария;79000000001;Тестовый канал;Тестовый источник;"
@@ -68,6 +67,16 @@ def test_lead_only_import_preserves_metadata_and_routes_task():
     assert task["title"] == "Новый лид" and task["due_at"] == "2026-11-26T23:59"
     assert tasks._erp_col(dict(task, student=student))[0] == "new_application"
     assert not services.new_cards_today(con)["cards"]
+
+    undated = erpimport.upload(con, "undated.csv", (
+        "ID;Имя ребенка;Имя родителя;Телефон;Филиал;Дата создания лида;Задача\n"
+        "9002;Другой Ребёнок;Ирина;79000000002;Тестовый филиал;25.11.2026;"
+    ).encode(), "clients")["id"]
+    preview = erppeople.transfer(con, [], [undated], admin)
+    assert len(preview["lead_branches"][0]["matches"]) == 1
+    erppeople.transfer(con, [], [undated], admin, preview["token"])
+    task = con.execute("SELECT title,due_at FROM tasks WHERE auto_key='erp-lead:9002'").fetchone()
+    assert tuple(task) == ("Новый лид. Даты задачи нет, надо создать", "")
 
 
 if __name__ == "__main__":

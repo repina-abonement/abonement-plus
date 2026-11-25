@@ -1097,6 +1097,57 @@ function erpWireFiles(box, d) {
   box.querySelectorAll("[data-udel]").forEach((b) => (b.onclick = async () => { if (!confirm("Убрать этот файл?")) return; await api("DELETE", `/api/erp/uploads/${b.dataset.udel}`).catch(fail); renderErp(box); }));
 }
 
+function erpLeadImportSetup(box, data) {
+  const root = document.createElement("section");
+  root.className = "erp-step";
+  root.innerHTML = `<h3>Импорт лидов из ERP</h3>
+    <p>Выберите Excel с лидами. Проверка покажет карточки и филиалы. Перенос добавит недостающие филиалы и задачи.</p>
+    <label>Файл лидов <input type="file" accept=".xlsx,.csv" data-lead-file></label>
+    <label>Или выберите загруженный файл <select data-lead-upload><option value="">Выберите файл</option>${data.uploads.filter(f=>f.kind==="clients").map(f=>`<option value="${f.id}">${esc(f.filename)}</option>`).join("")}</select></label>
+    <button class="btn" data-lead-preview>Проверить лиды</button>
+    <button class="btn primary" data-lead-apply disabled>Перенести лиды</button>
+    <div data-lead-result aria-live="polite"></div>`;
+  box.querySelector(".erp-page-head").after(root);
+  const file = root.querySelector("[data-lead-file]"), saved = root.querySelector("[data-lead-upload]");
+  const preview = root.querySelector("[data-lead-preview]"), apply = root.querySelector("[data-lead-apply]");
+  const output = root.querySelector("[data-lead-result]");
+  let approved = null;
+  const reset = () => { approved = null; apply.disabled = true; output.textContent = ""; };
+  file.onchange = () => { saved.value = ""; reset(); };
+  saved.onchange = () => { file.value = ""; reset(); };
+  const run = async writing => {
+    preview.disabled = apply.disabled = file.disabled = saved.disabled = true;
+    try {
+      let body = approved;
+      if (!writing) {
+        let id = Number(saved.value);
+        if (file.files[0]) {
+          const chosen = file.files[0];
+          const encoded = await new Promise((resolve,reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result.split(",")[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(chosen);
+          });
+          id = (await api("POST", "/api/erp/upload", {filename:chosen.name,data:encoded,kind:"clients"})).id;
+        }
+        if (!id) throw new Error("Выберите файл лидов");
+        body = {visitors:[], leads:[id]};
+      }
+      const r = await api("POST", "/api/erp/people/" + (writing ? "apply" : "plan"), body);
+      const branches = r.lead_branches || [];
+      output.innerHTML = `<p>${writing?"Перенос выполнен. ":""}Лидов: ${r.counts.leads||0}. Новых карточек: ${r.counts.new||0}. Строк на сверку: ${r.issues.length}.</p>
+        <ul>${branches.map(b=>`<li>${esc(b.label)}: ${b.matches.length===1?esc(b.matches[0].name):b.matches.length?"несколько совпадений":writing?"добавлен":"будет создан"}</li>`).join("")}</ul>
+        ${r.issues.length?`<details><summary>Строки на сверку</summary><ul>${r.issues.map(([row,reason])=>`<li>${esc(row)}: ${esc(reason)}</li>`).join("")}</ul></details>`:""}`;
+      approved = !writing && branches.every(b=>b.matches.length<=1) && (r.counts.same||r.counts.updated||r.counts.new)
+        ? {...body, token:r.token} : null;
+    } catch (error) { approved = null; output.textContent = error.message; }
+    finally { preview.disabled = file.disabled = saved.disabled = false; apply.disabled = !approved; }
+  };
+  preview.onclick = () => run(false);
+  apply.onclick = () => run(true);
+}
+
 function erpPeopleSetup(box, data) {
   const options = data.uploads.map((file) => `<option value="${file.id}">${esc(file.filename)} (${file.count})</option>`).join("");
   box.insertAdjacentHTML("beforeend", `
@@ -1332,7 +1383,7 @@ async function renderErp(box) {
   // widgets: an old empty-import edge case must never hide the recovery tool.
   if (typeof chatArchiveRestoreSetup === "function") chatArchiveRestoreSetup(box);
   if (typeof erpHistorySetup === "function") erpHistorySetup(box);
-  try { erpPeopleSetup(box, d); } catch (error) { fail(error); }
+  try { erpLeadImportSetup(box, d); erpPeopleSetup(box, d); } catch (error) { fail(error); }
   try { erpPriorityPeopleSetup(box); } catch (error) { fail(error); }
   try { erpPriorityHistorySetup(box); } catch (error) { fail(error); }
   try { erpPriorityAttendanceSetup(box); } catch (error) { fail(error); }
@@ -1685,7 +1736,9 @@ async function renderWorkdesk(page) {
   ]};
   const freshLeadIds=new Set(freshLeads.map(card=>Number(card.id)));
   const leadCards=(d.board?.columns||[]).find(column=>column.key==='lead')?.cards||[];
-  const otherLeadCards=leadCards.filter(card=>!freshLeadIds.has(Number(card.id)));
+  const noDateLeads=leadCards.filter(card=>!card.due && card.task_title==="Новый лид. Даты задачи нет, надо создать");
+  const noDateIds=new Set(noDateLeads.map(card=>Number(card.id)));
+  const otherLeadCards=leadCards.filter(card=>!freshLeadIds.has(Number(card.id)) && !noDateIds.has(Number(card.id)));
   const leadsBoard={funnel:'sales',draggable:false,columns:[{key:'lead',title:'Новые лиды',cards:otherLeadCards}]};
   const salesWithoutLeads=d.board?{...d.board,columns:d.board.columns.filter(column=>column.key!=='lead')}:d.board;
   let newCardsForDate=filterWorkdeskBoard(newCardsBoard,S.workdeskMode,S.workdeskDate,S.meta.today),leadsForDate=filterWorkdeskBoard(leadsBoard,S.workdeskMode,S.workdeskDate,S.meta.today),salesForDate=filterWorkdeskBoard(salesWithoutLeads,S.workdeskMode,S.workdeskDate,S.meta.today),renewForDate=filterWorkdeskBoard(renew,S.workdeskMode,S.workdeskDate,S.meta.today),paymentsForDate=filterWorkdeskBoard(d.manual_payment_checks,S.workdeskMode,S.workdeskDate,S.meta.today);
@@ -1701,13 +1754,14 @@ async function renderWorkdesk(page) {
   const renewTaskIds=taskIdsInBoard(renewForDate);
   salesForDate=withoutTaskIds(salesForDate,new Set([...paymentTaskIds,...newTaskIds,...renewTaskIds]));
   leadsForDate=withoutTaskIds(leadsForDate,new Set([...paymentTaskIds,...newTaskIds,...renewTaskIds,...taskIdsInBoard(salesForDate)]));
-  const specializedTaskIds=new Set([...taskIdsInBoard(newCardsForDate),...taskIdsInBoard(leadsForDate),...taskIdsInBoard(salesForDate),...taskIdsInBoard(renewForDate),...paymentTaskIds]);
+  const specializedTaskIds=new Set([...noDateLeads.map(card=>Number(card.task_id)),...taskIdsInBoard(newCardsForDate),...taskIdsInBoard(leadsForDate),...taskIdsInBoard(salesForDate),...taskIdsInBoard(renewForDate),...paymentTaskIds]);
   const erpSection=(can("sales") || S.viewAs || S.user.is_offline_admin)
     ? await erpTasksSection(S.viewAs,taskLayout,[...specializedTaskIds]) : {html:"",count:0};
   const erpHtml=erpSection.html;
   const pipelineItems = [
     { group:"Лиды", key:"new", icon:"✨", label:"Свежие новые карточки", count:(newCardsForDate?.columns||[]).reduce((sum,column)=>sum+column.cards.length,0), html:newCardsPanel },
     { group:"Лиды", key:"leads", icon:"👤", label:"Остальные новые лиды", count:(leadsForDate?.columns||[]).reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-leads">${boardHtml(leadsForDate)}</div>` },
+    { group:"Лиды", key:"leads-no-date", icon:"📅", label:"Новые лиды без даты", count:noDateLeads.length, html:boardHtml({funnel:"sales",draggable:false,columns:[{key:"lead",title:"Назначить дату задачи",cards:noDateLeads}]}) },
     { group:"Клиенты", key:"sales", icon:"🛒", label:"Продажи", count:(salesForDate?.columns||[]).reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-sales">${boardHtml(salesForDate)}</div>` },
     ...(renewForDate ? [{ group:"Клиенты", key:"renew", icon:"🔁", label:"Продления", count:renewForDate.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-renew">${boardHtml(renewForDate)}</div>` }] : []),
     ...((paymentsForDate?.columns?.[0]?.cards||[]).length ? [{ group:"Контроль", key:"manual-payments", icon:"🧾", label:"Оплаты Точки", count:paymentsForDate.columns[0].cards.length, danger:true, html:`<div id="dw-manual-payment-checks"><p class="pipeline-note">Нужно подтвердить поступление на расчётный счёт и чек в ОФД</p>${boardHtml(paymentsForDate)}</div>` }] : []),
