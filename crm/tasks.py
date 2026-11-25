@@ -1108,7 +1108,7 @@ def erp_board(con, day: str = "today", user: dict | None = None) -> dict:
     if user is not None and user.get("role") != "admin":
         base += " AND (t.student_id IS NOT NULL OR t.family_id IS NOT NULL OR t.assignee_id=?)"
         scope_args.append(int(user["id"]))
-    cond = {"overdue": ("substr(t.due_at,1,10) < ?", t0), "today": ("substr(t.due_at,1,10) = ?", t0),
+    cond = {"overdue": ("NULLIF(substr(t.due_at,1,10), '') < ?", t0), "today": ("substr(t.due_at,1,10) = ?", t0),
             "tomorrow": ("substr(t.due_at,1,10) = ?", tomorrow), "future": ("substr(t.due_at,1,10) > ?", tomorrow)}
     try:
         selected = date.fromisoformat(day).isoformat()

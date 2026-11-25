@@ -6,6 +6,7 @@ S.etDay = S.etDay || "today";
 async function erpTasksSection(asUser=null, layout="grid", excludedTaskIds=[]) {
   let d;
   try { d = await api("GET", "/api/tasks/erp-board?day=" + S.etDay + (asUser ? "&as_user=" + encodeURIComponent(asUser.id) : "")); } catch (_) { return {html:"",count:0}; }
+  const taskCounts = { today: d.counts.today, overdue: d.counts.overdue };
   const excluded=new Set(excludedTaskIds.map(Number));
   let removed=0;
   d.columns=d.columns.map((column)=>{
@@ -50,7 +51,7 @@ async function erpTasksSection(asUser=null, layout="grid", excludedTaskIds=[]) {
       <div class="et-task-grid" role="list" aria-label="Задачи на выбранный день">${d.columns.flatMap((c) => c.cards.map((t) => card(t, c.key, c.title))).join("")}</div>`
       : `<div class="muted small" style="padding:6px 2px">${empty}</div>`}
   </section>`;
-  return {html,count:d.columns.reduce((sum,column)=>sum+column.cards.length,0)};
+  return {html,taskCounts,count:d.columns.reduce((sum,column)=>sum+column.cards.length,0)};
 }
 
 function wireErpTasks(page) {

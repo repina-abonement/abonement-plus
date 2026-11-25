@@ -1657,7 +1657,7 @@ function todayTrialsPlaque(items) {
 function filterWorkdeskBoard(board, mode, selectedDay, today) {
   if (!board) return board;
   return { ...board, columns: board.columns.map(column => ({ ...column, cards: column.cards.filter(card => {
-    const cardDate = String(card.due || card.stage_changed_at || card.created_at || "").slice(0, 10);
+    const cardDate = String(card.due_at ?? (card.due || card.stage_changed_at || card.created_at || "")).slice(0, 10);
     if (mode === "overdue") return !!cardDate && cardDate < today;
     return cardDate === (mode === "date" ? selectedDay : today);
   }) })) };
@@ -1757,6 +1757,14 @@ async function renderWorkdesk(page) {
   const specializedTaskIds=new Set([...noDateLeads.map(card=>Number(card.task_id)),...taskIdsInBoard(newCardsForDate),...taskIdsInBoard(leadsForDate),...taskIdsInBoard(salesForDate),...taskIdsInBoard(renewForDate),...paymentTaskIds]);
   const erpSection=(can("sales") || S.viewAs || S.user.is_offline_admin)
     ? await erpTasksSection(S.viewAs,taskLayout,[...specializedTaskIds]) : {html:"",count:0};
+  const taskCount = mode => {
+    if (!erpSection.taskCounts) return "";
+    // Задачи оплаты Точки исключены из общей выдачи задач.
+    const payments = filterWorkdeskBoard(d.manual_payment_checks, mode, null, S.meta.today);
+    const count = erpSection.taskCounts[mode] + (payments?.columns || [])
+      .reduce((sum, column) => sum + column.cards.length, 0);
+    return ` <b class="pipeline-task-count">${count}</b>`;
+  };
   const erpHtml=erpSection.html;
   const pipelineItems = [
     { group:"Лиды", key:"new", icon:"✨", label:"Свежие новые карточки", count:(newCardsForDate?.columns||[]).reduce((sum,column)=>sum+column.cards.length,0), html:newCardsPanel },
@@ -1769,7 +1777,7 @@ async function renderWorkdesk(page) {
   ];
   if (!pipelineItems.some(item=>item.key===S.deskPipeline)) S.deskPipeline = (newCardsForDate?.columns||[]).some(column=>column.cards.length) ? "new" : "sales";
   const pipelineHub = `<section class="pipeline-hub" aria-label="Работа с клиентами">
-    <div class="pipeline-hub-head"><div><h2>Работа с клиентами</h2><p>Все воронки в одном месте</p></div><div class="pipeline-date-filter" aria-label="Фильтр по дате"><button type="button" class="btn sm ${S.workdeskMode==='today'?'primary':''}" data-pipeline-today>Сегодня</button><button type="button" class="btn sm ${S.workdeskMode==='overdue'?'danger':''}" data-pipeline-overdue>Просрок</button><label><span>Дата</span><input type="date" value="${esc(S.workdeskDate)}" data-pipeline-date></label><span class="pipeline-hub-total">${pipelineItems.reduce((sum,item)=>sum+(item.count||0),0)} карточек</span></div></div>
+    <div class="pipeline-hub-head"><div><h2>Работа с клиентами</h2><p>Все воронки в одном месте</p></div><div class="pipeline-date-filter" aria-label="Фильтр по дате"><button type="button" class="btn sm ${S.workdeskMode==='today'?'primary':''}" data-pipeline-today>Сегодня${taskCount("today")}</button><button type="button" class="btn sm ${S.workdeskMode==='overdue'?'danger':''}" data-pipeline-overdue>Просрок${taskCount("overdue")}</button><label><span>Дата</span><input type="date" value="${esc(S.workdeskDate)}" data-pipeline-date></label><span class="pipeline-hub-total">${pipelineItems.reduce((sum,item)=>sum+(item.count||0),0)} карточек</span></div></div>
     <nav class="pipeline-tabs" aria-label="Выберите воронку">${pipelineItems.map((item,index)=>`${item.group && (!index||pipelineItems[index-1].group!==item.group)?`<span class="pipeline-tab-group">${esc(item.group)}</span>`:''}<button type="button" class="pipeline-tab ${item.key===S.deskPipeline?'active':''} ${item.danger?'danger':''}" data-pipeline-tab="${item.key}" aria-selected="${item.key===S.deskPipeline}"><span>${item.icon}</span><b>${esc(item.label)}</b>${item.count!==null?`<em>${item.count}</em>`:''}</button>`).join('')}</nav>
     <div class="pipeline-panels">${pipelineItems.map(item=>`<section class="pipeline-panel" data-pipeline-panel="${item.key}" ${item.key===S.deskPipeline?'':'hidden'}><div class="pipeline-panel-title"><span>${item.icon}</span><h3>${esc(item.label)}</h3>${item.count!==null?`<span class="count">${item.count}</span>`:''}</div>${item.html}</section>`).join('')}</div>
   </section>`;
