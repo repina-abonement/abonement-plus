@@ -326,6 +326,53 @@ def _invoice_balance_preview(con,sid,total,use_balance=False,subscription_id=Non
         raise ApiError(str(error),409) from error
 
 
+def add_previous_subscription(con, sid, body, user):
+    get_student_row(con, sid)
+    month = body.get("month")
+    try:
+        if not isinstance(month, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}", month):
+            raise ValueError
+        start, end = logic.month_bounds(month)
+    except ValueError:
+        raise ApiError("Укажите месяц абонемента")
+    if start > today():
+        raise ApiError("Для будущего месяца оформите продажу")
+    group_id, lessons, price = (body.get(key) for key in ("group_id", "lessons", "price"))
+    if type(group_id) is not int or type(lessons) is not int or not 1 <= lessons <= 62:
+        raise ApiError("Укажите группу и количество занятий от 1 до 62")
+    if type(price) is not int or not 0 <= price <= 1000000:
+        raise ApiError("Укажите стоимость в рублях")
+    tariff = body.get("tariff")
+    group = con.execute("""SELECT g.program_id,g.lesson_kind FROM enrollments e JOIN groups g ON g.id=e.group_id
+        WHERE e.student_id=? AND e.group_id=? LIMIT 1""", (sid, group_id)).fetchone()
+    if not group or group["program_id"] or group["lesson_kind"] == "ofp" or tariff not in ("fixed", "flex"):
+        raise ApiError("Выберите группу ребёнка и тариф обычного абонемента")
+    from . import groupterms
+    if tariff == "flex" and groupterms.fixed_only(con, group_id):
+        raise ApiError("В этой группе доступен только негибкий тариф")
+    source_id = f"manual:{sid}:{group_id}:{month}"
+    existing = con.execute("""SELECT manual_tariff, lessons, revenue_amount FROM erp_history_subscriptions
+        WHERE source_id=?""", (source_id,)).fetchone()
+    if existing and tuple(existing) == (tariff, lessons, price):
+        return {"ok": True}
+    if existing or con.execute("""SELECT 1 FROM erp_history_subscriptions
+        WHERE student_id=? AND group_id=? AND month=?
+        UNION ALL
+        SELECT 1 FROM subscriptions x LEFT JOIN enrollments e ON e.id=x.enrollment_id
+        WHERE x.student_id=? AND COALESCE(e.group_id,(SELECT group_id FROM students WHERE id=x.student_id))=?
+        AND x.month=? AND x.status!='cancelled' AND COALESCE(x.kind,'month')='month'
+        LIMIT 1""", (sid, group_id, month, sid, group_id, month)).fetchone():
+        raise ApiError("Абонемент этой группы за выбранный месяц уже есть в карточке", 409)
+    con.execute("""INSERT INTO erp_history_subscriptions
+        (source_id,student_id,group_id,month,valid_from,valid_until,lessons,revenue_amount,
+         source_payload,imported_at,imported_by,manual_tariff)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (source_id, sid, group_id, month, start.isoformat(), end.isoformat(), lessons,
+         price, "{}", now_iso(), user.get("name", ""), tariff))
+    log(con, sid, f"Добавлен прошлый абонемент за {month}", user, "subscription")
+    return {"ok": True}
+
+
 def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tariff=None, excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None, paid_date=None, user=None, use_balance=False) -> dict:
     if type(use_balance) is not bool:
         raise ApiError('Подтвердите выбор зачёта денег с баланса')
@@ -349,7 +396,11 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
     prev_abs = unresolved_absences_in_month(con, sid, logic.shift_month(ym, -1), e["group_id"], cert_only=ym >= cert_from)
     prev_flex = con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND enrollment_id=? AND month=?
         AND tariff='flex' AND status='paid'""", (sid, e["id"], logic.shift_month(ym, -1))).fetchone()
-    eligible = prev_abs if prev_flex and e["tariff"] == "flex" else []
+    historical_flex = e["tariff"] == "flex" and prev_abs and not prev_flex and con.execute(
+        """SELECT 1 FROM erp_history_subscriptions
+           WHERE student_id=? AND group_id=? AND month=? AND manual_tariff='flex'""",
+        (sid, e["group_id"], logic.shift_month(ym, -1))).fetchone()
+    eligible = prev_abs if (prev_flex or historical_flex) and e["tariff"] == "flex" else []
     from . import groupterms
     special=groupterms.terms(con,e['group_id'],ym)
     credit_limit=special['credit_limit'] if special else logic.MAX_FLEX_CREDIT
@@ -1344,6 +1395,22 @@ def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpai
                          "tag": "paid" if paid_month else "single" if paid_single else "unpaid", "status": "vacation" if vac else (a["status"] if a else None),
                          "resolved": a["resolved"] if a else None, "warned": bool(a and a["warned"]) and not vac,
                          "note": a["note"] if a else ""})
+        if has_lesson:
+            for historical in con.execute("""SELECT s.id,s.name,s.birth FROM erp_history_subscriptions h
+                JOIN students s ON s.id=h.student_id
+                WHERE h.group_id=? AND h.manual_tariff IS NOT NULL
+                AND ? BETWEEN h.valid_from AND h.valid_until AND s.archived=0""", (group_id, day)):
+                sid = historical["id"]
+                row = next((item for item in rows if item["id"] == sid), None)
+                if row:
+                    if row["tag"] == "unpaid":
+                        row.update(tag="historical", unpaid=False)
+                    continue
+                if subscriptiondates.excluded(con, sid, group_id, day):
+                    continue
+                rows.append(dict(historical) | {"tag": "historical", "unpaid": False,
+                    "status": "vacation" if logic.in_vacation(d, vacations_of(con, sid)) else None,
+                    "resolved": None, "warned": False, "note": ""})
         # Снимок подтверждённого состава не зависит от сегодняшней записи в группу.
         have={row['id'] for row in rows}
         for sub in confirmed:
@@ -1411,7 +1478,8 @@ def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpai
                    or r.get('attendance_id') or r.get('makeup_id') or r.get('single_id')]
     marked_rows.extend(dict(r) | {'status': 'trial'} for r in historical_trials)
     rows = marked_rows
-    hidden = [r for r in hidden if r["id"] not in marks]
+    visible_ids = {r["id"] for r in rows if r.get("tag") == "historical"}
+    hidden = [r for r in hidden if r["id"] not in marks and r["id"] not in visible_ids]
     # Дневной рабочий список — только оплаченные занятия; историю не удаляем.
     if paid_only and not include_unpaid_marks:
         excluded = [r for r in rows if r.get("unpaid") and not r.get("makeup_id") and r.get("status") != "trial"]
@@ -1535,7 +1603,9 @@ def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -
     con.execute("UPDATE attendance SET marked_at=? WHERE student_id=? AND date=? AND group_id=?", (now_iso(), sid, day, group_id))
     from . import pu
     pu.record_lesson_mark(con, group_id, day)
-    if status == "present":
+    if status == "present" and not con.execute("""SELECT 1 FROM erp_history_subscriptions
+        WHERE student_id=? AND group_id=? AND manual_tariff IS NOT NULL
+        AND ? BETWEEN valid_from AND valid_until""", (sid, group_id, day)).fetchone():
         from . import lifecycle
         lifecycle.on_unpaid_visit(con, sid, group_id, day)
     if status == "absent":

@@ -2309,7 +2309,8 @@ function clientSubscriptionPaid(sub, balance) {
 function clientSubscriptionsHtml(d) {
   const tariffs={fixed:'Негибкий',flex:'Гибкий',pkg:'Арктика + ОФП',arena_only:'Только Арктика',single:'Разовое занятие'};
   const card=x=>{
-    if(x.history_import)return `<li class="subscription-card compact-subscription"><div class="subscription-overview"><div class="subscription-identity"><h4>${esc(monthLabel(x.month))}</h4><div class="subscription-group">${esc(clientGroupLabel(x))}</div><div class="small muted subscription-meta">Исторический абонемент ${String(x.source_subscription_id).startsWith('sz:')?'по данным СЗ':'ERP №'+esc(x.source_subscription_id)} · ${x.lessons} ${plural(x.lessons,'занятие','занятия','занятий')} · с ${dShort(x.valid_from)} по ${dShort(x.valid_until)}</div><span class="pill green">История перенесена</span></div><div class="finance-numbers subscription-money"><div><small>Историческая стоимость</small><b>${rub(x.price)}</b></div>${x.revenue_carry_out?`<div><small>Перенесено в следующий месяц</small><b>−${rub(x.revenue_carry_out)}</b></div>`:''}<div class="finance-note">Счета и оплаты не переносились</div></div></div></li>`;
+    const manual = String(x.source_subscription_id || '').startsWith('manual:');
+    if(x.history_import)return `<li class="subscription-card compact-subscription"><div class="subscription-overview"><div class="subscription-identity"><h4>${esc(monthLabel(x.month))}</h4><div class="subscription-group">${esc(clientGroupLabel(x))}</div><div class="small muted subscription-meta">${manual ? 'Прошлый абонемент · '+esc(tariffs[x.tariff]) : 'Исторический абонемент '+(String(x.source_subscription_id).startsWith('sz:')?'по данным СЗ':'ERP №'+esc(x.source_subscription_id))} · ${x.lessons} ${plural(x.lessons,'занятие','занятия','занятий')} · с ${dShort(x.valid_from)} по ${dShort(x.valid_until)}</div><span class="pill green">${manual ? 'Добавлен вручную' : 'История перенесена'}</span></div><div class="finance-numbers subscription-money"><div><small>Историческая стоимость</small><b>${rub(x.price)}</b></div>${x.revenue_carry_out?`<div><small>Перенесено в следующий месяц</small><b>−${rub(x.revenue_carry_out)}</b></div>`:''}<div class="finance-note">${manual ? 'Без записи об оплате' : 'Счета и оплаты не переносились'}</div></div></div></li>`;
     const cancellation=(d.subscription_cancellations||[]).find(c=>c.subscription_id===x.id);
     const paid=x.status==='cancelled'&&cancellation?.period_verified?cancellation.paid_before:clientSubscriptionPaid(x,d.balance),left=Math.max(0,x.price-paid),cancelled=x.status==='cancelled',carryIn=Number(x.revenue_carry_in)||0,carryOut=Number(x.revenue_carry_out)||0,carryPending=Number(x.revenue_carry_source_pending)||0;
     const status=cancelled?'Отменён':!left?'Оплачен':paid?'Оплачен частично':'Ожидает оплаты';
@@ -2591,7 +2592,7 @@ async function openStudent(id, options = {}) {
 
   <div class="section" data-sc="visits" data-title="Посещения и отработки">${clientAttendanceMarkup()}</div>
 
-  <div class="section" data-sc="subs">${clientSubscriptionsHtml(d)}</div>
+  <div class="section" data-sc="subs">${saleFull && d.enrollments.some(e=>!e.program_id && e.lesson_kind!=='ofp') ? '<button type="button" class="btn" id="add-previous-sub">Добавить прошлый абонемент</button><div id="previous-sub-form"></div>' : ''}${clientSubscriptionsHtml(d)}</div>
   <div class="section" data-sc="balance">${clientBalanceHtml(d)}</div>
 
   <div class="section" data-sc="vac" data-title="🌴 Отпуск">
@@ -2670,6 +2671,51 @@ async function openStudent(id, options = {}) {
   const firstPhone = (d.parents.find(p=>p.is_primary&&p.phone)||d.parents.find(p=>p.phone)||{}).phone;
   if ($("#act-call")) $("#act-call").onclick = () => dial(firstPhone);
   if ($("#act-sell")) $("#act-sell").onclick = () => openSell(d, reload);
+  const previousButton = body.querySelector('#add-previous-sub');
+  if (previousButton) previousButton.onclick = () => {
+    const root = body.querySelector('#previous-sub-form');
+    const groups = d.enrollments.filter(e => !e.program_id && e.lesson_kind !== 'ofp');
+    previousButton.hidden = true;
+    root.innerHTML = `<form class="client-profile-form">
+      <h4>Прошлый абонемент</h4>
+      <p class="small muted">Посещения отметьте в журнале. Платёж и чек не создаются</p>
+      <label class="field">Месяц<input name="month" type="month" value="${esc(d.cur_month)}" max="${esc(d.cur_month)}" required></label>
+      <label class="field">Группа<select name="group" required>${groups.map(e=>`<option value="${e.group_id}">${esc([e.branch_name,e.group_name].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>
+      <label class="field">Тариф<select name="tariff" required><option value="">Выберите тариф</option><option value="flex">Гибкий</option><option value="fixed">Негибкий</option></select></label>
+      <label class="field">Количество занятий<input name="lessons" type="number" min="1" max="62" required></label>
+      <label class="field">Стоимость абонемента, ₽<input name="price" type="number" min="0" max="1000000" required></label>
+      <div class="sc-actions"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-close>Отмена</button></div>
+      <div class="need-err" role="alert"></div></form>`;
+    const form = root.querySelector('form');
+    const save = form.querySelector('[type="submit"]');
+    const close = form.querySelector('[data-close]');
+    const syncTariff = () => {
+      const group = groups.find(item => item.group_id === Number(form.elements.group.value));
+      form.elements.tariff.options[1].disabled = Boolean(group?.fixed_only);
+      if (group?.fixed_only) form.elements.tariff.value = 'fixed';
+    };
+    form.elements.group.onchange = syncTariff;
+    syncTariff();
+    close.onclick = () => { root.replaceChildren(); previousButton.hidden = false; previousButton.focus(); };
+    form.elements.month.focus();
+    form.onsubmit = async event => {
+      event.preventDefault();
+      save.disabled = close.disabled = true;
+      const fields = new FormData(form);
+      try {
+        await api('POST', `/api/students/${id}/previous-subscription`, {
+          month: fields.get('month'), group_id: Number(fields.get('group')), tariff: fields.get('tariff'),
+          lessons: Number(fields.get('lessons')), price: Number(fields.get('price'))
+        });
+      } catch (error) {
+        form.querySelector('[role="alert"]').textContent = error.message;
+        save.disabled = close.disabled = false;
+        return;
+      }
+      toast('Прошлый абонемент сохранён');
+      await reload();
+    };
+  };
   if ($("#act-vac")) $("#act-vac").onclick = () => openFold(body, "vac");
   if ($("#act-move")) $("#act-move").onclick = () => { openFold(body, "abon"); const b = body.querySelector("[data-entr]"); if (b) { b.click(); b.scrollIntoView({ block: "center", behavior: "smooth" }); } };
   if ($("#act-trial")) $("#act-trial").onclick = () => openTrialBookingHub(d, body.querySelector("#sc-trial-booking"), reload);
@@ -3108,7 +3154,7 @@ async function renderJournal(page) {
 }
 
 /* возраст рядом с именем (Юлия, 04.11) */
-const J_TAGS = { paid: ["абонемент", "jt-paid"], single: ["разовое", "jt-single"], unpaid: ["не оплачен", "jt-unpaid"] };
+const J_TAGS = { historical: ["прошлый абонемент", ""], paid: ["абонемент", "jt-paid"], single: ["разовое", "jt-single"], unpaid: ["не оплачен", "jt-unpaid"] };
 const jTag = (r) => { const t = J_TAGS[r.tag]; return t && !(r.tag === "unpaid" && r.unpaid) ? `<span class="pill ${t[1]}">${t[0]}</span>` : ""; };
 const jNum = (r) => r.n ? `<span class="jn">${r.n}.</span>` : "";
 /* возраст с месяцами: «3 года 5 мес.» (Юлия, 04.11) */

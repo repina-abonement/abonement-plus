@@ -99,6 +99,8 @@ def init(con):
     columns = {row[1] for row in con.execute("PRAGMA table_info(erp_history_subscriptions)")}
     if "revenue_amount" not in columns:
         con.execute("ALTER TABLE erp_history_subscriptions ADD COLUMN revenue_amount INTEGER")
+    if "manual_tariff" not in columns:
+        con.execute("ALTER TABLE erp_history_subscriptions ADD COLUMN manual_tariff TEXT")
 
 
 def _json(value): return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

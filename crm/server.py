@@ -1511,6 +1511,11 @@ def vacation_del(con, h, user, body, q, vid):
     return {"ok": True}
 
 
+@route("POST", "/api/students/{sid}/previous-subscription", role="members:full|client_sales:full")
+def previous_subscription(con, h, user, body, q, sid):
+    return sv.add_previous_subscription(con, int(sid), body, user)
+
+
 @route("GET", "/api/students/{sid}/quote", role="operator|client_sales:full")
 def quote(con, h, user, body, q, sid):
     from . import invoicebalanceweb
