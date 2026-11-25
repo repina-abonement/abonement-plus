@@ -69,6 +69,18 @@ class JournalSingleEntitlement(unittest.TestCase):
         self.assertFalse(self.rows('2026-11-03')[0]['unpaid'])
         self.assertTrue(self.rows('2026-11-06')[0]['unpaid'])
 
+    def test_marking_requires_payment_for_the_exact_single_booking(self):
+        paid_day = '2026-11-03'
+        unpaid_day = '2026-11-06'
+        self.sale(paid_day)
+        self.sale(unpaid_day, status='invoiced')
+        for status in ('present', 'absent'):
+            with self.assertRaisesRegex(sv.ApiError, 'не оплачено'):
+                sv.mark_attendance(self.con, self.sid, self.group, unpaid_day, status, self.user)
+        self.assertIsNone(self.con.execute('SELECT 1 FROM attendance').fetchone())
+        sv.mark_attendance(self.con, self.sid, self.group, paid_day, 'present', self.user)
+        self.assertEqual(self.rows(paid_day)[0]['status'], 'present')
+
     def test_existing_attendance_outside_single_booking_dates_is_preserved(self):
         self.sale('2026-11-03')
         aid=self.con.execute("INSERT INTO attendance(student_id,group_id,date,status,note) VALUES (?,?,?,'present','Исторический факт')",(self.sid,self.group,'2026-11-17')).lastrowid

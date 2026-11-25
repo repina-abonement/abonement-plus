@@ -221,6 +221,8 @@ def warn(con, sid: int, day: str, group_id: int | None, note: str, user: dict) -
     if not lessons:
         raise CapacityError("В этот день у ребёнка нет тренировки")
     les = lessons[0]
+    if sv.attendance_payment(con, sid, les["group_id"], day) == "unpaid":
+        raise CapacityError("Занятие не оплачено. Сначала оформите оплату")
     a = con.execute("SELECT id, status, warned FROM attendance WHERE student_id=? AND group_id=? AND date=?",
                     (sid, les["group_id"], day)).fetchone()
     note = (note or "").strip()[:200]

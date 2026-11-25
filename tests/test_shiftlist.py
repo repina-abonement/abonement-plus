@@ -28,23 +28,32 @@ def main():
     check([x["name"] for x in j["hidden_unpaid"]] == ["Ребёнок 0"], "Журнал: неоплативший спрятан и показан строкой «Не оплатили»")
     check(len(sv.journal(con, g, "2026-11-02")["rows"]) == 4, "Для подсчёта мест CRM по-прежнему видит всех")
     check(kids[0]["age"] == "5 лет 8 мес.", "Возраст с месяцами на дату тренировки")
-    check(sh["trials"] == [{"name": "Новичок Пробный", "age": "6 лет 9 мес.", "group": "Небо Пн/Чт 17:00", "time": "17:00", "parent": "Анна"}],
-          "Блок вводников: имя, возраст, группа, родитель")
     check(shiftlist.shift(con, b, "2026-11-03")["groups"] == [], "Во вторник у группы занятий нет")
 
-    from crm import lifecycle, tasks
-    from datetime import datetime
-    sv.today = lambda: date(2026, 11, 30)
-    sv.mark_attendance(con, ids[0], g, "2026-11-02", "present", U)
-    t = con.execute("SELECT kind, note FROM tasks WHERE student_id=? AND status='open' AND kind='unpaid_visit'", (ids[0],)).fetchone()
-    check(t and "02.11" in t["note"], "Был на занятии без оплаты: красная задача администраторам")
-    check(tasks._erp_col({"kind": "unpaid_visit", "student": {}})[0] == "unpaid_visit", "…в своей колонке на рабочем столе")
-    con.execute("INSERT INTO subscriptions(student_id,month,tariff,lessons,per_lesson,price,status,created_at,kind) VALUES (?,'2026-11','fixed',9,1000,9000,'paid','2026-11-03','month')", (ids[0],))
-    lifecycle.cleanup(con, datetime(2026, 11, 3, 12, 0))
-    check(not con.execute("SELECT 1 FROM tasks WHERE student_id=? AND status='open' AND kind='unpaid_visit'", (ids[0],)).fetchone(), "Оплатили: задача снялась сама")
-    sv.mark_attendance(con, ids[2], g, "2026-11-02", "present", U)
-    check(not con.execute("SELECT 1 FROM tasks WHERE student_id=? AND kind='unpaid_visit'", (ids[2],)).fetchone(), "У оплатившего задачи нет")
+    from unittest.mock import patch
+    from crm import clientattendance
+    with patch.object(sv, "today", return_value=date(2026, 11, 30)):
+        for status in ("present", "absent"):
+            try:
+                sv.mark_attendance(con, ids[0], g, "2026-11-02", status, U)
+            except sv.ApiError as error:
+                check("не оплачено" in str(error), "Неоплаченное занятие нельзя отметить")
+            else:
+                raise AssertionError("Неоплаченная отметка сохранена")
+        check(not con.execute("SELECT 1 FROM attendance WHERE student_id=?", (ids[0],)).fetchone(),
+              "Неоплаченная отметка не записана")
+        sv.mark_attendance(con, ids[2], g, "2026-11-02", "present", U)
+        other = schedule.save_group(con, {"name": "Вторая группа", "branch_id": b, "weekdays": [0]})
+        sv.add_enrollment(con, ids[2], other, None, "fixed", U)
+        con.execute("UPDATE enrollments SET start_date='2026-11-01' WHERE student_id=? AND group_id=?", (ids[2], other))
+        check(sv.attendance_payment(con, ids[2], other, "2026-11-02") == "unpaid",
+              "Абонемент первой группы не даёт отметить занятие второй")
+        events = clientattendance.calendar(con, ids[2], "2026-11")["events"]
+        check(any(e["group_id"] == g and not e["unpaid"] for e in events), "Карточка показывает оплаченное занятие")
+        check(any(e["group_id"] == other and e["unpaid"] for e in events), "Карточка показывает неоплаченное занятие")
 
+    check(sh["trials"] == [{"name": "Новичок Пробный", "age": "6 лет 9 мес.", "group": "Небо Пн/Чт 17:00", "time": "17:00", "parent": "Анна"}],
+          "Блок вводников: имя, возраст, группа, родитель")
     adm = {"id": 5, "role": "operator"}
     check(perms.level(adm, "journal") == perms.LEVEL["view"], "Администратор: журнал только смотреть")
     check(perms.level(adm | {"is_journal": 1}, "journal") == perms.LEVEL["full"], "С отметкой «журнал» отмечает детей и тренеров")

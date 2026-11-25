@@ -52,14 +52,14 @@ def test_flow():
     mk = con.execute("INSERT INTO groups(branch_id,name,weekdays,is_makeup) VALUES (?, 'Отработка Сб', '5', 1)", (br,)).lastrowid
     sid = sv.create_student(con, {"name": "Миша", "parent_name": "Анна", "phone": "+7 900 123-45-67", "funnel": "members",
                                   "tariff": "flex", "group_id": g}, USER)
+    eid = sv.enrollments_of(con, sid)[0]["id"]
+    con.execute("""INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,per_lesson,price,status,created_at)
+                   VALUES (?,?,'2026-10','flex',9,1550,13950,'paid','2026-09-20')""", (sid,eid))
+
     for d in ["2026-10-05", "2026-10-08", "2026-10-12", "2026-10-15"]:
         sv.mark_attendance(con, sid, g, d, "absent", USER)
     c = sv.absence_counters(con, sid)
     check(c["absent_cur"] == 4 and c["available"] == 4, "4 пропуска в октябре, все можно отработать")
-
-    eid = sv.enrollments_of(con, sid)[0]["id"]
-    con.execute("""INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,per_lesson,price,status,created_at)
-                   VALUES (?,?,'2026-10','flex',9,1550,13950,'paid','2026-09-20')""", (sid,eid))
 
     sv.book_makeup(con, sid, mk, "2026-10-24", None, USER)
     c = sv.absence_counters(con, sid)

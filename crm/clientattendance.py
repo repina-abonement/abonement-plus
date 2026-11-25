@@ -5,7 +5,7 @@ import json
 
 
 def calendar(con, sid, ym):
-    from . import services as sv, logic, schedule, closures, subscriptiondates, program
+    from . import services as sv, logic, schedule, closures, subscriptiondates, program, makeuppolicy
     student=sv.get_student_row(con,sid)
     try: start,end=logic.month_bounds(ym)
     except (ValueError,TypeError): raise sv.ApiError('Выберите месяц')
@@ -106,11 +106,15 @@ def calendar(con, sid, ym):
             events[key]={'date':mark['visit_date'],'group_id':None,'kind':mark['kind'],'status':mark['status'],
                 'trial_time':mark['visit_time'],'historical_erp':True,'erp_attendance_id':mark['source_id'],
                 'group_unresolved':True,'source_group':mark['source_group']}
+    paid = makeuppolicy.paid(con, sid, ym, entitlements=entitlements)
     result=[]
     for event in events.values():
         g=groups.get(event['group_id'],{})
         day=date.fromisoformat(event['date'])
         event.update(group=schedule.on(con,g,day).get('name','') if g else ('Группа не определена' if event.get('group_unresolved') else ''),branch=g.get('branch',''),time=logic.group_time(schedule.on(con,g,day),day.weekday()) if g else '',future=event['date']>sv.today().isoformat())
+        if g and event['kind'] not in ('trial', 'makeup'):
+            event['unpaid'] = sv.attendance_payment(con, sid, event['group_id'], event['date'],
+                entitlements=entitlements, paid=paid) == 'unpaid'
         result.append(event)
     for event in result:
         if event['kind']=='trial':

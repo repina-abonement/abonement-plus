@@ -1332,6 +1332,27 @@ def _journal_single_paid(con, sid, group_id, day, entitlements):
     return False
 
 
+def attendance_payment(con, sid, group_id, day, *, entitlements=None, paid=None):
+    from . import makeuppolicy, subscriptiondates
+
+    if entitlements is None:
+        entitlements = subscriptiondates.calendar_entitlements(con, sid, day[:7])
+    if paid is None:
+        paid = makeuppolicy.paid(con, sid, day[:7], entitlements=entitlements)
+    if makeuppolicy.covered(con, paid, {"group_id": group_id, "date": day}, entitlements=entitlements):
+        return "paid"
+    if _journal_single_paid(con, sid, group_id, day, entitlements):
+        return "single"
+    if subscriptiondates.excluded(con, sid, group_id, day) or subscriptiondates.outside_period(con, sid, group_id, day):
+        return "unpaid"
+    # Verified past subscriptions may be entered without a new payment.
+    if con.execute("""SELECT 1 FROM erp_history_subscriptions
+        WHERE student_id=? AND group_id=? AND manual_tariff IS NOT NULL
+        AND ? BETWEEN valid_from AND valid_until""", (sid, group_id, day)).fetchone():
+        return "historical"
+    return "unpaid"
+
+
 def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpaid_marks: bool = True, *, _entitlement_cache=None) -> dict:
     g = con.execute("SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.id=?",
                     (group_id,)).fetchone()
@@ -1384,18 +1405,13 @@ def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpai
                           or subscriptiondates.outside_period(con, s["id"], group_id, day)):
                 continue
             vac = logic.in_vacation(d, vacations_of(con, s["id"]))
-            # в журнале только те, у кого оплачено фактически: абонемент на месяц или разовое (Юлия, 04.11).
-            # Уже отмеченных не прячем, чтобы не потерять отметку
-            paid_month = any(r['id'] not in entitlement['single_ids'] for r in con.execute(
-                """SELECT id FROM subscriptions WHERE student_id=? AND month=? AND status='paid'
-                   AND COALESCE(kind,'month')='month'""",(s["id"],day[:7])))
-            paid_single = not paid_month and _journal_single_paid(con,s["id"],group_id,day,entitlement)
-            if paid_only and not paid_month and not paid_single and not a:
+            tag = attendance_payment(con, s["id"], group_id, day, entitlements=entitlement)
+            unpaid = tag == "unpaid"
+            if paid_only and unpaid and not a:
                 hidden.append({"id": s["id"], "name": s["name"]})
                 continue
-            unpaid = not paid_month and not paid_single
             rows.append({"id": s["id"], "name": s["name"], "birth": s["birth"] or "", "unpaid": unpaid,
-                         "tag": "paid" if paid_month else "single" if paid_single else "unpaid", "status": "vacation" if vac else (a["status"] if a else None),
+                         "tag": tag, "status": "vacation" if vac else (a["status"] if a else None),
                          "resolved": a["resolved"] if a else None, "warned": bool(a and a["warned"]) and not vac,
                          "note": a["note"] if a else ""})
         if has_lesson:
@@ -1432,7 +1448,7 @@ def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpai
                 continue
             a = con.execute("SELECT status, resolved, warned, note FROM attendance WHERE student_id=? AND date=? AND group_id=?",
                             (v["id"], day, group_id)).fetchone()
-            paid1 = _journal_single_paid(con,v["id"],group_id,day,entitlements_for(v["id"]))
+            paid1 = attendance_payment(con, v["id"], group_id, day, entitlements=entitlements_for(v["id"])) != "unpaid"
             rows.append({"id": v["id"], "name": v["name"], "birth": v["birth"] or "", "tag": "single", "single_id": v["single_id"],
                          "unpaid": not paid1, "status": a["status"] if a else None, "resolved": a["resolved"] if a else None,
                          "warned": bool(a and a["warned"]), "note": a["note"] if a else ""})
@@ -1467,9 +1483,9 @@ def journal(con, group_id: int, day: str, paid_only: bool = False, include_unpai
     for sid, mark in marks.items():
         if sid in seen_marks:
             continue
-        paid = paid_for_month(con,sid,day[:7])
-        marked_rows.append({"id":sid,"name":mark["name"],"birth":mark["birth"] or "", "unpaid":not paid,
-                            "tag":"paid" if paid else "unpaid", "status":mark["status"],"resolved":mark["resolved"],
+        tag = attendance_payment(con, sid, group_id, day, entitlements=entitlements_for(sid))
+        marked_rows.append({"id":sid,"name":mark["name"],"birth":mark["birth"] or "", "unpaid":tag == "unpaid",
+                            "tag":tag, "status":mark["status"],"resolved":mark["resolved"],
                             "warned":bool(mark["warned"]),"note":mark["note"],"attendance_id":mark["id"],"erp_visit_kind":mark["erp_visit_kind"],
                             "group_id":group_id,"date":day,"historical_attendance":True})
     historical_trials = con.execute("""SELECT v.id AS historical_trial_id,s.id,s.name,s.birth,v.visit_at AS trial_at,
@@ -1583,16 +1599,13 @@ def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -
         raise ApiError("Этот пропуск уже учтён в перерасчёте абонемента")
     if a and a["resolved"] == "makeup" and status != "absent":
         raise ApiError("Этот пропуск уже отработан")
-    from . import subscriptiondates
-    if status != "clear" and subscriptiondates.excluded(con, sid, group_id, day):
-        raise ApiError("Эта дата исключена из абонемента: сначала оформите занятие отдельно")
-    if not a and status != "clear" and subscriptiondates.outside_period(con, sid, group_id, day):
-        raise ApiError("Дата занятия вне срока действия абонемента")
     if status == "clear":
         if a:
             con.execute("UPDATE makeups SET status='cancelled' WHERE absence_id=? AND status='booked'", (a["id"],))
             con.execute("DELETE FROM attendance WHERE id=?", (a["id"],))
         return
+    if attendance_payment(con, sid, group_id, day) == "unpaid":
+        raise ApiError("Занятие не оплачено. Сначала оформите оплату", 422)
     if a:
         if a["status"] == status:
             return
@@ -1606,11 +1619,6 @@ def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -
     con.execute("UPDATE attendance SET marked_at=? WHERE student_id=? AND date=? AND group_id=?", (now_iso(), sid, day, group_id))
     from . import pu
     pu.record_lesson_mark(con, group_id, day)
-    if status == "present" and not con.execute("""SELECT 1 FROM erp_history_subscriptions
-        WHERE student_id=? AND group_id=? AND manual_tariff IS NOT NULL
-        AND ? BETWEEN valid_from AND valid_until""", (sid, group_id, day)).fetchone():
-        from . import lifecycle
-        lifecycle.on_unpaid_visit(con, sid, group_id, day)
     if status == "absent":
         if s["skip_stage"] == "refused":
             con.execute("UPDATE students SET skip_stage='none' WHERE id=?", (sid,))
