@@ -19,6 +19,14 @@ function splitChildNameFields(form,name='child_name',requireSurname=false) {
   first.addEventListener('input',sync);last.addEventListener('input',sync);first.addEventListener('change',sync);last.addEventListener('change',sync);
   form.addEventListener('submit',sync,true);sync();
 }
+function fmtPhone(value) {
+  const raw = String(value ?? "").trim();
+  if (!/^[+\d\s()-]+$/.test(raw)) return raw;
+  const digits = raw.replace(/\D/g, "");
+  const russian = raw.startsWith("+") ? /^7\d{10}$/.test(digits) : /^[78]\d{10}$/.test(digits);
+  const local = russian ? digits.slice(1) : !raw.startsWith("+") && /^9\d{9}$/.test(digits) ? digits : null;
+  return local ? `+7 (${local.slice(0, 3)}) ${local.slice(3, 6)} ${local.slice(6, 8)} ${local.slice(8)}` : raw;
+}
 function formatContactPhone(value) {
   const raw=String(value||''),digits=raw.replace(/\D/g,'');if(!digits)return '';
   if(raw.trim().startsWith('+'))return '+'+digits;

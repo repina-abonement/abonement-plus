@@ -29,7 +29,7 @@ function taskRow(t, options = {}) {
         ${t.created_by_id && t.created_by_id !== t.assignee_id && t.created_by ? ` <span class="pill blue">от ${esc(firstName(t.created_by))}</span>` : ""}
         ${t.recur_id ? ` <span class="pill" title="Повторяющееся дело">🔁</span>` : ""}</div>
       ${t.returned_note ? `<div class="small" style="color:var(--red)">↩ Вернули: ${esc(t.returned_note)}</div>` : ""}
-      ${s.id ? `<button class="linkish" data-open="${s.id}">${esc(displayChildName(s.name))}</button> <span class="small muted">${esc([s.parent, s.phone, trial].filter(Boolean).join(", "))}</span>` : ""}
+      ${s.id ? `<button class="linkish" data-open="${s.id}">${esc(displayChildName(s.name))}</button> <span class="small muted">${esc([s.parent, fmtPhone(s.phone), trial].filter(Boolean).join(", "))}</span>` : ""}
       ${t.note ? `<div class="small muted">${esc(t.note)}</div>` : ""}
       ${auto ? `<div class="chips" style="margin-top:6px">${auto}</div>` : ""}
       ${!t.client_task && t.assignee && (S.tasks.scope === "all" || t.assignee_id !== S.user.id) ? `<div class="small muted">Исполнитель: ${esc(t.assignee)}</div>` : ""}

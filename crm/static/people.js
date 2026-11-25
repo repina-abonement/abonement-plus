@@ -19,11 +19,6 @@ function avatar(id, name, size = 36) {
   return stk ? `<span class="ava-wrap" style="width:${size}px;height:${size}px" title="${esc(u.nickname || "")}">${ini_}${stk}</span>` : ini_;
 }
 
-function fmtPhone(p) {
-  const d = String(p || "").replace(/\D/g, "");
-  return d.length === 11 ? `+7 ${d.slice(1, 4)} ${d.slice(4, 7)}-${d.slice(7, 9)}-${d.slice(9)}` : p;
-}
-
 const ROLE_LABEL = { admin: "Руководитель", operator: "Администратор", coach: "Тренер" };
 
 async function openStaffProfile(uid) {

@@ -172,7 +172,7 @@ async function chooseForwardTarget(){
   const query=prompt('Кому переслать? Введите имя или телефон');if(!query?.trim())return 0;
   const result=await api('GET',`/api/inbox?filter=all&q=${encodeURIComponent(query.trim())}`),rows=result.conversations||[];
   if(!rows.length)throw Error('Чат не найден');
-  const choices=rows.slice(0,9).map((row,index)=>`${index+1}. ${row.title||row.username||row.phone||'Без имени'} · ${chLabel(row.channel)}`).join('\n');
+  const choices=rows.slice(0,9).map((row,index)=>`${index+1}. ${fmtPhone(row.title||row.username||row.phone)||'Без имени'} · ${chLabel(row.channel)}`).join('\n');
   const picked=prompt(`Выберите номер чата:\n${choices}`,rows.length===1?'1':'');if(picked===null)return 0;
   const row=rows[Number(picked)-1];if(!row)throw Error('Выберите номер из списка');return row.id;
 }
@@ -481,7 +481,7 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
   const selectedTarget = savedIsUsable ? savedTarget : primaryTarget;
   const oq = d.conversations.filter((c) => c.open_q);
   box.innerHTML = `
-    <div class="family-chat-header"><h3>Переписка</h3><details class="family-contacts"><summary>Контакты</summary><div class="family-contact-list">${parents.filter(p=>p.phone).map(p=>`<button class="btn sm" data-dial="${esc(p.phone)}">📞 ${esc(p.name)}${p.relation?` · ${esc(p.relation)}`:''}<span>${esc(p.phone)}</span></button>`).join('')||'<span class="small muted">Телефон не указан</span>'}</div></details></div>
+    <div class="family-chat-header"><h3>Переписка</h3><details class="family-contacts"><summary>Контакты</summary><div class="family-contact-list">${parents.filter(p=>p.phone).map(p=>`<button class="btn sm" data-dial="${esc(p.phone)}">📞 ${esc(p.name)}${p.relation?` · ${esc(p.relation)}`:''}<span>${esc(fmtPhone(p.phone))}</span></button>`).join('')||'<span class="small muted">Телефон не указан</span>'}</div></details></div>
     ${oq.map((c) => `<div class="oq-on"><div class="grow"><b>❗ Открытый вопрос</b>${c.open_note ? `: ${esc(c.open_note)}` : ""}
       <div class="small muted">Вернуться к ${esc(dtShort(c.open_due))}${c.open_by ? ` · отметил(а) ${esc(c.open_by)}` : ""}</div></div>
       <button class="btn sm" data-oqchat="${c.id}">Открыть диалог</button></div>`).join("")}
@@ -642,7 +642,7 @@ async function renderInbox(page) {
     S.chatRows=S.chatRows||{};d.conversations.forEach(c=>S.chatRows[c.id]=c);
     const badge=$('#inbox-new-count');if(badge){badge.textContent=d.unread;badge.dataset.empty=d.unread?'0':'1'}
     list.innerHTML = d.conversations.length ? d.conversations.map(c=>{
-      const name=c.title||c.username||c.phone||'Без имени';
+      const name=fmtPhone(c.title||c.username||c.phone)||'Без имени';
       const initials=name.trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();
       return `<div class="list-row click conv-row ${c.unread?'unread':''} ${I.active===c.id?'selected':''}" data-conv="${c.id}" tabindex="0" role="button" aria-label="${esc(name)}${c.unread?', непрочитанных: '+c.unread:''}">
         <div class="conv-avatar" aria-hidden="true">${esc(initials)}${c.unread?`<span class="conv-unread-count" aria-label="Непрочитанных сообщений: ${c.unread}">${c.unread>99?'99+':c.unread}</span>`:''}</div>
@@ -683,7 +683,7 @@ async function renderCalls(body) {
       const missed = k.direction === "in" && ["missed", "busy"].includes(k.status) && !k.seen;
       return `<div class="list-row ${missed ? "row-missed" : ""}">
         <span class="call-ico">${k.direction === "in" ? "↙" : "↗"}</span>
-        <div class="grow"><b>${esc(k.phone)}</b> ${k.family_name ? `<span class="muted small">· семья ${esc(k.family_name)}</span>` : `<span class="pill yellow">нет карточки</span>`}
+        <div class="grow"><b>${esc(fmtPhone(k.phone))}</b> ${k.family_name ? `<span class="muted small">· семья ${esc(k.family_name)}</span>` : `<span class="pill yellow">нет карточки</span>`}
           <div class="small muted">${dtWhen(k.started_at)} · ${esc(CALL_ST[k.status] || k.status)}${k.talk ? " · " + secs(k.talk) : ""}${k.operator ? " · " + esc(k.operator) : ""}</div>
           ${k.has_record ? `<audio controls preload="none" src="/api/calls/${k.id}/record"></audio>` : ""}
           ${aiChip(k)}
@@ -730,7 +730,7 @@ async function openChat(cid, keepScroll = false) {
   const draft = sameChat && $("#chat-text") ? $("#chat-text").value : S.chatDrafts?.[cid]?.text||"";
   const html = `
     <div class="chat" data-chat="${cid}">
-      <header class="chat-header"><button type="button" class="chat-back btn sm" aria-label="К списку чатов">←</button><div class="grow"><h2>${esc(c.title||c.username||c.phone||'Без имени')}</h2><div class="small muted">${esc(reply.channel?chLabel(reply.channel):c.channel_label)}${c.phone?' · '+esc(c.phone):''}</div></div>${(can('members')||can('search','view'))&&c.students?.length===1?`<button class="btn sm chat-client-link" data-open="${c.students[0].id}">Открыть карточку</button>`:(can('members')||can('search','view'))&&c.students?.length>1?`<details class="chat-client-picker"><summary class="btn sm">Карточки клиентов</summary><div class="chat-client-list">${c.students.map(x=>`<button class="btn sm" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join('')}</div></details>`:''}<details class="chat-info-menu"><summary class="btn sm" aria-label="Информация о клиенте">⋯</summary><div class="chat-info-panel"><div class="chat-quick-actions" role="menu">${chatActionsHtml(c,true)}<button type="button" data-change-chat-channel>Канал ответа</button></div>
+      <header class="chat-header"><button type="button" class="chat-back btn sm" aria-label="К списку чатов">←</button><div class="grow"><h2>${esc(fmtPhone(c.title||c.username||c.phone)||'Без имени')}</h2><div class="small muted">${esc(reply.channel?chLabel(reply.channel):c.channel_label)}${c.phone?' · '+esc(fmtPhone(c.phone)):''}</div></div>${(can('members')||can('search','view'))&&c.students?.length===1?`<button class="btn sm chat-client-link" data-open="${c.students[0].id}">Открыть карточку</button>`:(can('members')||can('search','view'))&&c.students?.length>1?`<details class="chat-client-picker"><summary class="btn sm">Карточки клиентов</summary><div class="chat-client-list">${c.students.map(x=>`<button class="btn sm" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join('')}</div></details>`:''}<details class="chat-info-menu"><summary class="btn sm" aria-label="Информация о клиенте">⋯</summary><div class="chat-info-panel"><div class="chat-quick-actions" role="menu">${chatActionsHtml(c,true)}<button type="button" data-change-chat-channel>Канал ответа</button></div>
       <div class="section">
         ${c.family_id ? `<div class="small muted">Семья ${esc(c.family_name)}</div>
           <div class="chips" style="margin-top:6px">${c.students.map((x) => `<button class="chip" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join("")}
@@ -1058,7 +1058,7 @@ async function renderCallStats(body) {
       <div class="small muted" style="margin-bottom:8px">Сначала те, кто ждёт дольше всех</div>
       <div class="list" style="box-shadow:none">${d.waiting.map((w) => `<div class="list-row">
         <span class="ref-card red" aria-hidden="true"></span>
-        <div class="grow"><b>${esc(w.phone)}</b> ${w.family_name ? `<span class="muted small">семья ${esc(w.family_name)}</span>` : `<span class="pill yellow">нет карточки</span>`}
+        <div class="grow"><b>${esc(fmtPhone(w.phone))}</b> ${w.family_name ? `<span class="muted small">семья ${esc(w.family_name)}</span>` : `<span class="pill yellow">нет карточки</span>`}
           <div class="small muted">ждёт ${esc(w.waiting)}</div></div>
         <button class="btn sm primary" data-dial="${esc(w.phone)}" data-sid="${w.student_id || ""}">Перезвонить</button></div>`).join("")}</div>
     </section>` : ""}
@@ -1126,7 +1126,7 @@ function aiBlock(x) {
     ${x.recent.length ? `<section class="panel" style="margin-top:14px"><h3>Последние разборы</h3>
       <div class="list" style="box-shadow:none">${x.recent.map((r) => `<div class="list-row click" data-ai="${r.id}">
         <div class="ai-score sm ${r.score != null ? scoreClass(r.score) : ""}">${r.score ?? "—"}</div>
-        <div class="grow"><b>${esc(r.family_name ? "Семья " + r.family_name : r.phone)}</b> <span class="small muted">${esc(r.operator)} · ${dtWhen(r.started_at)}</span>
+        <div class="grow"><b>${esc(r.family_name ? "Семья " + r.family_name : fmtPhone(r.phone))}</b> <span class="small muted">${esc(r.operator)} · ${dtWhen(r.started_at)}</span>
           <div class="small ellipsis">${esc(r.summary || "")}</div></div>
         ${r.result ? `<span class="pill">${esc(r.result)}</span>` : ""}</div>`).join("")}</div></section>` : ""}`;
 }

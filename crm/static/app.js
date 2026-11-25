@@ -495,7 +495,7 @@ function wireNavSearch(nq) {
   const close = () => { box.hidden = true; cur = -1; };
   const paint = () => {
     box.innerHTML = (historyMode ? `<div class="nav-recent-head"><b>Недавно открывали</b>${rows.length ? `<button type="button" data-clear-recent>Очистить</button>` : ""}</div>` : "") + (rows.length ? rows.slice(0, 8).map((r, i) => `<button class="${i === cur ? "on" : ""}" data-nr="${r.id}"><b>${esc(displayChildName(r.name))}</b>
-      <small>${esc([r.parent, r.phone].filter(Boolean).join(" · "))}${r.funnel === "members" ? "" : " · лид"}</small></button>`).join("")
+      <small>${esc([r.parent, fmtPhone(r.phone)].filter(Boolean).join(" · "))}${r.funnel === "members" ? "" : " · лид"}</small></button>`).join("")
       + (rows.length > 8 ? `<button data-nall><small>Все результаты: ${rows.length} →</small></button>` : "")
       : `<div class="small" style="padding:8px 10px;opacity:.7">${historyMode ? "Здесь появятся последние карточки клиентов" : "Никого не нашли"}</div>`);
     box.style.top = nq.offsetTop + nq.offsetHeight + 4 + "px";
@@ -974,7 +974,7 @@ function wireBoardCardPreview(page){
   let current=null,timer;
   const hide=()=>{clearTimeout(timer);popup.hidden=true;current=null};
   const position=()=>{if(!current?.isConnected)return hide();const r=current.getBoundingClientRect(),w=Math.min(380,innerWidth-24);popup.style.width=w+"px";popup.style.left=Math.max(12,Math.min(innerWidth-w-12,r.right+10))+"px";const h=popup.getBoundingClientRect().height;popup.style.top=Math.max(12,Math.min(innerHeight-h-12,r.top))+"px"};
-  const show=card=>{clearTimeout(timer);current=card;const item=S.boardCardDetails?.[card.dataset.detailKey];if(!item)return hide();const student=item.student||item,title=item.task_title||item.title||item.due_title||"Текущая задача",due=item.due||item.due_at||"",note=item.task_note||item.note||"Подробное описание пока не добавлено";const extra=[student.group,student.branch?`Филиал: ${student.branch}`:"",student.source?`Источник: ${student.source}`:"",student.tariff?`Тариф: ${student.tariff}`:""].filter(Boolean);popup.innerHTML=`<div class="board-card-preview-label">Текущая задача</div><strong>${esc(title)}</strong><div class="board-card-preview-client"><span>${esc(displayChildName(student.name||""))}${student.parent?` · ${esc(student.parent)}`:""}</span>${student.phone?`<span class="board-card-preview-phone">${esc(student.phone)}</span>`:""}</div>${due?`<div class="board-card-preview-due">Срок: ${dShort(due)}${due.slice(11,16)?` · ${esc(due.slice(11,16)==="23:59"?"в течение дня":due.slice(11,16))}`:""}</div>`:""}${extra.length?`<div class="board-card-preview-extra">${extra.map(esc).join(" · ")}</div>`:""}<div class="board-card-preview-note">${esc(note)}</div>`;popup.hidden=false;position()};
+  const show=card=>{clearTimeout(timer);current=card;const item=S.boardCardDetails?.[card.dataset.detailKey];if(!item)return hide();const student=item.student||item,title=item.task_title||item.title||item.due_title||"Текущая задача",due=item.due||item.due_at||"",note=item.task_note||item.note||"Подробное описание пока не добавлено";const extra=[student.group,student.branch?`Филиал: ${student.branch}`:"",student.source?`Источник: ${student.source}`:"",student.tariff?`Тариф: ${student.tariff}`:""].filter(Boolean);popup.innerHTML=`<div class="board-card-preview-label">Текущая задача</div><strong>${esc(title)}</strong><div class="board-card-preview-client"><span>${esc(displayChildName(student.name||""))}${student.parent?` · ${esc(student.parent)}`:""}</span>${student.phone?`<span class="board-card-preview-phone">${esc(fmtPhone(student.phone))}</span>`:""}</div>${due?`<div class="board-card-preview-due">Срок: ${dShort(due)}${due.slice(11,16)?` · ${esc(due.slice(11,16)==="23:59"?"в течение дня":due.slice(11,16))}`:""}</div>`:""}${extra.length?`<div class="board-card-preview-extra">${extra.map(esc).join(" · ")}</div>`:""}<div class="board-card-preview-note">${esc(note)}</div>`;popup.hidden=false;position()};
   const later=()=>{clearTimeout(timer);timer=setTimeout(hide,160)};
   page.querySelectorAll(".card").forEach(card=>{card.addEventListener("mouseenter",()=>{if(matchMedia("(hover:hover)").matches)show(card)});card.addEventListener("mouseleave",later);card.addEventListener("focus",()=>show(card));card.addEventListener("blur",later)});
   const controller=new AbortController(),signal=controller.signal;window.addEventListener("resize",position,{signal});window.addEventListener("scroll",()=>{if(!popup.hidden)position()},{capture:true,passive:true,signal});
@@ -1016,7 +1016,7 @@ function renderMembersList(page, data) {
   const pill = { single: "", unpaid_cur: "red", renew: "", invoiced: "", paid: "green", left: "" };
   const row = (k, g) => `<div class="m-row ${k.color === "red" ? "m-red" : k.color === "yellow" ? "m-yellow" : ""}" data-open="${k.id}" role="button" tabindex="0">
     <span class="m-name"><b>${esc(displayChildName(k.name))}</b></span>
-    <span class="small muted m-parent">${esc(k.parent)}${k.phone ? ", " + esc(k.phone) : ""}</span>
+    <span class="small muted m-parent">${esc(k.parent)}${k.phone ? ", " + esc(fmtPhone(k.phone)) : ""}</span>
     ${g ? "" : `<span class="small m-group">${esc(k.groups.map((x) => x.branch + " · " + x.name).join(", ") || k.group)}</span>`}
     <span class="m-st"><span class="pill ${pill[k.status]}">${esc(k.badge || cols[k.status] || "")}</span></span></div>`;
   let body;
@@ -1564,7 +1564,7 @@ async function membersDups(btn) {
 function openDups(items) {
   const fam = (x) => `<div class="dup-fam"><b>${esc(x.name || "Семья")}</b>
     <div class="small">${x.kids.map((k) => esc(displayChildName(k.name)) + (k.birth ? ` (${dShort(k.birth)})` : "") + (k.funnel === "sales" ? " · лид" : "")).join(", ") || "детей нет"}</div>
-    <div class="small muted">${x.parents.map((p) => esc(p.name) + (p.phone ? " " + esc(p.phone) : "")).join(", ")}</div>
+    <div class="small muted">${x.parents.map((p) => esc(p.name) + (p.phone ? " " + esc(fmtPhone(p.phone)) : "")).join(", ")}</div>
     <div class="small muted">оплат: ${x.payments}</div></div>`;
   openDrawer(`<h2>👯 Похоже на одну семью</h2>
     <p class="muted">Одна и та же семья заведена дважды. Выберите, какую карточку оставить: всё из второй (дети, родители, переписка, звонки, оплаты) переедет в неё. Отменить склейку нельзя</p>
@@ -1648,7 +1648,7 @@ function todayTrialsPlaque(items) {
     <div class="trial-desk-head"><div><h2>⚽ Сегодня ждём на пробное</h2><p>Расчёт при покупке сразу после ПУ · скидки применены автоматически</p></div><b class="trial-desk-count">${items.length}</b></div>
     ${items.length?`<div class="trial-desk-list">${items.map(child=>`<details class="trial-desk-child" open>
       <summary><span class="trial-desk-time">${esc(child.time||"—")}</span><span><b>${esc(child.name)}</b><small>${esc(child.branch)} · ${esc(child.group)}${child.age?` · ${esc(child.age)}`:""}${child.came?" · ПУ отмечено":" · ждём"}</small></span><button type="button" class="btn sm" data-trial-card="${child.id}">Карточка</button></summary>
-      <div class="trial-desk-contact">Родитель: <b>${esc(child.parent||"не указан")}</b>${child.phone?` · <a href="tel:${esc(child.phone)}">${esc(child.phone)}</a>`:""}</div>
+      <div class="trial-desk-contact">Родитель: <b>${esc(child.parent||"не указан")}</b>${child.phone?` · <a href="tel:${esc(child.phone)}">${esc(fmtPhone(child.phone))}</a>`:""}</div>
       ${child.offers.length?`<div class="trial-offers">${child.offers.map(offer=>`<article><h3>${esc(offer.label)}</h3><div class="trial-offer-months">${monthPart(offer.current)}${monthPart(offer.next)}<span class="trial-offer-total"><b>Вместе</b><em>два месяца</em><strong>${rub(offer.bundle_total)}</strong></span></div>${offer.current.discount?`<p>Скидка: ${esc(offer.current.discount)} · ${offer.current.discount_percent}%</p>`:""}</article>`).join("")}</div>`:`<p class="need-err">Расчёт пока недоступен — откройте карточку и проверьте группу.</p>`}
     </details>`).join("")}</div>`:`<p class="trial-desk-empty">Сегодня записанных на пробное нет.</p>`}
   </section>`;
@@ -1787,7 +1787,7 @@ async function renderWorkdesk(page) {
       ${u.length ? `<div class="now-list">${u.slice(0, S.hotAll ? u.length : 3).map((x, i) => `
         <div class="now-item ${x.level}">
           <span class="ref-card ${x.level}" aria-hidden="true"></span>
-          <div class="grow"><b>${esc(x.title)}</b>${x.count ? ` <span class="nbadge static">${x.count}</span>` : ""}
+          <div class="grow"><b>${esc(x.kind === "missed_call" ? fmtPhone(x.title) : x.title)}</b>${x.count ? ` <span class="nbadge static">${x.count}</span>` : ""}
             <div class="small ellipsis">${esc(x.text)}</div></div>
           <span class="small muted when">${ago(x.ts)}</span>
           <div class="now-act">
@@ -1856,7 +1856,7 @@ function cardHtml(k, draggable) {
   return `<article class="card ${k.color || ""}" data-id="${studentId}" data-detail-key="${esc(k._board_detail_key||"")}" ${draggable ? 'draggable="true"' : ""}>
     ${k.color ? `<span class="ref-card ${k.color}" title="${k.color === "red" ? "Срочно" : "Пора связаться"}"></span>` : ""}
     <div class="name">${esc(displayChildName(student.name||""))}</div>
-    <div class="meta card-contact">${esc([student.parent,student.phone].filter(Boolean).join(", "))}</div>
+    <div class="meta card-contact">${esc([student.parent,fmtPhone(student.phone)].filter(Boolean).join(", "))}</div>
     ${taskTitle ? `<div class="card-task">${esc(taskTitle)}</div>` : ""}
     ${due ? `<div class="due ${k.due_color || ""}" title="${esc(k.due_title || "")}">⏰ ${dueText(due)}</div>` : ""}
   </article>`;
@@ -2552,7 +2552,7 @@ async function openStudent(id, options = {}) {
     ${d.siblings.length ? `<div class="chips sc-kids"><span class="chip on">${esc(displayChildName(s.name))}</span>${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join("")}</div>` : ""}
     <div class="sc-meta" ${full?'data-head-group tabindex="0" role="button" title="Изменить группу"':''}>${isMember ? (regular.length ? regular.map((e) => `<span class="pill">${esc(e.group_name)}</span>`).join(" ") : `<span class="muted small">Группа не выбрана</span>`)
       : `${s.trial_at ? `<span class="pill">Пробное ${dtShort(s.trial_at)}</span>` : ""}`}</div>
-    <div class="sc-parents">${d.parents.map((p, parentIndex) => `<div class="sc-parent"><button type="button" class="profile-text-edit" data-profile-edit="name">${esc(p.name)}</button>${p.is_primary?'<span class="small muted">основной</span>':''}<span class="muted" aria-hidden="true">·</span><button class="rel-chip ${p.relation?'':'empty'}" data-profile-edit="name" title="Изменить родство">${p.relation?esc(p.relation):'Указать родство'}</button>${p.phone?`<span class="muted" aria-hidden="true">·</span><button class="linkish" data-profile-edit="name" title="Изменить телефон">${esc(p.phone)}</button><button type="button" class="sc-copy-phone" data-copy-parent-phone="${parentIndex}" title="Скопировать номер" aria-label="Скопировать номер ${esc(p.name)}">⧉</button>`:''}${p.email?`<button type="button" class="profile-text-edit muted sc-parent-email" data-profile-edit="name">${esc(p.email)}</button>`:''}</div>`).join('')}</div>
+    <div class="sc-parents">${d.parents.map((p, parentIndex) => `<div class="sc-parent"><button type="button" class="profile-text-edit" data-profile-edit="name">${esc(p.name)}</button>${p.is_primary?'<span class="small muted">основной</span>':''}<span class="muted" aria-hidden="true">·</span><button class="rel-chip ${p.relation?'':'empty'}" data-profile-edit="name" title="Изменить родство">${p.relation?esc(p.relation):'Указать родство'}</button>${p.phone?`<span class="muted" aria-hidden="true">·</span><button class="linkish" data-profile-edit="name" title="Изменить телефон">${esc(fmtPhone(p.phone))}</button><button type="button" class="sc-copy-phone" data-copy-parent-phone="${parentIndex}" title="Скопировать номер" aria-label="Скопировать номер ${esc(p.name)}">⧉</button>`:''}${p.email?`<button type="button" class="profile-text-edit muted sc-parent-email" data-profile-edit="name">${esc(p.email)}</button>`:''}</div>`).join('')}</div>
     ${isMember && d.balance.debt ? `<div class="sc-debt-summary">Задолженность <b>${rub(d.balance.debt)}</b></div>` : ""}
     ${d.family.note ? `<div class="sc-staff-note" ${full?'data-profile-note tabindex="0" role="button" title="Изменить заметку"':''}><b>Заметка для команды</b><div>${esc(d.family.note)}</div></div>` : ""}
     ${alerts ? `<div class="sc-alerts">${alerts}</div>` : ""}
@@ -2590,7 +2590,7 @@ async function openStudent(id, options = {}) {
     <div data-client-stage></div>
     <h3>Семья ${esc(d.family.name)}</h3>
     <div class="field"><label>Заметка для персонала (видна в шапке карточки)</label><textarea id="fam-note" rows="2" placeholder="Например: аллергия, звонить только маме">${esc(d.family.note || "")}</textarea></div>
-    <dl class="sc-family-contacts">${d.parents.map((p) => `<div class="sc-contact-line"><dt>${esc(p.name)}</dt><dd>${p.phone ? `<button class="linkish" data-copy-phone="${esc(p.phone)}" title="Скопировать номер">${esc(p.phone)}</button>` : `<span class="muted">Телефон не указан</span>`}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}</dd></div>`).join("")}</dl>
+    <dl class="sc-family-contacts">${d.parents.map((p) => `<div class="sc-contact-line"><dt>${esc(p.name)}</dt><dd>${p.phone ? `<button class="linkish" data-copy-phone="${esc(p.phone)}" title="Скопировать номер">${esc(fmtPhone(p.phone))}</button>` : `<span class="muted">Телефон не указан</span>`}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}</dd></div>`).join("")}</dl>
     ${d.siblings.length ? `<div style="margin-top:10px" class="chips">${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join("")}</div>` : ""}
     <button class="btn sm" style="margin-top:10px" id="add-sibling">+ Брат или сестра</button>
   </div>
@@ -2975,7 +2975,7 @@ function openNewClient(preset = {}) {
   <h2>${preset.family_id ? "Ребёнок в семью " + esc(preset.family_name) : "Новый клиент"}</h2>
   <form id="nc" class="section">
     ${preset.family_id ? "" : `
-      <div class="field"><label>Телефон родителя</label><input name="phone" type="tel" required placeholder="+7 900 000-00-00" value="${esc(preset.phone || "")}"></div>
+      <div class="field"><label>Телефон родителя</label><input name="phone" type="tel" required placeholder="+7 (900) 000 00 00" value="${esc(preset.phone || "")}"></div>
       <div id="dup"></div>
       <div class="field"><label>Имя родителя</label><input name="parent_name" required value="${esc(preset.parent_name || "")}"></div>
       <div class="field"><label>Роль родителя</label><select name="parent_relation"><option value="">— выбрать —</option>${["мама", "папа", "бабушка", "дедушка", "тётя", "дядя", "сестра", "брат", "няня", "опекун", "другое"].map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join('')}</select></div>
@@ -3270,7 +3270,7 @@ async function renderSearch(page) {
     <div class="small muted" style="margin-bottom:6px">Найдено: ${d.total}${d.total > d.limit ? `, показаны первые ${d.limit}. Уточните поиск или фильтр` : ""}</div>
     <div id="results" class="list">${d.rows.length ? d.rows.map((r) => `
       <div class="list-row click" data-who="${r.id}"><div class="grow"><b>${esc(displayChildName(r.name))}</b>
-        <div class="small muted">${esc([r.parent, r.phone, r.group].filter(Boolean).join(" · "))}</div></div>
+        <div class="small muted">${esc([r.parent, fmtPhone(r.phone), r.group].filter(Boolean).join(" · "))}</div></div>
         <span class="small muted">${esc(r.status_label)}</span></div>`).join("")
       : `<div class="list-row muted">Никого не нашли</div>`}</div>`;
   page.querySelectorAll("[data-who]").forEach((el) => (el.onclick = () => openStudent(+el.dataset.who)));
