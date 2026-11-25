@@ -1286,6 +1286,7 @@ def workdesk(con, h, user, body, q):
             "new_cards_today": part("new_cards_today", lambda: sv.new_cards_today(con, selected_ref, not selected_day or selected_day == date.today().isoformat()), []),
             "birthdays": part("birthdays", lambda: sv.birthdays(con), []),
             "needs_subs": part("needs_subs", lambda: schedule.needs_subs(con), []),
+            "school_rules_tasks": part("school_rules_tasks", lambda: tasks.school_rules_board(con), {"columns": []}),
             "manual_payment_checks": part("manual_payment_checks", lambda: __import__("crm.manualpaymentcheck",fromlist=["task_board"]).task_board(con), {"columns": []}),
             "checkins": part("checkins", lambda: staff.day_report(con), None) if checkin_reviewer(con, user) else None,
             "merch_alerts": part("merch_alerts", lambda: merch_alerts(con), None),

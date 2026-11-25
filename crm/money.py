@@ -118,6 +118,9 @@ def init(con):
 
 def reconcile(con, sid: int) -> None:
     """Раскладывает все платежи ученика по его абонементам, от старых к новым."""
+    had_purchase = con.execute("""SELECT 1 FROM subscriptions WHERE student_id=?
+        AND COALESCE(kind,'month')='month' AND price>0
+        AND (status='paid' OR (status='cancelled' AND paid_at IS NOT NULL)) LIMIT 1""", (sid,)).fetchone()
     _reconcile(con, sid)
     from . import lifecycle
     lifecycle.on_payment(con, sid)  # первая оплата: продажа засчитана
@@ -127,6 +130,8 @@ def reconcile(con, sid: int) -> None:
     from . import erpstatus
     erpstatus.sync_one(con, sid)
     from . import tasks
+    if not had_purchase:
+        tasks.ensure_school_rules_task(con, sid)
     tasks.sync_subscription_payment_tasks(con, sid)
     from . import singles
     singles.sync_paid_tasks(con, singles._now(), sid)

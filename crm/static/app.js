@@ -1757,11 +1757,14 @@ async function renderWorkdesk(page) {
   const specializedTaskIds=new Set([...noDateLeads.map(card=>Number(card.task_id)),...taskIdsInBoard(newCardsForDate),...taskIdsInBoard(leadsForDate),...taskIdsInBoard(salesForDate),...taskIdsInBoard(renewForDate),...paymentTaskIds]);
   const erpSection=(can("sales") || S.viewAs || S.user.is_offline_admin)
     ? await erpTasksSection(S.viewAs,taskLayout,[...specializedTaskIds]) : {html:"",count:0};
+  const schoolRules = filterWorkdeskBoard(d.school_rules_tasks, S.workdeskMode, S.workdeskDate, S.meta.today);
+  const rulesTasks = schoolRules?.columns[0]?.cards || [];
   const taskCount = mode => {
     if (!erpSection.taskCounts) return "";
     // Задачи оплаты Точки исключены из общей выдачи задач.
     const payments = filterWorkdeskBoard(d.manual_payment_checks, mode, null, S.meta.today);
-    const count = erpSection.taskCounts[mode] + (payments?.columns || [])
+    const rules = filterWorkdeskBoard(d.school_rules_tasks, mode, null, S.meta.today);
+    const count = erpSection.taskCounts[mode] + (rules?.columns[0]?.cards.length || 0) + (payments?.columns || [])
       .reduce((sum, column) => sum + column.cards.length, 0);
     return ` <b class="pipeline-task-count">${count}</b>`;
   };
@@ -1770,6 +1773,12 @@ async function renderWorkdesk(page) {
     { group:"Лиды", key:"new", icon:"✨", label:"Свежие новые карточки", count:(newCardsForDate?.columns||[]).reduce((sum,column)=>sum+column.cards.length,0), html:newCardsPanel },
     { group:"Лиды", key:"leads", icon:"👤", label:"Остальные новые лиды", count:(leadsForDate?.columns||[]).reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-leads">${boardHtml(leadsForDate)}</div>` },
     { group:"Клиенты", key:"sales", icon:"🛒", label:"Продажи", count:(salesForDate?.columns||[]).reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-sales">${boardHtml(salesForDate)}</div>` },
+    { group:"Клиенты", key:"school-rules", icon:"📋", label:"Отправить правила школы", count:rulesTasks.length,
+      html:`<div class="et-task-grid" id="dw-school-rules">${rulesTasks.map(task=>`<article class="et-card">
+        <button type="button" class="linkish" data-rules-student="${task.student_id}">${esc(displayChildName(task.student?.name || ""))}</button>
+        <div class="small muted">${esc(task.note)} · ${dShort(task.due_at)}</div>
+        <button type="button" class="btn sm primary" data-rules-done="${task.id}">Правила отправлены</button>
+      </article>`).join("") || '<p class="small muted">Нет задач на выбранную дату</p>'}</div>` },
     ...(renewForDate ? [{ group:"Клиенты", key:"renew", icon:"🔁", label:"Продления", count:renewForDate.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-renew">${boardHtml(renewForDate)}</div>` }] : []),
     ...((paymentsForDate?.columns?.[0]?.cards||[]).length ? [{ group:"Контроль", key:"manual-payments", icon:"🧾", label:"Оплаты Точки", count:paymentsForDate.columns[0].cards.length, danger:true, html:`<div id="dw-manual-payment-checks"><p class="pipeline-note">Нужно подтвердить поступление на расчётный счёт и чек в ОФД</p>${boardHtml(paymentsForDate)}</div>` }] : []),
     ...(erpHtml ? [{ group:"Контроль", key:"tasks", icon:"✅", label:"Прочие задачи", count:erpSection.count, html:`<div id="dw-erptasks-hub">${erpHtml}</div>` }] : []),
@@ -1824,6 +1833,15 @@ async function renderWorkdesk(page) {
   const salesBoard=page.querySelector("#dw-sales");if(salesBoard)wireBoard(salesBoard,"sales",salesForDate);
   const renewBoard=page.querySelector("#dw-renew");if(renewForDate&&renewBoard)wireBoard(renewBoard,"members",renewForDate);
   const manualPaymentBoard=page.querySelector("#dw-manual-payment-checks");if(manualPaymentBoard)wireBoard(manualPaymentBoard,"manual_payment_checks",d.manual_payment_checks);
+  page.querySelectorAll("[data-rules-student]").forEach(button => button.onclick = () => openStudent(+button.dataset.rulesStudent));
+  page.querySelectorAll("[data-rules-done]").forEach(button => button.onclick = async () => {
+    button.disabled = true;
+    try {
+      await api("POST", `/api/tasks/${button.dataset.rulesDone}/done`, {result:"Правила отправлены"});
+      toast("Задача выполнена");
+      await render();
+    } catch (error) { button.disabled = false; fail(error); }
+  });
   wireErpTasks(page);
   wireTasks(page);
   wireViewAs(page);

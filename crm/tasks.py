@@ -28,6 +28,7 @@ KINDS = {
     "single_next": ("Разовые: договориться о следующем занятии", "1️⃣"),
     "request_data": ("Запросить данные", "📋"),
     "manual_payment_check": ("Проверить оплату Точки и чек Эвотор", "🧾"),
+    "school_rules": ("Отправить правила школы", "📋"),
     "client_followup": ("Определить следующий шаг", "🧭"),
     "manual": ("Задача", "✅"),
     "plan": ("Задача", "📌"),
@@ -195,6 +196,32 @@ def add_task(con, kind: str, student_id: int | None, due: datetime | str, *, aut
                        None if shared else (assignee or owner(con)), due_s, source,
                        auto_key, note, _iso(_now())))
     return cur.lastrowid if cur.rowcount else None
+
+
+def ensure_school_rules_task(con, sid: int) -> None:
+    invoice = con.execute("""SELECT x.id,b.name branch FROM subscriptions x
+        LEFT JOIN enrollments e ON e.id=x.enrollment_id LEFT JOIN groups g ON g.id=e.group_id
+        LEFT JOIN branches b ON b.id=g.branch_id
+        WHERE x.student_id=? AND x.status='paid' AND COALESCE(x.kind,'month')='month'
+          AND x.price>0 AND x.ledger_managed=1 AND x.erp_full_managed=0
+        ORDER BY x.id LIMIT 1""", (sid,)).fetchone()
+    if not invoice:
+        return
+    if con.execute("""SELECT 1 FROM erp_history_subscriptions WHERE student_id=?
+        UNION ALL SELECT 1 FROM erp_prior_memberships WHERE student_id=? LIMIT 1""", (sid, sid)).fetchone():
+        return
+    branch = f" ({invoice['branch']})" if invoice["branch"] else ""
+    add_task(con, "school_rules", sid, _now().date().isoformat() + "T23:59",
+             auto_key=f"school-rules:{sid}", source="subscription", shared=True,
+             note=f"Отправьте родителю актуальные правила школы для филиала ребёнка{branch}.")
+
+
+def school_rules_board(con):
+    cards = [_task_out(con, row) for row in con.execute(
+        "SELECT * FROM tasks WHERE kind='school_rules' AND status='open' ORDER BY due_at,id")]
+    return {"funnel": "school_rules", "draggable": False, "columns": [
+        {"key": "school_rules", "title": KINDS["school_rules"][0], "cards": cards}
+    ]}
 
 
 def subscription_renewal_plan(con, student_id):
@@ -904,7 +931,7 @@ def my_tasks(con, user: dict, scope: str = "mine") -> dict:
     end_tomorrow = (datetime.combine(date.today() + timedelta(days=1), datetime.max.time())).isoformat(timespec="minutes")
     from . import planner
     boss = planner.can_manage(con, user)
-    where, args = "status='open' AND due_at <= ?", [end_tomorrow]
+    where, args = "status='open' AND kind!='school_rules' AND due_at <= ?", [end_tomorrow]
     if scope == "mine" or not boss:
         if user.get("role") in ("admin", "operator"):  # «Перезаписать на ПУ» видят все админы и операторы
             where += " AND (assignee_id=? OR student_id IS NOT NULL OR family_id IS NOT NULL)"
@@ -1099,7 +1126,7 @@ def erp_board(con, day: str = "today", user: dict | None = None) -> dict:
     tomorrow = (today + timedelta(days=1)).isoformat()
     t0 = today.isoformat()
     base = """SELECT t.* FROM tasks t LEFT JOIN users u ON u.id=t.assignee_id
-              WHERE t.status='open' AND t.kind NOT IN ('bday','manual_payment_check')
+              WHERE t.status='open' AND t.kind NOT IN ('bday','manual_payment_check','school_rules')
                 AND NOT (t.kind='plan' AND t.student_id IS NULL AND t.family_id IS NULL AND u.role='offline_pool')
                 AND (t.student_id IS NOT NULL OR t.family_id IS NOT NULL OR u.id IS NULL OR u.role != 'coach')"""
     privacy, visible_ids = _planner_privacy(con, user, "t.") if user is not None else ("", [])

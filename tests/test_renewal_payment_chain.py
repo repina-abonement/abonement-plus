@@ -44,6 +44,21 @@ class RenewalPaymentChainTest(unittest.TestCase):
             per_lesson,price,status,created_at,ledger_managed) VALUES (?,?,?,'fixed',8,?,?,?,'2026-11-22T10:00',1)""",
             (self.sid, self.enrollment, month, price // 8, price, status)).lastrowid
 
+    def test_school_rules_after_first_fully_paid_monthly_invoice_only(self):
+        first = self.add_invoice("2026-12", 10000)
+        money.add_payment(self.con, self.sid, 4000, "card_branch", self.user, subscription_id=first)
+        self.assertFalse(tasks.school_rules_board(self.con)["columns"][0]["cards"])
+        money.add_payment(self.con, self.sid, 6000, "card_branch", self.user, subscription_id=first)
+        rules = tasks.school_rules_board(self.con)["columns"][0]["cards"]
+        self.assertEqual(len(rules), 1)
+        self.assertEqual(rules[0]["title"], "Отправить правила школы")
+        self.assertIsNone(rules[0]["assignee_id"])
+        tasks.complete(self.con, rules[0]["id"], self.user, "Правила отправлены")
+        following = self.add_invoice("2027-01", 10000)
+        money.add_payment(self.con, self.sid, 10000, "card_branch", self.user, subscription_id=following)
+        self.assertFalse(tasks.school_rules_board(self.con)["columns"][0]["cards"])
+        self.assertEqual(self.con.execute("SELECT count(*) FROM tasks WHERE kind='school_rules'").fetchone()[0], 1)
+
     def test_invoice_partial_and_full_payment_move_one_task_through_chain(self):
         # A zero-price paid current period is enough to establish the existing
         # renewal step without introducing an unfunded historical obligation.
