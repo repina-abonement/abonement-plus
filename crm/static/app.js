@@ -2356,7 +2356,7 @@ function clientSubscriptionsHtml(d) {
 }
 
 function wireSubscriptionCalendar(root,d) {
-  const choose=month=>{S.subscriptionCalendars[String(d.student.id)]=month;openStudent(d.student.id,{tab:'abon'})};
+  const choose=month=>{S.subscriptionCalendars[String(d.student.id)]=month;openStudent(d.student.id,{tab:'abon',preserveScroll:true})};
   root.querySelectorAll('[data-sub-month]').forEach(b=>b.onclick=()=>choose(b.dataset.subMonth));
   const year=root.querySelector('#subscription-year');
   if(year)year.onchange=()=>{
@@ -2502,15 +2502,18 @@ async function loadClientPaymentLinks(sid) {
 async function openStudent(id, options = {}) {
   const request=S.studentCardRequest=(S.studentCardRequest||0)+1;
   const previous = history.state?.studentCard;
-  const tab = options.tab || (previous?.id === +id && previous.userId === S.user?.id ? previous.tab : "feed") || "feed";
+  let tab = options.tab || (previous?.id === +id && previous.userId === S.user?.id ? previous.tab : "feed") || "feed";
+  const panel = options.preserveScroll && previous?.id === +id && previous.userId === S.user?.id
+    && !$("#drawer").hidden ? $("#drawer .drawer-panel") : null;
   // Do not leave the previous child's name and subscriptions visible while the
   // newly selected card is loading.  The request number also makes a late
   // response from the previous card harmless.
-  openDrawer(`<div class="section"><p class="muted">Загружаю карточку клиента…</p></div>`, "wide", { keepStudentRequest: true });
+  if (!panel) openDrawer(`<div class="section"><p class="muted">Загружаю карточку клиента…</p></div>`, "wide", { keepStudentRequest: true });
   let d;
   try { d = await api("GET", `/api/students/${id}`); }
   catch (e) {
     if(request!==S.studentCardRequest)return;
+    if (panel) return fail(e);
     const body=$("#drawer-body");
     if(body)body.innerHTML=`<div class="section"><h3>Карточка не открылась</h3><p class="error">${esc(e.message)}</p><button class="btn" data-student-retry>Повторить</button></div>`;
     body?.querySelector('[data-student-retry]')?.addEventListener('click',()=>openStudent(id,options));
@@ -2518,6 +2521,7 @@ async function openStudent(id, options = {}) {
   }
   if(request!==S.studentCardRequest)return;
   if(Number(d?.student?.id)!==Number(id)){
+    if (panel) return fail(new Error("Сервер вернул данные другого клиента"));
     const body=$("#drawer-body");
     if(body)body.innerHTML='<div class="section"><h3>Карточка не открылась</h3><p class="error">Сервер вернул данные другого клиента. Обновите страницу и повторите</p></div>';
     return;
@@ -2621,6 +2625,9 @@ async function openStudent(id, options = {}) {
     ${clientHistoryHtml(d.history,d.journey)}
   </div>
   <div style="margin-top:14px" data-sc="arch"><button class="btn sm ${s.archived ? "" : "danger"}" id="s-arch">${s.archived ? "Вернуть из архива" : "Перенести в архив"}</button></div>`;
+  const scrollTop = panel?.scrollTop;
+  const active = panel?.contains(document.activeElement) ? document.activeElement : null;
+  if (panel) tab = history.state?.studentCard?.tab || tab;
   openDrawer(html, "wide", { keepStudentRequest: true });
   try { history.replaceState({ ...history.state, studentCard: { ...(previous?.id === +id ? previous : {}), id: +id, userId: S.user.id, tab } }, ""); } catch (_) {}
   const body = $("#drawer-body");
@@ -2931,6 +2938,12 @@ async function openStudent(id, options = {}) {
         } catch (error) { save.disabled = false; fail(error); }
       };
     };
+  }
+  if (panel) {
+    const focusTarget = active?.matches('[data-sub-month]') ? body.querySelector('[data-sub-month][aria-pressed="true"]')
+      : active?.id === 'subscription-year' ? body.querySelector('#subscription-year') : null;
+    focusTarget?.focus({preventScroll:true});
+    panel.scrollTop = scrollTop;
   }
   $("#note-add").onclick = async () => {
     const t = $("#note").value.trim(); if (!t) return;
