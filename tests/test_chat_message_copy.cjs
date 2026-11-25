@@ -125,6 +125,40 @@ const conversationDetail = {conversation, targets:[{id:7,channel:'wazzup_max',la
       eq(await page.locator('#toast').innerText(),'Текст скопирован');
     };
 
+    if (process.argv.includes('--family-layout')) {
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({width, height: 700});
+        await openSurface('operator', 'family');
+        const layout = await page.evaluate(() => {
+          const box = document.querySelector('#comms-box');
+          const panel = box.closest('.drawer-panel');
+          const feed = box.querySelector('.family-chat-feed');
+          const composer = box.querySelector('.composer');
+          const spacer = document.createElement('div');
+          spacer.style.height = '320px';
+          box.before(spacer);
+          const gap = () => composer.getBoundingClientRect().top - feed.getBoundingClientRect().bottom;
+          panel.scrollTop = 0;
+          const startGap = gap();
+          panel.scrollTop = 120;
+          const scrolled = panel.scrollTop;
+          const scrolledGap = gap();
+          const composerTop = composer.getBoundingClientRect().top;
+          feed.scrollTop = 0;
+          feed.scrollTop = 100;
+          return {startGap, scrolled, scrolledGap, feedScroll: feed.scrollTop,
+            composerShift: composer.getBoundingClientRect().top - composerTop};
+        });
+        ok(layout.scrolled > 0 && layout.feedScroll > 0, 'Drawer and message history both scroll');
+        ok(layout.startGap >= -1 && layout.scrolledGap >= -1, `Composer stays below the messages at ${width}px`);
+        ok(Math.abs(layout.startGap - layout.scrolledGap) < 1, 'Composer scrolls with the chat section');
+        eq(layout.composerShift, 0, 'Scrolling history leaves the composer in place');
+      }
+
+      console.log('Family chat: composer stays below scrollable history on desktop and mobile');
+      return;
+    }
+
     for(const role of ['admin','operator'])for(const surface of ['chat','family']){
       const feed=await openSurface(role,surface);
       eq(await page.locator('body').evaluate(node=>node.classList.contains('no-copy')),role==='operator');
