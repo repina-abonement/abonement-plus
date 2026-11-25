@@ -26,6 +26,10 @@ class VaryaAssignment(unittest.TestCase):
             self.assertEqual(row['assignee_id'],pool);self.assertEqual(row['created_by_id'],varya['id'])
             self.assertEqual(con.execute('SELECT status FROM tasks WHERE id=?',(existing,)).fetchone()[0],'open')
             self.assertTrue(planner.view(con,varya)['can_manage'])
+            owner=planner.view(con,dict(con.execute("SELECT * FROM users WHERE role='admin'").fetchone()))
+            self.assertIn(varya['id'],[r['id'] for r in owner['assignable_staff']])
+            self.assertIn(pool,[r['id'] for r in planner.view(con,varya)['assignable_staff']])
+            self.assertNotIn(pool,[r['id'] for r in planner.view(con,observer)['assignable_staff']])
             self.assertIn(pool,[r['id'] for r in planner.view(con,varya)['staff']])
             for actor in (other,observer):
                 with self.assertRaises(planner.PlanError):planner.add(con,actor,{'title':'Denied','assignee_id':pool})

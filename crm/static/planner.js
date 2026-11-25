@@ -12,14 +12,22 @@ async function openTaskForm(box, done, preset = {}) {
   if (box.innerHTML) { box.innerHTML = ""; return; }
   let p;
   try { p = await api("GET", "/api/planner"); } catch (e) { return fail(e); }
-  const staff = p.staff;
-  const targetId=+(preset.assignee_id||p.my_board_id||S.user.id),target=staff.find(x=>+x.id===targetId),lockedTarget=!!preset.assignee_id;
-  if(lockedTarget&&!target){box.innerHTML='<p class="need-err">Эта доска недоступна для назначения. Обновите страницу и выберите планер заново</p>';return}
+  const staff = p.assignable_staff;
+  const targetId = +(preset.assignee_id || p.my_board_id || S.user.id);
+  const target = staff.find(person => +person.id === targetId);
+  if (!target) {
+    box.innerHTML = '<p class="need-err">Эта доска недоступна для назначения. Выберите другой планер</p>';
+    return;
+  }
+  const canChoose = p.can_manage && staff.length > 1;
 
-  box.innerHTML = `<div class="sub-form task-form">${lockedTarget?`<div class="planner-form-target"><b>Новая задача</b><div>Кому: ${esc(target.name)}</div><input type="hidden" data-ta value="${targetId}"></div>`:''}
+  box.innerHTML = `<div class="sub-form task-form">
+    <div class="planner-form-target"><b>Новая задача</b>
+      ${canChoose ? `<div class="field"><label for="planner-task-assignee">Кому</label><select id="planner-task-assignee" data-ta>${staff.map(person => `<option value="${person.id}" ${+person.id === targetId ? "selected" : ""}>${esc(person.name)}${+person.id === +S.user.id ? " (себе)" : ""}</option>`).join("")}</select></div>`
+        : `<div>Кому: ${esc(target.name)}</div><input type="hidden" data-ta value="${targetId}">`}
+    </div>
     <div class="field"><label>Название задачи</label><input data-tt maxlength="200" placeholder="Коротко: что нужно сделать" value="${esc(preset.title || "")}"><small class="muted">Короткое название действия. Подробности укажите ниже</small></div>
     <div class="row" style="flex-wrap:wrap;align-items:flex-end">
-      ${p.can_manage && !lockedTarget ? `<div class="field"><label>Кому</label><select data-ta>${staff.map((u) => `<option value="${u.id}" ${+u.id === targetId ? "selected" : ""}>${esc(u.name)}${u.id === S.user.id ? " (себе)" : ""}</option>`).join("")}</select></div>` : ""}
       <div class="field" style="flex:0 0 150px"><label>Когда</label><input type="date" data-td value="${preset.date || S.meta.today}"></div>
       <div class="field" style="flex:0 0 110px"><label>Время</label><input type="time" data-ttm></div>
       <div class="field" style="flex:0 0 170px"><label>Повтор</label><select data-tr><option value="">Не повторять</option>
@@ -38,14 +46,14 @@ async function openTaskForm(box, done, preset = {}) {
   const rule = box.querySelector("[data-tr]");
   rule.onchange = () => { box.querySelector("[data-twd]").hidden = rule.value !== "weekly"; };
   box.querySelectorAll("[data-twdi]").forEach((b) => (b.onclick = () => b.classList.toggle("on")));
-  const syncShift=()=>{const target=box.querySelector('[data-ta]')?.value||preset.assignee_id||p.my_board_id||S.user.id;const field=box.querySelector('[data-shift-field]');field.hidden=+target!==+p.shift_board_id;if(field.hidden)box.querySelector('[data-task-shift]').value='common'};
+  const syncShift=()=>{const target=box.querySelector('[data-ta]').value;const field=box.querySelector('[data-shift-field]');field.hidden=+target!==+p.shift_board_id;if(field.hidden)box.querySelector('[data-task-shift]').value='common'};
   const assignee=box.querySelector('[data-ta]');if(assignee)assignee.onchange=syncShift;syncShift();
   box.querySelector("[data-tt]").focus();
   box.scrollIntoView({block:"nearest",behavior:"smooth"});
   box.querySelector("[data-tsave]").onclick = async () => {
     const a = box.querySelector("[data-ta]");
     const data = { title: box.querySelector("[data-tt]").value, date: box.querySelector("[data-td]").value, time: box.querySelector("[data-ttm]").value,
-      subtasks:box.querySelector("[data-new-subtasks]").value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean),shift_mode:box.querySelector("[data-task-shift]").value,note: box.querySelector("[data-tn]").value, priority: box.querySelector("[data-tp]").checked, assignee_id: a ? +a.value : S.user.id };
+      subtasks:box.querySelector("[data-new-subtasks]").value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean),shift_mode:box.querySelector("[data-task-shift]").value,note: box.querySelector("[data-tn]").value, priority: box.querySelector("[data-tp]").checked, assignee_id: +a.value };
     if (rule.value) data.repeat = { rule: rule.value, weekdays: [...box.querySelectorAll("[data-twdi].on")].map((x) => +x.dataset.twdi) };
     try { await api("POST", "/api/planner/tasks", data); toast("Задача поставлена"); box.innerHTML = ""; done(); } catch (e) { fail(e); }
   };

@@ -432,6 +432,7 @@ def view(con, user: dict) -> dict:
            "can_manage": user["role"] != "trainee" and (can_manage(con,user) or offlineplanner.can_assign(con,user)),
            "controller": controller(con), "rules": RULES,"offline_viewer":comms.get(con,offlineplanner.VIEWER_KEY) if user['role']=='admin' else None,
            "staff": visible_staff(con, user), "people":visible_staff(con,user,people=True),"shift_board_id":offlineplanner.pool_id(con),"my_board_id":mine_id}
+    out["assignable_staff"] = [person for person in out["staff"] if can_add_plan(con, user, person["id"])]
     if out["can_manage"]:
         out["team"] = team(con, user)
     return out
