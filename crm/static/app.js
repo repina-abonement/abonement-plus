@@ -1137,7 +1137,7 @@ function erpLeadImportSetup(box, data) {
       const r = await api("POST", "/api/erp/people/" + (writing ? "apply" : "plan"), body);
       const branches = r.lead_branches || [];
       output.innerHTML = `<p>${writing?"Перенос выполнен. ":""}Лидов: ${r.counts.leads||0}. Новых карточек: ${r.counts.new||0}. Строк на сверку: ${r.issues.length}.</p>
-        <ul>${branches.map(b=>`<li>${esc(b.label)}: ${b.matches.length===1?esc(b.matches[0].name):b.matches.length?"несколько совпадений":writing?"добавлен":"будет создан"}</li>`).join("")}</ul>
+        <ul>${branches.map(b=>`<li>${esc(b.label)}: ${b.matches.length===1?esc(b.matches[0].name):b.matches.length?"несколько совпадений":writing?"добавлен":"будет создан"}${b.inactive?" · не работает":""}</li>`).join("")}</ul>
         ${r.issues.length?`<details><summary>Строки на сверку</summary><ul>${r.issues.map(([row,reason])=>`<li>${esc(row)}: ${esc(reason)}</li>`).join("")}</ul></details>`:""}`;
       approved = !writing && branches.every(b=>b.matches.length<=1) && (r.counts.same||r.counts.updated||r.counts.new)
         ? {...body, token:r.token} : null;

@@ -17,6 +17,10 @@ def _clean(value):
     return " ".join(str(value or "").split())
 
 
+def _historical_lead_branch(label):
+    return ei._norm(label) == "пыхтино ркш"
+
+
 def _lead_branches(con, label):
     def key(value):
         value = ei._norm(value).replace('«', '').replace('»', '')
@@ -199,7 +203,8 @@ def _plan(con, visitors, leads, erp_ids=None):
     labels = sorted({rec["branch"] for namespace, _, _, _, _, rec in actions
                      if namespace == "lead" and rec.get("branch")})
     report["lead_branches"] = [
-        {"label": label, "matches": _lead_branches(con, label)} for label in labels]
+        {"label": label, "matches": _lead_branches(con, label),
+         "inactive": _historical_lead_branch(label)} for label in labels]
     report["token"] = erpfull._hash([token, report["lead_branches"]])
     return report, actions
 
@@ -248,6 +253,11 @@ def transfer(con, visitors, leads, user, token=None, erp_ids=None):
                 if len(matches) > 1:
                     raise ei.ImportError_(f"Несколько филиалов соответствуют «{branch}». Сначала уточните соответствие.")
                 branch_id = matches[0]["id"] if matches else schedule.save_branch(con, {"name": branch})
+                if _historical_lead_branch(branch) and (not matches or matches[0]["active"]):
+                    try:
+                        schedule.set_branch_active(con, branch_id, False)
+                    except schedule.SchedError as exc:
+                        raise ei.ImportError_(str(exc)) from exc
                 con.execute("UPDATE students SET branch_id=? WHERE id=? AND branch_id IS NULL", (branch_id, sid))
             due = erpfull._date(rec.get("lead_due", ""))
             student = sv.get_student_row(con, sid)
