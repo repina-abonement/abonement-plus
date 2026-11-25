@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import calendar
 from datetime import date, datetime, timedelta
 
 from . import comms, trialscripts
@@ -309,7 +308,7 @@ def schedule_renewal(con, student_id: int) -> int | None:
     sale_kinds = {'call_lead', 'no_answer', 'revive', 'renew', 'why_not_bought', 'close_sale', 'first_pay'}
     erp_titles = {'проверить оплату абонемента', 'проверить продление', 'думает'}
     for task in con.execute("SELECT * FROM tasks WHERE student_id=? AND status='open'", (student_id,)).fetchall():
-        if task['id'] == tid:
+        if task['id'] == tid or task['kind'] == 'payment_check':
             continue
         if task['kind'] in sale_kinds or (task['source'] == 'erp' and task['title'].strip().casefold() in erp_titles):
             con.execute("""UPDATE tasks SET status='cancelled', done_at=?,
@@ -318,14 +317,15 @@ def schedule_renewal(con, student_id: int) -> int | None:
 
 
 def invoice_payment_plan(con, student_id: int) -> dict | None:
-    """Earliest unpaid future monthly invoice and its payment deadline."""
+    """Oldest unpaid monthly invoice and the day after it was issued."""
     from . import logic, money
     current = logic.month_of(date.today())
     covered = money.balance(con, student_id)["covered"]
     rows = []
-    for sub in con.execute("""SELECT id,month,price FROM subscriptions
-            WHERE student_id=? AND status!='cancelled' AND COALESCE(kind,'month')='month'
-              AND month>? ORDER BY month,id""", (student_id, current)):
+    for sub in con.execute("""SELECT id,month,price,date(substr(created_at,1,10),'+1 day') AS check_date FROM subscriptions
+            WHERE student_id=? AND status='invoiced' AND COALESCE(kind,'month')='month'
+              AND (month>? OR (ledger_managed=1 AND erp_full_managed=0)) ORDER BY month,id""",
+            (student_id, current)):
         remaining = max(0, sub["price"] - covered.get(sub["id"], 0))
         if remaining:
             rows.append((sub, remaining))
@@ -333,15 +333,13 @@ def invoice_payment_plan(con, student_id: int) -> dict | None:
         return None
     month = rows[0][0]["month"]
     chosen = [(sub, remaining) for sub, remaining in rows if sub["month"] == month]
-    deadline_month = logic.shift_month(month, -1)
-    year, mon = map(int, deadline_month.split("-"))
-    configured = int((con.execute("SELECT value FROM settings WHERE key='renewal_deadline_day'").fetchone() or ["25"])[0] or 25)
-    day = min(configured, calendar.monthrange(year, mon)[1])
+    due = min((sub["check_date"] for sub, _ in chosen if sub["check_date"]),
+              default=(date.today() + timedelta(days=1)).isoformat())
     remaining = sum(value for _, value in chosen)
     invoice_ids = [sub["id"] for sub, _ in chosen]
     return {
         "month": month,
-        "due": f"{year:04d}-{mon:02d}-{day:02d}T23:59",
+        "due": f"{due}T23:59",
         "remaining": remaining,
         "invoice_ids": invoice_ids,
         "note": f"Счёт {'№' if len(invoice_ids) == 1 else '№№'}{', '.join(map(str, invoice_ids))} на {logic.month_label(month)}. Осталось оплатить {remaining} ₽",
@@ -370,7 +368,6 @@ def sync_subscription_payment_tasks(con, student_id: int) -> int | None:
         if duplicate["status"] == "open":
             con.execute("UPDATE tasks SET status='cancelled',done_at=?,result='Дубликат контроля оплаты' WHERE id=?",
                         (_iso(_now()), duplicate["id"]))
-    ensure_subscription_renewal(con, student_id)
     if primary:
         tid = primary["id"]
         con.execute("""UPDATE tasks SET kind='payment_check',title='Проверить оплату абонемента',
@@ -380,6 +377,7 @@ def sync_subscription_payment_tasks(con, student_id: int) -> int | None:
         tid = add_task(con, "payment_check", student_id, plan["due"], title="Проверить оплату абонемента",
                        auto_key=key, source="subscription", note=plan["note"])
     con.execute("UPDATE tasks SET assignee_id=NULL WHERE id=?", (tid,))
+    schedule_renewal(con, student_id)
     return tid
 
 
@@ -773,6 +771,11 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     planner.generate(con, now.date())
     program.apply_pending(con, now.date())
     refresh_subscription_renewals(con)
+    if not comms.get(con, "payment_task_due_after_issue_v1"):
+        for row in con.execute("""SELECT DISTINCT student_id FROM tasks WHERE student_id IS NOT NULL
+            AND status='open' AND auto_key LIKE 'subscription-payment:%'""").fetchall():
+            sync_subscription_payment_tasks(con, row[0])
+        comms.put(con, "payment_task_due_after_issue_v1", "1")
     from . import pu, waitlist, ownerbot, lifecycle
     pu.tick(con, now)
     lifecycle.tick(con, now)  # задачи на всех этапах, где клиент может застрять

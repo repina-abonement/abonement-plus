@@ -1,10 +1,10 @@
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from crm import db, groupterms, money, schedule, services as sv, tasks
+from crm import db, groupterms, lifecycle, money, schedule, services as sv, tasks
 
 
 class FixedDate(date):
@@ -32,6 +32,13 @@ class RenewalPaymentChainTest(unittest.TestCase):
         self.clock.start()
         self.addCleanup(self.clock.stop)
 
+    def test_old_lead_revival_is_disabled(self):
+        task_id = tasks.add_task(self.con, "revive", self.sid, "2026-11-22T12:00", source="life")
+        lifecycle.tick(self.con, datetime(2026, 11, 22, 12))
+        status = self.con.execute("SELECT status FROM tasks WHERE id=?", (task_id,)).fetchone()[0]
+        self.assertEqual(status, "cancelled")
+        self.assertEqual(self.con.execute("SELECT count(*) FROM tasks WHERE kind='revive'").fetchone()[0], 1)
+
     def add_invoice(self, month, price, status="invoiced"):
         return self.con.execute("""INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,
             per_lesson,price,status,created_at,ledger_managed) VALUES (?,?,?,'fixed',8,?,?,?,'2026-11-22T10:00',1)""",
@@ -50,9 +57,14 @@ class RenewalPaymentChainTest(unittest.TestCase):
         control = self.con.execute("SELECT * FROM tasks WHERE auto_key=?", (f"subscription-payment:{self.sid}",)).fetchone()
         self.assertEqual(control["id"], existing_control)
         self.assertEqual((control["title"], control["due_at"], control["status"]),
-                         ("Проверить оплату абонемента", "2026-11-25T23:59", "open"))
+                         ("Проверить оплату абонемента", "2026-11-23T23:59", "open"))
         self.assertEqual(tuple(self.con.execute("SELECT status,due_at FROM tasks WHERE id=?", (renewal_id,)).fetchone()), ("open", "2026-12-20T23:59"))
         self.assertIn("10000 ₽", control["note"])
+
+        with patch.object(FixedDate, "today", return_value=FixedDate(2027, 1, 1)):
+            tasks.sync_subscription_payment_tasks(self.con, self.sid)
+            still_open = self.con.execute("SELECT status,due_at FROM tasks WHERE id=?", (control["id"],)).fetchone()
+            self.assertEqual(tuple(still_open), ("open", "2026-11-23T23:59"))
 
         money.add_payment(self.con, self.sid, 4000, "card_branch", self.user, subscription_id=invoice_id)
         partial = self.con.execute("SELECT * FROM tasks WHERE id=?", (control["id"],)).fetchone()

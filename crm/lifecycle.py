@@ -32,7 +32,6 @@ KINDS = {
 }
 # Юлия, 01.11: недозвон: завтра, через 3 дня, через неделю, через месяц, дальше ближайший набор (август или январь)
 NO_ANSWER_STEPS = [(1, "на следующий день"), (3, "через 3 дня"), (7, "через неделю"), (30, "через месяц")]
-REVIVE_PER_DAY = 10  # старых лидов в день на «оживление»: вся база обрабатывается постепенно, без завала
 LEFT_REASONS = ["Дорого", "Неудобное расписание", "Далеко ездить", "Ребёнку не нравится", "Перешли в другую секцию",
                 "Переезд", "Болезнь или травма", "Сезон, каникулы", "Другое"]
 NO_COMEBACK = ("Выбрали другую секцию", "Переезд")
@@ -220,41 +219,7 @@ def tick(con, now: datetime | None = None) -> int:
                         (s["id"],)).fetchone()
         if h and (_dt(h[0]) or now) <= now - timedelta(days=2):
             made += bool(_add(con, "makeup_check", s["id"], now, f"makeup:{s['id']}:{h[0][:10]}", group_id=s["group_id"]))
-    made += revive(con, now)
     cleanup(con, now)
-    return made
-
-
-def revive(con, now: datetime) -> int:
-    """Старые лиды из ERP не теряем: каждый день порция на «оживление», горячие первыми, потом тёплые, холодные.
-    Берём тех, у кого нет открытой задачи и кого не «оживляли» последние 60 дней."""
-    from . import pu, smart
-    if not (9 <= now.hour < 21):
-        return 0
-    limit = int((con.execute("SELECT value FROM settings WHERE key='revive_per_day'").fetchone() or [REVIVE_PER_DAY])[0] or REVIVE_PER_DAY)
-    today = now.date().isoformat()
-    done_today = con.execute("SELECT COUNT(*) FROM tasks WHERE kind='revive' AND substr(created_at,1,10)=?", (today,)).fetchone()[0]
-    if done_today >= limit:
-        return 0
-    rank = {"hot": 0, "warm": 1, "cold": 2}
-    cands = []
-    for s in _people(con, "s.funnel='sales' AND s.stage IN ('lead','no_answer','missed_trial','how_was','later','refused')"):
-        if s["stage"] == "refused" and any(x in (s["refusal_reason"] or "") for x in NO_COMEBACK):
-            continue
-        if _has_open(con, s["id"], s["family_id"]) or con.execute(
-                "SELECT 1 FROM tasks WHERE student_id=? AND kind IN ('revive','reinvite') AND created_at >= ?",
-                (s["id"], _iso(now - timedelta(days=60)))).fetchone():
-            continue
-        sc = smart.lead_score(con, dict(s), now) or {"level": "cold", "label": "❄ Холодный", "points": -9}
-        cands.append((rank[sc["level"]] + (1 if s["stage"] == "refused" else 0), -(sc["points"]), -(_dt(s["stage_changed_at"]) or now).timestamp(), s, sc))
-    cands.sort(key=lambda x: x[:3])
-    made = 0
-    for *_, s, sc in cands[:limit - done_today]:
-        from .services import SALES_LABELS
-        made += bool(_add(con, "revive", s["id"], now, f"revive:{s['id']}:{today}",
-                          title=f"Оживить старый лид ({sc['label']})",
-                          note=f"Этап: {SALES_LABELS.get(s['stage'], s['stage'])}. " + ", ".join(sc.get("why") or []),
-                          group_id=s["group_id"]))
     return made
 
 
