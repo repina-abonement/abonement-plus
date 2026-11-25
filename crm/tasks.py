@@ -674,11 +674,12 @@ def ensure_ad_source_tasks(con, now: datetime | None = None) -> int:
     now = (now or _now()).replace(second=0, microsecond=0)
     due = now.date().isoformat() + "T23:59"
     made = 0
-    for student in con.execute("""SELECT id,source,source_id,erp_id,created_at,archived FROM students
-        WHERE created_at>='2026-11-02' ORDER BY id""").fetchall():
+    for student in con.execute("""SELECT s.id,s.source,s.source_id,s.erp_id,s.created_at,s.archived,
+        EXISTS(SELECT 1 FROM erp_full_identities i WHERE i.student_id=s.id AND i.namespace='lead') AS erp_lead
+        FROM students s WHERE s.created_at>='2026-11-02' ORDER BY s.id""").fetchall():
         sid = student["id"]
         key = f"ad-source-required:{sid}"
-        missing = (not student["archived"] and not str(student["erp_id"] or "").strip()
+        missing = (not student["archived"] and not student["erp_lead"] and not str(student["erp_id"] or "").strip()
                    and not student["source_id"] and not str(student["source"] or "").strip())
         current = con.execute("SELECT id,status FROM tasks WHERE auto_key=?", (key,)).fetchone()
         if missing:

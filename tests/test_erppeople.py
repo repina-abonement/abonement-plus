@@ -77,6 +77,12 @@ def test_lead_only_import_preserves_metadata_and_routes_task():
     erppeople.transfer(con, [], [undated], admin, preview["token"])
     task = con.execute("SELECT title,due_at FROM tasks WHERE auto_key='erp-lead:9002'").fetchone()
     assert tuple(task) == ("Новый лид. Даты задачи нет, надо создать", "")
+    sid = con.execute("SELECT student_id FROM tasks WHERE auto_key='erp-lead:9002'").fetchone()[0]
+    tasks.add_task(con, "request_data", sid, "2026-11-25", auto_key=f"ad-source-required:{sid}", source="data_quality")
+    for _ in range(2):
+        tasks.ensure_ad_source_tasks(con)
+    assert con.execute("SELECT status FROM tasks WHERE auto_key=?", (f"ad-source-required:{sid}",)).fetchone()[0] == "cancelled"
+    assert con.execute("SELECT status FROM tasks WHERE auto_key='erp-lead:9002'").fetchone()[0] == "open"
 
 
 if __name__ == "__main__":
