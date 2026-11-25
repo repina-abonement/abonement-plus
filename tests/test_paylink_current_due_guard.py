@@ -315,13 +315,15 @@ class PaylinkCurrentDueGuardTest(unittest.TestCase):
                 with self.assertRaises(paylinks.PayLinkError) as caught:
                     action()
                 paragraphs = str(caught.exception).split('\n\n')
-                self.assertEqual(len(paragraphs), 3)
+                self.assertEqual(len(paragraphs), 4)
                 self.assertNotIn('—', str(caught.exception))
                 self.assertTrue(all(not paragraph.endswith('.') for paragraph in paragraphs))
-                self.assertIn('12 150 ₽', paragraphs[1])
-                self.assertIn('12 758 ₽', paragraphs[1])
-                self.assertIn('с 26-го числа', paragraphs[1])
-                self.assertIn('на 5%', paragraphs[1])
+                self.assertIn('12 150 ₽', paragraphs[2])
+                self.assertIn('12 758 ₽', paragraphs[2])
+                self.assertIn('с 26 числа', paragraphs[1])
+                self.assertIn('надбавка 5%', paragraphs[1])
+                self.assertIn('из очереди ожидания', paragraphs[1])
+                self.assertIn('уточним наличие места', paragraphs[3])
 
     def test_legacy_public_summary_uses_effective_price_fee_and_discount_without_writing_them(self):
         sub=self.invoice()['id'];link=self.link(sub)
