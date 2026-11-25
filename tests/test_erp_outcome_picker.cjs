@@ -3,7 +3,7 @@ const source=fs.readFileSync('crm/static/tasks.js','utf8');
 const start=source.indexOf('function erpOutcomePicker');
 const end=source.indexOf('function taskRow',start);
 const context={esc:value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;')};vm.createContext(context);vm.runInContext(source.slice(start,end),context);
-const task={erp_outcomes:['Новый лид (ндз)','Напоминание о ПУ (звонок)','Закрыть задачу'],erp_due_dates:{'Новый лид (ндз)':'2026-11-23'}};
+const task={erp_outcomes:['Новый лид (ндз)','Новый лид (думают)','Закрыть задачу'],erp_due_dates:{'Новый лид (ндз)':'2026-11-23'}};
 const html=context.erpOutcomePicker(task,false,'t');
 assert(html.includes('Выберите следующий шаг по цепочке ERP'));
 assert(html.includes('data-terp-outcome="0"'));

@@ -2,9 +2,10 @@
 import os
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from unittest.mock import patch
 
-from crm import comms, db, services, tasks
+from crm import comms, db, schedule, services, smart, tasks
 
 
 class ErpWorkflowTest(unittest.TestCase):
@@ -30,7 +31,7 @@ class ErpWorkflowTest(unittest.TestCase):
         shown = tasks.for_student(self.con, self.sid)["open"][0]
         self.assertEqual(shown["erp_outcomes"], [
             "Новый лид (ндз)", "Новый лид (думают)",
-            "Напоминание о ПУ (звонок)", "Закрыть задачу",
+            "Закрыть задачу",
         ])
         tasks.complete(self.con, tid, self.user, "Новый лид (ндз)", "Не дозвонились, повторить звонок")
         nxt = self.con.execute(
@@ -69,12 +70,20 @@ class ErpWorkflowTest(unittest.TestCase):
         self.assertEqual(shown["erp_outcomes"], [])
         tasks.complete(self.con, tid, self.user, "обычная заметка")
 
-    def test_trial_call_uses_trial_time_minus_23_59(self):
-        self.con.execute("UPDATE students SET trial_at='2026-11-25T18:00' WHERE id=?", (self.sid,))
+    def test_trial_call_is_automatic_after_booking(self):
         tid = self.add("Новый лид", "call_lead")
-        tasks.complete(self.con, tid, self.user, "Напоминание о ПУ (звонок)", "Записались на пробное")
-        due = self.con.execute("SELECT due_at FROM tasks WHERE student_id=? AND status='open'", (self.sid,)).fetchone()[0]
-        self.assertEqual(due, "2026-11-24T18:01")
+        with self.assertRaises(comms.CommsError):
+            tasks.complete(self.con, tid, self.user, "Напоминание о ПУ (звонок)", "Записались")
+        self.assertFalse(self.con.execute("SELECT 1 FROM tasks WHERE kind='trial_confirm'").fetchone())
+        branch = schedule.save_branch(self.con, {"name": "Тест"})
+        group = schedule.save_group(self.con, {"name": "Тестовая группа", "branch_id": branch, "weekdays": [2]})
+        with patch.object(services, "today", return_value=date(2026,11,23)), \
+             patch.object(tasks, "_now", return_value=datetime(2026,11,23,12)), \
+             patch.object(tasks, "send_booked"), patch.object(smart, "REQUIRE", False):
+            services.update_student(self.con, self.sid, {"group_id": group, "trial_at": "2026-11-25T18:00"}, self.user)
+        reminders = self.con.execute("""SELECT due_at,source FROM tasks
+            WHERE student_id=? AND kind='trial_confirm' AND status='open'""", (self.sid,)).fetchall()
+        self.assertEqual([tuple(row) for row in reminders], [("2026-11-24T18:01", "auto")])
 
     def test_erp_transition_requires_and_preserves_comment(self):
         tid = self.add("Новый лид", "call_lead")
