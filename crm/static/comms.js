@@ -486,8 +486,10 @@ async function loadFamilyComms(familyId, parents, studentId, kid) {
       <div class="small muted">Вернуться к ${esc(dtShort(c.open_due))}${c.open_by ? ` · отметил(а) ${esc(c.open_by)}` : ""}</div></div>
       <button class="btn sm" data-oqchat="${c.id}">Открыть диалог</button></div>`).join("")}
     <div class="feed chat-feed family-chat-feed" id="feed">${d.items.length ? chatHistoryHtml(d.items) : `<div class="muted small">Пока ни переписки, ни звонков</div>`}</div>
+    <div class="family-chat-actions">
     ${kid ? `<div class="family-trial-tools"><div class="to-bar"><button type="button" class="btn sm" id="to-open">Предложить дни ПУ</button><button type="button" class="btn sm" id="to-book">Записать на пробное</button></div><div id="to-panel" hidden></div></div>` : ""}
     <div data-makeup-offer></div>
+    </div>
     ${targets.length ? `
       <div class="composer">
         ${replyTargetHtml('cm-to',targets,selectedTarget)}

@@ -94,8 +94,8 @@ const conversationDetail = {conversation, targets:[{id:7,channel:'wazzup_max',la
       };
       document.querySelector('#toast').hidden=true;
     },{clipboard,exec});
-    const openSurface = async (role,surface) => {
-      await page.evaluate(async ({role,surface}) => {
+    const openSurface = async (role,surface,kid=null) => {
+      await page.evaluate(async ({role,surface,kid}) => {
         stopChatTimer();clearInterval(S.commsTimer);hideDrawer();
         S.user={id:role==='admin'?1:2,name:'Синтетический тест',role,perms:{members:'full',inbox:'full',export:role==='admin'?'full':'none'}};
         S.meta={today:'2026-11-20',user:S.user,comms:{wazzup_max:true},groups:[],branches:[],settings:{},staff:[]};
@@ -107,10 +107,10 @@ const conversationDetail = {conversation, targets:[{id:7,channel:'wazzup_max',la
         }else{
           S.view='search';document.body.classList.remove('chat-fullscreen');
           openDrawer('<h2>Тестовая карточка клиента</h2><div id="comms-box"></div>');
-          await loadFamilyComms(42,[],1,null);
+          await loadFamilyComms(42,[],1,kid);
         }
         stopChatTimer();clearInterval(S.commsTimer);
-      },{role,surface});
+      },{role,surface,kid});
       return page.locator(surface==='chat'?'#chat-feed':'#comms-box .family-chat-feed');
     };
     const copyMessage = async (feed,index,expected) => {
@@ -128,7 +128,7 @@ const conversationDetail = {conversation, targets:[{id:7,channel:'wazzup_max',la
     if (process.argv.includes('--family-layout')) {
       for (const width of [1280, 390]) {
         await page.setViewportSize({width, height: 700});
-        await openSurface('operator', 'family');
+        await openSurface('operator', 'family', {id:1,name:'Тестовый ребёнок'});
         const layout = await page.evaluate(() => {
           const box = document.querySelector('#comms-box');
           const panel = box.closest('.drawer-panel');
@@ -146,13 +146,23 @@ const conversationDetail = {conversation, targets:[{id:7,channel:'wazzup_max',la
           const composerTop = composer.getBoundingClientRect().top;
           feed.scrollTop = 0;
           feed.scrollTop = 100;
-          return {startGap, scrolled, scrolledGap, feedScroll: feed.scrollTop,
+          const text = composer.querySelector('textarea').getBoundingClientRect();
+          const send = composer.querySelector('#cm-send').getBoundingClientRect();
+          const actions = box.querySelector('.family-chat-actions');
+          return {feedHeight:feed.clientHeight, composerHeight:composer.offsetHeight,
+            sendBesideText:send.left >= text.right && send.top < text.bottom,
+            actionsFit:actions.scrollWidth <= actions.clientWidth,
+            actionsCount:actions.querySelectorAll('button').length,
+            startGap, scrolled, scrolledGap, feedScroll: feed.scrollTop,
             composerShift: composer.getBoundingClientRect().top - composerTop};
         });
         ok(layout.scrolled > 0 && layout.feedScroll > 0, 'Drawer and message history both scroll');
         ok(layout.startGap >= -1 && layout.scrolledGap >= -1, `Composer stays below the messages at ${width}px`);
         ok(Math.abs(layout.startGap - layout.scrolledGap) < 1, 'Composer scrolls with the chat section');
         eq(layout.composerShift, 0, 'Scrolling history leaves the composer in place');
+        ok(layout.feedHeight >= 290 && layout.feedHeight > layout.composerHeight, 'More vertical room goes to the history');
+        ok(layout.sendBesideText, 'Send button fits beside the message field');
+        ok(layout.actionsFit && layout.actionsCount === 3, 'Trial and makeup actions fit the chat width');
       }
 
       console.log('Family chat: composer stays below scrollable history on desktop and mobile');
