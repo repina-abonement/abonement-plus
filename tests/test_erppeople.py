@@ -114,3 +114,5 @@ def test_mass_visitors_create_and_fill_without_overwriting():
         ("301", "Думают", "2018-11-15", 1), ("302", "Нет абонемента", "2019-11-19", 1)]
     assert tuple(con.execute("SELECT name,email FROM parents").fetchone()) == ("Ирина", "test@example.com")
     assert con.execute("SELECT COUNT(*) FROM families").fetchone()[0] == 1
+
+    assert not services.new_cards_today(con)["cards"]

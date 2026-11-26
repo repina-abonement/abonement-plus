@@ -761,14 +761,16 @@ def new_cards_today(con, ref=None, include_pending=True):
     candidates=[]
     st=settings(con)
     rows = con.execute("""SELECT s.*,
-        s.stage='lead' AND COALESCE(s.erp_id,'')='' AND NOT EXISTS (
+        s.stage='lead' AND NOT EXISTS (
             SELECT 1 FROM subscriptions WHERE student_id=s.id AND status!='cancelled'
                 AND COALESCE(kind,'month')='month' AND month>=?
         ) AND EXISTS (
             SELECT 1 FROM tasks WHERE student_id=s.id AND kind='call_lead' AND status='open'
                 AND substr(due_at,1,10)<=?
         ) AS pending
-        FROM students s WHERE s.archived=0 AND NOT EXISTS (
+        FROM students s WHERE s.archived=0 AND COALESCE(s.erp_id,'')='' AND s.id NOT IN (
+            SELECT student_id FROM erp_full_identities WHERE namespace='student'
+        ) AND NOT EXISTS (
             SELECT 1 FROM tasks WHERE student_id=s.id AND kind='call_lead' AND auto_key LIKE 'erp-lead:%'
         ) ORDER BY s.created_at DESC,s.id DESC""", (logic.month_of(day),day.isoformat()))
     for row in rows:

@@ -55,8 +55,7 @@ class NewClientTest(unittest.TestCase):
         card=next(x for x in sv.new_cards_today(self.con)['cards'] if x['id']==sid)
         self.assertFalse(card['needs_processing'])
         self.con.execute("UPDATE students SET stage='lead',erp_id='historical-erp' WHERE id=?",(sid,))
-        card=next(x for x in sv.new_cards_today(self.con)['cards'] if x['id']==sid)
-        self.assertFalse(card['needs_processing'])
+        self.assertNotIn(sid, [card['id'] for card in sv.new_cards_today(self.con)['cards']])
 
     def test_unprocessed_application_from_previous_day_remains_in_queue(self):
         sid=sv.create_new_lead(self.con,{**self.data,'source':'Промоутер: Иван Ивакин'},self.user)
