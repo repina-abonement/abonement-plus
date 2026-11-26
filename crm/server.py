@@ -3976,6 +3976,7 @@ def handle_hook(h, method: str, source: str, token: str, url) -> None:
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "AbonementPlus/0.2"
+    maintenance_354 = None
 
     def log_message(self, fmt, *args):
         if os.environ.get("CRM_QUIET") != "1":
@@ -3989,6 +3990,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("X-CRM-Revision", _erp_single_recovery_web._RUNNING_COMMIT or "unknown")
+        if self.path == "/" and self.maintenance_354:
+            self.send_header("X-CRM-Maintenance-354", self.maintenance_354)
         self.send_header("X-Content-Type-Options", "nosniff")
         if not any(k.lower()=="referrer-policy" for k,v in getattr(self,"extra_headers",[])):
             self.send_header("Referrer-Policy", "same-origin")
@@ -4246,7 +4249,10 @@ def _startup():
     n = perms.archive_test_staff(con)
     if n:
         print(f"Тестовые участники команды отправлены в архив: {n}", flush=True)
+    from . import maintenance_354
+    maintenance_result = maintenance_354.apply(con)
     con.commit()
+    Handler.maintenance_354 = maintenance_result
     con.close()
     fiscal.start_worker(db.connect)
     ai.start_worker(db.connect)
