@@ -110,6 +110,18 @@ class ScriptsTest(unittest.TestCase):
                         self.assertEqual(preview['profile'], profile)
                         self.assertFalse(preview['reason'])
                         self.assertIn(offer, preview['text'].splitlines())
+                        self.assertEqual(preview['preview_offer_url'], offer)
+
+    def test_custom_offer_and_template_without_offer_have_no_extra_preview_link(self):
+        custom_offer = 'https://msk.footbolika.ru/assets/images/offer/1846/custom.pdf'
+        scripts.save_profiles(self.con, {'toddlers': {'offer': custom_offer}})
+        preview = scripts.rules(self.con, self.sid, 'telegram')
+        self.assertIn(custom_offer, preview['text'])
+        self.assertNotIn('preview_offer_url', preview)
+        scripts.save_profiles(self.con, {'toddlers': {'offer': scripts.NEBO_OFFER, 'text': 'Особый текст'}})
+        preview = scripts.rules(self.con, self.sid, 'max')
+        self.assertEqual(preview['text'], 'Особый текст')
+        self.assertNotIn('preview_offer_url', preview)
 
     def test_changed_rule_links_block_staged_send_before_network(self):
         with patch.object(memos,'image',return_value=b'\x89PNG\r\n\x1a\nTEST'):

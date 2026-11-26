@@ -125,7 +125,10 @@ def rules(con,sid,channel,gid=None):
     image=memos.image(con,memo_key) if memo_key else None
     if not image and not reason:reason='Актуальная картинка правил ещё формируется. Откройте скрипты повторно'
     if re.search(r'\{[a-z_]+\}',text) and not reason:reason='В тексте остались незаполненные поля'
-    return {'key':'rules','title':'Правила школы · '+p['name'],'text':text,'reason':reason,'profile':key,'image':('/api/memos/png?key='+memo_key+'&h='+hashlib.sha256(image).hexdigest()[:16]) if image else '', 'groups':[{'id':x['id'],'name':x['name']} for x in groups], 'group_id':g['id']}
+    result = {'key':'rules','title':'Правила школы · '+p['name'],'text':text,'reason':reason,'profile':key,'image':('/api/memos/png?key='+memo_key+'&h='+hashlib.sha256(image).hexdigest()[:16]) if image else '', 'groups':[{'id':x['id'],'name':x['name']} for x in groups], 'group_id':g['id']}
+    if key in ('nebo', 'toddlers') and p['offer'] == NEBO_OFFER and '{offer}' in template:
+        result['preview_offer_url'] = NEBO_OFFER
+    return result
 
 
 def catalog(con,sid=None,channel='',gid=None):

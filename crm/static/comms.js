@@ -1437,6 +1437,14 @@ function wireMessagePicker(selector, sendSticker, context={}) {
       const summary=document.createElement('summary');summary.textContent=item.title;details.append(summary);
       if(item.image){const img=document.createElement('img');img.src=item.image;img.alt=item.title;img.style.cssText='max-width:200px;max-height:260px;object-fit:contain';details.append(img)}
       const text=document.createElement('div');text.style.cssText='white-space:pre-wrap;margin:8px 0';text.textContent=item.reason||item.text;details.append(text);
+      if (!item.reason && item.preview_offer_url) {
+        const offerLink = document.createElement('a');
+        offerLink.href = item.preview_offer_url;
+        offerLink.target = '_blank';
+        offerLink.rel = 'noopener noreferrer';
+        offerLink.textContent = 'Открыть оферту';
+        text.append(document.createElement('br'), offerLink);
+      }
       const button=document.createElement('button');button.type='button';button.className='btn sm';button.textContent='Вставить в сообщение';button.disabled=!!item.reason;details.append(button);
       button.onclick=async()=>{
         if(input._attachmentBusy)return;
