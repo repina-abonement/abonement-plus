@@ -666,7 +666,6 @@ def send_auto(con, s: dict, kind: str, tpl: str) -> dict:
     return {"ok": ok, "error": err}
 
 
-_PAYLINK_SYNC = datetime.min
 
 
 def request_missing_data(con, day: date) -> int:
@@ -845,14 +844,6 @@ def run(con, now: datetime | None = None, send: bool = True) -> dict:
     schedule.apply_versions(con, now.date())  # с даты изменения в карточке группы новое расписание  # несданные отчёты о смене: 30 минут и 2 часа
     waitlist._sync_done(con)
     program.price_notice(con, now.date())
-    global _PAYLINK_SYNC
-    if (now - _PAYLINK_SYNC).total_seconds() >= 600:  # оплаты по ссылкам PayKeeper: раз в 10 минут
-        _PAYLINK_SYNC = now
-        from . import paylinks
-        try:
-            paylinks.sync(con, now.date())
-        except Exception:  # noqa: BLE001 — PayKeeper недоступен: попробуем в следующий раз
-            pass
     from . import chains, channels
     if send:
         try:
@@ -1294,9 +1285,11 @@ def start_worker(connect):
     import threading
     import time
     import traceback
+    from . import paylinks
 
     def loop():
         con = connect()
+        last_payment_sync = None
         while True:
             try:
                 waiting = time.monotonic()
@@ -1314,6 +1307,18 @@ def start_worker(connect):
                     raise
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
+            now = _now()
+            if last_payment_sync is None or (now - last_payment_sync).total_seconds() >= 600:
+                last_payment_sync = now
+                started = time.monotonic()
+                try:
+                    paylinks.sync(con, now.date())
+                except Exception as error:  # провайдер недоступен, повторим по расписанию
+                    print(f"CRM PayKeeper sync failed: {type(error).__name__}", flush=True)
+                finally:
+                    elapsed_ms = round((time.monotonic() - started) * 1000)
+                    if elapsed_ms >= 1000:
+                        print(f"CRM PayKeeper sync elapsed_ms={elapsed_ms}", flush=True)
             time.sleep(60)
     threading.Thread(target=loop, name="tasks-worker", daemon=True).start()
 

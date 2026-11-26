@@ -275,13 +275,25 @@ def apply_payments(con, pays: list[dict]) -> int:
 
 def sync(con, today: date | None = None) -> int:
     """Раз в 10 минут: если есть неоплаченные ссылки, забрать оплаты PayKeeper за их срок и зачислить."""
+    if con.in_transaction:
+        raise RuntimeError("PayKeeper polling requires an idle connection")
     today = today or date.today()
     con.execute("UPDATE pay_links SET status='expired' WHERE status='open' AND created_at < ?",
                 ((datetime.now() - timedelta(days=LIVE_DAYS)).isoformat(timespec="minutes"),))
     first = con.execute("SELECT MIN(created_at) FROM pay_links WHERE status='open'").fetchone()[0]
     if not first or not ready(con):
         return 0
-    return apply_payments(con, fiscal.fetch_pk_payments(con, date.fromisoformat(first[:10]), today))
+    payments = fiscal.fetch_pk_payments(con, date.fromisoformat(first[:10]), today)
+    if not payments:
+        return 0
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        applied = apply_payments(con, payments)
+        con.commit()
+        return applied
+    except BaseException:
+        con.rollback()
+        raise
 
 
 def payment_page(con,token):

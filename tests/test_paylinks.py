@@ -23,6 +23,25 @@ class PayLinksTest(unittest.TestCase):
  def new(self,amount=5400,sub=None):
   link=paylinks.create(self.con,self.sid,amount,self.user,subscription_id=sub)
   return link,link['url'].rsplit('/',1)[1]
+ def test_poll_releases_writer_during_provider_call_and_applies_once(self):
+  link,_=self.new()
+  order=self.con.execute("SELECT orderid FROM pay_links WHERE id=?",(link["id"],)).fetchone()[0]
+  competitor=db.connect(self.path)
+  self.addCleanup(competitor.close)
+  competitor.execute("PRAGMA busy_timeout=50")
+
+  def provider(con,*_args):
+   self.assertFalse(con.in_transaction)
+   competitor.execute("BEGIN IMMEDIATE")
+   competitor.execute("INSERT OR REPLACE INTO settings(key,value) VALUES ('synthetic_parallel_write','1')")
+   competitor.commit()
+   return [{"id":"synthetic-pk","status":"success","orderid":order,"pay_amount":5400}]
+
+  with patch.object(fiscal,"fetch_pk_payments",side_effect=provider):
+   self.assertEqual(paylinks.sync(self.con),1)
+   self.assertEqual(paylinks.sync(self.con),0)
+  self.assertEqual(self.con.execute("SELECT COUNT(*) FROM payments").fetchone()[0],1)
+
  def test_no_provider_invoice_until_valid_customer_email(self):
   link,token=self.new();self.assertIn('/pay/',link['url']);self.assertFalse(self.sent)
   for email in ('','bad','x@bad','x@@a.ru','a..b@example.com','x@example.com\nBcc: x@evil.ru',None):
