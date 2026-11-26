@@ -485,7 +485,7 @@ def quote_for(con, sid: int, ym: str, enrollment_id=None, discount_id=None, tari
 
 def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id=None, tariff=None,
                    excluded_dates=None, credit_requested=False, group_id=None, ofp_group_id=None, group_action="transfer", paid_date=None, exclusion_reason="",
-                   use_balance=False, expected_balance_token=None, request_id=None) -> dict:
+                   use_balance=False, expected_balance_token=None, request_id=None, individual_price=None, individual_reason=None) -> dict:
     from . import program, transfer, smart
     from . import invoicebalanceweb
     if type(use_balance) is not bool:
@@ -495,12 +495,17 @@ def create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_id
         'ofp_group_id':ofp_group_id,'group_action':group_action,'paid_date':paid_date,
         'exclusion_reason':exclusion_reason,'use_balance':use_balance,
         'expected_balance_token':expected_balance_token}
+    if individual_price is not None or individual_reason is not None:
+        request_data.update(individual_price=individual_price, individual_reason=individual_reason)
     previous=invoicebalanceweb.creation_replay(con,sid,request_id,request_data,required=use_balance)
     if previous is not None:
         return previous
     smart.require(con, sid, "sale")
     e = sale_enrollment(con, sid, enrollment_id, group_id)
     q = quote_for(con, sid, ym, enrollment_id, discount_id, tariff, excluded_dates, credit_requested, group_id, ofp_group_id, paid_date,user=user,use_balance=use_balance)
+    if individual_price is not None or individual_reason is not None:
+        from . import individualinvoice
+        q = individualinvoice.quote(con, sid, q, individual_price, individual_reason, use_balance)
     if (use_balance and not expected_balance_token or expected_balance_token is not None
             and expected_balance_token != q['balance_preview']['token']):
         raise ApiError('Баланс или сумма счёта изменились — обновите расчёт перед подтверждением',409)
@@ -590,6 +595,9 @@ def _create_invoice(con, sid: int, ym: str, user, enrollment_id=None, discount_i
                 (json.dumps(q.get("excluded_dates", [])), json.dumps(snapshot) if snapshot else "", sub_id))
     schedule_snapshot = q.get('components') or [{'group_id':e['group_id'],'rate':1,'dates':q['dates']}]
     con.execute('UPDATE subscriptions SET lesson_schedule=?,ledger_managed=1 WHERE id=?',(json.dumps(schedule_snapshot),sub_id))
+    if q.get('individual_reason'):
+        from . import individualinvoice
+        individualinvoice.save(con, sub_id, sid, q['standard_total'], q['total'], q['individual_reason'], user)
     balancecredit.protect_invoice(con,sub_id,user)
     if use_balance:
         # The external quote was checked before creating the invoice. The

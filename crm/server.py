@@ -1531,7 +1531,14 @@ def previous_subscription(con, h, user, body, q, sid):
 @route("GET", "/api/students/{sid}/quote", role="operator|client_sales:full")
 def quote(con, h, user, body, q, sid):
     from . import invoicebalanceweb
-    return sv.quote_for(con, int(sid), q.get("month"), q.get("enrollment_id"), q.get("discount_id"), q.get("tariff"), (q.get("excluded_dates") or []) if q.get("dates_selected")=="1" else q.get("excluded_dates"), q.get("credit_requested"), q.get("group_id"), q.get("ofp_group_id"),q.get("paid_date"),user=user,use_balance=invoicebalanceweb.query_choice(q))
+    result = sv.quote_for(con, int(sid), q.get("month"), q.get("enrollment_id"), q.get("discount_id"), q.get("tariff"), (q.get("excluded_dates") or []) if q.get("dates_selected")=="1" else q.get("excluded_dates"), q.get("credit_requested"), q.get("group_id"), q.get("ofp_group_id"),q.get("paid_date"),user=user,use_balance=invoicebalanceweb.query_choice(q))
+    if 'individual_price' in q:
+        from . import individualinvoice
+        raw = q['individual_price']
+        price = int(raw) if re.fullmatch(r'[0-9]{1,8}', raw) else None
+        return individualinvoice.quote(con, int(sid), result, price, 'Предварительный расчёт',
+                                       invoicebalanceweb.query_choice(q))
+    return result
 
 
 @route("POST", "/api/students/{sid}/multi-month-preview", role="members:full|client_sales:full")
@@ -1552,7 +1559,19 @@ def multi_month_sale(con,h,user,body,q,sid):
 
 @route("POST", "/api/students/{sid}/invoice", role="operator|client_sales:full")
 def invoice(con, h, user, body, q, sid):
-    return sv.create_invoice(con, int(sid), body.get("month"), user, body.get("enrollment_id"), body.get("discount_id"), body.get("tariff"), body.get("excluded_dates"), body.get("credit_requested", False), body.get("group_id"), body.get("ofp_group_id"), body.get("group_action", "transfer"),body.get("paid_date"),str(body.get("exclusion_reason") or "")[:1000],use_balance=body.get('use_balance',False),expected_balance_token=body.get('expected_balance_token',body.get('balance_token')),request_id=body.get('request_id'))
+    return sv.create_invoice(con, int(sid), body.get("month"), user, body.get("enrollment_id"), body.get("discount_id"), body.get("tariff"), body.get("excluded_dates"), body.get("credit_requested", False), body.get("group_id"), body.get("ofp_group_id"), body.get("group_action", "transfer"),body.get("paid_date"),str(body.get("exclusion_reason") or "")[:1000],use_balance=body.get('use_balance',False),expected_balance_token=body.get('expected_balance_token',body.get('balance_token')),request_id=body.get('request_id'), individual_price=body.get('individual_price'), individual_reason=body.get('individual_reason'))
+
+
+@route("POST", "/api/subscriptions/{sub}/individual-terms", role="client_sales:full")
+def individual_terms(con, h, user, body, q, sub):
+    from . import individualinvoice
+    return individualinvoice.change(con, int(sub), body.get('price'), body.get('reason'), user)
+
+
+@route("POST", "/api/subscriptions/{sub}/cancel-unpaid", role="client_sales:full")
+def cancel_unpaid_invoice(con, h, user, body, q, sub):
+    from . import individualinvoice
+    return individualinvoice.cancel(con, int(sub), body.get('reason'), user)
 
 
 from . import invoicebalanceweb as _invoice_balance_web
