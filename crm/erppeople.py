@@ -29,6 +29,14 @@ def _matching_branches(con, label):
             if key(row["name"]) == key(label)]
 
 
+def _profile_parent(con, family_id, phone=""):
+    return con.execute(
+        """SELECT * FROM parents WHERE family_id=?
+           ORDER BY (phone_norm = ? AND phone_norm != '') DESC, is_primary DESC, id LIMIT 1""",
+        (family_id, normalize_phone(phone)),
+    ).fetchone()
+
+
 def _profile_preview(con, sid, rec, visitor_cards=False):
     """Describe safe profile enrichment without changing an existing card."""
     from .smart import guess_relation
@@ -43,7 +51,7 @@ def _profile_preview(con, sid, rec, visitor_cards=False):
         result["fill"] = [label for key, label in PROFILE_FIELDS if source[key]]
         return result
     student = dict(con.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone())
-    parent_row = con.execute("SELECT * FROM parents WHERE family_id=? ORDER BY is_primary DESC,id LIMIT 1", (student["family_id"],)).fetchone()
+    parent_row = _profile_parent(con, student["family_id"], source["phone"] if visitor_cards else "")
     parent = dict(parent_row) if parent_row else {}
     current = {
         "child_name": _clean(student.get("name")), "birth": _clean(student.get("birth")),
@@ -57,6 +65,9 @@ def _profile_preview(con, sid, rec, visitor_cards=False):
         ).fetchone() else ""
     for key, label in PROFILE_FIELDS:
         if not source[key] or current[key] == source[key]:
+            continue
+        if (visitor_cards and key in {"parent_name", "email"} and normalize_phone(current["phone"])
+                and normalize_phone(source["phone"]) and normalize_phone(current["phone"]) != normalize_phone(source["phone"])):
             continue
         if not current[key] or (key == "parent_name" and current[key] == "Родитель") or (key == "child_name" and current[key] == ei.NO_NAME):
             result["fill"].append(label)
@@ -78,7 +89,7 @@ def _apply_profile(con, sid, rec, user, visitor_cards=False):
         channel, name = sources.canonical_source(rec.get("channel") or "Другое", source["source"])
         source_id = sources.ensure_source(con, channel, name)
         con.execute("UPDATE students SET source=?,source_id=? WHERE id=?", (name, source_id, sid))
-    parent_row = con.execute("SELECT * FROM parents WHERE family_id=? ORDER BY is_primary DESC,id LIMIT 1", (student["family_id"],)).fetchone()
+    parent_row = _profile_parent(con, student["family_id"], source["phone"] if visitor_cards else "")
     if not parent_row:
         con.execute("""INSERT INTO parents(family_id,name,phone,phone_norm,email,relation,is_primary)
                        VALUES (?,?,?,?,?,?,1)""", (student["family_id"], source["parent_name"] or "Родитель", source["phone"],
@@ -86,6 +97,8 @@ def _apply_profile(con, sid, rec, user, visitor_cards=False):
     else:
         parent = dict(parent_row); sets, args = [], []
         for column, key in (("name", "parent_name"), ("phone", "phone"), ("email", "email"), ("relation", "relation")):
+            if visitor_cards and dict(PROFILE_FIELDS)[key] not in preview["fill"]:
+                continue
             if source[key] and (not _clean(parent.get(column)) or (column == "name" and parent[column] == "Родитель")):
                 sets.append(column + "=?"); args.append(source[key])
                 if column == "phone":
