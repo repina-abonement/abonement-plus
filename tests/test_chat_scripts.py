@@ -1,4 +1,5 @@
 """Rules routing, exact approved templates, missing-MAX guard and draft-only attachments."""
+import json
 import tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -63,17 +64,53 @@ class ScriptsTest(unittest.TestCase):
         self.assertEqual(scripts.NEBO_OFFER,p['nebo']['offer']);self.assertEqual(scripts.NEBO_OFFER,p['toddlers']['offer'])
         with self.assertRaises(comms.CommsError):scripts.save_profiles(self.con,{'nebo':{'telegram':'https://evil.example/x'}})
         with self.assertRaises(comms.CommsError):scripts.save_profiles(self.con,{'nebo':{'offer':'javascript:alert(1)'}})
-    def test_old_saved_nebo_offers_migrate_without_touching_other_profiles(self):
-        scripts.save_profiles(self.con,{'nebo':{'offer':scripts.OLD_NEBO_OFFER},'toddlers':{'offer':scripts.OLD_NEBO_OFFER},
-            'western':{'offer':'https://msk.footbolika.ru/assets/images/offer/3867/8of3k6.pdf'}})
-        profiles=scripts.profiles(self.con)
-        self.assertEqual(scripts.NEBO_OFFER,profiles['nebo']['offer']);self.assertEqual(scripts.NEBO_OFFER,profiles['toddlers']['offer'])
-        self.assertEqual('https://msk.footbolika.ru/assets/images/offer/3867/8of3k6.pdf',profiles['western']['offer'])
-        saved=comms.get(self.con,'school_rules_profiles')
-        self.assertNotIn('dgw2m3.pdf',saved);self.assertIn('j1k2f6.pdf',saved)
-        with patch.object(memos,'image',return_value=b'PNG'):
-            self.assertIn('j1k2f6.pdf',scripts.rules(self.con,self.sid,'telegram')['text'])
-            self.assertIn('j1k2f6.pdf',scripts.rules(self.con,self.sid,'max')['text'])
+    def test_only_exact_legacy_offers_migrate_once_in_nebo_profiles(self):
+        base = 'https://msk.footbolika.ru/assets/images/offer/1846/'
+        august, previous = base + 'dgw2m3.pdf', base + 'j1k2f6.pdf'
+        current = base + 'vzaxum.pdf'
+        custom = previous + '?version=custom'
+        for nebo, toddlers, expected_nebo, expected_toddlers in [
+            (august, previous, current, current),
+            (previous, august, current, current),
+            (custom, previous, custom, current),
+            (august, custom, current, custom),
+        ]:
+            with self.subTest(nebo=nebo, toddlers=toddlers):
+                saved = {
+                    'nebo': {'offer': nebo, 'text': 'Правила {offer}', 'max': 'https://max.ru/example'},
+                    'toddlers': {'offer': toddlers, 'text': previous},
+                    'western': {'offer': previous},
+                    'arctic': {'offer': august},
+                }
+                comms.put(self.con, 'school_rules_profiles', json.dumps(saved))
+                scripts.migrate(self.con)
+                saved['nebo']['offer'] = expected_nebo
+                saved['toddlers']['offer'] = expected_toddlers
+                self.assertEqual(json.loads(comms.get(self.con, 'school_rules_profiles')), saved)
+                before = self.con.total_changes
+                scripts.migrate(self.con)
+                self.assertEqual(self.con.total_changes, before)
+
+    def test_current_offer_in_telegram_and_max_previews_for_both_nebo_groups(self):
+        offer = 'https://msk.footbolika.ru/assets/images/offer/1846/vzaxum.pdf'
+        regular_group = schedule.save_group(self.con, {
+            'name': 'Основная группа', 'branch_id': self.branch, 'age': '4-5',
+            'weekdays': [1, 4], 'time': '18:45',
+        })
+        regular_student = sv.create_student(self.con, {
+            'name': 'Тест Основной', 'parent_name': 'Тест', 'phone': '+79000000002',
+            'group_id': regular_group, 'funnel': 'members',
+        }, self.user)
+        with patch.object(memos, 'image', return_value=b'PNG'):
+            for profile, student in [('nebo', regular_student), ('toddlers', self.sid)]:
+                for channel in ('telegram', 'max'):
+                    with self.subTest(profile=profile, channel=channel):
+                        items = scripts.catalog(self.con, student, channel)['items']
+                        preview = next(item for item in items if item['key'] == 'rules')
+                        self.assertEqual(preview['profile'], profile)
+                        self.assertFalse(preview['reason'])
+                        self.assertIn(offer, preview['text'].splitlines())
+
     def test_changed_rule_links_block_staged_send_before_network(self):
         with patch.object(memos,'image',return_value=b'\x89PNG\r\n\x1a\nTEST'):
             draft=scripts.stage_rules(self.con,self.cid,self.user,self.sid)

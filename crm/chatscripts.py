@@ -9,8 +9,11 @@ from . import comms, tasks, memos
 
 PROFILE_NAMES={'nebo':'ТРЦ «Небо»','western':'СК «Западный»','arctic':'Арктика','toddlers':'ТРЦ «Небо», группа 1,5–3 года'}
 MAX_CHANNELS={'nebo':'https://max.ru/id183210983596_biz','western':'https://max.ru/id183210983596_biz3'}
-OLD_NEBO_OFFER='https://msk.footbolika.ru/assets/images/offer/1846/dgw2m3.pdf'
-NEBO_OFFER='https://msk.footbolika.ru/assets/images/offer/1846/j1k2f6.pdf'
+LEGACY_NEBO_OFFERS = (
+    'https://msk.footbolika.ru/assets/images/offer/1846/dgw2m3.pdf',
+    'https://msk.footbolika.ru/assets/images/offer/1846/j1k2f6.pdf',
+)
+NEBO_OFFER = 'https://msk.footbolika.ru/assets/images/offer/1846/vzaxum.pdf'
 OFFERS={'nebo':NEBO_OFFER,'western':'https://msk.footbolika.ru/assets/images/offer/3867/8of3k6.pdf','arctic':'https://msk.footbolika.ru/assets/images/offer/4005/2zqspv.pdf'}
 RULES_TEXT='''❗️ Обязательно подпишитесь на канал «Футболики»
 👉 {channel}
@@ -36,8 +39,9 @@ def migrate(con):
     changed=False
     for key in ('nebo','toddlers'):
         value=saved.get(key)
-        if isinstance(value,dict) and value.get('offer')==OLD_NEBO_OFFER:
-            value['offer']=NEBO_OFFER;changed=True
+        if isinstance(value, dict) and value.get('offer') in LEGACY_NEBO_OFFERS:
+            value['offer'] = NEBO_OFFER
+            changed = True
     if changed:comms.put(con,'school_rules_profiles',json.dumps(saved,ensure_ascii=False))
     return saved
 
