@@ -2,6 +2,8 @@
 import sqlite3
 import time
 
+from . import db
+
 
 def init(con):
     con.execute('''CREATE TABLE IF NOT EXISTS recent_clients (
@@ -31,8 +33,7 @@ def remember_if_available(con, uid, sid):
         remember(con, uid, sid)
         return True
     except sqlite3.OperationalError as error:
-        code = getattr(error, "sqlite_errorcode", None)
-        if code not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+        if not db.is_write_contention(error):
             raise
         return False
 

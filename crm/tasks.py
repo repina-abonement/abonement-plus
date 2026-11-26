@@ -1192,8 +1192,10 @@ def erp_board(con, day: str = "today", user: dict | None = None) -> dict:
 
 def for_student(con, sid: int) -> dict:
     """Задачи для карточки: открытые (ближайшая первой) и несколько последних выполненных."""
-    ensure_subscription_renewal(con, sid)
-    ensure_trial_confirm_task(con, sid)  # восстанавливает цепочку у уже записанного на будущее ПУ
+    from . import db
+    with db.optional_refresh(con):
+        ensure_subscription_renewal(con, sid)
+        ensure_trial_confirm_task(con, sid)  # восстанавливает цепочку у уже записанного на будущее ПУ
     fam = (con.execute("SELECT family_id FROM students WHERE id=?", (sid,)).fetchone() or [None])[0]
     q = "SELECT * FROM tasks WHERE (student_id=? OR (kind='rebook' AND family_id=?)) AND status=? ORDER BY "
     return {"open": [_task_out(con, r) for r in con.execute(q + "substr(due_at,1,10),priority DESC,due_at,id", (sid, fam, "open"))], "done": []}  # выполненные не показываем
@@ -1297,10 +1299,16 @@ def start_worker(connect):
         con = connect()
         while True:
             try:
+                waiting = time.monotonic()
                 con.execute("BEGIN IMMEDIATE")
+                acquired = time.monotonic()
                 try:
                     run(con)
                     con.execute("COMMIT")
+                    wait_ms = round((acquired - waiting) * 1000)
+                    held_ms = round((time.monotonic() - acquired) * 1000)
+                    if wait_ms >= 1000 or held_ms >= 1000:
+                        print(f"CRM tasks worker wait_ms={wait_ms} write_ms={held_ms}", flush=True)
                 except BaseException:
                     con.execute("ROLLBACK")
                     raise

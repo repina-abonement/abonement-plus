@@ -1435,7 +1435,7 @@ def student_get(con, h, user, body, q, sid):
     from . import recents
     recents.remember_if_available(con, user["id"], int(sid))
     from . import subcancel
-    return sv.student_detail(con, int(sid)) | {'can_delete_error':subcancel.can_cancel_error(con,user)}
+    return sv.student_detail(con, int(sid)) | {'can_delete_error':subcancel.can_cancel_error(con,user,persist=False)}
 
 
 @route("GET", "/api/students/{sid}/error-delete-preview", role="operator")
@@ -3991,6 +3991,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send(self, status: int, payload, ctype="application/json; charset=utf-8"):
         data = payload if isinstance(payload, bytes) else json.dumps(payload, ensure_ascii=False, default=str).encode()
+        route = getattr(self, "api_route_name", None)
+        if route:
+            elapsed_ms = round((time.monotonic() - self.api_started_at) * 1000)
+            if elapsed_ms >= 1000 or status >= 500:
+                print(f"CRM API {route} status={status} elapsed_ms={elapsed_ms}", flush=True)
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
@@ -4061,6 +4066,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle(self, method: str):
         self.extra_headers = []
+        self.api_route_name = None
+        self.api_started_at = time.monotonic()
         url = urlparse(self.path)
         hm = re.match(r"^/hooks/([a-z]+)/([A-Za-z0-9_\-]+)/?$", url.path)
         if hm and method in ("GET", "POST"):
@@ -4102,6 +4109,7 @@ class Handler(BaseHTTPRequestHandler):
                 mt = rx.match(url.path)
                 if not mt:
                     continue
+                self.api_route_name = fn.__name__
                 body = {}
                 if method in ("POST", "PUT", "PATCH", "DELETE"):
                     if method != "DELETE" and "application/json" not in (self.headers.get("Content-Type") or ""):
@@ -4247,8 +4255,7 @@ def _startup_with_lock_retry():
             _startup()
             return
         except sqlite3.OperationalError as error:
-            code = getattr(error, "sqlite_errorcode", 0) or 0
-            if (code & 0xff) not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or attempt == 2:
+            if not db.is_write_contention(error) or attempt == 2:
                 raise
             print("SQLite занята при запуске CRM, повторяем инициализацию", flush=True)
             time.sleep(attempt + 1)

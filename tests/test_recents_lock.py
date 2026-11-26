@@ -45,6 +45,19 @@ class RecentsLockTest(unittest.TestCase):
             reader.close()
             writer.close()
 
+    def test_card_stays_readable_after_another_connection_commits(self):
+        reader = db.connect(self.path)
+        try:
+            reader.execute("BEGIN")
+            reader.execute("SELECT id FROM students WHERE id=1719").fetchone()
+            self.con.execute("INSERT INTO settings(key,value) VALUES('snapshot-test','1')")
+            result = server.student_get(reader, None, self.user, {}, {}, "1719")
+            self.assertEqual(result["student"]["id"], 1719)
+            self.assertEqual(reader.execute("SELECT COUNT(*) FROM recent_clients").fetchone()[0], 0)
+            self.assertTrue(reader.in_transaction)
+        finally:
+            reader.close()
+
     def test_non_lock_operational_error_is_not_hidden(self):
         class BrokenConnection:
             def execute(self, *_args, **_kwargs):

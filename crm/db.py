@@ -6,6 +6,7 @@ import hmac
 import os
 import secrets
 import sqlite3
+from contextlib import contextmanager
 import threading
 from datetime import date, datetime, timedelta
 
@@ -174,6 +175,25 @@ DEFAULT_SETTINGS = {
 
 _local = threading.local()
 DB_PATH = os.environ.get("CRM_DB", os.path.join(os.path.dirname(__file__), "..", "data", "crm.sqlite3"))
+
+
+def is_write_contention(error):
+    code = getattr(error, "sqlite_errorcode", 0) or 0
+    return (code & 0xff) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+
+
+@contextmanager
+def optional_refresh(con):
+    """Keep a read view usable if an incidental refresh cannot acquire a writer."""
+    con.execute("SAVEPOINT optional_refresh")
+    try:
+        yield
+    except BaseException as error:
+        con.execute("ROLLBACK TO optional_refresh")
+        if not isinstance(error, sqlite3.OperationalError) or not is_write_contention(error):
+            raise
+    finally:
+        con.execute("RELEASE optional_refresh")
 
 
 def connect(path: str | None = None) -> sqlite3.Connection:

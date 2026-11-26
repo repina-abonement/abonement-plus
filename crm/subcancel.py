@@ -347,7 +347,7 @@ def cancellations(con,sid):
     return [dict(r) for r in con.execute('SELECT * FROM subscription_cancellations WHERE student_id=? ORDER BY id DESC',(sid,))]
 
 
-def can_cancel_error(con,user):
+def can_cancel_error(con,user,*,persist=True):
     """Owner and the uniquely confirmed Varvara account; never all operators."""
     if user.get('role')=='admin':return True
     if user.get('role')!='operator':return False
@@ -358,8 +358,10 @@ def can_cancel_error(con,user):
         matches=[r for r in con.execute("SELECT id,name FROM users WHERE active=1 AND role='operator'")
                  if {'варвара','батарева'}.issubset(set(re.findall(r'[а-яё]+',r['name'].casefold())))]
         if len(matches)!=1:return False
-        granted=str(matches[0]['id']);comms.put(con,key,granted)
-        sv.audit(con,None,'subscription.error_cancel_permission',granted)
+        granted=str(matches[0]['id'])
+        if persist:
+            comms.put(con,key,granted)
+            sv.audit(con,None,'subscription.error_cancel_permission',granted)
     return str(user.get('id'))==granted and bool(con.execute("SELECT 1 FROM users WHERE id=? AND active=1 AND role='operator'",(user.get('id'),)).fetchone())
 
 
