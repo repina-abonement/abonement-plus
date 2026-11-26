@@ -9,24 +9,30 @@ const root=path.resolve(__dirname,'..'),assets=path.join(root,'crm/static');
  const fixture=JSON.parse(fs.readFileSync(fixturePath,'utf8')),first=structuredClone(fixture.cases.monthly.detail),second=structuredClone(fixture.cases.monthly.detail);
  const firstId=fixture.student_id,secondId=4;
  first.student.id=firstId;first.student.name='Шарипов Даниил';first.subscriptions.forEach((s,i)=>{s.id=828113+i;s.group_name='Шарипов · абонемент'});
+ const decemberInvoice={...first.subscriptions.find(s=>s.status==='paid'&&s.kind==='month'),id:828199,month:'2026-12',display_month:'2026-12',group_name:'Синтетическая декабрьская продажа'};
+ first.subscriptions.push(decemberInvoice);
  second.student.id=secondId;second.student.name='Минибаев Дамир';second.student.family_id=404;second.family.id=404;second.subscriptions.forEach((s,i)=>{s.id=440001+i;s.group_name='Минибаев · абонемент'});
  const calendars={};for(const [id,source,label] of [[firstId,fixture.cases.monthly.calendar,'Шарипов'],[secondId,fixture.cases.recovered.calendar,'Минибаев']]){calendars[id]=structuredClone(source);for(const month of Object.values(calendars[id]))for(const event of month.events||[])event.group=label+' · синтетическая группа'}
  const launch={headless:true,args:['--no-sandbox']},exe=process.env.CHROMIUM_PATH||(fs.existsSync('/usr/bin/chromium')?'/usr/bin/chromium':null);if(exe)launch.executablePath=exe;browser=await pw.chromium.launch(launch);
- const page=await browser.newPage({viewport:{width:1440,height:1000}}),mutations=[],errors=[],attendanceGets=[];page.on('pageerror',e=>errors.push(e.message));
- await page.route('**/*',async route=>{const req=route.request(),url=new URL(req.url());if(req.method()!=='GET'){mutations.push(req.method()+' '+url.pathname);return route.fulfill({status:403,body:'{}'})}
-  if(url.pathname.startsWith('/api/')){let data;if(url.pathname===`/api/students/${firstId}`)data=first;else if(url.pathname===`/api/students/${secondId}`){await new Promise(r=>setTimeout(r,120));data=second}else if(url.pathname==='/api/people')data={erp:[],total:1,limit:100,rows:[{id:secondId,name:'Минибаев Дамир',parent:'Синтетический родитель',phone:'+70000000000',group:'Синтетическая группа',status_label:'Занимается'}]};else if(/\/api\/students\/\d+\/attendance-calendar/.test(url.pathname)){const id=Number(url.pathname.split('/')[3]);attendanceGets.push(id);data=calendars[id][url.searchParams.get('month')||'2026-11']}else if(url.pathname.endsWith('/paylinks'))data={ready:false,links:[]};else if(/\/api\/families\/\d+\/comms/.test(url.pathname))data={status:{},conversations:[],items:[]};else data={rows:[],items:[],links:[],total:0};return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(data)})}
+ const page=await browser.newPage({viewport:{width:1440,height:1000},hasTouch:true}),mutations=[],errors=[],attendanceGets=[],cardGets=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.route('**/*',async route=>{const req=route.request(),url=new URL(req.url());if(req.method()==='POST'&&url.pathname==='/api/activity')return route.fulfill({status:200,body:'{}'});
+      if(req.method()!=='GET'){mutations.push(req.method()+' '+url.pathname);return route.fulfill({status:403,body:'{}'})}
+  if(url.pathname.startsWith('/api/')){let data;if(url.pathname===`/api/students/${firstId}`){cardGets.push(firstId);data=first}else if(url.pathname===`/api/students/${secondId}`){await new Promise(r=>setTimeout(r,120));data=second}else if(url.pathname==='/api/people')data={erp:[],total:1,limit:100,rows:[{id:secondId,name:'Минибаев Дамир',parent:'Синтетический родитель',phone:'+70000000000',group:'Синтетическая группа',status_label:'Занимается'}]};else if(/\/api\/students\/\d+\/attendance-calendar/.test(url.pathname)){const id=Number(url.pathname.split('/')[3]);attendanceGets.push(id);data=calendars[id][url.searchParams.get('month')||'2026-11']}else if(url.pathname.endsWith('/paylinks'))data={ready:false,links:[]};else if(/\/api\/families\/\d+\/comms/.test(url.pathname))data={status:{},conversations:[],items:[]};else data={rows:[],items:[],links:[],total:0};return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(data)})}
   const file=path.join(assets,url.pathname==='/'?'index.html':url.pathname.slice(1));if(!file.startsWith(assets+path.sep)||!fs.existsSync(file))return route.fulfill({status:404,body:''});let body=fs.readFileSync(file);if(url.pathname==='/app.js')body=Buffer.from(body.toString().replace(/^boot\(\);$/m,'/* isolated test */'));return route.fulfill({status:200,contentType:path.extname(file)==='.js'?'text/javascript':path.extname(file)==='.css'?'text/css':'text/html',body})});
  await page.goto('http://card-switch.test/');await page.evaluate(meta=>{S.meta=meta;S.user={id:1,name:'Руководитель',role:'admin',perms:{members:'full',search:'view',journal:'full',payments:'full'}};S.meta.user=S.user;window.copiedPhones=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>window.copiedPhones.push(text)}})},fixture.meta);
  await page.evaluate(id=>openStudent(id,{tab:'abon'}),firstId);assert.match(await page.locator('.sc-title').innerText(),/Шарипов.*Даниил|Даниил.*Шарипов/);assert.match(await page.locator('[data-sc="subs"]').innerText(),/Шарипов · абонемент/);
- await page.setViewportSize({width:1280,height:600});
+ await page.setViewportSize({width:390,height:650});
  const december=page.locator('[data-sub-month="2026-12"]');
  await december.scrollIntoViewIfNeeded();
  const panel=page.locator('#drawer .drawer-panel');
  const beforeMonth=await panel.evaluate(el=>el.scrollTop);
  assert(beforeMonth>0,'Month tile is reached after scrolling');
- await december.click();
+ const cardRequestsBeforeTap=cardGets.length;
+ await december.tap();
  await page.waitForFunction(()=>document.querySelector('[data-sub-month="2026-12"]')?.getAttribute('aria-pressed')==='true');
  assert.equal(await panel.evaluate(el=>el.scrollTop),beforeMonth,'Choosing a month preserves scroll position');
+ assert.equal(cardGets.length,cardRequestsBeforeTap,'A tap opens the month using the card already on screen');
+ assert.match(await page.locator('.subscription-live-list').innerText(),/Синтетическая декабрьская продажа/);
  await page.locator('[data-sub-month="2026-11"]').click();
  await page.waitForFunction(()=>document.querySelector('[data-sub-month="2026-11"]')?.getAttribute('aria-pressed')==='true');
  await page.setViewportSize({width:1440,height:1000});

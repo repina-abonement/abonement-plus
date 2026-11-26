@@ -2222,3 +2222,5 @@ html.theme-soft #comms-box .family-chat-feed{background:#182624}html.theme-soft 
 
 .planner-assignee-form{flex-wrap:wrap;margin-top:10px}
 .planner-assignee-form .field{flex:1 1 180px;margin:0;min-width:0}
+
+.subscription-month{touch-action:manipulation}

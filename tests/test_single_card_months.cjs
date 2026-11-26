@@ -31,6 +31,7 @@ const ok = (condition,message) => { assert(condition,message); checks++; };
     page.on('pageerror', error=>errors.push(error.stack || error.message));
     await page.route('**/*', async route=>{
       const req = route.request(), url = new URL(req.url());
+      if(req.method()==='POST'&&url.pathname==='/api/activity')return route.fulfill({status:200,body:'{}'});
       if (req.method() !== 'GET') { mutations.push({method:req.method(),path:url.pathname}); return route.fulfill({status:403,contentType:'application/json',body:'{"error":"Test forbids mutations"}'}); }
       if (url.pathname.startsWith('/api/')) {
         let data;

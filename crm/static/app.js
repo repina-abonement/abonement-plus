@@ -2471,8 +2471,27 @@ function clientSubscriptionsHtml(d) {
   const availableYears=[...new Set([d.cur_month.slice(0,4),...d.subscriptions.map(x=>clientSubscriptionMonth(x).slice(0,4))])].sort().reverse();
   let selected=S.subscriptionCalendars[key];
   if(!selected||!availableYears.includes(selected.slice(0,4))){selected=d.subscriptions.some(x=>clientSubscriptionMonth(x)===d.cur_month)?d.cur_month:d.subscriptions.map(clientSubscriptionMonth).filter(Boolean).sort().reverse()[0]||d.cur_month;S.subscriptionCalendars[key]=selected}
-  const year=selected.slice(0,4),shown=d.subscriptions.filter(x=>clientSubscriptionMonth(x)===selected&&x.status!=='cancelled'),cancelledHistory=d.subscriptions.filter(x=>clientSubscriptionMonth(x)===selected&&x.status==='cancelled');
-  const tiles=Array.from({length:12},(_,i)=>{
+  const year = selected.slice(0, 4);
+  const months = new Map();
+  for (const sub of d.subscriptions) {
+    const month = clientSubscriptionMonth(sub);
+    if (!months.has(month)) months.set(month, []);
+    months.get(month).push(sub);
+  }
+  const details = Array.from(months, ([month, entries]) => {
+    const shown = entries.filter(sub => sub.status !== 'cancelled');
+    const cancelled = entries.filter(sub => sub.status === 'cancelled');
+    const visible = month === selected;
+    return `<div data-sub-detail-month="${esc(month)}" ${visible ? '' : 'hidden'}>
+      ${shown.length ? `<ul data-sub-live-list class="sub-list ${visible ? 'subscription-live-list' : ''}">${shown.map(card).join('')}</ul>` : '<p class="muted small">В этом месяце покупок нет</p>'}
+      ${cancelled.length ? `<details class="subscription-cancelled-history"><summary>Отменённые покупки · ${cancelled.length}</summary><ul class="sub-list">${cancelled.map(card).join('')}</ul></details>` : ''}
+    </div>`;
+  }).join('');
+  return `<div class="subscription-balance"><div><small>Свободный баланс</small><b>${rub(d.balance.deposit||0)}</b><span>Можно зачесть в оплату</span>${balanceLabelsHtml(d.balance.balance_labels)}</div><div><small>Долг</small><b class="${d.balance.debt?'finance-due':''}">${rub(d.balance.debt||0)}</b><span>Прошлые и текущий месяц</span></div><div><small>Будущие абонементы</small><b>${rub(d.balance.upcoming||0)}</b><span>Осталось оплатить</span></div></div><div class="subscription-year-head"><h3>Абонементы</h3><select id="subscription-year" aria-label="Год абонементов">${availableYears.map(y=>`<option ${y===year?'selected':''}>${y}</option>`).join('')}</select></div><div class="subscription-year-grid">${subscriptionMonthTiles(d,year,selected)}</div><h4 class="subscription-selected-month">${esc(monthLabel(selected))}</h4>${details}<p data-sub-empty class="muted small" ${!months.has(selected)?'':'hidden'}>В этом месяце покупок нет</p>${refundRequestsHtml(d.refund_requests||[])}${subscriptionRefundsHtml(d)}`;
+}
+
+function subscriptionMonthTiles(d, year, selected) {
+  return Array.from({length:12},(_,i)=>{
     const month=year+'-'+String(i+1).padStart(2,'0'),all=d.subscriptions.filter(x=>clientSubscriptionMonth(x)===month),live=all.filter(x=>x.status!=='cancelled');
     const financial=live.filter(x=>!x.history_import),historical=live.filter(x=>x.history_import),historicalTotal=historical.reduce((sum,x)=>sum+(Number(x.price)||0),0),historicalLessons=historical.reduce((n,x)=>n+x.lessons,0),total=financial.reduce((sum,x)=>sum+x.price,0),paid=financial.reduce((sum,x)=>sum+clientSubscriptionPaid(x,d.balance),0),left=Math.max(0,total-paid);
     const state=!all.length?'empty':!live.length?'cancelled':!financial.length&&historical.length?'historical':!left?'paid':paid?'partial':'unpaid';
@@ -2480,19 +2499,43 @@ function clientSubscriptionsHtml(d) {
     const singleCount=live.filter(x=>x.kind==='single').length,caption=singleCount&&singleCount===live.length?`${singleCount} ${plural(singleCount,'разовое','разовых','разовых')}`:label;
     return `<button type="button" class="subscription-month ${state} ${month===selected?'selected':''}" data-sub-month="${month}" aria-pressed="${month===selected}"><strong>${esc(MONTHS[i])}</strong><span class="subscription-month-status">${caption}</span>${live.length?historical.length&&!financial.length?`<b>${rub(historicalTotal)}</b><small>${historicalLessons} ${plural(historicalLessons,'занятие','занятия','занятий')} · без счетов и оплат</small>`:`<b>${rub(total)}</b>${left?`<small>Остаток ${rub(left)}</small>`:'<small>Всё оплачено</small>'}`:'<b>—</b><small>&nbsp;</small>'}</button>`;
   }).join('');
-  return `<div class="subscription-balance"><div><small>Свободный баланс</small><b>${rub(d.balance.deposit||0)}</b><span>Можно зачесть в оплату</span>${balanceLabelsHtml(d.balance.balance_labels)}</div><div><small>Долг</small><b class="${d.balance.debt?'finance-due':''}">${rub(d.balance.debt||0)}</b><span>Прошлые и текущий месяц</span></div><div><small>Будущие абонементы</small><b>${rub(d.balance.upcoming||0)}</b><span>Осталось оплатить</span></div></div><div class="subscription-year-head"><h3>Абонементы</h3><select id="subscription-year" aria-label="Год абонементов">${availableYears.map(y=>`<option ${y===year?'selected':''}>${y}</option>`).join('')}</select></div><div class="subscription-year-grid">${tiles}</div><h4 class="subscription-selected-month">${esc(monthLabel(selected))}</h4>${shown.length?`<ul class="sub-list subscription-live-list">${shown.map(card).join('')}</ul>`:'<p class="muted small">В этом месяце покупок нет</p>'}${cancelledHistory.length?`<details class="subscription-cancelled-history"><summary>Отменённые покупки · ${cancelledHistory.length}</summary><ul class="sub-list">${cancelledHistory.map(card).join('')}</ul></details>`:''}${refundRequestsHtml(d.refund_requests||[])}${subscriptionRefundsHtml(d)}`;
 }
 
-function wireSubscriptionCalendar(root,d) {
-  const choose=month=>{S.subscriptionCalendars[String(d.student.id)]=month;openStudent(d.student.id,{tab:'abon',preserveScroll:true})};
-  root.querySelectorAll('[data-sub-month]').forEach(b=>b.onclick=()=>choose(b.dataset.subMonth));
-  const year=root.querySelector('#subscription-year');
-  if(year)year.onchange=()=>{
-    const months=d.subscriptions.map(clientSubscriptionMonth).filter(month=>month.startsWith(year.value+'-')).sort().reverse();
-    choose(months[0]||year.value+'-01');
+function wireSubscriptionCalendar(root, d) {
+  const grid = root.querySelector('.subscription-year-grid');
+  const year = root.querySelector('#subscription-year');
+  const heading = root.querySelector('.subscription-selected-month');
+  const empty = root.querySelector('[data-sub-empty]');
+  if (!grid || !year || !heading || !empty) return;
+  const details = root.querySelectorAll('[data-sub-detail-month]');
+  const choose = month => {
+    S.subscriptionCalendars[String(d.student.id)] = month;
+    const active = Array.from(details).find(section => section.dataset.subDetailMonth === month);
+    heading.textContent = monthLabel(month);
+    empty.hidden = Boolean(active);
+    details.forEach(section => {
+      section.hidden = section !== active;
+      section.querySelector('[data-sub-live-list]')?.classList.toggle('subscription-live-list', section === active);
+    });
+    grid.querySelectorAll('[data-sub-month]').forEach(button => {
+      const selected = button.dataset.subMonth === month;
+      button.classList.toggle('selected', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
   };
-
+  grid.onclick = event => {
+    const button = event.target.closest('[data-sub-month]');
+    if (button) choose(button.dataset.subMonth);
+  };
+  year.onchange = () => {
+    const months = d.subscriptions.map(clientSubscriptionMonth)
+      .filter(month => month.startsWith(year.value + '-')).sort().reverse();
+    const selected = months[0] || year.value + '-01';
+    grid.innerHTML = subscriptionMonthTiles(d, year.value, selected);
+    choose(selected);
+  };
 }
+
 function openSubscriptionPeriod(sub, box, reload) {
   const display=value=>value?value.split('-').reverse().join('.'):'';
   box.innerHTML=`<form class="subscription-period-form"><h4>Срок действия по ERP</h4><div class="row">${[['from','Дата начала',sub.valid_from],['until','Дата окончания',sub.valid_until]].map(([key,label,value])=>`<div class="field"><label for="period-${key}">${label}</label><div class="period-date-control"><input id="period-${key}" data-date-text="${key}" type="text" inputmode="numeric" autocomplete="off" placeholder="ДД.ММ.ГГГГ" maxlength="10" value="${esc(display(value))}" ${key==='from'?'required':''}><label class="btn period-calendar" title="Выбрать дату в календаре" aria-label="Выбрать дату в календаре">📅<input data-date-picker="${key}" type="date" value="${esc(value||'')}" aria-label="${label}: календарь"></label></div></div>`).join('')}</div><div class="small need-err" role="alert"></div><div class="sc-actions"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-period-close>Отмена</button></div></form>`;
@@ -2698,18 +2741,15 @@ async function loadClientPaymentLinks(sid) {
 async function openStudent(id, options = {}) {
   const request=S.studentCardRequest=(S.studentCardRequest||0)+1;
   const previous = history.state?.studentCard;
-  let tab = options.tab || (previous?.id === +id && previous.userId === S.user?.id ? previous.tab : "feed") || "feed";
-  const panel = options.preserveScroll && previous?.id === +id && previous.userId === S.user?.id
-    && !$("#drawer").hidden ? $("#drawer .drawer-panel") : null;
+  const tab = options.tab || (previous?.id === +id && previous.userId === S.user?.id ? previous.tab : "feed") || "feed";
   // Do not leave the previous child's name and subscriptions visible while the
   // newly selected card is loading.  The request number also makes a late
   // response from the previous card harmless.
-  if (!panel) openDrawer(`<div class="section"><p class="muted">Загружаю карточку клиента…</p></div>`, "wide", { keepStudentRequest: true });
+  openDrawer(`<div class="section"><p class="muted">Загружаю карточку клиента…</p></div>`, "wide", { keepStudentRequest: true });
   let d;
   try { d = await api("GET", `/api/students/${id}`); }
   catch (e) {
     if(request!==S.studentCardRequest)return;
-    if (panel) return fail(e);
     const body=$("#drawer-body");
     if(body)body.innerHTML=`<div class="section"><h3>Карточка не открылась</h3><p class="error">${esc(e.message)}</p><button class="btn" data-student-retry>Повторить</button></div>`;
     body?.querySelector('[data-student-retry]')?.addEventListener('click',()=>openStudent(id,options));
@@ -2717,7 +2757,6 @@ async function openStudent(id, options = {}) {
   }
   if(request!==S.studentCardRequest)return;
   if(Number(d?.student?.id)!==Number(id)){
-    if (panel) return fail(new Error("Сервер вернул данные другого клиента"));
     const body=$("#drawer-body");
     if(body)body.innerHTML='<div class="section"><h3>Карточка не открылась</h3><p class="error">Сервер вернул данные другого клиента. Обновите страницу и повторите</p></div>';
     return;
@@ -2821,15 +2860,13 @@ async function openStudent(id, options = {}) {
     ${clientHistoryHtml(d.history,d.journey)}
   </div>
   <div style="margin-top:14px" data-sc="arch"><button class="btn sm ${s.archived ? "" : "danger"}" id="s-arch">${s.archived ? "Вернуть из архива" : "Перенести в архив"}</button></div>`;
-  const scrollTop = panel?.scrollTop;
-  const active = panel?.contains(document.activeElement) ? document.activeElement : null;
-  if (panel) tab = history.state?.studentCard?.tab || tab;
   openDrawer(html, "wide", { keepStudentRequest: true });
   try { history.replaceState({ ...history.state, studentCard: { ...(previous?.id === +id ? previous : {}), id: +id, userId: S.user.id, tab } }, ""); } catch (_) {}
   const body = $("#drawer-body");
   body.dataset.studentId = String(id);
   erpFullClient(body, id);
   layoutStudentCard(body, isMember);
+  wireSubscriptionCalendar(body, d);
   scTab(tab);
   const reload = () => { openStudent(id); render(); };
   wireClientAttendance(body,d,reload);
@@ -2878,7 +2915,7 @@ async function openStudent(id, options = {}) {
   const bindEdit=(selector,callback)=>body.querySelectorAll(selector).forEach(el=>{el.onclick=callback;el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();callback()}}});
   bindEdit('[data-profile-open]',()=>profile(false,'birth'));bindEdit('[data-profile-note]',()=>profile(false,'note'));
   body.querySelectorAll('[data-client-add]').forEach(b=>b.onclick=()=>{const root=body.querySelector('#sc-profile-edit');root.hidden=false;root.innerHTML='<div class="client-profile-form"><h4>Кого добавить в семью?</h4><div class="sc-actions"><button type="button" class="btn" data-add-contact>Родителя</button><button type="button" class="btn" data-add-family-child>Брата или сестру — клиента</button><button type="button" class="btn" data-add-close>Отмена</button></div></div>';root.querySelector('[data-add-contact]').onclick=()=>profile(true);root.querySelector('[data-add-family-child]').onclick=()=>$('#add-sibling').click();root.querySelector('[data-add-close]').onclick=()=>{root.hidden=true;root.replaceChildren()}});
-  bindEdit('[data-head-group]',()=>{if(isMember){scTab('abon');const move=body.querySelector('[data-sub-transfer]');if(move){move.click();move.scrollIntoView({block:'center'})}else toast('Сначала выберите действующий абонемент для перевода',true)}else{scTab('info');openFold(body,'family');$('#f-group')?.focus()}});
+  bindEdit('[data-head-group]',()=>{if(isMember){scTab('abon');const move=body.querySelector('[data-sub-detail-month]:not([hidden]) [data-sub-transfer]');if(move){move.click();move.scrollIntoView({block:'center'})}else toast('Сначала выберите действующий абонемент для перевода',true)}else{scTab('info');openFold(body,'family');$('#f-group')?.focus()}});
   const firstPhone = (d.parents.find(p=>p.is_primary&&p.phone)||d.parents.find(p=>p.phone)||{}).phone;
   if ($("#act-call")) $("#act-call").onclick = () => dial(firstPhone);
   if ($("#act-sell")) $("#act-sell").onclick = () => openSell(d, reload);
@@ -3046,7 +3083,6 @@ async function openStudent(id, options = {}) {
   };
   body.querySelectorAll("[data-pay]").forEach((b) => (b.onclick = () => payForm("Оплата счёта", +b.dataset.left,
     (amount, method) => api("POST", `/api/subscriptions/${b.dataset.pay}/pay`, { amount, method }))));
-  wireSubscriptionCalendar(body,d);
   wireRefundRequests(body,()=>openStudent(id,{tab:'abon'}));
   body.querySelectorAll('[data-fiscal-check]').forEach(b=>b.onclick=async()=>{
     b.disabled=true;try{const r=await api('POST',`/api/payments/${b.dataset.fiscalCheck}/fiscal-check`,{});const panel=b.parentElement,pill=panel.querySelector('.pill');pill.textContent=r.label;pill.className='pill '+(r.status==='confirmed'?'green':r.status==='failed'?'red':'yellow');panel.querySelector('[data-fiscal-last-check]').textContent=r.checked_at?'Проверено: '+subscriptionPaymentMoment(r.checked_at):'';panel.querySelector('[data-fiscal-note]').textContent=r.note||''}catch(e){fail(e)}finally{b.disabled=false}
@@ -3157,12 +3193,6 @@ async function openStudent(id, options = {}) {
         } catch (error) { save.disabled = false; fail(error); }
       };
     };
-  }
-  if (panel) {
-    const focusTarget = active?.matches('[data-sub-month]') ? body.querySelector('[data-sub-month][aria-pressed="true"]')
-      : active?.id === 'subscription-year' ? body.querySelector('#subscription-year') : null;
-    focusTarget?.focus({preventScroll:true});
-    panel.scrollTop = scrollTop;
   }
   $("#note-add").onclick = async () => {
     const t = $("#note").value.trim(); if (!t) return;
