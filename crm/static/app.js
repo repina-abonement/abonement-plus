@@ -119,7 +119,7 @@ function askRequired(need) {
         done(false); box.focus(); box.scrollIntoView({ block: "center" });
         toast(sl && sl.until ? `Место держим до ${sl.until.slice(11, 16)}. Запрос вставлен в поле ответа: нажмите «Отправить»` : "Запрос вставлен в поле ответа: проверьте и нажмите «Отправить»");
       } else {
-        try { await navigator.clipboard.writeText(text); toast("Текст запроса скопирован: вставьте его в переписку с родителем"); }
+        try { await copyCrmText(text); toast("Текст запроса скопирован: вставьте его в переписку с родителем"); }
         catch (_) { prompt("Скопируйте текст запроса родителю", text); }
         done(false);
       }
@@ -173,7 +173,7 @@ async function renderOwnerTg(box) {
         <li>Отправьте ему сообщение: <b>/crm_me ${esc(r.code)}</b> <button class="btn sm" data-copy="/crm_me ${esc(r.code)}">Копировать</button></li>
         <li>Бот ответит «✅ Готово». Код действует 30 минут</li>
         <li>Вернитесь сюда и нажмите <button class="btn sm" id="otg-check">Проверить</button></li></ol>`;
-      $("#otg-code").querySelector("[data-copy]").onclick = (e) => { navigator.clipboard.writeText(e.target.dataset.copy).then(() => toast("Скопировано"), () => {}); };
+      $("#otg-code").querySelector("[data-copy]").onclick = (e) => { copyCrmText(e.target.dataset.copy).then(() => toast("Скопировано"), () => {}); };
       $("#otg-check").onclick = () => renderOwnerTg(box);
     } catch (e) { fail(e); }
   };
@@ -421,7 +421,7 @@ async function renderLogin(force = false) {
 /* ---------- каркас ---------- */
 const VIEWS = [
   ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Действующие клиенты"], ["nodeadline", "Без дедлайнов"],
-  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["posts", "Посты в каналы"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["staffexpenses", "Покупки и возмещения"], ["dashboard", "Дашборд"], ["revenue-losses", "Выручка и потери"], ["search", "Клиенты"], ["docs", "Документы"], ["settings", "Настройки"],
+  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["activity", "История действий"], ["posts", "Посты в каналы"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["staffexpenses", "Покупки и возмещения"], ["dashboard", "Дашборд"], ["revenue-losses", "Выручка и потери"], ["search", "Клиенты"], ["docs", "Документы"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
   team: '<circle cx="12" cy="6" r="2.5"/><circle cx="5.5" cy="17.5" r="2.5"/><circle cx="18.5" cy="17.5" r="2.5"/><path d="M12 8.5v3.5M5.5 15v-3h13v3"/>',
@@ -455,7 +455,7 @@ const isCoach = () => S.user && S.user.role === "coach";
 const LEVELS = { own: 1, view: 2, full: 3 };
 const can = (sec, lvl = "own") => (LEVELS[((S.user && S.user.perms) || {})[sec]] || 0) >= LEVELS[lvl];
 const isOwner = () => can("settings", "full");
-const visibleViews = () => VIEWS.filter(([k]) => can(k === "manual" ? "planner" : k === "nodeadline" ? "sales" : k === "revenue-losses" ? "dashboard" : k) && (k !== "today" || !isOwner())
+const visibleViews = () => VIEWS.filter(([k]) => (k === "activity" ? S.user?.activity_history : can(k === "manual" ? "planner" : k === "nodeadline" ? "sales" : k === "revenue-losses" ? "dashboard" : k)) && (k !== "today" || !isOwner())
   && (k !== "manual" || !["coach", "trainee"].includes(S.user.role)))  // тренеру задачи приходят на «Сегодня» и в отчёт, отдельная вкладка не нужна  // руководитель смотрит стол тренера через «Как видит»
   .map(([k, t]) => [k, k === "today" && S.user.coach_nebo_only ? "Мой дашборд" : k === "coaches" && !can("coaches", "view") ? "Мои результаты" : k === "members" && !can("members", "full") ? "Мои ученики" : t]);
 const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
@@ -465,7 +465,7 @@ const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></s
 /* Боковое меню: главное сверху, остальное по папкам. Открыта папка с текущим разделом и те, что участник команды раскрыл сам */
 const NAV_TOP = ["today", "sales", "inbox", "planner"];
 const NAV_FOLDERS = [["Клиенты", ["search", "members", "nodeadline"]], ["Занятия", ["journal", "schedule", "coaches"]],
-  ["Деньги", ["payments", "fiscal", "merch", "spend", "staffexpenses", "dashboard", "revenue-losses"]], ["Школа", ["team", "posts", "docs", "settings"]]];
+  ["Деньги", ["payments", "fiscal", "merch", "spend", "staffexpenses", "dashboard", "revenue-losses"]], ["Школа", ["team", "activity", "posts", "docs", "settings"]]];
 const navOpen = () => { try { return JSON.parse(localStorage.getItem("crm.nav_open") || "{}"); } catch (_) { return {}; } };
 function sideNav(views) {
   const item = ([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}<span>${t}</span>${badge(k)}</button>`;
@@ -735,6 +735,10 @@ async function render() {
   if (!page) return;
   page.classList.remove("readonly");
   if (S.meta && S.meta.staff_docs_pending) return renderStaffDocs(page);
+  if (S.activityView !== S.view) {
+    S.activityView = S.view;
+    recordCrmActivity("view");
+  }
   await renderView(page);
   if (["sales", "today"].includes(S.view) && !S.viewAs) festiveBanner(page);
   if (S.meta && S.meta.tour_pending && !S.tourOn) startTour();
@@ -746,6 +750,7 @@ async function render() {
 
 async function renderView(page) {
   try {
+    if (S.view === "activity" && S.user.activity_history) return await renderActivityHistory(page);
     if (S.view === "sales") return await renderWorkdesk(page);
     if (S.view === "today") return await renderCoachToday(page);
     if (S.view === "payments") return await renderPayments(page);
@@ -1495,7 +1500,7 @@ async function renderErp(box) {
           <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn sm" id="erp-day-copy">Копировать итоги</button><button class="btn sm primary" id="erp-day-prompt">Копировать задание для агента в браузере</button></div>
           <div class="small muted" style="margin-top:6px">Задание вставьте агенту в облачном браузере, где вы вошли в ERP. Это передача данных клиентов внешнему сервису: учтите в уведомлении в Роскомнадзор</div>`
           : `<div class="small muted" style="margin-top:6px">За этот день отметок нет</div>`;
-        const cp = (t) => navigator.clipboard.writeText(t).then(() => toast("Скопировано"), () => window.prompt("Скопируйте", t));
+        const cp = (t) => copyCrmText(t).then(() => toast("Скопировано"), () => window.prompt("Скопируйте", t));
         if ($("#erp-day-copy")) { $("#erp-day-copy").onclick = () => cp(txt); $("#erp-day-prompt").onclick = () => cp(task); }
       } catch (e) { fail(e); }
     };
@@ -2109,6 +2114,8 @@ function layoutStudentCard(body, isMember) {
   ["family", "hist"].forEach(k => fold(k, info, k === "family"));
   if (take("arch")) info.appendChild(take("arch"));
   body.querySelectorAll("[data-sctab]").forEach((b) => (b.onclick = () => {
+    const card = history.state?.studentCard;
+    if (card && card.userId === S.user.id) recordCrmActivity("card", {studentId: card.id, tab: b.dataset.sctab});
     grid.dataset.tab = b.dataset.sctab;
     if (history.state?.studentCard) {
       try { history.replaceState({ ...history.state, studentCard: { ...history.state.studentCard, tab: b.dataset.sctab } }, ""); } catch (_) {}
@@ -2337,7 +2344,7 @@ async function openSell(d, reload) {
         await validatePaymentLinkForSharing(link,id,subscriptionId,true);if(!current())return;
         const paymentUrls=(message.value.match(/https?:\/\/[^\s<>"']+/gi)||[]).map(value=>value.replace(/[)\]},.;!?]+$/g,'')).filter(value=>{try{return new URL(value).pathname.startsWith('/pay/')}catch(_){return false}});
         if(paymentUrls.length!==1||paymentUrls[0]!==link.url)throw Error('Ссылка в сообщении изменена или добавлена другая ссылка на оплату. Обновите сообщение перед копированием или вставкой');
-        if(action==='copy')await copyTextWithNotice(message.value,'Текст скопирован');
+        if(action==='copy')await copyTextWithNotice(message.value,'Текст скопирован','payment-link');
         else{scTab('feed');const target=$('#cm-text');if(!target)return toast('Откройте чат в карточке или скопируйте сообщение',true);target.value=message.value;target.dispatchEvent(new Event('input',{bubbles:true}));target.focus();target.scrollIntoView({block:'center',behavior:'smooth'});toast('Сообщение вставлено. Проверьте и отправьте')}
         if(current())status.textContent='Сумма ссылки проверена';
       }catch(error){block(error)}finally{sharing=false;if(current())setPending(false)}
@@ -2369,8 +2376,8 @@ async function openSell(d, reload) {
   recommend();pastGroupSearch($('#sl-en'));pastGroupSearch($('#sl-ofp'));quote();box.scrollIntoView({block:'start',behavior:'smooth'});
 }
 
-async function copyTextWithNotice(text, notice='Текст скопирован') {
-  try { await navigator.clipboard.writeText(text); }
+async function copyTextWithNotice(text, notice='Текст скопирован', copyType='text') {
+  try { await copyCrmText(text, copyType); }
   catch (_) {
     const input=document.createElement('textarea'),previous=document.activeElement,selection=window.getSelection();
     const ranges=selection?Array.from({length:selection.rangeCount},(_,i)=>selection.getRangeAt(i).cloneRange()):[];
@@ -2646,7 +2653,7 @@ async function loadClientPaymentLinks(sid) {
   box.innerHTML=links.length?`<details class="finance-detail payment-links"><summary>Ссылки, по которым ждём оплату (${links.length})</summary>${links.map(l=>`<div class="payment-link-card"><b>${rub(l.amount)}</b><div>${esc(l.purpose)}</div><div class="small muted">Создана ${dtShort(l.created_at)}</div><button type="button" class="btn sm" data-plcopy="${l.id}">Скопировать ссылку</button><p class="need-err" data-pl-warning role="alert" hidden></p><button type="button" class="btn sm" data-pl-renew="${l.id}" hidden>${l.subscription_id?'Обновить ссылку':'Открыть оформление'}</button><details class="finance-detail"><summary>Другие действия</summary><button class="btn sm" data-plx="${l.id}">Отменить ссылку</button></details></div>`).join('')}</details>`:'';
   box.querySelectorAll('[data-plcopy]').forEach(b=>b.onclick=async()=>{
     if(b.disabled)return;const link=links.find(l=>Number(l.id)===Number(b.dataset.plcopy)),row=b.closest('.payment-link-card');b.disabled=true;
-    try{await validatePaymentLinkForSharing(link,sid,link.subscription_id);if(b.isConnected&&$('#pay-links')===box&&box.dataset.linkLoad===generation)await copyTextWithNotice(link.url,'Ссылка скопирована');if(b.isConnected&&box.dataset.linkLoad===generation)b.disabled=false}
+    try{await validatePaymentLinkForSharing(link,sid,link.subscription_id);if(b.isConnected&&$('#pay-links')===box&&box.dataset.linkLoad===generation)await copyTextWithNotice(link.url,'Ссылка скопирована','payment-link');if(b.isConnected&&box.dataset.linkLoad===generation)b.disabled=false}
     catch(error){if(!b.isConnected||box.dataset.linkLoad!==generation)return;const warning=row.querySelector('[data-pl-warning]');warning.hidden=false;warning.textContent=(error.message||'Не удалось проверить ссылку')+' Ссылка не скопирована.';row.querySelector('[data-pl-renew]').hidden=false;}
   });
   box.querySelectorAll('[data-pl-renew]').forEach(b=>b.onclick=async()=>{
@@ -2835,7 +2842,7 @@ async function openStudent(id, options = {}) {
   body.querySelectorAll(".sc-head [data-dial]").forEach((b) => (b.onclick = () => dial(b.dataset.dial)));
   const profile=(add=false,focus='name')=>{if(full)openClientProfile(d,body.querySelector('#sc-profile-edit'),reload,add,focus)};
   body.querySelectorAll('[data-profile-edit]').forEach(b=>b.onclick=()=>profile(false,b.dataset.profileEdit));
-  body.querySelectorAll('[data-copy-parent-phone]').forEach(b=>b.onclick=async e=>{e.stopPropagation();const phone=d.parents[+b.dataset.copyParentPhone]?.phone;if(phone)await copyTextWithNotice(phone,'Номер скопирован')});
+  body.querySelectorAll('[data-copy-parent-phone]').forEach(b=>b.onclick=async e=>{e.stopPropagation();const phone=d.parents[+b.dataset.copyParentPhone]?.phone;if(phone)await copyTextWithNotice(phone,'Номер скопирован','phone')});
   const bindEdit=(selector,callback)=>body.querySelectorAll(selector).forEach(el=>{el.onclick=callback;el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();callback()}}});
   bindEdit('[data-profile-open]',()=>profile(false,'birth'));bindEdit('[data-profile-note]',()=>profile(false,'note'));
   body.querySelectorAll('[data-client-add]').forEach(b=>b.onclick=()=>{const root=body.querySelector('#sc-profile-edit');root.hidden=false;root.innerHTML='<div class="client-profile-form"><h4>Кого добавить в семью?</h4><div class="sc-actions"><button type="button" class="btn" data-add-contact>Родителя</button><button type="button" class="btn" data-add-family-child>Брата или сестру — клиента</button><button type="button" class="btn" data-add-close>Отмена</button></div></div>';root.querySelector('[data-add-contact]').onclick=()=>profile(true);root.querySelector('[data-add-family-child]').onclick=()=>$('#add-sibling').click();root.querySelector('[data-add-close]').onclick=()=>{root.hidden=true;root.replaceChildren()}});
@@ -3592,7 +3599,7 @@ async function renderSettings(page) {
       const text = `${r.name}\nВход в CRM: ${location.origin}\nЛогин: ${r.login}\nПароль: ${r.password}`;
       openDrawer(`<h2>Участник команды добавлен</h2><p>${esc(r.name)}</p><dl class="kv"><dt>Логин</dt><dd><b>${esc(r.login)}</b></dd><dt>Пароль</dt><dd><code>${esc(r.password)}</code></dd></dl><p class="small muted">Скопируйте данные для входа перед закрытием этой карточки. Пароль показывается только сейчас</p><button type="button" class="btn primary" id="new-staff-copy">Скопировать данные для входа</button>`);
       $("#new-staff-copy").onclick = async () => {
-        try { await navigator.clipboard.writeText(text); toast("Данные для входа скопированы"); }
+        try { await copyCrmText(text, "login"); toast("Данные для входа скопированы"); }
         catch (_) { prompt("Скопируйте данные для входа", text); }
       };
     } catch (err) { fail(err); }
@@ -3655,7 +3662,7 @@ async function renderSettings(page) {
     try { await api("PATCH", `/api/users/${b.dataset.ucopy}`, { password: pw, keep_sessions: true }); } catch (e) { return fail(e); }
     const text = `Вход в CRM «Абонемент Плюс»\nСсылка: ${location.origin}\nЛогин: ${b.dataset.login}\nПароль: ${pw}`;
     let ok = false;
-    try { await navigator.clipboard.writeText(text); ok = true; } catch (_) {}
+    try { await copyCrmText(text); ok = true; } catch (_) {}
     if (ok) return toast(`Скопировано! Вставьте и отправьте ${name} лично`);
     openDrawer(`<h2>Вход для ${esc(name)}</h2><p class="muted">Браузер не дал скопировать сам: выделите текст и скопируйте</p>
       <textarea readonly rows="5" style="width:100%" onclick="this.select()">${esc(text)}</textarea>`);
@@ -3671,7 +3678,7 @@ async function renderSettings(page) {
       $("#bulk-res").innerHTML = `<div class="alert" style="margin-top:8px">Пароли показываются только сейчас. Скопируйте и раздайте участникам команды лично</div>
         <table class="tbl"><thead><tr><th>Участник команды</th><th>Логин</th><th>Пароль</th><th></th></tr></thead><tbody>${r.users.map((u) => `<tr><td>${esc(u.name)}</td><td><b>${esc(u.login)}</b></td><td><code>${esc(u.password)}</code></td><td class="small muted">${esc(u.status)}</td></tr>`).join("")}</tbody></table>
         <button class="btn sm" id="bulk-copy" style="margin-top:6px">Копировать всё</button>`;
-      $("#bulk-copy").onclick = () => { navigator.clipboard.writeText(txt).then(() => toast("Скопировано")); };
+      $("#bulk-copy").onclick = () => { copyCrmText(txt, "client-list").then(() => toast("Скопировано")); };
     } catch (e) { fail(e); }
   };
   page.querySelectorAll("[data-prof]").forEach((el) => (el.onclick = () => openStaffProfile(+el.dataset.prof)));
@@ -4015,7 +4022,7 @@ async function renderBackup(box) {
       <div class="small muted" style="margin-top:6px"><b>Вся база:</b> дети и родители с телефонами, абонементы, оплаты, посещения, группы, участники команды.<br>
         <b>Только контакты:</b> один лист для обзвона: ребёнок, родитель, телефон, группа, ученик или лид, пометка «не звонить». Без оплат.<br>
         Храните файлы в надёжном месте: в них персональные данные клиентов</div></div>` : ""}`;
-  $("#bk-copy").onclick = () => navigator.clipboard.writeText(d.key).then(() => toast("Пароль скопирован"));
+  $("#bk-copy").onclick = () => copyCrmText(d.key, "backup").then(() => toast("Пароль скопирован"));
   $("#bk-save").onclick = async () => { try { await api("POST", "/api/backup", { yadisk_token: $("#bk-token").value }); toast("Сохранено"); renderBackup(box); } catch (e) { fail(e); } };
   $("#bk-run").onclick = async (e) => {
     e.target.disabled = true; e.target.textContent = "Делаю копию…";
@@ -4036,7 +4043,7 @@ document.addEventListener("click", async (e) => {
   e.preventDefault();
   try {
     const text = normalizedCopyPhone(b.dataset.copyPhone);
-    try { await navigator.clipboard.writeText(text); }
+    try { await copyCrmText(text); }
     catch (_) {
       const input = document.createElement("textarea"); input.value = text;
       input.style.position = "fixed"; input.style.opacity = "0";
@@ -4123,7 +4130,7 @@ async function openMultiMonthSale(d,id,box,reload,preset={}) {
         try{
           await validateLinks();if(!current())return;
           if(issuedLinks.length){const expected=[...new Set(issuedLinks.map(item=>item.link.url))],urls=(message.value.match(/https?:\/\/[^\s<>"']+/gi)||[]).map(value=>value.replace(/[)\]},.;!?]+$/g,'')).filter(value=>{try{return new URL(value).pathname.startsWith('/pay/')}catch(_){return false}});if(urls.length!==expected.length||!expected.every(url=>urls.includes(url)))throw Error('Ссылка в сообщении изменена или добавлена другая ссылка на оплату')}
-          if(action==='copy')await copyTextWithNotice(message.value);
+          if(action==='copy')await copyTextWithNotice(message.value,'Текст скопирован','payment-link');
           else{scTab('feed');const target=$('#cm-text');if(!target)return toast('Откройте чат в карточке',true);target.value=message.value;target.dispatchEvent(new Event('input',{bubbles:true}));target.focus()}
           if(current())status.textContent='Сумма ссылки проверена';
         }catch(error){block(error)}finally{sharing=false;if(current()&&!invalid){copy.disabled=chat.disabled=false;message.disabled=false}}

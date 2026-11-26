@@ -123,7 +123,7 @@ document.addEventListener('click',async event=>{
   const menu=button.closest('.msg-actions'),summary=menu?.querySelector('summary'),wasFocused=document.activeElement===button;
   let copied=false;button.disabled=true;
   try{
-    copied=await copyTextWithNotice(raw,'Текст скопирован')===true;
+    copied=await copyTextWithNotice(raw,'Текст скопирован','message')===true;
     if(copied&&menu?.isConnected){
       menu.open=false;summary?.focus({preventScroll:true});
     }
@@ -963,7 +963,7 @@ async function renderCommsSettings(box, users) {
         details.append(summary,pre);result.append(details);
       }
       const copy=document.createElement('button');copy.type='button';copy.className='btn sm';copy.textContent='Скопировать диагностику';
-      copy.onclick=()=>navigator.clipboard.writeText(JSON.stringify(report,null,2)).then(()=>toast('Диагностика скопирована'),()=>toast('Не удалось скопировать: выделите текст результата',true));result.append(copy);
+      copy.onclick=()=>copyCrmText(JSON.stringify(report,null,2)).then(()=>toast('Диагностика скопирована'),()=>toast('Не удалось скопировать: выделите текст результата',true));result.append(copy);
     }catch(error){result.textContent=error.message}finally{if(wzCheck.isConnected)wzCheck.disabled=false}
   };
 
@@ -983,7 +983,7 @@ async function renderCommsSettings(box, users) {
     S.meta = await api("GET", "/api/meta"); renderCommsSettings(box, users);
   };
   box.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async () => {
-    try { await navigator.clipboard.writeText(b.dataset.copy); toast("Скопировано"); } catch (_) { b.previousElementSibling.select(); }
+    try { await copyCrmText(b.dataset.copy); toast("Скопировано"); } catch (_) { b.previousElementSibling.select(); }
   }));
   box.querySelector("#hook-log").closest("details").ontoggle = async (e) => {
     if (!e.target.open) return;
@@ -1253,7 +1253,7 @@ function wireTrialOffer(c, textSel = "#chat-text") {
       const selectedId = $("#to-kid") ? +$("#to-kid").value : kid?.id;
       const text = trialAgeQuestion(leads.find(child => child.id === selectedId) || kid || {});
       if (ta) { ta.value = text; ta.focus(); toast("Вопрос вставлен в поле ответа: нажмите «Отправить»"); }
-      else navigator.clipboard.writeText(text).then(() => toast("Текст скопирован"), () => prompt("Скопируйте текст", text));
+      else copyCrmText(text).then(() => toast("Текст скопирован"), () => prompt("Скопируйте текст", text));
     };
     if ($("#to-age").value) go();
   };

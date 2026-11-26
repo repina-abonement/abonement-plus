@@ -442,7 +442,7 @@ async function loadPlannerTaskSettings(id) {
 
 async function copyTaskDescription(text) {
   try {
-    try { await navigator.clipboard.writeText(text); }
+    try { await copyCrmText(text); }
     catch (_) {
       const previous = document.activeElement;
       const input = document.createElement("textarea");

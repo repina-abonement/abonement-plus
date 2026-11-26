@@ -425,6 +425,8 @@ def init_db(con: sqlite3.Connection):
 
     from . import groupnames
     groupnames.init(con)
+    from . import activity
+    activity.init(con)
 
 
 def sync_enrollments(con):

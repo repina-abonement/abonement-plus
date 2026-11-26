@@ -78,7 +78,7 @@ function singleTaskDialog(t, done) {
   const next = async (body, msg) => {
     try { await api("POST", `/api/students/${sid}/singles/next`, { ...body, task_id: t.id }); toast(msg); closeDrawer(); done && done(); } catch (e) { fail(e); }
   };
-  if ($("#sd-copy")) $("#sd-copy").onclick = () => navigator.clipboard.writeText($("#sd-msg").value).then(() => toast("Скопировано"), () => window.prompt("Скопируйте", $("#sd-msg").value));
+  if ($("#sd-copy")) $("#sd-copy").onclick = () => copyCrmText($("#sd-msg").value).then(() => toast("Скопировано"), () => window.prompt("Скопируйте", $("#sd-msg").value));
   $("#sd-card").onclick = () => { closeDrawer(); if (sid) openStudent(sid); };
   let get = null;
   $("#sd-date").onclick = () => { $("#sd-dbox").hidden = false; get = get || wireSingleForm("sd"); };

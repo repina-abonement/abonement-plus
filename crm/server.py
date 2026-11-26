@@ -554,10 +554,23 @@ def coach_guard(con, user, group_id: int):
         raise ApiError("Это не ваша группа", 403)
 
 
+@route("POST", "/api/activity", role="all")
+def activity_record(con, h, user, body, q):
+    from . import activity
+    return activity.record(con, user, body)
+
+
+@route("GET", "/api/activity", role="admin")
+def activity_history(con, h, user, body, q):
+    from . import activity
+    return activity.history(con, user, q)
+
+
 @route("GET", "/api/meta", role="all")
 def meta(con, h, user, body, q):
     user["sip_number"] = con.execute("SELECT sip_number FROM users WHERE id=?", (user["id"],)).fetchone()[0]
-    user |= {"perms": perms.view_of(user), "title": perms.title(user)}
+    from . import activity
+    user |= {"perms": perms.view_of(user), "title": perms.title(user), "activity_history": activity.may_read(con, user)}
     if user["role"] == "trainee":
         from datetime import date
         from . import staffdocs
@@ -4077,7 +4090,7 @@ class Handler(BaseHTTPRequestHandler):
                     if user.get("coach_nebo_only") and (url.path.startswith("/api/envelope") or url.path == "/api/tasks/manual" or url.path == "/api/report-search"):
                         raise ApiError("Этот раздел недоступен тренеру Неба", 403)
                     if user["role"] == "trainee":
-                        safe = url.path.startswith("/api/planner") or url.path in ("/api/meta", "/api/me", "/api/me/password", "/api/pin", "/api/logout", "/api/staff-docs", "/api/staff-docs/accept")
+                        safe = url.path.startswith("/api/planner") or url.path in ("/api/meta", "/api/me", "/api/me/password", "/api/pin", "/api/logout", "/api/staff-docs", "/api/staff-docs/accept", "/api/activity")
                         safe = safe or bool(re.fullmatch(r"/api/tasks/[0-9]+/done", url.path))
                         safe = safe or url.path in (f"/api/users/{user['id']}/profile", f"/api/users/{user['id']}/photo")
                         if not safe:

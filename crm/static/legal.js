@@ -52,7 +52,7 @@ async function renderLegalSettings(box) {
         <div class="small muted">Фигурные скобки {legal_inn} и подобные заменяются реквизитами сами</div></div>`).join("")}</div>
     <button class="btn primary" id="l-save">Сохранить</button>`;
   box.querySelectorAll("[data-ledit]").forEach((b) => (b.onclick = () => { const x = box.querySelector(`[data-lbox="${b.dataset.ledit}"]`); x.hidden = !x.hidden; }));
-  box.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast("Скопировано"); } catch (_) {} }));
+  box.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async () => { try { await copyCrmText(b.dataset.copy); toast("Скопировано"); } catch (_) {} }));
   $("#l-save").onclick = async () => {
     const data = Object.fromEntries([...box.querySelectorAll("[data-l]")].map((i) => [i.dataset.l, i.value]));
     try { await api("PUT", "/api/legal", data); toast("Сохранено"); renderLegalSettings(box); } catch (e) { fail(e); }
@@ -79,7 +79,7 @@ async function renderOffers(box) {
         ${can("docs", "full") ? `<button class="btn sm" data-oarch="${v.id}" data-v="${v.archived ? 0 : 1}" title="${v.archived ? "Вернуть" : "В архив, если загрузили по ошибке"}">${v.archived ? "↩" : "🗄"}</button>` : ""}</div>`).join("")}</div>
     </section>`).join("") : `<div class="muted small" style="margin-bottom:10px">Оферт пока нет</div>`}
     ${can("docs", "full") ? `<button class="btn primary" id="of-new">+ Загрузить оферту</button><div id="of-form"></div>` : ""}`;
-  box.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast("Ссылка скопирована"); } catch (_) {} }));
+  box.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async () => { try { await copyCrmText(b.dataset.copy); toast("Ссылка скопирована"); } catch (_) {} }));
   box.querySelectorAll("[data-oarch]").forEach((b) => (b.onclick = async () => {
     try { await api("POST", `/api/offers/${b.dataset.oarch}/archive`, { archived: b.dataset.v === "1" }); renderOffers(box); } catch (e) { fail(e); }
   }));

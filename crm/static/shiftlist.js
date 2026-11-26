@@ -34,7 +34,7 @@ function shiftText(d) {
 async function shiftCopy(branchId, day) {
   try {
     const t = shiftTextAll(await shiftData(branchId, day));
-    try { await navigator.clipboard.writeText(t); toast("Списки смены скопированы"); } catch (_) { window.prompt("Скопируйте", t); }
+    try { await copyCrmText(t); toast("Списки смены скопированы"); } catch (_) { window.prompt("Скопируйте", t); }
   } catch (e) { fail(e); }
 }
 
