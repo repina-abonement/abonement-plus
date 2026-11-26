@@ -1053,20 +1053,32 @@ def _refuse(con, s: dict, reason: str, comment: str, user) -> dict:
     return {"stage": "refused"}
 
 
-def _hide_cancelled_card_sale(sid, card):
+def _hide_cancelled_card_sale(con, sid, card):
     # CRM-356: presentation-only correction for one verified erroneous sale.
     if sid != 134 or not any(
         sub["id"] == 86 and sub["status"] == "cancelled" and sub["month"] == "2026-12"
         for sub in card["subscriptions"]
     ):
         return
-    card["subscriptions"] = [sub for sub in card["subscriptions"] if sub["id"] != 86]
     card["subscription_cancellations"] = [
         row for row in card["subscription_cancellations"]
         if (row["id"], row["subscription_id"]) != (1, 86)
     ]
     hidden_history = {5310, 5311, 5320, 5321, 5322}
+    from . import comms, money
+    hidden_sales = {86}
+    hidden_payments = set()
+    correction = comms.get(con, "maintenance_356")
+    if correction:
+        hidden_sales.add(88)
+        hidden_payments.add(84)
+        hidden_history.update(json.loads(correction))
+    card["subscriptions"] = [
+        sub for sub in card["subscriptions"] if sub["id"] not in hidden_sales or sub["status"] != "cancelled"
+    ]
     card["history"] = [row for row in card["history"] if row["id"] not in hidden_history]
+    card["payments"] = [row for row in card["payments"] if row["id"] not in hidden_payments or not row["cancelled"]]
+    card["ledger"] = money.ledger(con, sid, hidden_sales=hidden_sales, hidden_payments=hidden_payments)
 
 
 def student_detail(con, sid: int) -> dict:
@@ -1162,7 +1174,7 @@ def student_detail(con, sid: int) -> dict:
     out["stage_tip"] = smart.tips(con).get(s["stage"]) if s["funnel"] == "sales" else None
     from . import chains
     out["chains"] = chains.for_student(con, sid)
-    _hide_cancelled_card_sale(sid, out)
+    _hide_cancelled_card_sale(con, sid, out)
     return out
 
 

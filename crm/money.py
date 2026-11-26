@@ -388,14 +388,17 @@ def refund(con, sid: int, amount: int, user: dict, comment: str) -> None:
                 (sid, _now(), user.get("name", ""), "payment", f"Возврат {amount} ₽: {comment.strip()}. Пробейте чек возврата"))
 
 
-def ledger(con, sid: int) -> list[dict]:
+def ledger(con, sid: int, *, hidden_sales=(), hidden_payments=()) -> list[dict]:
     """Лента баланса: поступления, переносы, возвраты и абонементы по времени, с остатком после каждой строки."""
     months = dict(con.execute("SELECT id, month FROM subscriptions WHERE student_id=?", (sid,)).fetchall())
     ev = [{"at": p["paid_at"], "kind": "pay", "ord": (months.get(p["subscription_id"], "9999"), 1, p["id"]), "text": f"{METHODS.get(payment_method(con,p), p['method'])}" + (f": {p['comment']}" if p["comment"] else ""),
            "amount": p["amount"], "cancelled": bool(p["cancelled"])}
-          for p in con.execute("SELECT * FROM payments WHERE student_id=? ORDER BY paid_at, id", (sid,))]
+          for p in con.execute("SELECT * FROM payments WHERE student_id=? ORDER BY paid_at, id", (sid,))
+          if not p["cancelled"] or p["id"] not in hidden_payments]
     for x in con.execute("""SELECT x.*, g.name AS gname FROM subscriptions x LEFT JOIN enrollments e ON e.id=x.enrollment_id
                             LEFT JOIN groups g ON g.id=e.group_id WHERE x.student_id=? ORDER BY x.created_at, x.id""", (sid,)):
+        if x["status"] == "cancelled" and x["id"] in hidden_sales:
+            continue
         label = "Разовое занятие" if x["kind"] == "single" else f"Абонемент {logic.month_label(x['month']).lower()}" + (f", {x['gname']}" if x["gname"] else "")
         ev.append({"at": x["created_at"], "kind": "sub", "ord": (x["month"], 0, x["id"]), "text": label + (" (отменён)" if x["status"] == "cancelled" else ""),
                    "amount": -x["price"], "cancelled": x["status"] == "cancelled"})
