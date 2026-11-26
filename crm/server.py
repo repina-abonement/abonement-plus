@@ -10,6 +10,9 @@ import mimetypes
 import os
 import re
 import secrets
+import sqlite3
+import time
+from contextlib import closing
 import traceback
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -4219,7 +4222,7 @@ def main():
     host = os.environ.get("CRM_HOST", "127.0.0.1")
     port = int(os.environ.get("CRM_PORT", "8000"))
     try:
-        _startup()
+        _startup_with_lock_retry()
     except Exception:  # noqa: BLE001 — показать ошибку на сайте вместо «502»
         import traceback
         tb = traceback.format_exc()
@@ -4238,31 +4241,43 @@ def main():
         pass
 
 
+def _startup_with_lock_retry():
+    for attempt in range(3):
+        try:
+            _startup()
+            return
+        except sqlite3.OperationalError as error:
+            code = getattr(error, "sqlite_errorcode", 0) or 0
+            if (code & 0xff) not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or attempt == 2:
+                raise
+            print("SQLite занята при запуске CRM, повторяем инициализацию", flush=True)
+            time.sleep(attempt + 1)
+
+
 def _startup():
-    con = db.connect()
-    db.init_db(con)
-    # Initial reconciliation phase requested by the owner. Retain historic evidence.
-    if con.execute("INSERT OR IGNORE INTO integrations(key,value) VALUES ('payment_control_from','2026-11-19')").rowcount:
-        con.execute("UPDATE payment_control_jobs SET next_at=NULL WHERE lease_owner IS NULL")
-    if os.environ.get("CRM_DEMO", "1") == "1" and not perms.real_staff(con):  # при настоящей команде выдуманных не заводим
-        db.seed_demo(con)
-        coaches.seed_demo_coaches(con)
-        money.init(con)
-        if not comms.status(con)["telegram"] and not comms.status(con)["sipuni"]:
-            comms.seed_demo(con)
-        ai.seed_demo(con)
-        tasks.seed_demo(con)
-    n = perms.archive_test_staff(con)
-    if n:
-        print(f"Тестовые участники команды отправлены в архив: {n}", flush=True)
-    from . import maintenance_354
-    maintenance_result = maintenance_354.apply(con)
-    from . import maintenance_356
-    Handler.maintenance_356 = maintenance_356.apply(con)
-    Handler.maintenance_356_reset = maintenance_356.reset_payment(con)
-    con.commit()
-    Handler.maintenance_354 = maintenance_result
-    con.close()
+    with closing(db.connect()) as con:
+        db.init_db(con)
+        # Initial reconciliation phase requested by the owner. Retain historic evidence.
+        if con.execute("INSERT OR IGNORE INTO integrations(key,value) VALUES ('payment_control_from','2026-11-19')").rowcount:
+            con.execute("UPDATE payment_control_jobs SET next_at=NULL WHERE lease_owner IS NULL")
+        if os.environ.get("CRM_DEMO", "1") == "1" and not perms.real_staff(con):  # при настоящей команде выдуманных не заводим
+            db.seed_demo(con)
+            coaches.seed_demo_coaches(con)
+            money.init(con)
+            if not comms.status(con)["telegram"] and not comms.status(con)["sipuni"]:
+                comms.seed_demo(con)
+            ai.seed_demo(con)
+            tasks.seed_demo(con)
+        n = perms.archive_test_staff(con)
+        if n:
+            print(f"Тестовые участники команды отправлены в архив: {n}", flush=True)
+        from . import maintenance_354
+        maintenance_result = maintenance_354.apply(con)
+        from . import maintenance_356
+        Handler.maintenance_356 = maintenance_356.apply(con)
+        Handler.maintenance_356_reset = maintenance_356.reset_payment(con)
+        con.commit()
+        Handler.maintenance_354 = maintenance_result
     fiscal.start_worker(db.connect)
     ai.start_worker(db.connect)
     tasks.start_worker(db.connect)

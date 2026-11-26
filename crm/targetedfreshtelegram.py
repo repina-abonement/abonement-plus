@@ -403,6 +403,20 @@ def _reconcile_missing_identity_tasks(con, result):
 
 
 def apply(con):
+    if con.in_transaction:
+        return _apply(con)
+    # Reserve the WAL writer before reading the snapshot used by the batch.
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        report = _apply(con)
+        con.commit()
+        return report
+    except BaseException:
+        con.rollback()
+        raise
+
+
+def _apply(con):
     previous = con.execute("SELECT value FROM settings WHERE key=?", (KEY,)).fetchone()
     if previous:
         try:
