@@ -35,3 +35,14 @@ class DuplicateSaleCorrectionTest(unittest.TestCase):
         self.assertEqual([tuple(row) for row in con.execute("SELECT id,cancelled FROM payments ORDER BY id")],
                          [(82, 0), (84, 1)])
         self.assertEqual(con.execute("SELECT status FROM subscriptions WHERE id=88").fetchone()[0], "cancelled")
+
+        with patch.object(maintenance_356, "STUDENT", self.sid):
+            con.execute("INSERT INTO fiscal_payment_checks VALUES (82,'2026-11-26','confirmed','{}')")
+            self.assertEqual(maintenance_356.reset_payment(con), "dependencies-found")
+            self.assertEqual(money.balance(con, self.sid)["deposit"], 10800)
+            con.execute("DELETE FROM fiscal_payment_checks WHERE payment_id=82")
+            self.assertEqual(maintenance_356.reset_payment(con), "complete")
+            self.assertEqual(maintenance_356.reset_payment(con), "complete")
+        self.assertEqual(money.balance(con, self.sid)["deposit"], 0)
+        self.assertEqual(con.execute("SELECT COUNT(*) FROM payments WHERE cancelled=0").fetchone()[0], 0)
+        self.assertEqual(con.execute("SELECT COUNT(*) FROM payments WHERE cancelled=1").fetchone()[0], 2)

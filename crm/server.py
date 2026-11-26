@@ -3978,6 +3978,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "AbonementPlus/0.2"
     maintenance_354 = None
     maintenance_356 = None
+    maintenance_356_reset = None
 
     def log_message(self, fmt, *args):
         if os.environ.get("CRM_QUIET") != "1":
@@ -3995,6 +3996,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("X-CRM-Maintenance-354", self.maintenance_354)
         if self.path == "/" and self.maintenance_356:
             self.send_header("X-CRM-Maintenance-356", self.maintenance_356)
+        if self.path == "/" and self.maintenance_356_reset:
+            self.send_header("X-CRM-Maintenance-356-Reset", self.maintenance_356_reset)
         self.send_header("X-Content-Type-Options", "nosniff")
         if not any(k.lower()=="referrer-policy" for k,v in getattr(self,"extra_headers",[])):
             self.send_header("Referrer-Policy", "same-origin")
@@ -4256,6 +4259,7 @@ def _startup():
     maintenance_result = maintenance_354.apply(con)
     from . import maintenance_356
     Handler.maintenance_356 = maintenance_356.apply(con)
+    Handler.maintenance_356_reset = maintenance_356.reset_payment(con)
     con.commit()
     Handler.maintenance_354 = maintenance_result
     con.close()

@@ -77,3 +77,51 @@ def _correct(con):
     ))
     comms.put(con, MARKER, json.dumps(hidden))
     return "complete"
+
+
+RESET_MARKER = "maintenance_356_reset"
+
+
+def reset_payment(con):
+    """Reverse only the original manual entry so it can be recorded once again."""
+    if comms.get(con, RESET_MARKER):
+        return "complete"
+    if not comms.get(con, MARKER):
+        return "correction-required"
+    payment = con.execute("SELECT * FROM payments WHERE id=82").fetchone()
+    if not payment or (
+        payment["student_id"], payment["subscription_id"], payment["amount"],
+        payment["method"], payment["confirmed"], payment["cancelled"], payment["paid_at"][:10],
+    ) != (STUDENT, 86, 10800, "tochka_qr_link", 1, 0, "2026-11-21"):
+        return "payment-mismatch"
+    if con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND month='2026-12' AND status!='cancelled'
+        UNION ALL SELECT 1 FROM pay_links WHERE payment_id=82
+        UNION ALL SELECT 1 FROM fiscal_payment_checks WHERE payment_id=82 AND status='confirmed'""",
+        (STUDENT,)).fetchone():
+        return "dependencies-found"
+    before = money.balance(con, STUDENT)
+    if (before["deposit"], before["debt"]) != (10800, 0):
+        return "balance-mismatch"
+
+    con.execute("SAVEPOINT reverse_original_entry")
+    try:
+        previous_history = con.execute("SELECT COALESCE(MAX(id),0) FROM history").fetchone()[0]
+        money.cancel_payment(con, 82, {"name": "CRM"})
+        after = money.balance(con, STUDENT)
+        if (after["deposit"], after["debt"]) != (0, 0) or after["covered"] != before["covered"]:
+            con.execute("ROLLBACK TO reverse_original_entry")
+            return "verification-failed"
+        hidden = [5313]
+        hidden.extend(row[0] for row in con.execute(
+            "SELECT id FROM history WHERE student_id=? AND id>?", (STUDENT, previous_history)
+        ))
+        comms.put(con, RESET_MARKER, json.dumps(hidden))
+        return "complete"
+    except ValueError:
+        con.execute("ROLLBACK TO reverse_original_entry")
+        return "guard-rejected"
+    except BaseException:
+        con.execute("ROLLBACK TO reverse_original_entry")
+        raise
+    finally:
+        con.execute("RELEASE reverse_original_entry")

@@ -1073,6 +1073,10 @@ def _hide_cancelled_card_sale(con, sid, card):
         hidden_sales.add(88)
         hidden_payments.add(84)
         hidden_history.update(json.loads(correction))
+    reset = comms.get(con, "maintenance_356_reset")
+    if reset:
+        hidden_payments.add(82)
+        hidden_history.update(json.loads(reset))
     card["subscriptions"] = [
         sub for sub in card["subscriptions"] if sub["id"] not in hidden_sales or sub["status"] != "cancelled"
     ]
