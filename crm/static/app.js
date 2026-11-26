@@ -420,8 +420,8 @@ async function renderLogin(force = false) {
 
 /* ---------- каркас ---------- */
 const VIEWS = [
-  ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["planner", "Планер"], ["members", "Действующие клиенты"], ["nodeadline", "Без дедлайнов"],
-  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["activity", "История действий"], ["posts", "Посты в каналы"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["staffexpenses", "Покупки и возмещения"], ["dashboard", "Дашборд"], ["revenue-losses", "Выручка и потери"], ["search", "Клиенты"], ["docs", "Документы"], ["settings", "Настройки"],
+  ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["search", "Клиенты"], ["planner", "Планер"], ["nodeadline", "Без дедлайнов"],
+  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["activity", "История действий"], ["posts", "Посты в каналы"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["staffexpenses", "Покупки и возмещения"], ["dashboard", "Дашборд"], ["revenue-losses", "Выручка и потери"], ["docs", "Документы"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
   team: '<circle cx="12" cy="6" r="2.5"/><circle cx="5.5" cy="17.5" r="2.5"/><circle cx="18.5" cy="17.5" r="2.5"/><path d="M12 8.5v3.5M5.5 15v-3h13v3"/>',
@@ -457,14 +457,14 @@ const can = (sec, lvl = "own") => (LEVELS[((S.user && S.user.perms) || {})[sec]]
 const isOwner = () => can("settings", "full");
 const visibleViews = () => VIEWS.filter(([k]) => (k === "activity" ? S.user?.activity_history : can(k === "manual" ? "planner" : k === "nodeadline" ? "sales" : k === "revenue-losses" ? "dashboard" : k)) && (k !== "today" || !isOwner())
   && (k !== "manual" || !["coach", "trainee"].includes(S.user.role)))  // тренеру задачи приходят на «Сегодня» и в отчёт, отдельная вкладка не нужна  // руководитель смотрит стол тренера через «Как видит»
-  .map(([k, t]) => [k, k === "today" && S.user.coach_nebo_only ? "Мой дашборд" : k === "coaches" && !can("coaches", "view") ? "Мои результаты" : k === "members" && !can("members", "full") ? "Мои ученики" : t]);
+  .map(([k, t]) => [k, k === "today" && S.user.coach_nebo_only ? "Мой дашборд" : k === "coaches" && !can("coaches", "view") ? "Мои результаты" : t]);
 const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
 function isCoachShort() { return "Результаты"; }
 const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></span>` : "";
 
 /* Боковое меню: главное сверху, остальное по папкам. Открыта папка с текущим разделом и те, что участник команды раскрыл сам */
-const NAV_TOP = ["today", "sales", "inbox", "planner"];
-const NAV_FOLDERS = [["Клиенты", ["search", "members", "nodeadline"]], ["Занятия", ["journal", "schedule", "coaches"]],
+const NAV_TOP = ["today", "sales", "inbox", "planner", "search"];
+const NAV_FOLDERS = [["Занятия", ["journal", "schedule", "coaches"]],
   ["Деньги", ["payments", "fiscal", "merch", "spend", "staffexpenses", "dashboard", "revenue-losses"]], ["Школа", ["team", "activity", "posts", "docs", "settings"]]];
 const navOpen = () => { try { return JSON.parse(localStorage.getItem("crm.nav_open") || "{}"); } catch (_) { return {}; } };
 function sideNav(views) {
@@ -472,7 +472,7 @@ function sideNav(views) {
   if (views.length <= 8) return views.map(item).join("");
   const has = (k) => views.find(([v]) => v === k);
   const search = has("search") ? `<form id="client-search-form" role="search" autocomplete="off"><textarea class="nav-q" id="nav-q" role="searchbox" rows="1" name="crm-customer-query" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" placeholder="🔍 Найти клиента   /" aria-label="Найти клиента" title="Имя, фамилия или телефон. Быстро открыть поиск: клавиша /"></textarea></form>` : "";
-  const placed = new Set(["search"]);
+  const placed = new Set();
   const top = NAV_TOP.filter(has).map((k) => { placed.add(k); return item(has(k)); }).join("");
   const o = navOpen();
   const folders = NAV_FOLDERS.map(([title, keys]) => {
@@ -729,7 +729,12 @@ window.addEventListener("popstate", (e) => {
   }
 });
 
+function clientDirectoryView(view) {
+  return view === "members" && can("search") ? "search" : view;
+}
+
 function go(view, fromHistory = false) {
+  view = clientDirectoryView(view);
   if (view === "settings" && !fromHistory) S.setTab = null;  // из меню: сначала плитки
   S.view = view;
   if (!fromHistory) pushNav(true);  // переход из меню: кнопку «Назад» не показываем
@@ -3887,7 +3892,8 @@ async function boot() {
     S.user = S.meta.user;
   } catch (e) { if (e.message !== "Нужно войти") renderLogin(); return; }
   S.view = visibleViews()[0][0];
-  const [requestedView,routeQuery=''] = location.hash.slice(1).split('?');
+  const [routeView,routeQuery=''] = location.hash.slice(1).split('?');
+  const requestedView = clientDirectoryView(routeView);
   const routeParams = new URLSearchParams(routeQuery);
   if(requestedView==='planner'){
     const q=routeParams,day=q.get('event_day');
@@ -3898,7 +3904,7 @@ async function boot() {
   }
   if (requestedView === "settings" && routeParams.get("settings_tab")) S.setTab = routeParams.get("settings_tab");
   if (visibleViews().some(([k]) => k === requestedView)) S.view = requestedView;
-  else try { const v = localStorage.getItem("crm.view"); if (v && visibleViews().some(([k]) => k === v)) S.view = v; } catch (_) {}
+  else try { const v = clientDirectoryView(localStorage.getItem("crm.view")); if (v && visibleViews().some(([k]) => k === v)) S.view = v; } catch (_) {}
   shell();
   applyFestive();
   const restoreCard = previousState?.drawer && mayRestoreStudent(previousState.studentCard) ? previousState.studentCard : null;
