@@ -30,7 +30,8 @@ def remember_if_available(con, uid, sid):
     still surface normally.
     """
     try:
-        remember(con, uid, sid)
+        with db.without_write_wait(con):
+            remember(con, uid, sid)
         return True
     except sqlite3.OperationalError as error:
         if not db.is_write_contention(error):

@@ -68,7 +68,7 @@ def _age(birth: str, ref: date) -> float | None:
     return (ref - b).days / 365.25
 
 
-def lead_score(con, s: dict, ref: datetime | None = None) -> dict | None:
+def lead_score(con, s: dict, ref: datetime | None = None, *, replied=None) -> dict | None:
     """Горячий / тёплый / холодный лид и причины. Для учеников None."""
     if s["funnel"] != "sales" or s["stage"] in ("bought", "refused"):
         return None
@@ -89,8 +89,9 @@ def lead_score(con, s: dict, ref: datetime | None = None) -> dict | None:
         pts += 1
     elif days > 30:
         pts -= 2; why.append("заявке больше месяца")
-    replied = con.execute("""SELECT 1 FROM messages m JOIN conversations c ON c.id=m.conversation_id
-                             WHERE c.family_id=? AND m.direction='in' LIMIT 1""", (s["family_id"],)).fetchone()
+    if replied is None:
+        replied = con.execute("""SELECT 1 FROM messages m JOIN conversations c ON c.id=m.conversation_id
+                                 WHERE c.family_id=? AND m.direction='in' LIMIT 1""", (s["family_id"],)).fetchone()
     if replied:
         pts += 2; why.append("отвечал в мессенджере")
     if s["stage"] in ("trial_booked", "trial_reminder"):

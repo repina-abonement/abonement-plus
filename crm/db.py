@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS parents (
     messenger TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_parents_phone ON parents(phone_norm);
+CREATE INDEX IF NOT EXISTS idx_parents_family ON parents(family_id);
 
 CREATE TABLE IF NOT EXISTS students (
     id INTEGER PRIMARY KEY,
@@ -118,6 +119,8 @@ CREATE TABLE IF NOT EXISTS makeups (
 
 -- Ученик может ходить в несколько групп: на каждую группу свой абонемент.
 -- weekdays — дни, в которые ученик ходит в эту группу ('' = все дни группы).
+CREATE INDEX IF NOT EXISTS idx_students_family ON students(family_id);
+
 CREATE TABLE IF NOT EXISTS enrollments (
     id INTEGER PRIMARY KEY,
     student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -183,11 +186,22 @@ def is_write_contention(error):
 
 
 @contextmanager
+def without_write_wait(con):
+    timeout = con.execute("PRAGMA busy_timeout").fetchone()[0]
+    con.execute("PRAGMA busy_timeout=0")
+    try:
+        yield
+    finally:
+        con.execute(f"PRAGMA busy_timeout={int(timeout)}")
+
+
+@contextmanager
 def optional_refresh(con):
     """Keep a read view usable if an incidental refresh cannot acquire a writer."""
     con.execute("SAVEPOINT optional_refresh")
     try:
-        yield
+        with without_write_wait(con):
+            yield
     except BaseException as error:
         con.execute("ROLLBACK TO optional_refresh")
         if not isinstance(error, sqlite3.OperationalError) or not is_write_contention(error):

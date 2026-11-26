@@ -717,32 +717,39 @@ def fmt_date(iso: str) -> str:
     return f"{d.day:02d}.{d.month:02d}"
 
 
-def card_summary(con, s: dict, st: dict) -> dict:
-    fam = con.execute("SELECT name FROM families WHERE id=?", (s["family_id"],)).fetchone()
-    parent = con.execute("SELECT name, phone FROM parents WHERE family_id=? ORDER BY is_primary DESC,id LIMIT 1",
-                         (s["family_id"],)).fetchone()
-    ens = con.execute("""SELECT g.name FROM enrollments e JOIN groups g ON g.id=e.group_id
-                         WHERE e.student_id=? AND e.active=1 ORDER BY e.id""", (s["id"],)).fetchall()
-    grp = {"name": " + ".join(r[0] for r in ens)} if ens else (
-        con.execute("SELECT name FROM groups WHERE id=?", (s["group_id"],)).fetchone() if s["group_id"] else None)
-    sib = con.execute("SELECT COUNT(*) FROM students WHERE family_id=? AND id != ?",
-                      (s["family_id"], s["id"])).fetchone()[0]
-    task = con.execute("""SELECT id,title,note,due_at,kind FROM tasks WHERE student_id=? AND status='open' AND kind!='school_rules'
-                        ORDER BY due_at,priority DESC,id LIMIT 1""", (s["id"],)).fetchone()
+_CARD_SUMMARY_SQL = """SELECT s.id, f.name AS family, p.name AS parent, p.phone,
+        EXISTS (SELECT 1 FROM conversations c JOIN messages m ON m.conversation_id=c.id
+            WHERE c.family_id=s.family_id AND m.direction='in') AS replied,
+        (SELECT COUNT(*) FROM students WHERE family_id=s.family_id AND id!=s.id) AS siblings,
+        COALESCE((SELECT group_concat(name, ' + ') FROM (
+            SELECT g.name FROM enrollments e JOIN groups g ON g.id=e.group_id
+            WHERE e.student_id=s.id AND e.active=1 ORDER BY e.id
+        )), fallback.name, '') AS group_name,
+        t.id AS task_id, t.title AS task_title, t.note AS task_note, t.kind AS task_kind, t.due_at
+        FROM students s LEFT JOIN families f ON f.id=s.family_id
+        LEFT JOIN parents p ON p.id=(SELECT id FROM parents WHERE family_id=s.family_id ORDER BY is_primary DESC,id LIMIT 1)
+        LEFT JOIN groups fallback ON fallback.id=s.group_id
+        LEFT JOIN tasks t ON t.id=(SELECT id FROM tasks WHERE student_id=s.id AND status='open' AND kind!='school_rules'
+            ORDER BY due_at,priority DESC,id LIMIT 1)"""
+
+
+def card_summary(con, s: dict, st: dict, *, info=None) -> dict:
+    if info is None:
+        info = con.execute(_CARD_SUMMARY_SQL + " WHERE s.id=?", (s["id"],)).fetchone()
     return {
-        "id": s["id"], "name": s["name"], "family": fam["name"] if fam else "", "family_id": s["family_id"],
-        "parent": parent["name"] if parent else "", "phone": parent["phone"] if parent else "",
-        "group": grp["name"] if grp else "", "tariff": s["tariff"], "siblings": sib,
+        "id": s["id"], "name": s["name"], "family": info["family"] or "", "family_id": s["family_id"],
+        "parent": info["parent"] or "", "phone": info["phone"] or "",
+        "group": info["group_name"], "tariff": s["tariff"], "siblings": info["siblings"],
         "stage": s["stage"], "stage_changed_at": s["stage_changed_at"], "trial_at": s["trial_at"],
         "source": s.get("source", ""),
         "priority": s.get("priority", 0),
-        "branch": "" if grp else _branch_name(con, s.get("branch_id")),
-        "score": (__import__("crm.smart", fromlist=["lead_score"]).lead_score(con, s) or {}).get("level") if s["funnel"] == "sales" else None,
-        "task_title": task["title"] if task else "",
-        "task_id": task["id"] if task else None,
-        "task_note": task["note"] if task else "",
-        "task_kind": task["kind"] if task else "",
-        "due": task["due_at"] if task else "",
+        "branch": "" if info["group_name"] else _branch_name(con, s.get("branch_id")),
+        "score": (__import__("crm.smart", fromlist=["lead_score"]).lead_score(con, s, replied=info["replied"]) or {}).get("level") if s["funnel"] == "sales" else None,
+        "task_title": info["task_title"] or "",
+        "task_id": info["task_id"],
+        "task_note": info["task_note"] or "",
+        "task_kind": info["task_kind"] or "",
+        "due": info["due_at"] or "",
     }
 
 
@@ -751,31 +758,43 @@ def new_cards_today(con, ref=None, include_pending=True):
     tz=ZoneInfo('Europe/Moscow')
     day=(ref or datetime.now(tz)).astimezone(tz).date()
     cards=[]
-    for row in con.execute("SELECT * FROM students WHERE archived=0 ORDER BY created_at DESC,id DESC"):
-        if con.execute("""SELECT 1 FROM tasks WHERE student_id=? AND kind='call_lead'
-            AND auto_key LIKE 'erp-lead:%' LIMIT 1""", (row['id'],)).fetchone():
-            continue
+    candidates=[]
+    st=settings(con)
+    rows = con.execute("""SELECT s.*,
+        s.stage='lead' AND COALESCE(s.erp_id,'')='' AND NOT EXISTS (
+            SELECT 1 FROM subscriptions WHERE student_id=s.id AND status!='cancelled'
+                AND COALESCE(kind,'month')='month' AND month>=?
+        ) AND EXISTS (
+            SELECT 1 FROM tasks WHERE student_id=s.id AND kind='call_lead' AND status='open'
+                AND substr(due_at,1,10)<=?
+        ) AS pending
+        FROM students s WHERE s.archived=0 AND NOT EXISTS (
+            SELECT 1 FROM tasks WHERE student_id=s.id AND kind='call_lead' AND auto_key LIKE 'erp-lead:%'
+        ) ORDER BY s.created_at DESC,s.id DESC""", (logic.month_of(day),day.isoformat()))
+    for row in rows:
         try:
             created=datetime.fromisoformat(row['created_at'])
         except (ValueError,TypeError):
             continue
         if created.tzinfo is not None:
             created=created.astimezone(tz)
-        has_subscription=con.execute("""SELECT 1 FROM subscriptions WHERE student_id=? AND status!='cancelled'
-            AND COALESCE(kind,'month')='month' AND month>=? LIMIT 1""",(row['id'],logic.month_of(day))).fetchone()
-        pending = row['stage']=='lead' and not row['erp_id'] and not has_subscription and con.execute(
-            """SELECT 1 FROM tasks WHERE student_id=? AND kind='call_lead' AND status='open'
-               AND substr(due_at,1,10)<=? LIMIT 1""", (row['id'], day.isoformat())).fetchone()
+        pending = row['pending']
         # Красная очередь включает все необработанные заявки, даже если они поступили раньше.
         # Обычные карточки после обработки показываем здесь только в день создания.
         if created.date()!=day and not (include_pending and pending):
             continue
-        card=card_summary(con,dict(row),settings(con))
-        card['created_at']=row['created_at']
-        # Исторические карточки, созданные сегодняшним импортом ERP, не являются
-        # свежими заявками с сайта или ручным вводом промоутера.
-        card['needs_processing']=bool(pending)
-        cards.append(card)
+        candidates.append(row)
+    for start in range(0, len(candidates), 500):
+        batch = candidates[start:start + 500]
+        marks = ",".join("?" for _ in batch)
+        summaries = {row["id"]: row for row in con.execute(
+            _CARD_SUMMARY_SQL + f" WHERE s.id IN ({marks})", [row["id"] for row in batch])}
+        for row in batch:
+            card=card_summary(con,dict(row),st,info=summaries[row["id"]])
+            card['created_at']=row['created_at']
+            # Старый импорт ERP не считается свежей заявкой.
+            card['needs_processing']=bool(row['pending'])
+            cards.append(card)
     return {'date':day.isoformat(),'cards':cards}
 
 
@@ -817,9 +836,19 @@ def board(con, funnel: str) -> dict:
         from .comms import missed_by_family
         missed = missed_by_family(con)
         cols = {k: {"key": k, "title": t, "cards": [], "auto": k in AUTO_SALES} for k, t in SALES_STAGES}
+        summaries = {row["id"]: row for row in con.execute(
+            _CARD_SUMMARY_SQL + " WHERE s.funnel='sales' AND s.archived=0")}
+        deadlines = {row["student"]: row for row in con.execute("""SELECT s.id AS student,t.due_at,t.title
+            FROM students s JOIN tasks t ON t.id=(
+              SELECT id FROM (
+                SELECT id,due_at FROM tasks WHERE student_id=s.id AND status='open'
+                UNION ALL
+                SELECT id,due_at FROM tasks WHERE kind='rebook' AND family_id=s.family_id AND status='open'
+              ) ORDER BY due_at,id LIMIT 1
+            ) WHERE s.funnel='sales' AND s.archived=0""")}
         for s in _rows(con.execute("SELECT * FROM students WHERE funnel='sales' AND archived=0 ORDER BY stage_changed_at DESC")):
             stage, color, mins = effective_sales_stage(s, st, ref)
-            card = card_summary(con, s, st)
+            card = card_summary(con, s, st, info=summaries[s["id"]])
             card["color"] = color
             card["minutes_since_end"] = mins
             if stage == "trial_done" and mins is not None:
@@ -838,8 +867,7 @@ def board(con, funnel: str) -> dict:
                 mins = int((ref - datetime.fromisoformat(s["stage_changed_at"][:16])).total_seconds() // 60)
                 card["badge"] = "Заявка с сайта · " + (f"{mins} мин назад" if mins < 120 else f"{mins // 60} ч назад")
             # дедлайн: ближайшая открытая задача по ребёнку или семье
-            t = con.execute("""SELECT due_at, title FROM tasks WHERE status='open' AND (student_id=? OR (kind='rebook' AND family_id=?))
-                               ORDER BY due_at LIMIT 1""", (s["id"], s["family_id"])).fetchone()
+            t = deadlines.get(s["id"])
             if t:
                 card["due"] = t["due_at"]
                 card["due_title"] = t["title"]

@@ -84,6 +84,7 @@ def init(con):
     for col in ("family_id INTEGER", "attempt INTEGER NOT NULL DEFAULT 0"):
         if col.split()[0] not in tcols:
             con.execute(f"ALTER TABLE tasks ADD COLUMN {col}")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_tasks_rebook_family ON tasks(family_id, due_at) WHERE status='open' AND kind='rebook'")
 
 
 # ---------------- рабочее время ----------------

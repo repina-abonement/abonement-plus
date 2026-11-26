@@ -184,7 +184,7 @@ def upload_photos(con, limit: int = 300) -> int:
 def run(con=None) -> dict:
     """Сделать копию сейчас: локально и, если подключено, на Яндекс Диск. Статус пишется в настройки."""
     own = con is None
-    con = con or sqlite3.connect(DB_PATH)
+    con = con or sqlite3.connect(DB_PATH, timeout=30, isolation_level=None)
     out = {"local": None, "remote": None, "error": ""}
     try:
         out["local"] = backup_once()
@@ -282,7 +282,7 @@ if __name__ == "__main__":
     while True:
         if os.path.exists(DB_PATH):
             now = datetime.now()
-            con = sqlite3.connect(DB_PATH, timeout=30)
+            con = sqlite3.connect(DB_PATH, timeout=30, isolation_level=None)
             try:
                 hour = now.strftime("%Y-%m-%d %H")
                 if hour != last_hour:

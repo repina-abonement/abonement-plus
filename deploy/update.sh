@@ -10,7 +10,14 @@ if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
   # проверка перед перезапуском: если код не собирается, остаёмся на старой версии
   if python3 -m compileall -q crm >/dev/null; then
     # резервный сервер (deploy/standby.sh): код обновляем, но CRM не запускаем, пока не включили crm-activate
-    [ -f /etc/abonement-plus.standby ] || systemctl restart abonement-plus abonement-plus-backup
+    if [ ! -f /etc/abonement-plus.standby ]; then
+      systemctl stop abonement-plus-backup
+      if ! systemctl restart abonement-plus; then
+        systemctl start abonement-plus-backup
+        exit 1
+      fi
+      systemctl start abonement-plus-backup
+    fi
     echo "Обновлено до $(git rev-parse --short HEAD)"
   else
     git reset -q --hard HEAD@{1}

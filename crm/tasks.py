@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     result TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_open ON tasks(status, assignee_id, due_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_student_status ON tasks(student_id, status, due_at);
 
 CREATE TABLE IF NOT EXISTS auto_messages (
     id INTEGER PRIMARY KEY,
