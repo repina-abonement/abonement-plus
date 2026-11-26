@@ -396,6 +396,7 @@ def init_db(con: sqlite3.Connection):
     from . import targetedtrainerresidual
     targetedtrainerresidual.apply(con)
     groupterms.provision_nebo_morning(con)
+    groupterms.provision_nebo_weekend_december(con)
     from . import mypay, coachreport
     mypay.init(con)
     coachreport.init(con)

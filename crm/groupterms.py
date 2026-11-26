@@ -45,6 +45,60 @@ def provision_nebo_morning(con):
         con.execute('ROLLBACK TO morning_terms');con.execute('RELEASE morning_terms');raise
 
 
+def provision_nebo_weekend_december(con):
+    """Shift the four verified weekend groups by 30 minutes from 1 December."""
+    from . import services as sv
+    key = 'nebo_weekend_times_20261201'
+    if comms.get(con, key):
+        return
+    effective = '2026-12-01'
+    slots = {
+        19: ('3–4', '10:00', '10:30'),
+        20: ('4–5', '11:00', '11:30'),
+        21: ('5–6', '12:00', '12:30'),
+        22: ('6–8', '13:00', '13:30'),
+    }
+    con.execute('SAVEPOINT nebo_weekend_times')
+    try:
+        groups = con.execute("""
+            SELECT g.* FROM groups g JOIN branches b ON b.id=g.branch_id
+            WHERE g.id IN (19,20,21,22) AND b.id=1 AND b.name='ТЦ «Небо»'
+              AND b.active=1 AND g.active=1 AND g.is_makeup=0 AND g.program_id IS NULL
+              AND g.lesson_kind='' AND g.weekdays='5,6' AND g.day_times=''
+        """).fetchall()
+        if len(groups) != len(slots):
+            return
+        rows = []
+        for g in groups:
+            gid = g['id']
+            age, old, new = slots[gid]
+            before = schedule.on(con, g, '2026-11-30')
+            after = schedule.on(con, g, effective)
+            if (g['age'] != age or before['weekdays'] != '5,6' or before['time'] != old
+                    or before['day_times'] or after['weekdays'] != '5,6' or after['day_times']
+                    or after['time'] not in (old, new)):
+                return
+            if after['time'] == new:
+                continue
+            if con.execute('SELECT 1 FROM group_versions WHERE group_id=? AND valid_from=?',
+                           (gid, effective)).fetchone():
+                return
+            rows.extend([(gid, schedule.BASE, g['time']), (gid, effective, new)])
+        stamp = sv.now_iso()
+        con.executemany("""
+            INSERT INTO group_versions(group_id,valid_from,time,weekdays,day_times,created_at,created_by)
+            VALUES (?,?,?,'5,6','',?,'По поручению руководителя')
+            ON CONFLICT(group_id,valid_from) DO NOTHING
+        """, [(gid, start, time, stamp) for gid, start, time in rows])
+        comms.put(con, key, effective)
+        sv.audit(con, None, 'group.weekend_times', key)
+    except BaseException:
+        con.execute('ROLLBACK TO nebo_weekend_times')
+        raise
+    finally:
+        con.execute('RELEASE nebo_weekend_times')
+
+
 def fixed_only(con,gid):
     """The specifically requested Nebo morning group has one tariff for new sales."""
     marked=comms.get(con,'nebo_mon_wed_morning_terms_202611_v1')
