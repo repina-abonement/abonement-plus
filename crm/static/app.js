@@ -694,10 +694,23 @@ function step(fn) { fn(); pushNav(); window.scrollTo(0, 0); render(); }
 let drawerInHistory = false, skipPop = false;
 const mayRestoreStudent = card => card && card.userId === S.user?.id && !S.meta?.staff_docs_pending &&
   ["admin", "operator"].includes(S.user?.role) && ["members", "sales", "search", "inbox"].some(section => can(section));
+function studentCardHash(card) {
+  const [view, query = ""] = (location.hash.slice(1) || S.view).split("?");
+  const params = new URLSearchParams(query);
+  params.delete("student");
+  params.delete("student_tab");
+  if (card) {
+    params.set("student", card.id);
+    if (card.tab !== "feed") params.set("student_tab", card.tab);
+  }
+  return "#" + view + (params.size ? "?" + params : "");
+}
+function saveStudentCardRoute(card) {
+  try { history.replaceState({ ...history.state, studentCard: card }, "", studentCardHash(card)); } catch (_) {}
+}
 const forgetStudentCard = () => {
-  if (!history.state?.studentCard) return;
   const state = { ...history.state }; delete state.studentCard;
-  try { history.replaceState(state, ""); } catch (_) {}
+  try { history.replaceState(state, "", studentCardHash()); } catch (_) {}
 };
 window.addEventListener("popstate", (e) => {
   if (skipPop) { skipPop = false; return; }
@@ -2070,8 +2083,8 @@ function openDrawer(html, size, options = {}) {
   const panel = $("#drawer .drawer-panel"); if (panel) panel.classList.toggle("wide", size === "wide");
   const state = { ...(history.state || {}), drawer: true }; delete state.studentCard;
   try {
-    if (!drawerInHistory) { history.pushState(state, ""); drawerInHistory = true; }
-    else history.replaceState(state, "");
+    if (!drawerInHistory) { history.pushState(state, "", studentCardHash()); drawerInHistory = true; }
+    else history.replaceState(state, "", studentCardHash());
   } catch (_) {}
 }
 function hideDrawer() { S.studentCardRequest=(S.studentCardRequest||0)+1; const d = $("#drawer"); if (d) d.hidden = true; document.body.style.overflow = ""; }
@@ -2118,7 +2131,7 @@ function layoutStudentCard(body, isMember) {
     if (card && card.userId === S.user.id) recordCrmActivity("card", {studentId: card.id, tab: b.dataset.sctab});
     grid.dataset.tab = b.dataset.sctab;
     if (history.state?.studentCard) {
-      try { history.replaceState({ ...history.state, studentCard: { ...history.state.studentCard, tab: b.dataset.sctab } }, ""); } catch (_) {}
+      saveStudentCardRoute({ ...history.state.studentCard, tab: b.dataset.sctab });
     }
     body.querySelectorAll("[data-sctab]").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-selected", String(x === b)); });
   }));
@@ -2741,7 +2754,8 @@ async function loadClientPaymentLinks(sid) {
 async function openStudent(id, options = {}) {
   const request=S.studentCardRequest=(S.studentCardRequest||0)+1;
   const previous = history.state?.studentCard;
-  const tab = options.tab || (previous?.id === +id && previous.userId === S.user?.id ? previous.tab : "feed") || "feed";
+  const requestedTab = options.tab || (previous?.id === +id && previous.userId === S.user?.id ? previous.tab : "feed");
+  const tab = ["feed", "abon", "visits", "info"].includes(requestedTab) ? requestedTab : "feed";
   // Do not leave the previous child's name and subscriptions visible while the
   // newly selected card is loading.  The request number also makes a late
   // response from the previous card harmless.
@@ -2861,7 +2875,7 @@ async function openStudent(id, options = {}) {
   </div>
   <div style="margin-top:14px" data-sc="arch"><button class="btn sm ${s.archived ? "" : "danger"}" id="s-arch">${s.archived ? "Вернуть из архива" : "Перенести в архив"}</button></div>`;
   openDrawer(html, "wide", { keepStudentRequest: true });
-  try { history.replaceState({ ...history.state, studentCard: { ...(previous?.id === +id ? previous : {}), id: +id, userId: S.user.id, tab } }, ""); } catch (_) {}
+  saveStudentCardRoute({ ...(previous?.id === +id ? previous : {}), id: +id, userId: S.user.id, tab });
   const body = $("#drawer-body");
   body.dataset.studentId = String(id);
   erpFullClient(body, id);
@@ -3885,13 +3899,15 @@ async function boot() {
   shell();
   applyFestive();
   const restoreCard = previousState?.drawer && mayRestoreStudent(previousState.studentCard) ? previousState.studentCard : null;
-  const routedStudent = Number(routeParams.get("student")) || 0;
+  const rawStudent = routeParams.get("student") || "";
+  const routedStudent = /^\d+$/.test(rawStudent) && Number.isSafeInteger(+rawStudent) ? +rawStudent : 0;
   const routedConversation = Number(routeParams.get("conversation")) || 0;
   try { history.replaceState({ view: S.view, sub: navSnap(), depth: previousState?.depth || 0,
     ...(S.view === "settings" && S.setTab ? { settingsTab:S.setTab } : {}),
-    ...(restoreCard ? { drawer: true, studentCard: restoreCard } : {}) }, "", location.hash || "#" + S.view); } catch (_) {}
+    ...(restoreCard ? { drawer: true, studentCard: restoreCard } : {}) }, "", studentCardHash(restoreCard)); } catch (_) {}
   await render();
   if (routedStudent && ["members", "sales", "search", "inbox"].some((section) => can(section))) {
+    drawerInHistory = restoreCard?.id === routedStudent;
     await openStudent(routedStudent, { tab: routeParams.get("student_tab") || "feed" });
   } else if (routedConversation && S.view === "inbox" && can("inbox") && typeof openChat === "function") {
     await openChat(routedConversation, true);
