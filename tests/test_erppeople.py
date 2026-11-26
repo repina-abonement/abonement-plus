@@ -87,3 +87,30 @@ def test_lead_only_import_preserves_metadata_and_routes_task():
 
 if __name__ == "__main__":
     main()
+
+
+def test_mass_visitors_create_and_fill_without_overwriting():
+    con = db.connect(":memory:")
+    db.init_db(con)
+    admin = {"id": 1, "name": "Admin"}
+    con.execute("INSERT INTO branches(name) VALUES ('ТРЦ Небо')")
+    sid = services.create_student(con, {
+        "name": "Котов Илья", "parent_name": "Ирина", "phone": "79000000001",
+    }, admin)
+    con.execute("UPDATE students SET erp_status='Думают' WHERE id=?", (sid,))
+    upload = erpimport.upload(con, "visitors.csv", (
+        "ID;ФИО посетителя;Телефон;Имя родителя;Почта;Дата рождения;Статус;Филиал\n"
+        "301;Котов Илья;79000000001;Мария;test@example.com;15.11.2018;Постоянный посетитель;ТЦ Небо\n"
+        "302;Котова Анна;79000000001;Ирина;;19.11.2019;Нет абонемента;ТЦ Небо\n"
+        "303;Котов Илья;79000000002;Анна;;;;ТЦ Небо\n"
+    ).encode(), "clients")["id"]
+    for expected in (1, 0):
+        plan = erppeople.transfer(con, [upload], [], admin, visitor_cards=True)
+        assert plan["counts"].get("new", 0) == expected
+        assert len(plan["issues"]) == 1
+        erppeople.transfer(con, [upload], [], admin, plan["token"], visitor_cards=True)
+    rows = con.execute("SELECT erp_id,erp_status,birth,branch_id FROM students ORDER BY id").fetchall()
+    assert [tuple(r) for r in rows] == [
+        ("301", "Думают", "2018-11-15", 1), ("302", "Нет абонемента", "2019-11-19", 1)]
+    assert tuple(con.execute("SELECT name,email FROM parents").fetchone()) == ("Ирина", "test@example.com")
+    assert con.execute("SELECT COUNT(*) FROM families").fetchone()[0] == 1

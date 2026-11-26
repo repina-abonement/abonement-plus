@@ -21,15 +21,15 @@ def _historical_lead_branch(label):
     return ei._norm(label) == "пыхтино ркш"
 
 
-def _lead_branches(con, label):
+def _matching_branches(con, label):
     def key(value):
         value = ei._norm(value).replace('«', '').replace('»', '')
-        return {'ск арктика': 'арктика', 'чоботовская 4с2': 'чоботовская'}.get(value, value)
+        return {'ск арктика': 'арктика', 'трц небо': 'тц небо', 'чоботовская 4с2': 'чоботовская'}.get(value, value)
     return [dict(row) for row in con.execute("SELECT id,name,active FROM branches")
             if key(row["name"]) == key(label)]
 
 
-def _profile_preview(con, sid, rec):
+def _profile_preview(con, sid, rec, visitor_cards=False):
     """Describe safe profile enrichment without changing an existing card."""
     from .smart import guess_relation
     source = {key: _clean(rec.get(key)) for key, _ in PROFILE_FIELDS}
@@ -37,7 +37,7 @@ def _profile_preview(con, sid, rec):
     source["child_name"] = _clean(ei._split_name(rec))
     source["birth"] = (erpfull._date(rec.get("birth", "")) or "")[:10]
     source["phone"] = _clean(rec.get("phone"))
-    source["relation"] = guess_relation(source["relation"] or source["parent_name"])
+    source["relation"] = "" if visitor_cards else guess_relation(source["relation"] or source["parent_name"])
     result = {"source": source, "fill": [], "conflicts": [], "missing": [label for key, label in PROFILE_FIELDS if not source[key]]}
     if not sid:
         result["fill"] = [label for key, label in PROFILE_FIELDS if source[key]]
@@ -65,9 +65,9 @@ def _profile_preview(con, sid, rec):
     return result
 
 
-def _apply_profile(con, sid, rec, user):
+def _apply_profile(con, sid, rec, user, visitor_cards=False):
     """Fill only empty profile values; preserve conflicts for explicit review."""
-    preview = _profile_preview(con, sid, rec)
+    preview = _profile_preview(con, sid, rec, visitor_cards)
     source = preview["source"]
     student = dict(con.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone())
     if source["child_name"] and student["name"] == ei.NO_NAME:
@@ -99,11 +99,17 @@ def _apply_profile(con, sid, rec, user):
     return preview
 
 
-def _plan(con, visitors, leads, erp_ids=None):
+def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
     if not (visitors or leads) or set(visitors) & set(leads):
         raise ei.ImportError_("Выберите отдельно файлы посетителей и лидов")
+    if visitor_cards and (leads or erp_ids):
+        raise ei.ImportError_("Для массового переноса выберите только файлы посетителей и очистите фильтр ERP ID")
     files = erpfull._files(con, visitors + leads)
     matcher = erpfull.Matcher(con)
+    names = defaultdict(set)
+    if visitor_cards:
+        for sid, student in matcher.students.items():
+            names[tuple(sorted(ei._norm(student["name"]).split()))].add(sid)
     requested = {str(value).strip() for value in (erp_ids or []) if str(value).strip()}
     if any(not value.isdigit() for value in requested):
         raise ei.ImportError_("ERP ID должны состоять только из цифр")
@@ -131,6 +137,8 @@ def _plan(con, visitors, leads, erp_ids=None):
                 rec.update(channel=fields.get("канал", ""), territory=fields.get("территория", ""),
                            created=fields.get("дата создания лида", ""), lead_due=fields.get("задача", ""))
             namespace = "lead" if lead else "student"
+            if visitor_cards:
+                rec["child_name"] = ei._split_name(rec)
             rec["id_namespace"] = namespace
             eid = rec.get("erp_id", "").strip()
             if requested and eid not in requested:
@@ -139,13 +147,17 @@ def _plan(con, visitors, leads, erp_ids=None):
                 found_requested.add(eid)
             status = "Новый лид" if lead else row[status_column].strip()
             counts["leads" if lead else "visitors"] += 1
-            if not eid or not status:
+            if not eid or (not status and not visitor_cards):
                 issues.append([where, "Нет ID ERP" if not eid else "Нет статуса в ERP"])
                 continue
             candidates[namespace, eid].append((rec, status, where))
 
     actions = []
     claimed = set()
+    incoming_names = Counter(
+        tuple(sorted(ei._norm(ei._split_name(rows[0][0])).split()))
+        for rows in candidates.values()
+    ) if visitor_cards else Counter()
     known_visitors = {target for (namespace, _), target in matcher.identities.items() if namespace == "student"}
     for (namespace, eid), rows in sorted(candidates.items(), key=lambda item: item[0][0] == "lead"):
         lead = namespace == "lead"
@@ -172,7 +184,12 @@ def _plan(con, visitors, leads, erp_ids=None):
                 ]
                 if len(candidates_for_alias) == 1:
                     sid = candidates_for_alias[0]
-            if not sid and (not lead or reason != "Не найдено однозначное совпадение"):
+            if visitor_cards and not sid and reason == "Не найдено однозначное совпадение":
+                name = tuple(sorted(ei._norm(ei._split_name(rec)).split()))
+                if not name or not normalize_phone(rec.get("phone", "")) or names.get(name) or incoming_names[name] > 1:
+                    issues.append([where, "Нет имени или телефона либо найден тёзка. Сверьте личность"])
+                    continue
+            elif not sid and (not lead or reason != "Не найдено однозначное совпадение"):
                 issues.append([where, reason])
                 continue
         if lead and sid and not linked and (sid in claimed or sid in known_visitors or
@@ -184,14 +201,42 @@ def _plan(con, visitors, leads, erp_ids=None):
             continue
         if sid:
             claimed.add(sid)
+        if visitor_cards and not sid and len(sv.find_families_by_phone(con, rec.get("phone", ""))) > 1:
+            issues.append([where, "Телефон есть у нескольких семей CRM"])
+            continue
         current = matcher.students[sid]["erp_status"] if sid else None
+        if visitor_cards:
+            rec = {key: value for key, value in rec.items()
+                   if key in {"child_name", "birth", "phone", "parent_name", "email", "branch"}}
+            branch = _clean(rec.get("branch"))
+            matches = _matching_branches(con, branch) if branch else []
+            rec["visitor_branch_id"] = matches[0]["id"] if len(matches) == 1 else None
+            student = matcher.students[sid] if sid else {}
+            existing_branch = student.get("branch_id")
+            if not existing_branch and student.get("group_id"):
+                group = con.execute("SELECT branch_id FROM groups WHERE id=?", (student["group_id"],)).fetchone()
+                existing_branch = group["branch_id"] if group else None
+            if branch and not existing_branch and not rec["visitor_branch_id"]:
+                issues.append([where, f"Филиал «{branch}» не найден однозначно. Остальные данные можно перенести"])
+            rec["visitor_existing_branch"] = existing_branch
+            rec["visitor_source_status"] = status
+            status = current or status
         counts["new" if sid is None else "same" if current == status else "updated"] += 1
         actions.append((namespace, eid, sid, current, status, rec))
     token = erpfull._hash([[(f["id"], f["digest"]) for f in files], actions, issues])
     profile = {"source_present": Counter(), "source_missing": Counter(), "fill": Counter(), "conflicts": []}
     for namespace, eid, sid, _current, _status, rec in actions:
-        preview = _profile_preview(con, sid, rec)
-        for key, label in PROFILE_FIELDS:
+        preview = _profile_preview(con, sid, rec, visitor_cards)
+        fields = PROFILE_FIELDS
+        if visitor_cards:
+            fields = tuple((key, label) for key, label in fields if key not in {"relation", "source", "comment"})
+            fields += (("branch", "Филиал"), ("status", "Статус"))
+            preview["source"].update(branch=_clean(rec.get("branch")), status=rec["visitor_source_status"])
+            if rec["visitor_branch_id"] and not rec["visitor_existing_branch"]:
+                preview["fill"].append("Филиал")
+            if rec["visitor_source_status"] and not _current:
+                preview["fill"].append("Статус")
+        for key, label in fields:
             profile["source_present" if preview["source"][key] else "source_missing"][label] += 1
         profile["fill"].update(preview["fill"])
         profile["conflicts"].extend({"erp_id": eid, "namespace": namespace, **item} for item in preview["conflicts"])
@@ -203,16 +248,16 @@ def _plan(con, visitors, leads, erp_ids=None):
     labels = sorted({rec["branch"] for namespace, _, _, _, _, rec in actions
                      if namespace == "lead" and rec.get("branch")})
     report["lead_branches"] = [
-        {"label": label, "matches": _lead_branches(con, label),
+        {"label": label, "matches": _matching_branches(con, label),
          "inactive": _historical_lead_branch(label)} for label in labels]
-    report["token"] = erpfull._hash([token, report["lead_branches"]])
+    report["token"] = erpfull._hash([token, report["lead_branches"], bool(visitor_cards), profile if visitor_cards else None])
     return report, actions
 
 
-def transfer(con, visitors, leads, user, token=None, erp_ids=None):
+def transfer(con, visitors, leads, user, token=None, erp_ids=None, visitor_cards=False):
     if any(not isinstance(ids, list) or any(type(uid) is not int for uid in ids) for ids in (visitors, leads)):
         raise ei.ImportError_("Выберите файлы посетителей и лидов")
-    report, actions = _plan(con, visitors, leads, erp_ids)
+    report, actions = _plan(con, visitors, leads, erp_ids, visitor_cards)
     if token is None:
         return report
     if token != report["token"]:
@@ -242,14 +287,17 @@ def transfer(con, visitors, leads, user, token=None, erp_ids=None):
             comment = rec.get("comment", "").strip()
             if comment:
                 sv.log(con, sid, comment, user, "note")
-        _apply_profile(con, sid, rec, user)
+        _apply_profile(con, sid, rec, user, visitor_cards)
+        if visitor_cards and rec["visitor_branch_id"] and not rec["visitor_existing_branch"]:
+            con.execute("UPDATE students SET branch_id=? WHERE id=? AND branch_id IS NULL",
+                        (rec["visitor_branch_id"], sid))
         if namespace == "lead":
             con.execute("""INSERT OR IGNORE INTO erp_lead_details
                 (source_id, territory, branch, channel) VALUES (?,?,?,?)""",
                 (eid, rec.get("territory", ""), rec.get("branch", ""), rec.get("channel", "")))
             branch = _clean(rec.get("branch"))
             if branch:
-                matches = _lead_branches(con, branch)
+                matches = _matching_branches(con, branch)
                 if len(matches) > 1:
                     raise ei.ImportError_(f"Несколько филиалов соответствуют «{branch}». Сначала уточните соответствие.")
                 branch_id = matches[0]["id"] if matches else schedule.save_branch(con, {"name": branch})

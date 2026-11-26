@@ -918,7 +918,7 @@ def erp_people_transfer(con, h, user, body, q):
         raise ApiError("Сначала проверьте перенос")
     try:
         return erppeople.transfer(con, body.get("visitors"), body.get("leads"), user, token if apply else None,
-                                  body.get("erp_ids"))
+                                  body.get("erp_ids"), body.get("visitor_cards") is True)
     except erpimport.ImportError_ as exc:
         raise ApiError(str(exc))
 
