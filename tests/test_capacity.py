@@ -39,6 +39,17 @@ fails(lambda: sv.update_student(con, lead, {"group_id": g, "trial_at": day + "T1
 # ребёнок предупредил — место освободилось
 r = capacity.warn(con, kids[0], day, None, "заболел", U)
 assert r["occupancy"]["free"] == 1, r
+def makeup_tasks(sid):
+    return [row["status"] for row in con.execute(
+        "SELECT status FROM tasks WHERE student_id=? AND kind='makeup_book'", (sid,))]
+
+assert makeup_tasks(kids[0]) == ["open"]
+capacity.warn(con, kids[0], day, g, "", U)
+assert makeup_tasks(kids[0]) == ["open"]
+capacity.unwarn(con, kids[0], day, g, U)
+assert makeup_tasks(kids[0]) == ["cancelled"]
+capacity.warn(con, kids[0], day, g, "", U)
+assert makeup_tasks(kids[0]) == ["open"]
 fam = con.execute("SELECT family_id FROM students WHERE id=?", (kids[0],)).fetchone()[0]
 fl = capacity.family_lessons(con, fam)
 assert fl[0]["lessons"] and any(x["warned"] for x in fl[0]["lessons"]), fl
@@ -51,10 +62,14 @@ con.execute("UPDATE groups SET weekdays='0,1,2,3,4,5,6' WHERE id=?",(g2,))
 eid=sv.enrollments_of(con,other)[0]['id']
 con.execute("INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,price,per_lesson,status,created_at) VALUES (?,?,?,'fixed',30,30000,1000,'paid',?)",(other,eid,day[:7],day))
 past = date.today() - timedelta(days=1)
-con.execute("INSERT INTO attendance(student_id, group_id, date, status) VALUES (?,?,?,'absent')", (other, g2, past.isoformat()))
+if past.isoformat()[:7] != day[:7]:
+    con.execute("INSERT INTO subscriptions(student_id,enrollment_id,month,tariff,lessons,price,per_lesson,status,created_at) VALUES (?,?,?,'fixed',30,30000,1000,'paid',?)",(other,eid,past.isoformat()[:7],past.isoformat()))
+sv.mark_attendance(con, other, g2, past.isoformat(), "absent", U)
+assert makeup_tasks(other) == ["open"]
 fails(lambda: sv.book_makeup(con, other, g, day, None, U), "мест нет — отработка не должна записаться")
 capacity.warn(con, kids[1], day, g, "", U)
 sv.book_makeup(con, other, g, day, None, U)
+assert makeup_tasks(other) == ["done"]
 rows = sv.journal(con, g, day)["rows"]
 assert any(x.get("status") == "makeup" for x in rows) and sum(1 for x in rows if x.get("warned")) == 2
 slots = capacity.free_slots(con, 7)

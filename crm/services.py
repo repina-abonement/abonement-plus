@@ -239,7 +239,10 @@ def book_makeup(con, sid: int, group_id: int, day: str, absence_id: int | None, 
     from . import capacity
     if not g["is_makeup"]:
         capacity.ensure(con, group_id, day, "записать на отработку")
-    absence_date = con.execute("SELECT date FROM attendance WHERE id=?", (absence_id,)).fetchone()[0]
+    absence = con.execute("SELECT date, group_id FROM attendance WHERE id=?", (absence_id,)).fetchone()
+    absence_date = absence["date"]
+    from . import tasks
+    tasks.sync_makeup_booking_task(con, sid, absence["group_id"], absence_date)
     con.execute("UPDATE students SET skip_stage='none' WHERE id=?", (sid,))
     log(con, sid, f"Записан на отработку {fmt_date(day)} ({g['name']}) за пропуск {fmt_date(absence_date)}", user, "makeup")
     return {"id": mid}
@@ -258,6 +261,10 @@ def set_makeup_status(con, mid: int, status: str, user) -> None:
         con.execute("UPDATE attendance SET resolved = 'makeup' WHERE id = ?", (m["absence_id"],))
     elif m["status"] == "done":
         con.execute("UPDATE attendance SET resolved = NULL WHERE id = ? AND resolved = 'makeup'", (m["absence_id"],))
+    absence = con.execute("SELECT date, group_id FROM attendance WHERE id=?", (m["absence_id"],)).fetchone()
+    if absence:
+        from . import tasks
+        tasks.sync_makeup_booking_task(con, m["student_id"], absence["group_id"], absence["date"])
     labels = {"done": "Отработал", "missed": "Не пришёл на отработку", "cancelled": "Отработка отменена",
               "booked": "Отработка снова в записи"}
     log(con, m["student_id"], f"{labels[status]}: {fmt_date(m['date'])}", user, "makeup")
@@ -1630,6 +1637,7 @@ def mark_trial(con, sid: int, came: bool, user) -> None:
 def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -> None:
     if status not in ("present", "absent", "clear"):
         raise ApiError("Неизвестная отметка")
+    from . import tasks
     s = get_student_row(con, sid)
     d = date.fromisoformat(day)
     if d > today():
@@ -1646,11 +1654,13 @@ def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -
         if a:
             con.execute("UPDATE makeups SET status='cancelled' WHERE absence_id=? AND status='booked'", (a["id"],))
             con.execute("DELETE FROM attendance WHERE id=?", (a["id"],))
+            tasks.sync_makeup_booking_task(con, sid, group_id, day)
         return
     if attendance_payment(con, sid, group_id, day) == "unpaid":
         raise ApiError("Занятие не оплачено. Сначала оформите оплату", 422)
     if a:
         if a["status"] == status:
+            tasks.sync_makeup_booking_task(con, sid, group_id, day)
             return
         if status == "present":
             con.execute("UPDATE makeups SET status='cancelled' WHERE absence_id=? AND status='booked'", (a["id"],))
@@ -1662,6 +1672,7 @@ def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -
     con.execute("UPDATE attendance SET marked_at=? WHERE student_id=? AND date=? AND group_id=?", (now_iso(), sid, day, group_id))
     from . import pu
     pu.record_lesson_mark(con, group_id, day)
+    tasks.sync_makeup_booking_task(con, sid, group_id, day)
     if status == "absent":
         if s["skip_stage"] == "refused":
             con.execute("UPDATE students SET skip_stage='none' WHERE id=?", (sid,))

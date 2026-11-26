@@ -232,6 +232,8 @@ def warn(con, sid: int, day: str, group_id: int | None, note: str, user: dict) -
         con.execute("INSERT INTO attendance(student_id, group_id, date, status, warned, note) VALUES (?,?,?,'absent',1,?)",
                     (sid, les["group_id"], day, note))
     sv.log(con, sid, f"Предупредил, что не придёт {d.strftime('%d.%m')} ({les['group']})" + (f": {note}" if note else ""), user, "attendance")
+    from . import tasks
+    tasks.sync_makeup_booking_task(con, sid, les["group_id"], day)
     o = occupancy(con, les["group_id"], day)
     return {"group_id": les["group_id"], "group": les["group"], "date": day, "name": s["name"], "occupancy": o}
 
@@ -247,6 +249,8 @@ def unwarn(con, sid: int, day: str, group_id: int, user: dict):
     con.execute("UPDATE makeups SET status='cancelled' WHERE absence_id=? AND status='booked'", (a["id"],))
     con.execute("DELETE FROM attendance WHERE id=?", (a["id"],))
     ensure(con, group_id, day, "отменить предупреждение (место уже заняли)")
+    from . import tasks
+    tasks.sync_makeup_booking_task(con, sid, group_id, day)
     sv.log(con, sid, f"Отменено «не придёт {date.fromisoformat(day).strftime('%d.%m')}»: ребёнок придёт", user, "attendance")
 
 

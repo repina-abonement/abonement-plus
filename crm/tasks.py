@@ -28,6 +28,7 @@ KINDS = {
     "single_next": ("Разовые: договориться о следующем занятии", "1️⃣"),
     "request_data": ("Запросить данные", "📋"),
     "manual_payment_check": ("Проверить оплату Точки и чек Эвотор", "🧾"),
+    "makeup_book": ("Записать на отработку", "🩹"),
     "school_rules": ("Отправить правила школы", "📋"),
     "client_followup": ("Определить следующий шаг", "🧭"),
     "manual": ("Задача", "✅"),
@@ -196,6 +197,32 @@ def add_task(con, kind: str, student_id: int | None, due: datetime | str, *, aut
                        None if shared else (assignee or owner(con)), due_s, source,
                        auto_key, note, _iso(_now())))
     return cur.lastrowid if cur.rowcount else None
+
+
+def sync_makeup_booking_task(con, sid, group_id, day):
+    from . import services
+
+    key = f"makeup-book:{sid}:{group_id}:{day}"
+    absence = con.execute("""SELECT a.*, g.name AS group_name,
+        EXISTS (SELECT 1 FROM makeups m WHERE m.absence_id=a.id AND m.status='booked') AS booked
+        FROM attendance a JOIN groups g ON g.id=a.group_id
+        WHERE a.student_id=? AND a.group_id=? AND a.date=? AND a.status='absent'""",
+        (sid, group_id, day)).fetchone()
+    if not absence or absence["resolved"] or absence["booked"]:
+        completed = absence and (absence["booked"] or absence["resolved"] == "makeup")
+        con.execute("""UPDATE tasks SET status=?, done_at=?, done_by='CRM', result=?
+            WHERE auto_key=? AND status='open'""",
+            ("done" if completed else "cancelled", _iso(_now()),
+             "Записан на отработку" if completed else "Пропуск больше не доступен для записи", key))
+        return
+    if services.attendance_payment(con, sid, group_id, day) not in ("paid", "historical"):
+        return
+    due = _now().date().isoformat() + "T23:59"
+    note = f"Занятие {services.fmt_date(day)}. Группа: {absence['group_name']}. Подберите отработку во вкладке «Посещения»."
+    add_task(con, "makeup_book", sid, due, auto_key=key, source="attendance", shared=True, note=note)
+    con.execute("""UPDATE tasks SET status='open', due_at=?, done_at=NULL, done_by='', result=''
+        WHERE auto_key=? AND (status='cancelled' OR
+            (status='done' AND done_by='CRM' AND result='Записан на отработку'))""", (due, key))
 
 
 def ensure_school_rules_task(con, sid: int) -> None:
@@ -1086,6 +1113,7 @@ ERP_COLUMNS = [
     ("request_data", "Запрос данных"),
     ("reinvite_pu", "Приглашение на ПУ повторно"),
     ("single", "Разовые занятия"),
+    ("makeup_book", "Записать на отработку"),
 ]
 THINK_KINDS = ("close_sale",)
 
