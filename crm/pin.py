@@ -72,7 +72,7 @@ def hello(con, device_token: str) -> dict | None:
         dev = _dev(device_token)
     except ApiError:
         return None
-    r = con.execute("""SELECT u.name FROM device_pins p JOIN users u ON u.id=p.user_id WHERE p.device=? AND u.active=1""",
+    r = con.execute("""SELECT u.name FROM device_pins p JOIN users u ON u.id=p.user_id WHERE p.device=? AND u.active=1 AND u.role!='coach'""",
                     (dev,)).fetchone()
     return {"name": r["name"].split()[0]} if r else None
 
@@ -93,6 +93,8 @@ def login(con, device_token: str, pin: str) -> tuple[dict | None, dict | None]:
                        WHERE p.device=?""", (dev,)).fetchone()
     if not r or not r["active"]:
         return None, {"error": "Быстрый вход не настроен. Войдите по паролю", "need_password": True}
+    if r["role"] == "coach":
+        return None, {"error": "Доступ тренеров к CRM временно закрыт", "need_password": False}
     pin = (pin or "").strip()
     if len(pin) == 4 and pin.isdigit() and db.check_password(pin + dev, r["pin_hash"]):
         con.execute("UPDATE device_pins SET fails=0, last_used=? WHERE device=?", (datetime.now().isoformat(timespec="seconds"), dev))

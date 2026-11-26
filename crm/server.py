@@ -87,17 +87,13 @@ def current_user(con, handler) -> dict | None:
     if not tok:
         return None
     r = con.execute("""SELECT u.id, u.login, u.name, u.role, u.is_senior, u.is_offline_admin, u.is_promoter, u.is_journal, s.created_at FROM sessions s
-                       JOIN users u ON u.id=s.user_id WHERE s.token=? AND u.active=1""", (tok.value,)).fetchone()
+                       JOIN users u ON u.id=s.user_id WHERE s.token=? AND u.active=1 AND u.role!='coach'""", (tok.value,)).fetchone()
     if not r:
         return None
     if (datetime.now() - datetime.fromisoformat(r["created_at"])).days > SESSION_DAYS:
         con.execute("DELETE FROM sessions WHERE token=?", (tok.value,))
         return None
-    out = dict(r)
-    if out["role"] == "coach":
-        from . import coachpolicy
-        out["coach_nebo_only"] = coachpolicy.nebo_only(con, out["id"])
-    return out
+    return dict(r)
 
 
 def _start_session(con, h, u) -> None:
@@ -134,6 +130,8 @@ def login(con, h, user, body, q):
             except Exception:  # noqa: BLE001
                 pass
         raise ApiError("Неверный логин или пароль", 401)
+    if u["role"] == "coach":
+        raise ApiError("Доступ тренеров к CRM временно закрыт", 403)
     con.execute("DELETE FROM login_fails WHERE login=?", (name,))
     _start_session(con, h, u)
     return {"ok": True, "user": {"name": u["name"], "role": u["role"]}}
