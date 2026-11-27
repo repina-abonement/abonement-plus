@@ -19,12 +19,15 @@ def transfer(con, content, token=None):
             ON s.id=i.student_id WHERE i.namespace='student'"""):
         links[str(eid)].add(sid)
     existing = dict(con.execute("SELECT row_key,student_id FROM erp_revenue_history"))
+    totals = defaultdict(int)
     additions = []
     skipped = set()
     missing = already = amount = 0
     reader = csv.reader(io.StringIO(content))
     next(reader)
     for file, row, eid, kind, sale, start, end, value in reader:
+        month = start[6:] + "-" + start[3:5]
+        totals[month] += int(value)
         key = file + "/" + row
         candidates = links[eid]
         if len(candidates) != 1 or (key in existing and existing[key] not in candidates):
@@ -35,15 +38,17 @@ def transfer(con, content, token=None):
             already += 1
             continue
         sid, = candidates
-        month = start[6:] + "-" + start[3:5]
         additions.append((key, sid, eid, month, kind, sale, start, end, int(value)))
         amount += int(value)
     signature = hashlib.sha256(json.dumps(additions).encode()).hexdigest()
+    update_totals = dict(con.execute("SELECT month,amount FROM erp_revenue_months")) != totals
     if token is not None:
         if signature != token:
             raise ValueError("Сопоставление изменилось. Повторите проверку")
+        if update_totals:
+            con.executemany("INSERT OR REPLACE INTO erp_revenue_months(month,amount) VALUES (?,?)", totals.items())
         con.executemany("""INSERT INTO erp_revenue_history
             (row_key,student_id,erp_id,month,kind,sale,start,end,amount)
             VALUES (?,?,?,?,?,?,?,?,?)""", additions)
-    return dict(token=signature, count=len(additions), amount=amount, already=already,
+    return dict(update_totals=update_totals, token=signature, count=len(additions), amount=amount, already=already,
                 missing=missing, ids=sorted(skipped, key=int))

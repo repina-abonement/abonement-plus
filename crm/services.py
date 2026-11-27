@@ -1825,6 +1825,11 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
         for sid_, first_month in con.execute(
                 "SELECT student_id,MIN(month) FROM erp_history_subscriptions WHERE revenue_amount IS NOT NULL GROUP BY student_id"):
             first_paid[sid_] = min(first_paid.get(sid_, first_month), first_month)
+    # The snapshot describes revenue by service month across all locations.
+    # The upload contains no historical group or branch identifiers.
+    erp_totals = {}
+    if not branch_id and not group_id:
+        erp_totals = dict(con.execute("SELECT month,amount FROM erp_revenue_months"))
     cache = {}
 
     def month_stats(m):
@@ -1834,7 +1839,7 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
         prev = holders(logic.shift_month(m, -1))
         revenue = sum(sum(v) for v in h.values())
         n_subs = sum(len(v) for v in h.values())
-        st = {"revenue": revenue, "holders": len(h), "subs": n_subs, "avg": round(revenue / n_subs) if n_subs else 0,
+        st = {"revenue": erp_totals.get(m, revenue), "holders": len(h), "subs": n_subs, "avg": round(revenue / n_subs) if n_subs else 0,
               "conversion": _pct(len(set(h) & set(prev)), len(prev)), "ids": set(h),
               "prices": {k: sum(v) for k, v in h.items()}}
         cache[m] = st
@@ -1892,7 +1897,7 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
     months = [logic.shift_month(cur, -i) for i in range(11, -1, -1)]
     series = {}
     for key in ("revenue", "holders", "avg", "conversion"):
-        val = lambda m: month_stats(m)[key] if month_stats(m)["holders"] else None
+        val = lambda m: month_stats(m)[key] if month_stats(m)["holders"] or (key == "revenue" and m in erp_totals) else None
         series[key] = {"cur": [val(x) for x in months],
                        "prev": [val(logic.shift_month(x, -12)) for x in months]}
 
@@ -1907,7 +1912,7 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
             at_risk += min(logic.MAX_FLEX_CREDIT, a) * per
 
     return {
-        "month": cur, "month_label": logic.month_label(cur),
+        "month": cur, "month_label": logic.month_label(cur), "revenue_from_erp": cur in erp_totals,
         "kpi": {"revenue": kpi("revenue"), "holders": kpi("holders"), "avg": kpi("avg"),
                 "conversion": kpi("conversion"),
                 "fill": {"value": fill, "subs": fill_subs, "subs_count": c["subs"],
