@@ -30,10 +30,15 @@ def save(con,sid,data,user):
             try:b=date.fromisoformat(birth)
             except ValueError:raise sv.ApiError('Проверьте дату рождения')
             if not date(2000,1,1)<b<sv.today():raise sv.ApiError('Проверьте дату рождения')
-        if data.get('scope') == 'child':
+        if data.get('scope') in ('child', 'details'):
             if (name, birth) != (s['name'], s['birth'] or ''):
                 con.execute('UPDATE students SET name=?,birth=? WHERE id=?', (name,birth,sid))
                 sv.audit(con,user,'client.profile_child',str(sid))
+            if data.get('scope') == 'details' and 'note' in data:
+                note = str(data.get('note') or '').strip()[:500]
+                if con.execute('SELECT note FROM families WHERE id=?', (fid,)).fetchone()[0] != note:
+                    con.execute('UPDATE families SET note=? WHERE id=?', (note, fid))
+                    sv.audit(con,user,'client.profile_note',str(sid))
             con.execute('RELEASE client_profile')
             return {'ok':True}
         rows=data.get('parents')
