@@ -1642,7 +1642,7 @@ async function renderErp(box) {
 function erpRevenueSetup(container) {
   const panel = document.createElement("section");
   panel.innerHTML = `<h3>Выручка по месяцам за 2022–2026 годы</h3>
-    <label>Файл истории <input type="file" accept=".csv"></label>
+    <label>Файл истории или распределения по группам <input type="file" accept=".csv"></label>
     <button class="btn" disabled>Проверить</button>
     <button class="btn primary" disabled>Перенести</button>
     <p aria-live="polite"></p>`;
@@ -1664,7 +1664,7 @@ function erpRevenueSetup(container) {
       token = r.token;
       out.textContent = (write ? "Перенесено" : "Готово к переносу") + " записей: " + r.count +
         " на " + rub(r.amount) + (r.update_totals ? (write ? ". Итоги выручки обновлены" : ". Будут обновлены итоги выручки") : "") + ". Уже в истории: " + r.already + ". Требуют сверки: " + r.missing +
-        (r.ids.length ? ". ERP ID: " + r.ids.join(", ") : "");
+        (r.ids.length ? ". " + r.ids.join(", ") : "") + (r.groups ? ". Распределение по группам для зарплаты" : "");
       apply.disabled = write || !(r.count || r.update_totals);
     } catch (err) {
       token = null;

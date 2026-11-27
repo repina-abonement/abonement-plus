@@ -9,7 +9,10 @@ DIGEST = "2dee63dec450785aa1b282866b1bcfd43b2f80343df3c37e4839c0ffccb4db0c"
 
 
 def transfer(con, content, token=None):
-    if not isinstance(content, str) or hashlib.sha256(content.encode()).hexdigest() != DIGEST:
+    digest = hashlib.sha256(content.encode()).hexdigest() if isinstance(content, str) else None
+    if digest == "4927fc8048ae020e82fbd66f7cb37971f038ef9e3cd8bf97db70d7d22c9629b5":
+        return assign_november_groups(con, content, token)
+    if digest != DIGEST:
         raise ValueError("Выберите подготовленный файл «Абонементы ERP 2022–2026.csv»")
     if token is not None and not con.in_transaction:
         con.execute("BEGIN IMMEDIATE")
@@ -64,3 +67,46 @@ def transfer(con, content, token=None):
             VALUES (?,?,?,?,?,?,?,?,?)""", additions)
     return dict(update_totals=update_totals, token=signature, count=len(additions), amount=amount, already=already,
                 missing=missing, ids=sorted(skipped, key=int))
+
+
+def assign_november_groups(con, content, token):
+    from . import erpimport, erppeople
+
+    if token is not None and not con.in_transaction:
+        con.execute("BEGIN IMMEDIATE")
+    norm = lambda name: erpimport._norm(name).removeprefix("стоп ").strip()
+    additions, issues = [], []
+    already = amount = 0
+    for row in csv.DictReader(io.StringIO(content)):
+        key, eid, branch, label = (row[k] for k in ("Строка", "ERP ID", "Филиал", "Группа"))
+        sale = con.execute("""SELECT r.*, a.group_id FROM erp_revenue_history r
+            LEFT JOIN erp_revenue_groups a USING(row_key) WHERE r.row_key=? AND r.erp_id=?
+            AND r.month='2026-11' AND r.kind=? AND r.amount=?""",
+            (key, eid, row["Вид"], int(row["Выручка"]))).fetchone()
+        if not sale:
+            issues.append(f"{eid} · история продажи не найдена")
+            continue
+        branches = erppeople._matching_branches(con, branch)
+        candidates = set()
+        if len(branches) == 1:
+            saved = erpimport._group_id(con, branch, label)
+            for g in con.execute("SELECT id,name,source_name FROM groups WHERE branch_id=? AND is_makeup=0",
+                                 (branches[0]["id"],)):
+                if (g["id"] == saved if saved else norm(label) in (norm(g["name"]), norm(g["source_name"] or ""))):
+                    candidates.add(g["id"])
+        if len(candidates) != 1 or (sale["group_id"] and sale["group_id"] not in candidates):
+            issues.append(f"{eid} · {branch} · {label}")
+            continue
+        if sale["group_id"]:
+            already += 1
+            continue
+        additions.append((key, candidates.pop(), sale["student_id"]))
+        amount += sale["amount"]
+    signature = hashlib.sha256(json.dumps(["groups", additions]).encode()).hexdigest()
+    if token is not None:
+        if token != signature:
+            raise ValueError("Данные изменились. Повторите проверку групп")
+        con.executemany("INSERT INTO erp_revenue_groups(row_key,group_id) VALUES (?,?)",
+                        [(key, gid) for key, gid, _ in additions])
+    return dict(count=len(additions), amount=amount, already=already, missing=len(issues),
+                ids=issues, token=signature, groups=True)

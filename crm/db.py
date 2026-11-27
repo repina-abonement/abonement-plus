@@ -270,6 +270,9 @@ def init_db(con: sqlite3.Connection):
         row_key TEXT PRIMARY KEY, student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
         erp_id TEXT NOT NULL, month TEXT NOT NULL, kind TEXT NOT NULL, sale TEXT NOT NULL,
         start TEXT NOT NULL, end TEXT NOT NULL, amount INTEGER NOT NULL)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS erp_revenue_groups (
+        row_key TEXT PRIMARY KEY REFERENCES erp_revenue_history(row_key) ON DELETE CASCADE,
+        group_id INTEGER NOT NULL REFERENCES groups(id))""")
     con.execute("""CREATE TABLE IF NOT EXISTS erp_subscription_months (
         month TEXT PRIMARY KEY, holders INTEGER NOT NULL, subscriptions INTEGER NOT NULL,
         subscription_revenue INTEGER NOT NULL)""")
