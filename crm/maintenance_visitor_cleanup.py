@@ -14,21 +14,22 @@ def apply(con):
     cards = con.execute("SELECT * FROM students WHERE id IN (3643,3646)").fetchall()
     if not cards:
         return "complete"
-    if len(cards) != len(TARGETS) or cards[0]["family_id"] != cards[1]["family_id"]:
-        return "identity-mismatch"
     for card in cards:
         sid = card["id"]
         name, erp_id = TARGETS[sid]
-        if (sorted(erpimport._norm(card["name"]).split()) != name or card["erp_id"] != erp_id
-                or not con.execute("SELECT 1 FROM parents WHERE family_id=? AND phone_norm=?",
-                                   (card["family_id"], "79859881756")).fetchone()):
-            return "identity-mismatch"
+        if sorted(erpimport._norm(card["name"]).split()) != name:
+            return "name-mismatch"
+        if card["erp_id"] not in ("", None, erp_id):
+            return "erp-id-mismatch"
+        if not con.execute("SELECT 1 FROM parents WHERE family_id=? AND phone_norm=?",
+                           (card["family_id"], "79859881756")).fetchone():
+            return "parent-mismatch"
         report = studentdelete.preview(con, sid, ACTOR)
         for relation in report["state"]["relations"]:
             table, column, rows = relation["table"], relation["column"], relation["rows"]
             if column != "student_id":
                 return "dependencies-found"
-            if table == "history":
+            if table in {"history", "crm_activity"}:
                 continue
             if table == "erp_full_identities" and all(
                 row["namespace"] == "student" and row["source_id"] == erp_id for row in rows
@@ -40,14 +41,19 @@ def apply(con):
                 for row in rows
             ):
                 continue
+            if table in {"tasks", "erp_full_identities", "payments", "subscriptions", "attendance",
+                         "erp_history_subscriptions", "erp_history_visits", "enrollments"}:
+                return "blocked-" + table.replace("_", "-")
             return "dependencies-found"
 
     con.execute("SAVEPOINT remove_erp_visitor_cards")
     try:
         for table in ("erp_full_identities", "tasks", "history"):
             con.execute(f"DELETE FROM {table} WHERE student_id IN (3643,3646)")
+        if con.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='crm_activity'").fetchone():
+            con.execute("UPDATE crm_activity SET student_id=NULL WHERE student_id IN (3643,3646)")
         con.execute("DELETE FROM students WHERE id IN (3643,3646)")
-        services.audit(con, ACTOR, "maintenance.remove_erroneous_erp_cards", "2")
+        services.audit(con, ACTOR, "maintenance.remove_erroneous_erp_cards", str(len(cards)))
     except BaseException as error:
         con.execute("ROLLBACK TO remove_erp_visitor_cards")
         if isinstance(error, sqlite3.IntegrityError):
