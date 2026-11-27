@@ -421,9 +421,10 @@ async function renderLogin(force = false) {
 /* ---------- каркас ---------- */
 const VIEWS = [
   ["today", "Сегодня"], ["sales", "Рабочий стол"], ["inbox", "Чаты и звонки"], ["search", "Клиенты"], ["planner", "Планер"], ["nodeadline", "Без дедлайнов"],
-  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["activity", "История действий"], ["posts", "Посты в каналы"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["staffexpenses", "Покупки и возмещения"], ["dashboard", "Дашборд"], ["revenue-losses", "Выручка и потери"], ["docs", "Документы"], ["settings", "Настройки"],
+  ["journal", "Журнал"], ["schedule", "Расписание"], ["coaches", "Тренеры"], ["team", "Команда"], ["activity", "История действий"], ["posts", "Посты в каналы"], ["payments", "Оплаты"], ["fiscal", "Чеки"], ["merch", "Мерч"], ["spend", "Расходы"], ["staffexpenses", "Покупки и возмещения"], ["dashboard", "Дашборд"], ["revenue-losses", "Выручка и потери"], ["cash-receipts", "Поступления"], ["docs", "Документы"], ["settings", "Настройки"],
 ];
 const NAV_ICONS = {
+  "cash-receipts": '<path d="M4 5h16v14H4zM8 9h8M8 13h5"/>',
   team: '<circle cx="12" cy="6" r="2.5"/><circle cx="5.5" cy="17.5" r="2.5"/><circle cx="18.5" cy="17.5" r="2.5"/><path d="M12 8.5v3.5M5.5 15v-3h13v3"/>',
   sales: '<path d="M4 5h16v14H4z"/><path d="M9 5v14M15 5v14"/>',
   today: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
@@ -455,7 +456,7 @@ const isCoach = () => S.user && S.user.role === "coach";
 const LEVELS = { own: 1, view: 2, full: 3 };
 const can = (sec, lvl = "own") => (LEVELS[((S.user && S.user.perms) || {})[sec]] || 0) >= LEVELS[lvl];
 const isOwner = () => can("settings", "full");
-const visibleViews = () => VIEWS.filter(([k]) => (k === "activity" ? S.user?.activity_history : can(k === "manual" ? "planner" : k === "nodeadline" ? "sales" : k === "revenue-losses" ? "dashboard" : k)) && (k !== "today" || !isOwner())
+const visibleViews = () => VIEWS.filter(([k]) => (k === "activity" ? S.user?.activity_history : can(k === "manual" ? "planner" : k === "nodeadline" ? "sales" : ["revenue-losses", "cash-receipts"].includes(k) ? "dashboard" : k)) && (k !== "today" || !isOwner())
   && (k !== "manual" || !["coach", "trainee"].includes(S.user.role)))  // тренеру задачи приходят на «Сегодня» и в отчёт, отдельная вкладка не нужна  // руководитель смотрит стол тренера через «Как видит»
   .map(([k, t]) => [k, k === "today" && S.user.coach_nebo_only ? "Мой дашборд" : k === "coaches" && !can("coaches", "view") ? "Мои результаты" : t]);
 const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
@@ -465,7 +466,7 @@ const badge = (k) => k === "inbox" ? `<span class="nbadge" data-badge hidden></s
 /* Боковое меню: главное сверху, остальное по папкам. Открыта папка с текущим разделом и те, что участник команды раскрыл сам */
 const NAV_TOP = ["today", "sales", "inbox", "planner", "search"];
 const NAV_FOLDERS = [["Занятия", ["journal", "schedule", "coaches"]],
-  ["Деньги", ["payments", "fiscal", "merch", "spend", "staffexpenses", "dashboard", "revenue-losses"]], ["Школа", ["team", "activity", "posts", "docs", "settings"]]];
+  ["Деньги", ["payments", "fiscal", "merch", "spend", "staffexpenses", "dashboard", "revenue-losses", "cash-receipts"]], ["Школа", ["team", "activity", "posts", "docs", "settings"]]];
 const navOpen = () => { try { return JSON.parse(localStorage.getItem("crm.nav_open") || "{}"); } catch (_) { return {}; } };
 function sideNav(views) {
   const item = ([k, t]) => `<button data-view="${k}" class="${S.view === k ? "active" : ""}">${navIcon(k)}<span>${t}</span>${badge(k)}</button>`;
@@ -784,6 +785,7 @@ async function renderView(page) {
     if (["members", "skips"].includes(S.view)) return await renderBoard(page, S.view);
     if (S.view === "nodeadline") return await renderNoDeadline(page);
     if (S.view === "dashboard") return await renderDashboard(page);
+    if (S.view === "cash-receipts") return await renderCashReceipts(page);
     if (S.view === "revenue-losses") return await renderRevenueLosses(page);
     if (S.view === "inbox") return await renderInbox(page);
     if (S.view === "coaches") return await renderCoaches(page);
@@ -879,6 +881,35 @@ function dashboardMonths() {
     months.push(isoDate(dt).slice(0, 7));
   }
   return months;
+}
+
+async function renderCashReceipts(page) {
+  const month = S.cashMonth || S.meta.today.slice(0, 7);
+  page.innerHTML = `<section class="panel"><h2>Поступления</h2>
+    <p>Деньги учитываются по дате фактической оплаты. Например, оплата в ноябре за декабрь попадёт сюда в ноябрь, а на дашборде в декабрь.</p>
+    <form class="dash-filters"><label>Месяц оплаты <input type="month" name="month" value="${esc(month)}" required></label><button class="btn primary">Сформировать</button></form>
+    <p class="small muted">Только подтверждённые оплаты CRM. Возвраты вычитаются в месяце возврата. Бонусы, зачёты, исторические остатки и перемещения баланса не являются поступлениями. Суммы указаны до комиссии банка.</p></section><section class="panel" id="cash-results" aria-live="polite">Загрузка…</section>`;
+  page.querySelector('form').onsubmit = e => { e.preventDefault(); S.cashMonth = e.target.elements.month.value; render(); };
+  const host = page.querySelector('#cash-results');
+  try {
+    const r = await api('GET', '/api/cash-receipts?' + new URLSearchParams({month}));
+    if (!host.isConnected) return;
+    const columns = [['received','Получено'],['returned','Возвращено'],['net','Итого'],['pending_received','Ожидает подтверждения: оплаты'],['pending_returned','Ожидает подтверждения: возвраты']];
+    const table = (label, rows) => `<div class="client-history-table-wrap"><table class="client-history-table"><thead><tr><th>${label}</th>${columns.map(([,title])=>`<th>${esc(title)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.label)}</td>${columns.map(([key])=>`<td>${rub(row[key])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    host.innerHTML = `<div class="panel-head"><h3>${esc(monthLabel(month))}</h3><button class="btn sm" data-cash-export>Скачать CSV</button></div>
+      ${table('Период',[{label:'За месяц',...r.totals}])}
+      <p class="small muted">Ожидающие подтверждения записи не входят в итог. Оплата сверх стоимости абонемента учитывается полностью один раз, включая остаток на балансе.</p>
+      <h3>По способам оплаты</h3>${table('Способ',r.methods)}<h3>По дням</h3>${table('Дата',r.days.map(row=>({...row,label:row.date})))}`;
+    host.querySelector('[data-cash-export]').onclick = () => {
+      const lines = [['Раздел','Период',...columns.map(([,label])=>label)],
+        ['Итого',month,...columns.map(([k])=>r.totals[k])],
+        ...r.methods.map(row=>['Способ',row.label,...columns.map(([k])=>row[k])]),
+        ...r.days.map(row=>['День',row.date,...columns.map(([k])=>row[k])])];
+      const quote = value => '"' + String(value).replaceAll('"','""') + '"';
+      const url=URL.createObjectURL(new Blob(['\ufeff'+lines.map(row=>row.map(quote).join(';')).join('\r\n')],{type:'text/csv;charset=utf-8'}));
+      const a=document.createElement('a');a.href=url;a.download=`receipts-${month}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    };
+  } catch(e) { if(host.isConnected) host.textContent=e.message; }
 }
 
 async function renderRevenueLosses(page) {

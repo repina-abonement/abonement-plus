@@ -3120,6 +3120,12 @@ def my_pay_set(con, h, user, body, q):
     return mypay.view(con, user, ym)
 
 
+@route("GET", "/api/cash-receipts", role="dashboard")
+def cash_receipts(con, h, user, body, q):
+    from . import cashreceipts
+    return mx(cashreceipts.report, con, q.get("month") or sv.today().isoformat()[:7])
+
+
 @route("GET", "/api/revenue-losses", role="dashboard")
 def revenue_losses(con, h, user, body, q):
     from . import revenuelosses
