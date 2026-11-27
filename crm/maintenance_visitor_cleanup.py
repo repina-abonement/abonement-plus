@@ -59,3 +59,34 @@ def apply(con):
     finally:
         con.execute("RELEASE remove_erp_visitor_cards")
     return "complete"
+
+
+def release_empty_family(con):
+    """Release the owner's phone only if the deleted cards left an unused family."""
+    if con.execute("SELECT 1 FROM students WHERE id IN (3643,3646)").fetchone():
+        return "cards-present"
+    matches = con.execute("""SELECT family_id,name FROM parents
+        WHERE phone_norm='79859881756'""").fetchall()
+    if not matches:
+        return "phone-available"
+    if len(matches) != 1 or erpimport._norm(matches[0]["name"]) != "маргарита":
+        return "contact-mismatch"
+    family = matches[0]["family_id"]
+    cards = con.execute("SELECT archived FROM students WHERE family_id=?", (family,)).fetchall()
+    if cards:
+        return "archived-card-present" if all(card["archived"] for card in cards) else "active-card-present"
+    if con.execute("SELECT COUNT(*) FROM parents WHERE family_id=?", (family,)).fetchone()[0] != 1:
+        return "other-contacts-present"
+    for (table,) in con.execute("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'"):
+        if table == "parents":
+            continue
+        quoted = '"' + table.replace('"', '""') + '"'
+        refs = {r["from"] for r in con.execute(f"PRAGMA foreign_key_list({quoted})") if r["table"] == "families"}
+        refs.update(r["name"] for r in con.execute(f"PRAGMA table_info({quoted})") if r["name"] == "family_id")
+        for ref in refs:
+            column = '"' + ref.replace('"', '""') + '"'
+            if con.execute(f"SELECT 1 FROM {quoted} WHERE {column}=? LIMIT 1", (family,)).fetchone():
+                return "family-linked-" + table.replace("_", "-")
+    con.execute("DELETE FROM families WHERE id=?", (family,))
+    services.audit(con, ACTOR, "maintenance.remove_empty_family", "1")
+    return "phone-available"
