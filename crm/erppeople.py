@@ -199,6 +199,11 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
         tuple(sorted(ei._norm(ei._split_name(rows[0][0])).split()))
         for rows in candidates.values()
     ) if visitor_cards else Counter()
+    incoming_name_phones = Counter(
+        (tuple(sorted(ei._norm(ei._split_name(rows[0][0])).split())),
+         normalize_phone(rows[0][0].get("phone", "")))
+        for rows in candidates.values()
+    ) if visitor_cards else Counter()
     known_visitors = {target for (namespace, _), target in matcher.identities.items() if namespace == "student"}
     for (namespace, eid), rows in sorted(candidates.items(), key=lambda item: item[0][0] == "lead"):
         lead = namespace == "lead"
@@ -227,7 +232,17 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
                     sid = candidates_for_alias[0]
             if visitor_cards and not sid and reason == "Не найдено однозначное совпадение":
                 name = tuple(sorted(ei._norm(ei._split_name(rec)).split()))
-                if not name or not normalize_phone(rec.get("phone", "")) or names.get(name) or incoming_names[name] > 1:
+                phone = normalize_phone(rec.get("phone", ""))
+                given_name_only = (len(name) == 1 and name[0].replace("-", "").isalpha()
+                                   and name[0] not in {"лид", "уточнить", "неизвестно", "ребенок", "тест"})
+                if given_name_only:
+                    ambiguous = incoming_name_phones[name, phone] > 1 or any(
+                        name[0] in candidate_name and phone[-10:] == candidate_phone
+                        for candidate_name, candidate_phone in matcher.by_np
+                    )
+                else:
+                    ambiguous = bool(names.get(name)) or incoming_names[name] > 1
+                if not name or not phone or ambiguous:
                     issues.append([where, "Нет имени или телефона либо найден тёзка. Сверьте личность"])
                     continue
             elif not sid and (not lead or reason != "Не найдено однозначное совпадение"):

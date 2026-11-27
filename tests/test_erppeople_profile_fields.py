@@ -75,6 +75,20 @@ class ErpPeopleProfileFieldsTest(unittest.TestCase):
         erppeople.transfer(self.con, visitors, [], self.user, plan["token"], visitor_cards=True)
         self.assertEqual(self.con.execute("SELECT name FROM parents").fetchone()[0], "лилия")
 
+    def test_visitor_first_name_only_with_distinct_phones(self):
+        data = ("ID;ФИО посетителя;Статус;Телефон\n"
+                "41;Арсен;Новый лид;79001112233\n"
+                "42;Арсен;Новый лид;79001112234").encode()
+        visitors = [erpimport.upload(self.con, "visitors.csv", data, "clients")["id"]]
+        plan = erppeople.transfer(self.con, visitors, [], self.user, visitor_cards=True)
+        self.assertFalse(plan["issues"])
+        self.assertEqual(plan["counts"]["new"], 2)
+        erppeople.transfer(self.con, visitors, [], self.user, plan["token"], visitor_cards=True)
+        result = erppeople.transfer(self.con, visitors, [], self.user, visitor_cards=True)
+        self.assertEqual(result["counts"]["same"], 2)
+        self.assertEqual([r[0] for r in self.con.execute("SELECT name FROM students ORDER BY id")],
+                         ["Арсен", "Арсен"])
+
     def test_existing_card_is_enriched_without_duplicate_or_finance(self):
         sid = services.create_student(self.con, {
             "name": "Иванов Александр", "parent_name": "Родитель", "phone": "+7 900 111-22-33",
