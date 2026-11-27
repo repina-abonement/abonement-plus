@@ -2236,3 +2236,53 @@ html.theme-soft #comms-box .family-chat-feed{background:#182624}html.theme-soft 
 .erp-transfer-stage>p{margin:0 0 12px}
 .erp-transfer-stage .erp-step:first-child{margin-top:0}
 .erp-transfer-workspace>.erp-advanced{margin-top:20px}
+
+.erp-card-tools {
+  max-width: 660px;
+  padding: clamp(16px, 3vw, 28px);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+}
+.erp-card-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.erp-card-tabs button {
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 13px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.erp-card-tabs button[aria-pressed="true"] {
+  background: var(--accent-soft, #e7f6ee);
+  font-weight: 700;
+}
+.erp-card-tools > .erp-step { margin: 0; padding: 0; border: 0; }
+.erp-card-tools > [hidden] { display: none; }
+.erp-card-tools h3 { margin: 0 0 6px; }
+.erp-card-tools h3 + p { margin: 0 0 18px; }
+.erp-card-upload { display: grid; gap: 7px; font-weight: 600; }
+.erp-card-upload input { width: 100%; min-width: 0; font-weight: 400; }
+.erp-card-upload input::file-selector-button {
+  border: 0;
+  border-radius: 7px;
+  padding: 6px 10px;
+  margin-inline-end: 8px;
+  background: var(--accent-soft, #e7f6ee);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.erp-card-options { margin-top: 14px; }
+.erp-card-options summary { cursor: pointer; font-size: .9rem; }
+.erp-card-check { margin: 12px 0; }
+.erp-card-check input { width: auto; margin: 0; }
+.erp-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }

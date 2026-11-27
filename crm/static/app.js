@@ -1194,11 +1194,13 @@ function erpLeadImportSetup(box) {
   const root = document.createElement("section");
   root.className = "erp-step";
   root.dataset.erpLeadImport = "1";
-  root.innerHTML = `<h3>Импорт лидов из ERP</h3>
-    <p>Выберите Excel с лидами. Проверка покажет карточки и филиалы. Перенос добавит недостающие филиалы и задачи.</p>
-    <label>Файл лидов <input type="file" accept=".xlsx,.csv" data-lead-file></label>
-    <button class="btn" data-lead-preview>Проверить лиды</button>
-    <button class="btn primary" data-lead-apply disabled>Перенести лиды</button>
+  root.innerHTML = `<h3>Загрузить лиды</h3>
+    <p class="muted">Перед переносом можно проверить карточки, филиалы и задачи.</p>
+    <label class="erp-card-upload"><span>Выгрузка лидов</span><input type="file" accept=".xlsx,.csv" data-lead-file></label>
+    <div class="erp-card-actions">
+      <button class="btn primary" data-lead-preview disabled>Проверить</button>
+      <button class="btn" data-lead-apply disabled>Перенести</button>
+    </div>
     <div data-lead-result aria-live="polite"></div>`;
   box.querySelector(".erp-page-head").after(root);
   const file = root.querySelector("[data-lead-file]");
@@ -1206,7 +1208,7 @@ function erpLeadImportSetup(box) {
   const output = root.querySelector("[data-lead-result]");
   let approved = null;
   const reset = () => { approved = null; apply.disabled = true; output.textContent = ""; };
-  file.onchange = reset;
+  file.onchange = () => { reset(); preview.disabled = !file.files.length; };
   const run = async writing => {
     preview.disabled = apply.disabled = file.disabled = true;
     try {
@@ -1243,14 +1245,18 @@ function erpLeadImportSetup(box) {
 function erpPeopleSetup(box) {
   box.insertAdjacentHTML("beforeend", `
     <div class="erp-step" id="erp-people">
-      <b>Карточки посетителей из ERP</b>
-      <p class="small muted">Переносятся карточки без счетов и денежных операций. Обязательные поля проверки: имя и фамилия ребёнка, дата рождения, телефон, имя и роль родителя, почта, рекламный источник и комментарий. Уже созданные карточки, в том числе дети из сборной, сопоставляются без дублей: пустые поля дополняются, расхождения показываются для ручной сверки</p>
-      <div class="field"><label for="erp-people-visitors">Посетители, включая архив</label><input id="erp-people-visitors" type="file" multiple accept=".xlsx,.csv"></div>
-      <div class="field"><label for="erp-people-ids">Только указанные ERP ID (необязательно)</label><textarea id="erp-people-ids" rows="2" placeholder="Например: 64928, 65188, 79204"></textarea><div class="small muted">Если поле заполнено, остальные строки полных файлов полностью пропускаются и новые карточки по ним не создаются</div></div>
-      <label><input type="checkbox" id="erp-people-create-visitors"> Создать отсутствующие карточки посетителей и дополнить пустые поля существующих</label>
-      <p class="small muted">Для массового переноса оставьте поле ERP ID пустым. Заполненные статус и филиал сохраняются.</p>
-      <button class="btn" id="erp-people-plan" disabled>Проверить</button>
-      <button class="btn primary" id="erp-people-apply" disabled>Перенести</button>
+      <h3>Загрузить посетителей</h3>
+      <p class="muted">Заполненные данные CRM сохраняются. Перед переносом проверьте новые карточки и поля к заполнению.</p>
+      <label class="erp-card-upload" for="erp-people-visitors"><span>Выгрузка посетителей</span><input id="erp-people-visitors" type="file" multiple accept=".xlsx,.csv"></label>
+      <details class="erp-card-options">
+        <summary>Параметры переноса</summary>
+        <label class="check erp-card-check"><input type="checkbox" id="erp-people-create-visitors" checked> Создавать недостающие карточки</label>
+        <div class="field"><label for="erp-people-ids">Только выбранные ERP ID</label><textarea id="erp-people-ids" rows="2" placeholder="Например: 64928, 65188" disabled></textarea><small class="muted">Чтобы проверить конкретные ID, выключите создание карточек.</small></div>
+      </details>
+      <div class="erp-card-actions">
+        <button class="btn primary" id="erp-people-plan" disabled>Проверить</button>
+        <button class="btn" id="erp-people-apply" disabled>Перенести</button>
+      </div>
       <div id="erp-people-out" aria-live="polite"></div>
     </div>`);
   const root = box.querySelector("#erp-people");
@@ -1288,11 +1294,16 @@ function erpPeopleSetup(box) {
       ${!createVisitors.checked && (p.conflicts || []).length ? `<details open><summary>Расхождения карточки и ERP: ${p.conflicts.length}</summary><ul>${p.conflicts.map((item) => `<li>ERP ID ${esc(item.erp_id)} · ${esc(item.field)}: в CRM «${esc(item.crm)}», в ERP «${esc(item.erp)}». Значение CRM сохранится до ручной сверки</li>`).join("")}</ul></details>` : ""}
       ${report.issues.length ? `<details><summary>Требуют сверки: ${report.issues.length}</summary><ul>${report.issues.map(([row, reason]) => `<li>${esc(row)}: ${esc(reason)}</li>`).join("")}</ul></details>` : ""}`;
   }
-  createVisitors.onchange = visitors.onchange = ids.oninput = () => {
+  visitors.onchange = ids.oninput = () => {
     approved = null;
     apply.disabled = true;
     check.disabled = !visitors.files.length;
     out.replaceChildren();
+  };
+  createVisitors.onchange = () => {
+    ids.disabled = createVisitors.checked;
+    if (createVisitors.checked) ids.value = "";
+    visitors.onchange();
   };
   async function run(applyChanges) {
     const erp_ids = ids.value.split(/[^0-9]+/).filter(Boolean);
@@ -1315,7 +1326,8 @@ function erpPeopleSetup(box) {
     } catch (error) {
       out.textContent = error.message;
     } finally {
-      check.disabled = visitors.disabled = ids.disabled = createVisitors.disabled = false;
+      check.disabled = visitors.disabled = createVisitors.disabled = false;
+      ids.disabled = createVisitors.checked;
     }
   }
   check.onclick = () => run(false);
@@ -1607,7 +1619,7 @@ function erpOrganizeTools(box) {
   const workspace = document.createElement("div");
   workspace.className = "erp-transfer-workspace";
   const stages = [
-    { key: "cards", label: "Карточки", description: "Карточки посетителей и лидов уже загружали. Здесь можно проверить оставшиеся строки и дополнить карточки.", selectors: ["[data-erp-lead-import]", "#erp-people"] },
+    { key: "cards", label: "Карточки", description: "", selectors: ["#erp-people", "[data-erp-lead-import]"] },
     { key: "subscriptions", label: "Абонементы", description: "Выберите выгрузку проданных абонементов и проверьте, какие записи появятся в истории клиентов.", selectors: ["[data-erp-priority-history]"] },
     { key: "tasks", label: "Задачи", description: "Загрузите выгрузку задач и проверьте клиента, срок и состояние перед переносом.", selectors: ["#erp-task-transfer"] },
   ];
@@ -1616,7 +1628,7 @@ function erpOrganizeTools(box) {
       ${stages.map(({ key, label }) => `<button type="button" class="btn" data-erp-stage="${key}" aria-controls="erp-stage-${key}">${label}</button>`).join("")}
     </nav>
     ${stages.map(({ key, label, description }) => `<section class="erp-transfer-stage" id="erp-stage-${key}" aria-label="${label}" hidden>
-      <p class="muted">${description}</p>
+      ${description ? `<p class="muted">${description}</p>` : ""}
       <div data-erp-stage-tools></div>
     </section>`).join("")}
     <details class="erp-advanced"><summary><span><b>Дополнительные инструменты</b><small>История одного ребёнка, загруженные файлы и прежние операции</small></span><span aria-hidden="true">⌄</span></summary>
@@ -1629,6 +1641,37 @@ function erpOrganizeTools(box) {
       const tool = box.querySelector(selector);
       if (tool) tools.append(tool);
     }
+  }
+  const cardTools = workspace.querySelector("#erp-stage-cards [data-erp-stage-tools]");
+  cardTools.classList.add("erp-card-tools");
+  const cardOptions = [
+    { key: "visitors", label: "Посетители", panel: cardTools.querySelector("#erp-people") },
+    { key: "leads", label: "Лиды", panel: cardTools.querySelector("[data-erp-lead-import]") },
+  ].filter(option => option.panel);
+  if (cardOptions.length) {
+    const cardTabs = document.createElement("nav");
+    cardTabs.className = "erp-card-tabs";
+    cardTabs.setAttribute("aria-label", "Тип карточек");
+    const controls = cardOptions.map(({ key, label, panel }) => {
+      panel.id ||= "erp-leads";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.setAttribute("aria-controls", panel.id);
+      button.onclick = () => selectCardType(key);
+      cardTabs.append(button);
+      return { key, panel, button };
+    });
+    function selectCardType(key) {
+      S.erpCardType = key;
+      for (const option of controls) {
+        const active = option.key === key;
+        option.panel.hidden = !active;
+        option.button.setAttribute("aria-pressed", String(active));
+      }
+    }
+    cardTools.prepend(cardTabs);
+    selectCardType(controls.some(option => option.key === S.erpCardType) ? S.erpCardType : controls[0].key);
   }
   const advanced = workspace.querySelector("[data-erp-advanced-body]");
   for (const node of [...box.children]) {
