@@ -1779,13 +1779,27 @@ function wireViewAs(page) {
 
 function todayTrialsPlaque(items) {
   const monthPart=(q)=>`<span><b>${esc(monthLabel(q.month))}</b><em>${q.lessons} ${plural(q.lessons,"занятие","занятия","занятий")}</em><strong>${rub(q.total)}</strong></span>`;
+  const trialCard = child => {
+    const groupParts = String(child.group || "").split("·").map(part => part.trim()).filter(Boolean);
+    const location = [...new Set([child.branch, ...groupParts, child.age].filter(Boolean))].join(" · ");
+    return `<article class="trial-desk-child">
+      <div class="trial-desk-row">
+        <time class="trial-desk-time">${esc(child.time || "—")}</time>
+        <div class="trial-desk-info">
+          <div class="trial-desk-name"><b>${esc(child.name)}</b><span class="pill">${child.came ? "ПУ отмечено" : "Ждём"}</span></div>
+          ${location ? `<small>${esc(location)}</small>` : ""}
+          <div class="trial-desk-contact">Родитель: <b>${esc(child.parent || "не указан")}</b>${child.phone ? ` · <a href="tel:${esc(child.phone)}">${esc(fmtPhone(child.phone))}</a>` : ""}</div>
+        </div>
+        <button type="button" class="btn sm" data-trial-card="${child.id}">Карточка</button>
+      </div>
+      ${child.offers.length ? `<details class="trial-desk-pricing"><summary>Расчёт абонемента</summary>
+        <div class="trial-offers">${child.offers.map(offer => `<article><h3>${esc(offer.label)}</h3><div class="trial-offer-months">${monthPart(offer.current)}${monthPart(offer.next)}<span class="trial-offer-total"><b>Вместе</b><em>два месяца</em><strong>${rub(offer.bundle_total)}</strong></span></div>${offer.current.discount ? `<p>Скидка: ${esc(offer.current.discount)} · ${offer.current.discount_percent}%</p>` : ""}</article>`).join("")}</div>
+        </details>` : `<p class="trial-desk-note">Расчёт недоступен. Проверьте группу в карточке</p>`}
+    </article>`;
+  };
   return `<section class="trial-desk" aria-label="Сегодня ждём на пробное">
-    <div class="trial-desk-head"><div><h2>⚽ Сегодня ждём на пробное</h2><p>Расчёт при покупке сразу после ПУ · скидки применены автоматически</p></div><b class="trial-desk-count">${items.length}</b></div>
-    ${items.length?`<div class="trial-desk-list">${items.map(child=>`<details class="trial-desk-child" open>
-      <summary><span class="trial-desk-time">${esc(child.time||"—")}</span><span><b>${esc(child.name)}</b><small>${esc(child.branch)} · ${esc(child.group)}${child.age?` · ${esc(child.age)}`:""}${child.came?" · ПУ отмечено":" · ждём"}</small></span><button type="button" class="btn sm" data-trial-card="${child.id}">Карточка</button></summary>
-      <div class="trial-desk-contact">Родитель: <b>${esc(child.parent||"не указан")}</b>${child.phone?` · <a href="tel:${esc(child.phone)}">${esc(fmtPhone(child.phone))}</a>`:""}</div>
-      ${child.offers.length?`<div class="trial-offers">${child.offers.map(offer=>`<article><h3>${esc(offer.label)}</h3><div class="trial-offer-months">${monthPart(offer.current)}${monthPart(offer.next)}<span class="trial-offer-total"><b>Вместе</b><em>два месяца</em><strong>${rub(offer.bundle_total)}</strong></span></div>${offer.current.discount?`<p>Скидка: ${esc(offer.current.discount)} · ${offer.current.discount_percent}%</p>`:""}</article>`).join("")}</div>`:`<p class="need-err">Расчёт пока недоступен — откройте карточку и проверьте группу.</p>`}
-    </details>`).join("")}</div>`:`<p class="trial-desk-empty">Сегодня записанных на пробное нет.</p>`}
+    <div class="trial-desk-head"><h2>Сегодня ждём на пробное</h2><b class="trial-desk-count">${items.length}</b></div>
+    ${items.length ? `<div class="trial-desk-list">${items.map(trialCard).join("")}</div>` : `<p class="trial-desk-empty">Сегодня записанных на пробное нет</p>`}
   </section>`;
 }
 
