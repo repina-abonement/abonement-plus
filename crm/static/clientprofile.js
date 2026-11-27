@@ -20,3 +20,42 @@ function openClientProfile(d,root,reload,addParent=false,focus='name') {
   };
   const field=addParent?list.lastElementChild.querySelector('input'):form.elements[focus==='name'?'name_last':focus];field?.focus();root.scrollIntoView({block:'nearest',behavior:'smooth'});
 }
+
+
+function openChildDetails(d, root, reload) {
+  if (!root.hidden) return;
+  const child = d.student;
+  root.innerHTML = `<form class="client-profile-form">
+    <div class="row">
+      <div class="field"><label for="child-details-name">Имя и фамилия</label><input id="child-details-name" name="name" required value="${esc(child.name)}"></div>
+      <div class="field"><label for="child-details-birth">Дата рождения</label><input id="child-details-birth" name="birth" type="date" value="${esc((child.birth || '').slice(0,10))}"></div>
+    </div>
+    <div class="need-err" role="alert"></div>
+    <div class="sc-actions"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-cancel-child>Отмена</button></div>
+  </form>`;
+  root.hidden = false;
+  const form = root.querySelector('form');
+  const save = form.querySelector('[type=submit]');
+  form.querySelector('[data-cancel-child]').onclick = () => {
+    if (save.disabled) return;
+    root.hidden = true;
+    root.replaceChildren();
+  };
+  form.onsubmit = async event => {
+    event.preventDefault();
+    if (save.disabled || !form.reportValidity()) return;
+    save.disabled = true;
+    try {
+      await api('PATCH', `/api/students/${child.id}/profile`, {
+        scope: 'child', expected: d.profile_token,
+        name: form.elements.name.value, birth: form.elements.birth.value,
+      });
+      toast('Данные сохранены');
+      reload();
+    } catch (error) {
+      form.querySelector('[role=alert]').textContent = error.message;
+      save.disabled = false;
+    }
+  };
+  form.elements.name.focus();
+}

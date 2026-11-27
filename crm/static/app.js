@@ -2845,14 +2845,22 @@ async function openStudent(id, options = {}) {
   </div>
 
   <div class="section" data-sc="family" data-title="Данные ребёнка и семьи">
-    <h3>Данные ребёнка</h3>
+    <div class="row"><h3 class="grow">Данные ребёнка</h3>${full ? '<button type="button" class="btn sm" data-edit-child>Редактировать</button>' : ""}</div>
     ${s.erp_branch_labels ? `<div class="field"><label>Филиалы из ERP</label><div>${esc(s.erp_branch_labels.split("; ").join(" · "))}</div></div>` : ""}
 
     <div class="row"><div class="field"><label>Имя и фамилия</label><div>${esc(displayChildName(s.name))}</div></div><div class="field"><label>Дата рождения</label><div>${s.birth?esc(s.birth.slice(0,10).split('-').reverse().join('.')):'Не указана'}</div></div>${reportedAgeText(s)?`<div class="field"><label>Возраст</label><div><b>${esc(reportedAgeText(s))}</b></div></div>`:''}</div>
-    <div class="field"><label>Рекламный источник</label>${sourceSelect("f-source", s.source_id, s.source)}</div>
-    <div data-client-stage></div>
+    <div data-edit-child-form hidden></div>
+    <fieldset data-client-parameters disabled style="border:0;padding:0;margin:0;min-width:0">
+      <div class="field"><label>Рекламный источник</label>${sourceSelect("f-source", s.source_id, s.source)}</div>
+      <div data-client-stage></div>
+    </fieldset>
+    ${full ? '<button type="button" class="btn sm" data-edit-client-parameters>Редактировать параметры</button>' : ''}
+
     <h3>Семья ${esc(d.family.name)}</h3>
-    <div class="field"><label>Заметка для персонала (видна в шапке карточки)</label><textarea id="fam-note" rows="2" placeholder="Например: аллергия, звонить только маме">${esc(d.family.note || "")}</textarea></div>
+    <div class="field"><label>Заметка для команды</label><div>${esc(d.family.note || "Не указана")}</div></div>
+    ${full ? `<button type="button" class="btn sm" data-edit-family>Редактировать заметку</button>
+    <form data-family-note hidden><div class="field"><label for="family-note">Заметка для команды</label><textarea id="family-note" name="note" rows="2" maxlength="500">${esc(d.family.note || "")}</textarea></div>
+    <div class="sc-actions"><button type="submit" class="btn primary">Сохранить</button><button type="button" class="btn" data-cancel-family>Отмена</button></div></form>` : ''}
     <dl class="sc-family-contacts">${d.parents.map((p) => `<div class="sc-contact-line"><dt>${esc(p.name)}</dt><dd>${p.phone ? `<button class="linkish" data-copy-phone="${esc(p.phone)}" title="Скопировать номер">${esc(fmtPhone(p.phone))}</button>` : `<span class="muted">Телефон не указан</span>`}${p.messenger ? ` <span class="pill">${esc(p.messenger)}</span>` : ""}</dd></div>`).join("")}</dl>
     ${d.siblings.length ? `<div style="margin-top:10px" class="chips">${d.siblings.map((x) => `<button class="chip" data-open="${x.id}">${esc(displayChildName(x.name))}</button>`).join("")}</div>` : ""}
     <button class="btn sm" style="margin-top:10px" id="add-sibling">+ Брат или сестра</button>
@@ -2934,12 +2942,45 @@ async function openStudent(id, options = {}) {
   }));
   body.querySelectorAll(".sc-head [data-dial]").forEach((b) => (b.onclick = () => dial(b.dataset.dial)));
   const profile=(add=false,focus='name')=>{if(full)openClientProfile(d,body.querySelector('#sc-profile-edit'),reload,add,focus)};
+  const editChild = body.querySelector('[data-edit-child]');
+  if (editChild) editChild.onclick = () => openChildDetails(d, body.querySelector('[data-edit-child-form]'), reload);
+  const editParameters = body.querySelector('[data-edit-client-parameters]');
+  if (editParameters) editParameters.onclick = () => {
+    const fields = body.querySelector('[data-client-parameters]');
+    fields.disabled = !fields.disabled;
+    editParameters.textContent = fields.disabled ? 'Редактировать параметры' : 'Закрыть редактирование';
+  };
+  const editFamily = body.querySelector('[data-edit-family]');
+  if (editFamily) {
+    const noteForm = body.querySelector('[data-family-note]');
+    const note = noteForm.elements.note;
+    const saveNote = noteForm.querySelector('[type=submit]');
+    editFamily.onclick = () => { noteForm.hidden = false; note.focus(); };
+    noteForm.querySelector('[data-cancel-family]').onclick = () => {
+      if (saveNote.disabled) return;
+      noteForm.reset();
+      noteForm.hidden = true;
+    };
+    noteForm.onsubmit = async event => {
+      event.preventDefault();
+      if (saveNote.disabled) return;
+      saveNote.disabled = true;
+      try {
+        await api('PATCH', `/api/families/${s.family_id}`, { note: note.value });
+        toast('Заметка сохранена');
+        reload();
+      } catch (error) {
+        fail(error);
+        saveNote.disabled = false;
+      }
+    };
+  }
   body.querySelectorAll('[data-profile-edit]').forEach(b=>b.onclick=()=>profile(false,b.dataset.profileEdit));
   body.querySelectorAll('[data-copy-parent-phone]').forEach(b=>b.onclick=async e=>{e.stopPropagation();const phone=d.parents[+b.dataset.copyParentPhone]?.phone;if(phone)await copyTextWithNotice(phone,'Номер скопирован','phone')});
   const bindEdit=(selector,callback)=>body.querySelectorAll(selector).forEach(el=>{el.onclick=callback;el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();callback()}}});
   bindEdit('[data-profile-open]',()=>profile(false,'birth'));bindEdit('[data-profile-note]',()=>profile(false,'note'));
   body.querySelectorAll('[data-client-add]').forEach(b=>b.onclick=()=>{const root=body.querySelector('#sc-profile-edit');root.hidden=false;root.innerHTML='<div class="client-profile-form"><h4>Кого добавить в семью?</h4><div class="sc-actions"><button type="button" class="btn" data-add-contact>Родителя</button><button type="button" class="btn" data-add-family-child>Брата или сестру — клиента</button><button type="button" class="btn" data-add-close>Отмена</button></div></div>';root.querySelector('[data-add-contact]').onclick=()=>profile(true);root.querySelector('[data-add-family-child]').onclick=()=>$('#add-sibling').click();root.querySelector('[data-add-close]').onclick=()=>{root.hidden=true;root.replaceChildren()}});
-  bindEdit('[data-head-group]',()=>{if(isMember){scTab('abon');const move=body.querySelector('[data-sub-detail-month]:not([hidden]) [data-sub-transfer]');if(move){move.click();move.scrollIntoView({block:'center'})}else toast('Сначала выберите действующий абонемент для перевода',true)}else{scTab('info');openFold(body,'family');$('#f-group')?.focus()}});
+  bindEdit('[data-head-group]',()=>{if(isMember){scTab('abon');const move=body.querySelector('[data-sub-detail-month]:not([hidden]) [data-sub-transfer]');if(move){move.click();move.scrollIntoView({block:'center'})}else toast('Сначала выберите действующий абонемент для перевода',true)}else{scTab('info');openFold(body,'family');body.querySelector('[data-edit-client-parameters]')?.focus()}});
   const firstPhone = (d.parents.find(p=>p.is_primary&&p.phone)||d.parents.find(p=>p.phone)||{}).phone;
   if ($("#act-call")) $("#act-call").onclick = () => dial(firstPhone);
   if ($("#act-sell")) $("#act-sell").onclick = () => openSell(d, reload);
@@ -3016,7 +3057,6 @@ async function openStudent(id, options = {}) {
     if (!confirm("Остановить автоцепочку для этого клиента? Больше сообщений по ней не уйдёт")) return;
     try { await api("POST", `/api/chain-runs/${b.dataset.chstop}/stop`, {}); toast("Цепочка остановлена"); reload(); } catch (e) { fail(e); }
   }));
-  if ($("#fam-note")) $("#fam-note").onchange = async (e) => { try { await api("PATCH", `/api/families/${s.family_id}`, { note: e.target.value }); toast("Заметка сохранена"); reload(); } catch (err) { fail(err); } };
 
   if (isMember) loadWarnBox(s.family_id, body.querySelector("#warn-box"), id);
   if ($("#mk-slots")) loadSlots($("#mk-slots"), async (x) => {

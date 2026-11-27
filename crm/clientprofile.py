@@ -30,6 +30,12 @@ def save(con,sid,data,user):
             try:b=date.fromisoformat(birth)
             except ValueError:raise sv.ApiError('Проверьте дату рождения')
             if not date(2000,1,1)<b<sv.today():raise sv.ApiError('Проверьте дату рождения')
+        if data.get('scope') == 'child':
+            if (name, birth) != (s['name'], s['birth'] or ''):
+                con.execute('UPDATE students SET name=?,birth=? WHERE id=?', (name,birth,sid))
+                sv.audit(con,user,'client.profile_child',str(sid))
+            con.execute('RELEASE client_profile')
+            return {'ok':True}
         rows=data.get('parents')
         if not isinstance(rows,list) or not rows or len(rows)>20:raise sv.ApiError('Укажите контакты родителей')
         existing={r['id']:dict(r) for r in con.execute('SELECT * FROM parents WHERE family_id=?',(fid,))}

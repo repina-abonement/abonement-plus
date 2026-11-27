@@ -10,6 +10,22 @@ class ProfileTest(unittest.TestCase):
         s=sv.get_student_row(self.con,self.sid);self.fid=s['family_id']
         p=dict(self.con.execute('SELECT * FROM parents WHERE family_id=?',(self.fid,)).fetchone())
         self.body={'name':'Матвей Тестовый','birth':'2021-01-01','note':'Позвонить папе','expected':clientprofile.signature(self.con,self.sid),'parents':[{**p,'is_primary':False},{'name':'Павел','phone':'+79001114455','relation':'папа','email':'','messenger':'@test_parent','is_primary':True}]}
+    def test_child_edit_leaves_family_and_other_fields_untouched(self):
+        before = clientprofile.signature(self.con,self.sid)
+        self.con.execute("DELETE FROM parents WHERE family_id=?", (self.fid,))
+        expected = clientprofile.signature(self.con,self.sid)
+        data = {'scope':'child','expected':expected,'name':'Матвей Тестовый',
+                'birth':'2021-01-01','note':'Не менять','stage':'no_answer'}
+        self.assertNotEqual(before, expected)
+        clientprofile.save(self.con,self.sid,data,self.user)
+        row = sv.get_student_row(self.con,self.sid)
+        self.assertEqual((row['name'],row['birth']), ('Матвей Тестовый','2021-01-01'))
+        self.assertNotEqual(row['stage'], 'no_answer')
+        self.assertEqual(self.con.execute("SELECT note FROM families WHERE id=?", (self.fid,)).fetchone()[0], '')
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM parents WHERE family_id=?", (self.fid,)).fetchone()[0], 0)
+        with self.assertRaises(sv.ApiError):
+            clientprofile.save(self.con,self.sid,data,self.user)
+
     def test_edit_add_primary_and_no_message(self):
         clientprofile.save(self.con,self.sid,self.body,self.user)
         d=sv.student_detail(self.con,self.sid)
