@@ -9,6 +9,41 @@ CATEGORIES={'duplicate':'Дубликат','test':'Тестовая карточ
 PROTECTED={'subscriptions','payments','attendance','single_visits','erp_trial_visits','pay_links','historical_entries'}
 
 
+BLOCKER_LABELS = {
+    'subscriptions': 'Абонементы', 'payments': 'Оплаты', 'attendance': 'Посещения и пропуски',
+    'single_visits': 'Разовые занятия', 'erp_trial_visits': 'Пробные занятия из ERP',
+    'pay_links': 'Платёжные ссылки', 'historical_entries': 'Записи прошлых периодов',
+    'erp_full_identities': 'Связь карточки с ERP', 'erp_rows': 'Строки переноса из ERP',
+    'erp_history_subscriptions': 'Абонементы из ERP', 'erp_history_visits': 'Посещения из ERP',
+    'erp_prior_memberships': 'История абонементов из ERP', 'chat_day_transfer_events': 'Записи переноса из переписки',
+    'tasks': 'Задачи', 'enrollments': 'Записи в группы', 'makeups': 'Отработки',
+    'subscription_refunds': 'Возвраты', 'subscription_cancellations': 'Отмены абонементов',
+    'refund_requests': 'Заявки на возврат', 'erp_full_rows': 'Исходные строки ERP',
+}
+
+
+def blocker_summary(table, rows):
+    label = BLOCKER_LABELS.get(table)
+    if label is None and table.startswith('erp_'):
+        label = 'Связанные данные ERP'
+    records = []
+    for row in rows[:20]:
+        record = {}
+        if type(row.get('id')) is int:
+            record['id'] = row['id']
+        erp_id = str(row.get('erp_id') or '')
+        if table.startswith('erp_') and re.fullmatch(r'[0-9]{1,18}', erp_id):
+            record['erp_id'] = erp_id
+        for key in ('paid_at', 'date', 'visit_at', 'month', 'valid_from', 'source_at', 'created_at'):
+            value = row.get(key)
+            if isinstance(value, str) and re.fullmatch(r'\d{4}-\d{2}(?:-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?)?', value):
+                record['date'] = value[:10]
+                break
+        if record:
+            records.append(record)
+    return {'table': table, 'label': label or 'Связанные записи', 'count': len(rows), 'records': records}
+
+
 def preview(con,sid,user):
     if not subcancel.can_cancel_error(con,user):raise sv.ApiError('Удаление ошибочных карточек доступно руководителю и Варе',403)
     student=dict(sv.get_student_row(con,sid));relations=[];blockers=[]
@@ -22,7 +57,7 @@ def preview(con,sid,user):
             rows=[dict(r) for r in con.execute(f'SELECT * FROM "{table}" WHERE "{column}"=?',(sid,))]
             if not rows:continue
             relations.append({'table':table,'column':column,'rows':rows})
-            if table in PROTECTED or action!='CASCADE':blockers.append({'table':table,'count':len(rows)})
+            if table in PROTECTED or action!='CASCADE':blockers.append(blocker_summary(table, rows))
     state={'student':student,'relations':relations}
     token=hashlib.sha256(json.dumps(state,sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
     return {'student_id':sid,'name':student['name'],'token':token,'allowed':not blockers,'blockers':blockers,'state':state}

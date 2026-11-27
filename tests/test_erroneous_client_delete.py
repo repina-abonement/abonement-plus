@@ -30,6 +30,13 @@ class ErroneousClientDelete(unittest.TestCase):
         self.con.execute("INSERT INTO payments(student_id,amount,method,paid_at,created_at) VALUES (?,950,'card_branch','2026-11-18','2026-11-18')",(self.sid,))
         q=studentdelete.preview(self.con,self.sid,self.user)
         self.assertFalse(q['allowed'])
+        from crm import server
+        public = server.student_error_delete_preview(self.con,None,self.user,{}, {},str(self.sid))
+        self.assertNotIn('state',public)
+        payment = next(blocker for blocker in public['blockers'] if blocker['table']=='payments')
+        payment_id = self.con.execute('SELECT id FROM payments').fetchone()[0]
+        self.assertEqual(payment,{'table':'payments','label':'Оплаты','count':1,
+                                  'records':[{'id':payment_id,'date':'2026-11-18'}]})
         with self.assertRaises(sv.ApiError):studentdelete.delete(self.con,self.sid,self.user,{'token':q['token'],'category':'duplicate','reason':'Synthetic duplicate','confirmed_error':True})
         with self.assertRaises(sv.ApiError):studentdelete.preview(self.con,self.sid,{'id':999,'role':'operator'})
         self.assertEqual(self.con.execute('SELECT SUM(amount) FROM payments').fetchone()[0],950)
