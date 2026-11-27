@@ -56,8 +56,12 @@ def plan(con, file_id, erp_ids, since="2026-11-01"):
     file = files[0]
     if file["kind"] != "subs":
         raise PriorityHistoryError("Выберите файл «Проданные абонементы»")
-    students = {str(row["erp_id"]): dict(row) for row in con.execute(
-        "SELECT id,name,erp_id FROM students WHERE archived=0 AND erp_id!=''")}
+    candidates = {}
+    for row in con.execute("""SELECT s.id,s.name,s.erp_id AS source_id FROM students s WHERE s.archived=0 AND s.erp_id!=''
+        UNION SELECT s.id,s.name,i.source_id FROM erp_full_identities i JOIN students s ON s.id=i.student_id
+        WHERE i.namespace='student' AND s.archived=0"""):
+        candidates.setdefault(row["source_id"], []).append(row)
+    students = {eid: rows[0] for eid, rows in candidates.items() if len(rows) == 1}
     entries, found, issues = [], set(), []
     for number, row in enumerate(file["rows"], 2):
         item = _entry(file, row)

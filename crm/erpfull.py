@@ -206,7 +206,10 @@ class Matcher:
                 return None, 'Событие связано с несколькими заявками или клиентами'
             sid = self.identities.get(('lead', eid))
             return (sid, '') if sid else (None, 'ID заявки ERP не сопоставлен с карточкой; ID ученика не используется')
-        ids = self.by_id.get(eid, set()) if eid and not lead else set()
+        linked = self.identities.get(("student", eid)) if eid and not lead else None
+        ids = set(self.by_id.get(eid, ())) if eid and not lead else set()
+        if linked:
+            ids.add(linked)
         if not ids and name and phone:
             ids = self.by_np.get((tuple(sorted(name.split())), phone), set())
         if not ids and kind == 'clients' and not name and phone:
@@ -224,7 +227,7 @@ class Matcher:
         s = self.students[sid]
         if lead and eid and self.identities.get(('lead', eid), sid) != sid:
             return None, 'ID заявки ERP связан с другой карточкой'
-        if not lead and eid and s.get('erp_id') and s['erp_id'] != eid:
+        if not lead and eid and s.get('erp_id') and s['erp_id'] != eid and linked != sid:
             return None, 'Совпали имя и телефон, но различаются ID ERP'
         # Reusing an ERP ID cannot silently change a known person's identity.
         if not lead and eid and name and name != ei._norm(s['name']):

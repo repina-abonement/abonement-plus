@@ -140,11 +140,50 @@ def _apply_profile(con, sid, rec, user, visitor_cards=False):
     return preview
 
 
+# Pairs confirmed by the owner. Each ERP ID remains available for later imports.
+VISITOR_PAIRS = (
+    ("68349", "99699"), ("100563", "82964"), ("113503", "119677"),
+    ("89227", "68726"), ("128139", "98809"), ("122798", "116222"),
+)
+
+
+def _confirmed_pair(con, matcher, rows):
+    records = [row[0] for row in rows]
+    names = [tuple(sorted(ei._norm(rec["child_name"]).split())) for rec in records]
+    dates = [erpfull._date(rec.get("birth", "")) for rec in records]
+    phones = [normalize_phone(rec.get("phone", "")) for rec in records]
+    if names[0] != names[1] or len(names[0]) < 2 or not dates[0] or dates[0] != dates[1] or not all(phones):
+        raise ValueError("Подтверждённая пара ERP изменилась")
+    targets = set()
+    families = set()
+    ids = {rec["erp_id"].strip() for rec in records}
+    for rec, phone in zip(records, phones):
+        eid = rec["erp_id"].strip()
+        targets.update(matcher.by_id.get(eid, ()))
+        linked = matcher.identities.get(("student", eid))
+        if linked:
+            targets.add(linked)
+        targets.update(matcher.by_np.get((names[0], phone[-10:]), ()))
+        families.update(family["id"] for family in sv.find_families_by_phone(con, phone))
+    if len(targets) > 1 or len(families) > 1:
+        raise ValueError("Подтверждённая пара уже связана с разными карточками или семьями CRM")
+    if targets:
+        sid = next(iter(targets))
+        card = matcher.students[sid]
+        if (card["archived"] or (card["erp_id"] and card["erp_id"] not in ids)
+                or tuple(sorted(ei._norm(card["name"]).split())) != names[0]
+                or (card["birth"] and card["birth"][:10] != dates[0][:10])
+                or families - {card["family_id"]}):
+            raise ValueError("Связь подтверждённой пары с карточкой CRM требует проверки")
+        return sid, next(iter(families), card["family_id"])
+    return None, next(iter(families), None)
+
+
 def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
     if not (visitors or leads) or set(visitors) & set(leads):
         raise ei.ImportError_("Выберите отдельно файлы посетителей и лидов")
-    if visitor_cards and (leads or erp_ids):
-        raise ei.ImportError_("Для массового переноса выберите только файлы посетителей и очистите фильтр ERP ID")
+    if visitor_cards and leads:
+        raise ei.ImportError_("Для массового переноса выберите только файлы посетителей")
     files = erpfull._files(con, visitors + leads)
     matcher = erpfull.Matcher(con)
     names = defaultdict(set)
@@ -193,6 +232,26 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
                 continue
             candidates[namespace, eid].append((rec, status, where))
 
+    pairs = {}
+    if visitor_cards:
+        for first, second in VISITOR_PAIRS:
+            keys = [("student", first), ("student", second)]
+            if not all(key in candidates for key in keys):
+                continue
+            left, right = (candidates[key] for key in keys)
+            try:
+                if len(left) != 1 or len(right) != 1:
+                    raise ValueError("В подтверждённой паре ERP обнаружены повторные строки")
+                sid, family = _confirmed_pair(con, matcher, [left[0], right[0]])
+            except ValueError as error:
+                issues.extend([rows[0][2], str(error)] for rows in (left, right))
+                for key in keys:
+                    del candidates[key]
+                continue
+            pairs[first] = (sid, family, right[0][0], right[0][1])
+            del candidates[keys[1]]
+            counts["repeated_rows"] += 1
+
     actions = []
     claimed = set()
     incoming_names = Counter(
@@ -212,9 +271,10 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
             issues.append([where, f"Противоречивые строки для ID {eid}"])
             continue
         counts["repeated_rows"] += len(rows) - 1
+        pair = pairs.get(eid)
         linked = matcher.identities.get((namespace, eid))
-        sid = linked
-        if not sid:
+        sid = pair[0] if pair else linked
+        if not sid and not pair:
             sid, reason = matcher.find(rec, "clients")
             # Both ERP records for this visitor were verified against the same family.
             if not lead and not sid and eid == "76621" and not matcher.by_id.get(eid):
@@ -264,6 +324,10 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
         if visitor_cards:
             rec = {key: value for key, value in rec.items()
                    if key in {"child_name", "birth", "phone", "parent_name", "email", "branch"}}
+            if pair:
+                rec["visitor_pair"] = pair[2] | {"erp_status": pair[3]}
+                rec["visitor_pair_family"] = pair[1]
+                rec["branch"] = "; ".join(filter(None, (rec.get("branch"), pair[2].get("branch"))))
             branch = _clean(rec.get("branch"))
             matches = _matching_branches(con, branch) if branch else []
             rec["visitor_branch_id"] = matches[0]["id"] if len(matches) == 1 else None
@@ -276,6 +340,9 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
             rec["visitor_branch_labels"] = (
                 "; ".join(labels) if len(labels) > 1 and not existing_branch and not student.get("erp_branch_labels") else ""
             )
+            if len(labels) == 1:
+                matches = _matching_branches(con, labels[0])
+                rec["visitor_branch_id"] = matches[0]["id"] if len(matches) == 1 else None
             if branch and len(labels) <= 1 and not existing_branch and not rec["visitor_branch_id"]:
                 issues.append([where, f"Филиал «{branch}» не найден однозначно. Остальные данные можно перенести"])
             rec["visitor_existing_branch"] = existing_branch
@@ -331,7 +398,7 @@ def transfer(con, visitors, leads, user, token=None, erp_ids=None, visitor_cards
             if visitor_cards:
                 parent, _role = _parent_name_and_role(parent)
             parent = parent or "Родитель"
-            family = families[0]["id"] if len(families) == 1 else None
+            family = rec.get("visitor_pair_family") or (families[0]["id"] if len(families) == 1 else None)
             if not family:
                 family = con.execute("INSERT INTO families(name) VALUES (?)", (parent,)).lastrowid
                 con.execute("INSERT INTO parents(family_id,name,phone,phone_norm) VALUES (?,?,?,?)",
@@ -350,6 +417,24 @@ def transfer(con, visitors, leads, user, token=None, erp_ids=None, visitor_cards
             comment = rec.get("comment", "").strip()
             if comment:
                 sv.log(con, sid, comment, user, "note")
+        if visitor_cards and rec.get("visitor_pair"):
+            alternate = rec["visitor_pair"]
+            family = sv.get_student_row(con, sid)["family_id"]
+            for profile in (rec, alternate):
+                phone = profile.get("phone", "")
+                normalized = normalize_phone(phone)
+                if not con.execute("SELECT 1 FROM parents WHERE family_id=? AND phone_norm=?", (family, normalized)).fetchone():
+                    parent, role = _parent_name_and_role(profile.get("parent_name"))
+                    con.execute("""INSERT INTO parents(family_id,name,phone,phone_norm,email,relation)
+                        VALUES (?,?,?,?,?,?)""",
+                        (family, parent or "Родитель", phone, normalized, profile.get("email", ""), role))
+            _apply_profile(con, sid, {key: alternate.get(key) for key in ("child_name", "birth", "phone", "parent_name", "email")}, user, True)
+            alias = alternate["erp_id"].strip()
+            con.execute("INSERT OR IGNORE INTO erp_full_identities(namespace,source_id,student_id) VALUES ('student',?,?)",
+                        (alias, sid))
+            note = f"ERP ID {alias}: {alternate['erp_status'] or 'статус не указан'}"
+            if not con.execute("SELECT 1 FROM history WHERE student_id=? AND kind='note' AND text=?", (sid, note)).fetchone():
+                sv.log(con, sid, note, {"name": "ERP"}, "note")
         _apply_profile(con, sid, rec, user, visitor_cards)
         if visitor_cards and rec["visitor_branch_id"] and not rec["visitor_existing_branch"]:
             con.execute("UPDATE students SET branch_id=? WHERE id=? AND branch_id IS NULL",
