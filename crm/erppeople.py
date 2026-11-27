@@ -151,6 +151,7 @@ DISTINCT_VISITOR_IDS = {"92940", "132829", "95513", "114710", "108850", "110708"
 VISITOR_PAIRS = (
     ("68349", "99699"), ("100563", "82964"), ("113503", "119677"),
     ("89227", "68726"), ("128139", "98809"), ("122798", "116222"),
+    ("95317", "84213"),
 )
 
 
@@ -159,7 +160,10 @@ def _confirmed_pair(con, matcher, rows):
     names = [tuple(sorted(ei._norm(rec["child_name"]).split())) for rec in records]
     dates = [erpfull._date(rec.get("birth", "")) for rec in records]
     phones = [normalize_phone(rec.get("phone", "")) for rec in records]
-    if names[0] != names[1] or len(names[0]) < 2 or not dates[0] or dates[0] != dates[1] or not all(phones):
+    source_ids = tuple(rec["erp_id"].strip() for rec in records)
+    approved_birth = source_ids == ("95317", "84213") and dates == ["2020-07-30", "2020-07-31"]
+    if (names[0] != names[1] or len(names[0]) < 2 or not dates[0]
+            or (dates[0] != dates[1] and not approved_birth) or not all(phones)):
         raise ValueError("Подтверждённая пара ERP изменилась")
     targets = set()
     families = set()
@@ -181,7 +185,7 @@ def _confirmed_pair(con, matcher, rows):
         card = matcher.students[sid]
         if (card["archived"] or (card["erp_id"] and card["erp_id"] not in ids)
                 or tuple(sorted(ei._norm(card["name"]).split())) != names[0]
-                or (card["birth"] and card["birth"][:10] != dates[0][:10])
+                or (card["birth"] and (card["birth"][:10] not in dates if approved_birth else card["birth"][:10] != dates[0][:10]))
                 or families - {card["family_id"]}):
             raise ValueError("Связь подтверждённой пары с карточкой CRM требует проверки")
         return sid, next(iter(families), card["family_id"])
@@ -345,6 +349,8 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
             rec = {key: value for key, value in rec.items()
                    if key in {"child_name", "birth", "phone", "parent_name", "email", "branch", "unnamed_visitor"}}
             if pair:
+                if eid == "95317" and erpfull._date(rec.get("birth", "")) == "2020-07-30":
+                    rec["visitor_confirmed_birth"] = "2020-07-30"
                 rec["visitor_pair"] = pair[2] | {"erp_status": pair[3]}
                 rec["visitor_pair_family"] = pair[1]
                 rec["branch"] = "; ".join(filter(None, (rec.get("branch"), pair[2].get("branch"))))
@@ -458,6 +464,9 @@ def transfer(con, visitors, leads, user, token=None, erp_ids=None, visitor_cards
             if not con.execute("SELECT 1 FROM history WHERE student_id=? AND kind='note' AND text=?", (sid, note)).fetchone():
                 sv.log(con, sid, note, {"name": "ERP"}, "note")
         _apply_profile(con, sid, rec, user, visitor_cards)
+        if visitor_cards and rec.get("visitor_confirmed_birth"):
+            con.execute("UPDATE students SET birth=? WHERE id=? AND birth='2020-07-31'",
+                        (rec["visitor_confirmed_birth"], sid))
         if visitor_cards and rec["visitor_branch_id"] and not rec["visitor_existing_branch"]:
             con.execute("UPDATE students SET branch_id=? WHERE id=? AND branch_id IS NULL",
                         (rec["visitor_branch_id"], sid))
@@ -509,7 +518,7 @@ def transfer(con, visitors, leads, user, token=None, erp_ids=None, visitor_cards
 
 def apply_confirmed_visitor_pairs(con):
     """Apply only owner-confirmed pairs from the already uploaded register."""
-    marker = "confirmed_visitor_pairs_20261127"
+    marker = "confirmed_visitor_pairs_20261127_v2"
     saved = con.execute("SELECT value FROM settings WHERE key=?", (marker,)).fetchone()
     if saved:
         return saved["value"]
