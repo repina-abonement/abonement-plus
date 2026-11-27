@@ -2014,7 +2014,7 @@ async function renderWorkdesk(page) {
   if (!pipelineItems.some(item=>item.key===S.deskPipeline)) S.deskPipeline = (newCardsForDate?.columns||[]).some(column=>column.cards.length) ? "new" : "sales";
   const pipelineGroups = new Map();
   for (const item of pipelineItems) {
-    const group = item.group || "Очереди";
+    const group = item.group || "Очереди (пока не разбирать)";
     if (!pipelineGroups.has(group)) pipelineGroups.set(group, []);
     pipelineGroups.get(group).push(item);
   }
