@@ -561,3 +561,79 @@ def apply_unnamed_visitors(con):
         con.execute("INSERT INTO settings(key,value) VALUES (?, 'complete')", (marker,))
         return "complete"
     return f"review-required-{completed}-of-{len(UNNAMED_VISITOR_IDS)}"
+
+
+def apply_confirmed_visitor_contacts(con):
+    """Attach the two owner-confirmed ERP rows to their existing CRM cards."""
+    marker = "confirmed_visitor_contacts_20261127"
+    if con.execute("SELECT 1 FROM settings WHERE key=?", (marker,)).fetchone():
+        return "complete"
+    upload = con.execute("""SELECT id FROM erp_uploads
+        WHERE filename='Посетители (41).xlsx' AND kind='clients' ORDER BY id DESC LIMIT 1""").fetchone()
+    if not upload:
+        return "source-not-uploaded"
+    file = erpfull._files(con, [upload["id"]])[0]
+    rows = defaultdict(list)
+    for row in file["rows"]:
+        rec = erpfull._record(file, row)
+        rows[rec.get("erp_id", "").strip()].append(rec)
+
+    completed = 0
+    user = {"name": "CRM", "role": "admin"}
+    for sid, eid, expected_name, expected_parent, expected_phone in (
+        (1427, "78519", "козлов олег", "лилия", "79253884037"),
+        (1496, "88401", "дамир маиров", "оксана", "79663753894"),
+    ):
+        card = con.execute("SELECT * FROM students WHERE id=? AND archived=0", (sid,)).fetchone()
+        if not card or len(rows[eid]) != 1:
+            continue
+        rec = rows[eid][0]
+        parent_name, role = _parent_name_and_role(rec.get("parent_name"))
+        if (sorted(ei._norm(card["name"]).split()) != expected_name.split()
+                or sorted(ei._norm(ei._split_name(rec)).split()) != expected_name.split()
+                or ei._norm(parent_name) != expected_parent
+                or normalize_phone(rec.get("phone", "")) != expected_phone
+                or card["erp_id"] not in ("", None, eid)):
+            continue
+        links = {row[0] for row in con.execute("""SELECT id FROM students WHERE erp_id=?
+            UNION SELECT student_id FROM erp_full_identities WHERE namespace='student' AND source_id=?""", (eid, eid))}
+        if links - {sid}:
+            continue
+        family = card["family_id"]
+        parents = con.execute("SELECT * FROM parents WHERE family_id=?", (family,)).fetchall()
+        matching = [p for p in parents if p["phone_norm"] == expected_phone]
+        if len(matching) > 1 or (matching and ei._norm(matching[0]["name"]) != expected_parent):
+            continue
+        if sid == 1427 and not matching:
+            empty = [p for p in parents if ei._norm(p["name"]) == expected_parent and not _clean(p["phone"])]
+            if len(empty) != 1:
+                continue
+        if sid == 1496 and not any(p["phone_norm"] == "79264838328" for p in parents):
+            continue
+
+        con.execute("SAVEPOINT confirmed_visitor_contact")
+        try:
+            if not matching:
+                if sid == 1427:
+                    con.execute("UPDATE parents SET phone=?,phone_norm=? WHERE id=?",
+                                (rec["phone"], expected_phone, empty[0]["id"]))
+                else:
+                    con.execute("""INSERT INTO parents(family_id,name,phone,phone_norm,relation,is_primary)
+                        VALUES (?,?,?,?,?,0)""", (family, parent_name, rec["phone"], expected_phone, role))
+            con.execute("""INSERT OR IGNORE INTO erp_full_identities(namespace,source_id,student_id)
+                VALUES ('student',?,?)""", (eid, sid))
+            report, actions = _plan(con, [upload["id"]], [], [eid], visitor_cards=True)
+            if len(actions) != 1 or actions[0][2] != sid:
+                con.execute("ROLLBACK TO confirmed_visitor_contact")
+                continue
+            transfer(con, [upload["id"]], [], user, report["token"], [eid], visitor_cards=True)
+            completed += 1
+        except BaseException:
+            con.execute("ROLLBACK TO confirmed_visitor_contact")
+            raise
+        finally:
+            con.execute("RELEASE confirmed_visitor_contact")
+    if completed == 2:
+        con.execute("INSERT INTO settings(key,value) VALUES (?, 'complete')", (marker,))
+        return "complete"
+    return f"review-required-{completed}-of-2"
