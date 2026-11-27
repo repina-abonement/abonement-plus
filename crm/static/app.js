@@ -1251,7 +1251,7 @@ function erpPeopleSetup(box) {
       <details class="erp-card-options">
         <summary>Параметры переноса</summary>
         <label class="check erp-card-check"><input type="checkbox" id="erp-people-create-visitors" checked> Создавать недостающие карточки</label>
-        <div class="field"><label for="erp-people-ids">Только выбранные ERP ID</label><textarea id="erp-people-ids" rows="2" placeholder="Например: 64928, 65188" disabled></textarea><small class="muted">Чтобы проверить конкретные ID, выключите создание карточек.</small></div>
+        <div class="field"><label for="erp-people-ids">Только выбранные ERP ID</label><textarea id="erp-people-ids" rows="2" placeholder="Например: 64928, 65188"></textarea><small class="muted">Для переноса всего файла оставьте поле пустым.</small></div>
       </details>
       <div class="erp-card-actions">
         <button class="btn primary" id="erp-people-plan" disabled>Проверить</button>
@@ -1294,16 +1294,11 @@ function erpPeopleSetup(box) {
       ${!createVisitors.checked && (p.conflicts || []).length ? `<details open><summary>Расхождения карточки и ERP: ${p.conflicts.length}</summary><ul>${p.conflicts.map((item) => `<li>ERP ID ${esc(item.erp_id)} · ${esc(item.field)}: в CRM «${esc(item.crm)}», в ERP «${esc(item.erp)}». Значение CRM сохранится до ручной сверки</li>`).join("")}</ul></details>` : ""}
       ${report.issues.length ? `<details><summary>Требуют сверки: ${report.issues.length}</summary><ul>${report.issues.map(([row, reason]) => `<li>${esc(row)}: ${esc(reason)}</li>`).join("")}</ul></details>` : ""}`;
   }
-  visitors.onchange = ids.oninput = () => {
+  visitors.onchange = createVisitors.onchange = ids.oninput = () => {
     approved = null;
     apply.disabled = true;
     check.disabled = !visitors.files.length;
     out.replaceChildren();
-  };
-  createVisitors.onchange = () => {
-    ids.disabled = createVisitors.checked;
-    if (createVisitors.checked) ids.value = "";
-    visitors.onchange();
   };
   async function run(applyChanges) {
     const erp_ids = ids.value.split(/[^0-9]+/).filter(Boolean);
@@ -1327,7 +1322,7 @@ function erpPeopleSetup(box) {
       out.textContent = error.message;
     } finally {
       check.disabled = visitors.disabled = createVisitors.disabled = false;
-      ids.disabled = createVisitors.checked;
+      ids.disabled = false;
     }
   }
   check.onclick = () => run(false);
