@@ -67,13 +67,24 @@ def today_offers(con, user: dict, on: date | None = None) -> list[dict]:
                 WHERE id=?""", (day + "T" + (row["trial_at"] or "")[11:16], row["id"]))
             offers = []
             for tariff, ofp_group_id, label in _variants(con, group):
-                try:
-                    now_q = _quote(con, row["id"], group["id"], current, tariff, ofp_group_id, on, user)
-                    next_q = _quote(con, row["id"], group["id"], nxt, tariff, ofp_group_id, on, user)
-                except (sv.ApiError, ValueError):
-                    continue
-                offers.append({"tariff": tariff, "label": label, "current": now_q, "next": next_q,
-                               "bundle_total": now_q["total"] + next_q["total"]})
+                prices = {}
+                unavailable = {}
+                for key, month in (("current", current), ("next", nxt)):
+                    try:
+                        quote = _quote(con, row["id"], group["id"], month, tariff, ofp_group_id, on, user)
+                    except (sv.ApiError, ValueError) as error:
+                        quote = None
+                        unavailable[key] = {
+                            "month": month,
+                            "message": "После пробного занятий в этом месяце больше нет"
+                            if isinstance(error, sv.ApiError) and error.message == "В абонементе должно остаться хотя бы одно занятие"
+                            else "Не удалось рассчитать",
+                        }
+                    prices[key] = quote
+                if any(prices.values()):
+                    total = sum(q["total"] for q in prices.values()) if all(prices.values()) else None
+                    offers.append({"tariff": tariff, "label": label, **prices,
+                                   "unavailable": unavailable, "bundle_total": total})
         finally:
             con.execute("ROLLBACK TO SAVEPOINT trial_desk_quote")
             con.execute("RELEASE SAVEPOINT trial_desk_quote")

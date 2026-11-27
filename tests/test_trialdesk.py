@@ -43,6 +43,17 @@ class TrialDeskTest(unittest.TestCase):
         self.assertEqual(0, self.con.execute("SELECT COUNT(*) FROM subscriptions").fetchone()[0])
         self.assertEqual(0, self.con.execute("SELECT COUNT(*) FROM payments").fetchone()[0])
 
+    def test_december_quote_remains_after_last_november_class(self):
+        self.con.execute("UPDATE groups SET weekdays='1,4' WHERE id=?", (self.group,))
+        self.con.execute("UPDATE students SET trial_at='2026-11-27T18:45' WHERE id=?", (self.sid,))
+        child = trialdesk.today_offers(self.con, self.user, date(2026, 11, 27))[0]
+        for offer in child["offers"]:
+            self.assertIsNone(offer["current"])
+            self.assertIsNone(offer["bundle_total"])
+            self.assertEqual(offer["next"]["month"], "2026-12")
+            self.assertEqual(offer["next"]["lessons"], 9)
+        self.assertEqual(len(child["offers"]), 2)
+
     def test_other_days_are_not_shown(self):
         self.assertEqual([], trialdesk.today_offers(self.con, self.user, date(2026, 11, 25)))
 

@@ -1779,6 +1779,18 @@ function wireViewAs(page) {
 
 function todayTrialsPlaque(items) {
   const monthPart=(q)=>`<span><b>${esc(monthLabel(q.month))}</b><em>${q.lessons} ${plural(q.lessons,"занятие","занятия","занятий")}</em><strong>${rub(q.total)}</strong></span>`;
+  const offerCard = offer => {
+    const unavailable = part => {
+      const info = offer.unavailable?.[part];
+      return info ? `<span><b>${esc(monthLabel(info.month))}</b><em>${esc(info.message)}</em></span>` : "";
+    };
+    const quote = offer.current || offer.next;
+    return `<article><h3>${esc(offer.label)}</h3><div class="trial-offer-months">
+      ${offer.current ? monthPart(offer.current) : unavailable("current")}
+      ${offer.next ? monthPart(offer.next) : unavailable("next")}
+      ${offer.bundle_total == null ? "" : `<span class="trial-offer-total"><b>Вместе</b><em>два месяца</em><strong>${rub(offer.bundle_total)}</strong></span>`}</div>
+      ${quote?.discount ? `<p>Скидка: ${esc(quote.discount)} · ${quote.discount_percent}%</p>` : ""}</article>`;
+  };
   const trialCard = child => {
     const groupParts = String(child.group || "").split("·").map(part => part.trim()).filter(Boolean);
     const location = [...new Set([child.branch, ...groupParts, child.age].filter(Boolean))].join(" · ");
@@ -1793,7 +1805,7 @@ function todayTrialsPlaque(items) {
         <button type="button" class="btn sm" data-trial-card="${child.id}">Карточка</button>
       </div>
       ${child.offers.length ? `<details class="trial-desk-pricing"><summary>Расчёт абонемента</summary>
-        <div class="trial-offers">${child.offers.map(offer => `<article><h3>${esc(offer.label)}</h3><div class="trial-offer-months">${monthPart(offer.current)}${monthPart(offer.next)}<span class="trial-offer-total"><b>Вместе</b><em>два месяца</em><strong>${rub(offer.bundle_total)}</strong></span></div>${offer.current.discount ? `<p>Скидка: ${esc(offer.current.discount)} · ${offer.current.discount_percent}%</p>` : ""}</article>`).join("")}</div>
+        <div class="trial-offers">${child.offers.map(offerCard).join("")}</div>
         </details>` : `<p class="trial-desk-note">Расчёт недоступен. Проверьте группу в карточке</p>`}
     </article>`;
   };
