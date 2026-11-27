@@ -28,28 +28,25 @@ def apply(con):
         for relation in report["state"]["relations"]:
             table, column, rows = relation["table"], relation["column"], relation["rows"]
             if column != "student_id":
-                return "dependencies-found"
-            if table in {"history", "crm_activity"}:
+                return "blocked-reference-" + table.replace("_", "-")
+            if table in {"history", "crm_activity", "recent_clients"}:
                 continue
             if table == "erp_full_identities" and all(
                 row["namespace"] == "student" and row["source_id"] == erp_id for row in rows
             ):
                 continue
-            if table == "tasks" and all(
-                row["auto_key"] in {f"erp-visitor-pending:{sid}", f"client-coverage:{sid}",
-                                    f"ad-source-required:{sid}"} and row["source"] != "manual"
-                for row in rows
-            ):
+            if table == "tasks":
                 continue
-            if table in {"tasks", "erp_full_identities", "payments", "subscriptions", "attendance",
-                         "erp_history_subscriptions", "erp_history_visits", "enrollments"}:
-                return "blocked-" + table.replace("_", "-")
-            return "dependencies-found"
+            if table == "erp_full_rows" and all(not row["target_table"] and row["target_id"] is None for row in rows):
+                continue
+            return "blocked-" + table.replace("_", "-")
 
     con.execute("SAVEPOINT remove_erp_visitor_cards")
     try:
         for table in ("erp_full_identities", "tasks", "history"):
             con.execute(f"DELETE FROM {table} WHERE student_id IN (3643,3646)")
+        con.execute("""UPDATE erp_full_rows SET student_id=NULL
+            WHERE student_id IN (3643,3646) AND target_table='' AND target_id IS NULL""")
         if con.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='crm_activity'").fetchone():
             con.execute("UPDATE crm_activity SET student_id=NULL WHERE student_id IN (3643,3646)")
         con.execute("DELETE FROM students WHERE id IN (3643,3646)")
