@@ -297,6 +297,17 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
             continue
         counts["repeated_rows"] += len(rows) - 1
         pair = pairs.get(eid)
+        confirmed_namesake = visitor_cards and not lead and eid == "130981"
+        if confirmed_namesake:
+            if (sorted(ei._norm(ei._split_name(rec)).split()) != ["даниил", "козлов"]
+                    or normalize_phone(rec.get("phone", "")) != "79168769820"
+                    or erpfull._date(rec.get("birth", "")) != "2019-03-08"
+                    or ei._norm(rec.get("parent_name", "")) != "сергей"):
+                issues.append([where, "Данные подтверждённого тёзки изменились"])
+                continue
+            rec = dict(rec)
+            rec["source"] = rec.get("source") or "Рекомендация друзей"
+            rec["relation"] = "папа"
         linked = matcher.identities.get((namespace, eid))
         sid = pair[0] if pair else linked
         if not sid and not pair:
@@ -328,13 +339,18 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
                         for candidate_name, candidate_phone in matcher.by_np
                     )
                 else:
-                    ambiguous = eid not in DISTINCT_VISITOR_IDS and (bool(names.get(name)) or incoming_names[name] > 1)
+                    ambiguous = not confirmed_namesake and eid not in DISTINCT_VISITOR_IDS and (bool(names.get(name)) or incoming_names[name] > 1)
                 if (not name and not rec.get("unnamed_visitor")) or not phone or ambiguous:
                     issues.append([where, "Нет имени или телефона либо найден тёзка. Сверьте личность"])
                     continue
             elif not sid and (not lead or reason != "Не найдено однозначное совпадение"):
                 issues.append([where, reason])
                 continue
+        if confirmed_namesake and sid and (sid == 65 or
+                matcher.students[sid]["birth"] not in (None, "", "2019-03-08") or
+                "9168769820" not in matcher.phones[sid]):
+            issues.append([where, "Проверьте связь с карточкой Даниила и контактом Сергея"])
+            continue
         if lead and sid and not linked and (sid in claimed or sid in known_visitors or
                                              matcher.students[sid]["funnel"] == "members" or
                                              matcher.students[sid]["erp_id"]):
