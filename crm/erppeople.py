@@ -483,3 +483,25 @@ def transfer(con, visitors, leads, user, token=None, erp_ids=None, visitor_cards
             (now_iso(),))
     sv.audit(con, user, "erp.people", erpfull._json(report["counts"]))
     return report
+
+
+def apply_confirmed_visitor_pairs(con):
+    """Apply only owner-confirmed pairs from the already uploaded register."""
+    marker = "confirmed_visitor_pairs_20261127"
+    saved = con.execute("SELECT value FROM settings WHERE key=?", (marker,)).fetchone()
+    if saved:
+        return saved["value"]
+    upload = con.execute("""SELECT id FROM erp_uploads
+        WHERE filename='Посетители (41).xlsx' AND kind='clients' ORDER BY id DESC LIMIT 1""").fetchone()
+    if not upload:
+        return "source-not-uploaded"
+    user = {"name": "CRM", "role": "admin"}
+    ids = [eid for pair in VISITOR_PAIRS for eid in pair]
+    report, actions = _plan(con, [upload["id"]], [], ids, visitor_cards=True)
+    if set(report["filter"]["found"]) != set(ids):
+        return "source-incomplete"
+    if report["issues"] or len(actions) != len(VISITOR_PAIRS):
+        return "review-required"
+    transfer(con, [upload["id"]], [], user, report["token"], ids, visitor_cards=True)
+    con.execute("INSERT INTO settings(key,value) VALUES (?, 'complete')", (marker,))
+    return "complete"

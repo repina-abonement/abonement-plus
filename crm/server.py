@@ -3984,6 +3984,7 @@ class Handler(BaseHTTPRequestHandler):
     maintenance_356 = None
     maintenance_356_reset = None
     visitor_cleanup = None
+    confirmed_visitor_pairs = None
     visitor_family_cleanup = None
 
     def log_message(self, fmt, *args):
@@ -4009,6 +4010,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("X-CRM-Maintenance-356", self.maintenance_356)
         if self.path == "/" and self.visitor_family_cleanup:
             self.send_header("X-CRM-Visitor-Family-Cleanup", self.visitor_family_cleanup)
+        if self.path == "/" and self.confirmed_visitor_pairs:
+            self.send_header("X-CRM-Confirmed-Visitor-Pairs", self.confirmed_visitor_pairs)
         if self.path == "/" and self.visitor_cleanup:
             self.send_header("X-CRM-Visitor-Cleanup", self.visitor_cleanup)
         if self.path == "/" and self.maintenance_356_reset:
@@ -4292,6 +4295,8 @@ def _startup():
         Handler.maintenance_356_reset = maintenance_356.reset_payment(con)
         from . import maintenance_visitor_cleanup
         Handler.visitor_cleanup = maintenance_visitor_cleanup.apply(con)
+        from . import erppeople
+        Handler.confirmed_visitor_pairs = erppeople.apply_confirmed_visitor_pairs(con)
         Handler.visitor_family_cleanup = maintenance_visitor_cleanup.release_empty_family(con)
         con.commit()
         Handler.maintenance_354 = maintenance_result
