@@ -830,6 +830,27 @@ function kpiCard(ic, title, value, k, extra = "") {
     ${k ? `<div class="kpi-deltas">${delta(k.vs_month, "мес. назад")}${k.vs_year !== undefined ? delta(k.vs_year, "год назад") : ""}</div>` : ""}</div>${extra}</div>`;
 }
 
+const formatRate = (value) => Number(value).toLocaleString("ru-RU", { maximumFractionDigits: 1 });
+
+function renewalCard(k) {
+  const dateLabel = (iso) => esc(birthDisplay(iso));
+  const percent = (value) => value == null ? "—" : `${formatRate(value)} %`;
+  const comparison = (label, day, rate, change) => {
+    const difference = change == null ? "" : `${change > 0 ? "+" : ""}${formatRate(change)} п. п.`;
+    const color = change > 0 ? "up" : change < 0 ? "down" : "";
+    return `<div class="renewal-comparison"><span>${label}${day ? " · " + dateLabel(day) : ""}</span>
+      <b>${percent(rate)}</b><span class="${color}">${difference}</span></div>`;
+  };
+  const detail = k.value == null ? esc(k.reason || "Недостаточно данных для расчёта") :
+    `Продлили ${fmtNum(k.renewed)} из ${fmtNum(k.previous)} учеников прошлого месяца`;
+  return kpiCard("trend", "Конверсия продления", percent(k.value), null,
+    `<div class="kpi-note">${k.as_of ? "На " + dateLabel(k.as_of) + " · " : ""}${detail}</div>
+     <div class="renewal-comparisons">
+       ${comparison("Месяц назад", k.month_as_of, k.month_value, k.vs_month)}
+       ${comparison("Год назад", k.year_as_of, k.year_value, k.vs_year)}
+     </div>`);
+}
+
 function lineChart(labels, cur, prev, fmt) {
   const W = 640, H = 230, L = 58, R = 12, T = 14, B = 44;
   const vals = [...cur, ...prev].filter((v) => v !== null && v !== undefined);
@@ -1018,7 +1039,7 @@ async function renderDashboard(page) {
       ${kpiCard("cart", "Уникальных держателей абонементов", fmtNum(k.holders.value), k.holders, `<div class="kpi-note">ребёнок с абонементами в две группы считается один раз</div>`)}
       ${kpiCard("calc", "Средний чек", `${fmtNum(k.avg.value)} <small>₽</small>`, k.avg, `<div class="kpi-note">средняя сумма одного абонемента</div>`)}
       ${kpiCard("pie", "Заполненность", `<span class="fill2"><span><em>по абонементам</em>${k.fill.subs ?? "—"} <small>%</small></span><span><em>по уникальным</em>${k.fill.value ?? "—"} <small>%</small></span></span>`, { vs_month: k.fill.vs_month }, `<div class="kpi-note">${k.fill.subs_count} абонементов и ${k.holders.value} учеников на ${k.seats} мест</div>`)}
-      ${kpiCard("trend", "Конверсия из месяца в месяц", `${k.conversion.value ?? "—"} <small>%</small>`, k.conversion, `<div class="kpi-note">продлили из тех, кто занимался в прошлом месяце</div>`)}
+      ${renewalCard(k.conversion)}
       ${kpiCard("user", "Количество мест", `${fmtNum(k.seats)} <small>шт</small>`, null, `<div class="kpi-note">сумма мест во всех группах</div>`)}
     </div>
 
@@ -1041,7 +1062,7 @@ async function renderDashboard(page) {
       <section class="panel"><div class="panel-head">Выручка по месяцам</div>${lineChart(d.months, sr.revenue.cur, sr.revenue.prev, kRub)}</section>
       <section class="panel"><div class="panel-head">Количество уникальных держателей абонементов</div>${lineChart(d.months, sr.holders.cur, sr.holders.prev, fmtNum)}</section>
       <section class="panel"><div class="panel-head">Средний чек по месяцам</div>${lineChart(d.months, sr.avg.cur, sr.avg.prev, fmtNum)}</section>
-      <section class="panel"><div class="panel-head">Конверсия из месяца в месяц, %</div>${lineChart(d.months, sr.conversion.cur, sr.conversion.prev, (t) => Math.round(t))}</section>
+      <section class="panel"><div class="panel-head">Конверсия продления, %</div>${lineChart(d.months, sr.conversion.cur, sr.conversion.prev, formatRate)}</section>
       <section class="panel"><div class="panel-head">Воронка продаж по лидам · ${esc(d.month_label)}</div>${funnelChart(d.funnel_leads)}</section>
       <section class="panel"><div class="panel-head">Воронка продаж по записанным на пробное · ${esc(d.month_label)}</div>${funnelChart(d.funnel_trials)}</section>
       <section class="panel">

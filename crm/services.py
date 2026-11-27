@@ -1792,7 +1792,8 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
         br_arg=(group_id,group_id)
     holder_args = (group_id or branch_id,) if group_id or branch_id else ()
     from functools import lru_cache
-    from . import dashboard_sales
+    from . import dashboard_renewals, dashboard_sales
+    renewal = dashboard_renewals.periods(con, today(), branch_id, group_id)
 
     @lru_cache(None)
     def card_month(m):
@@ -1822,11 +1823,10 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
         if m in cache:
             return cache[m]
         h, other_revenue = card_month(m)
-        prev, _ = card_month(logic.shift_month(m, -1))
         revenue = sum(sum(v) for v in h.values())
         n_subs = sum(len(v) for v in h.values())
         st = {"revenue": revenue + other_revenue, "holders": len(h), "subs": n_subs, "avg": round(revenue / n_subs) if n_subs else 0,
-              "conversion": _pct(len(set(h) & set(prev)), len(prev)), "ids": set(h),
+              "ids": set(h),
               "prices": {k: sum(v) for k, v in h.items()}}
         cache[m] = st
         return st
@@ -1882,10 +1882,20 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
     # графики: 12 месяцев, текущий и прошлый год
     months = [logic.shift_month(cur, -i) for i in range(11, -1, -1)]
     series = {}
-    for key in ("revenue", "holders", "avg", "conversion"):
+    for key in ("revenue", "holders", "avg"):
         val = lambda m: month_stats(m)[key] if month_stats(m)["holders"] or (key == "revenue" and month_stats(m)["revenue"]) else None
         series[key] = {"cur": [val(x) for x in months],
                        "prev": [val(logic.shift_month(x, -12)) for x in months]}
+
+    conversion = dict(renewal(cur))
+    for label, offset in (("month", -1), ("year", -12)):
+        reference = renewal(cur, offset)
+        conversion[label + "_value"] = reference["value"]
+        conversion[label + "_as_of"] = reference["as_of"]
+        conversion["vs_" + label] = (round(conversion["value"] - reference["value"], 1)
+                                     if None not in (conversion["value"], reference["value"]) else None)
+    series["conversion"] = {"cur": [renewal(m)["value"] for m in months],
+                            "prev": [renewal(m, -12)["value"] for m in months]}
 
     # отработки (своё, нет в ERP)
     can_make_up, at_risk = 0, 0
@@ -1900,7 +1910,7 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
     return {
         "month": cur, "month_label": logic.month_label(cur),
         "kpi": {"revenue": kpi("revenue"), "holders": kpi("holders"), "avg": kpi("avg"),
-                "conversion": kpi("conversion"),
+                "conversion": conversion,
                 "fill": {"value": fill, "subs": fill_subs, "subs_count": c["subs"],
                          "vs_month": (fill - fill_m1) if fill is not None and fill_m1 is not None else None},
                 "seats": seats},
