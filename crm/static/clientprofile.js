@@ -25,6 +25,20 @@ function openClientProfile(d,root,reload,addParent=false,focus='name') {
   const initialParents = JSON.stringify(readParents().filter(parent => parent.id));
   const birth = form.elements.birth;
   const picker = form.querySelector('[data-profile-birth-picker]');
+  birth.addEventListener('input', () => {
+    const value = birth.value;
+    const digits = value.replace(/\D/g, '').slice(0, 8);
+    const formatted = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4)].filter(Boolean).join('.');
+    if (formatted === value) return;
+    let precedingDigits = value.slice(0, birth.selectionStart).replace(/\D/g, '').length;
+    let caret = 0;
+    while (caret < formatted.length && precedingDigits > 0) {
+      if (formatted[caret] !== '.') precedingDigits--;
+      caret++;
+    }
+    birth.value = formatted;
+    birth.setSelectionRange(caret, caret);
+  });
   picker.onchange = () => { birth.value = birthDisplay(picker.value); birth.focus(); };
   birth.onblur = () => {
     const iso = birthIso(birth.value);

@@ -48,7 +48,7 @@ const root=path.resolve(__dirname,'..'),assets=path.join(root,'crm/static');
  assert(await edit.isHidden());
  await page.locator('[data-edit-child]').click();
  await edit.locator('[name=birth]').fill('');
- await edit.locator('[name=birth]').pressSequentially('12.03.2020');
+ await edit.locator('[name=birth]').pressSequentially('12032020');
  assert.equal(await edit.locator('[name=birth]').inputValue(),'12.03.2020');
  await page.locator('.sc-tool[data-profile-edit]').click();
  assert.equal(await edit.locator('[name=birth]').inputValue(),'12.03.2020');
