@@ -229,7 +229,11 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
             if not existing_branch and student.get("group_id"):
                 group = con.execute("SELECT branch_id FROM groups WHERE id=?", (student["group_id"],)).fetchone()
                 existing_branch = group["branch_id"] if group else None
-            if branch and not existing_branch and not rec["visitor_branch_id"]:
+            labels = list(dict.fromkeys(_clean(label) for label in branch.split(";") if _clean(label)))
+            rec["visitor_branch_labels"] = (
+                "; ".join(labels) if len(labels) > 1 and not existing_branch and not student.get("erp_branch_labels") else ""
+            )
+            if branch and len(labels) <= 1 and not existing_branch and not rec["visitor_branch_id"]:
                 issues.append([where, f"Филиал «{branch}» не найден однозначно. Остальные данные можно перенести"])
             rec["visitor_existing_branch"] = existing_branch
             rec["visitor_source_status"] = status
@@ -245,7 +249,7 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
             fields = tuple((key, label) for key, label in fields if key not in {"relation", "source", "comment"})
             fields += (("branch", "Филиал"), ("status", "Статус"))
             preview["source"].update(branch=_clean(rec.get("branch")), status=rec["visitor_source_status"])
-            if rec["visitor_branch_id"] and not rec["visitor_existing_branch"]:
+            if rec["visitor_branch_labels"] or (rec["visitor_branch_id"] and not rec["visitor_existing_branch"]):
                 preview["fill"].append("Филиал")
             if rec["visitor_source_status"] and not _current:
                 preview["fill"].append("Статус")
@@ -304,6 +308,11 @@ def transfer(con, visitors, leads, user, token=None, erp_ids=None, visitor_cards
         if visitor_cards and rec["visitor_branch_id"] and not rec["visitor_existing_branch"]:
             con.execute("UPDATE students SET branch_id=? WHERE id=? AND branch_id IS NULL",
                         (rec["visitor_branch_id"], sid))
+        if visitor_cards and rec["visitor_branch_labels"]:
+            con.execute(
+                "UPDATE students SET erp_branch_labels=? WHERE id=? AND branch_id IS NULL AND erp_branch_labels=''",
+                (rec["visitor_branch_labels"], sid),
+            )
         if namespace == "lead":
             con.execute("""INSERT OR IGNORE INTO erp_lead_details
                 (source_id, territory, branch, channel) VALUES (?,?,?,?)""",

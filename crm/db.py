@@ -277,7 +277,7 @@ def init_db(con: sqlite3.Connection):
         con.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('cert_required_from', '9999')")
         con.execute("INSERT INTO settings(key, value) VALUES ('cert_off_2611', '1')")
     scols = {r[1] for r in con.execute("PRAGMA table_info(students)")}
-    for col in ("converted_at TEXT", "trial_booked_at TEXT", "trial_came INTEGER"):
+    for col in ("converted_at TEXT", "trial_booked_at TEXT", "trial_came INTEGER", "erp_branch_labels TEXT NOT NULL DEFAULT ''"):
         if col.split()[0] not in scols:
             con.execute(f"ALTER TABLE students ADD COLUMN {col}")
     if "capacity" not in cols:

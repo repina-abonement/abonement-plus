@@ -2846,6 +2846,8 @@ async function openStudent(id, options = {}) {
 
   <div class="section" data-sc="family" data-title="Данные ребёнка и семьи">
     <h3>Данные ребёнка</h3>
+    ${s.erp_branch_labels ? `<div class="field"><label>Филиалы из ERP</label><div>${esc(s.erp_branch_labels.split("; ").join(" · "))}</div></div>` : ""}
+
     <div class="row"><div class="field"><label>Имя и фамилия</label><div>${esc(displayChildName(s.name))}</div></div><div class="field"><label>Дата рождения</label><div>${s.birth?esc(s.birth.slice(0,10).split('-').reverse().join('.')):'Не указана'}</div></div>${reportedAgeText(s)?`<div class="field"><label>Возраст</label><div><b>${esc(reportedAgeText(s))}</b></div></div>`:''}</div>
     <div class="field"><label>Рекламный источник</label>${sourceSelect("f-source", s.source_id, s.source)}</div>
     <div data-client-stage></div>
