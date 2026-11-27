@@ -86,6 +86,10 @@ def _profile_preview(con, sid, rec, visitor_cards=False):
     for key, label in PROFILE_FIELDS:
         if not source[key] or current[key] == source[key]:
             continue
+        if visitor_cards and key == "parent_name":
+            crm_name, erp_name = ei._norm(current[key]), ei._norm(source[key])
+            if {crm_name, erp_name} == {"лилия", "лиля"}:
+                continue
         if key == "child_name" and ei._norm(current[key]) == ei._norm(source[key]):
             continue
         if key == "phone" and normalize_phone(source[key]) and normalize_phone(current[key]) == normalize_phone(source[key]):

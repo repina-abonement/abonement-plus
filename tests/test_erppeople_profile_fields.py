@@ -62,6 +62,19 @@ class ErpPeopleProfileFieldsTest(unittest.TestCase):
         self.assertEqual(tuple(self.con.execute("SELECT id,name,erp_id FROM students").fetchone()),
                          (sid, "Дмитрий Королёв", "80953"))
 
+    def test_visitor_parent_lilia_and_lilya_match(self):
+        sid = services.create_student(self.con, {
+            "name": "Иванов Александр", "parent_name": "лилия", "phone": "79001112233",
+        }, self.user)
+        self.con.execute("UPDATE students SET erp_id='42' WHERE id=?", (sid,))
+        data = ("ID;ФИО посетителя;Статус;Телефон;Имя родителя\n"
+                "42;Иванов Александр;Постоянный посетитель;79001112233;Лиля").encode()
+        visitors = [erpimport.upload(self.con, "visitors.csv", data, "clients")["id"]]
+        plan = erppeople.transfer(self.con, visitors, [], self.user, visitor_cards=True)
+        self.assertFalse(plan["profile"]["conflicts"])
+        erppeople.transfer(self.con, visitors, [], self.user, plan["token"], visitor_cards=True)
+        self.assertEqual(self.con.execute("SELECT name FROM parents").fetchone()[0], "лилия")
+
     def test_existing_card_is_enriched_without_duplicate_or_finance(self):
         sid = services.create_student(self.con, {
             "name": "Иванов Александр", "parent_name": "Родитель", "phone": "+7 900 111-22-33",
