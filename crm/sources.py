@@ -37,9 +37,14 @@ def init(con):
     cols = {r[1] for r in con.execute("PRAGMA table_info(students)")}
     if "source_id" not in cols:
         con.execute("ALTER TABLE students ADD COLUMN source_id INTEGER REFERENCES ad_sources(id)")
+    if "source_comment" not in cols:
+        con.execute("ALTER TABLE students ADD COLUMN source_comment TEXT NOT NULL DEFAULT ''")
     if not con.execute("SELECT 1 FROM ad_sources").fetchone():
         site = (con.execute("SELECT id FROM ad_channels WHERE name='Сайт'").fetchone() or con.execute("SELECT id FROM ad_channels ORDER BY id LIMIT 1").fetchone())[0]
         con.execute("INSERT INTO ad_sources(channel_id, name, created_at) VALUES (?,?,?)", (site, "Заявка с сайта", _now()))
+    if not con.execute("SELECT 1 FROM settings WHERE key='source_other_seeded_v1'").fetchone():
+        ensure_source(con, 'Другое', 'Прочие')
+        con.execute("INSERT INTO settings(key,value) VALUES ('source_other_seeded_v1','1')")
     if not con.execute("SELECT 1 FROM settings WHERE key=?", (NIKITA_MERGE_SETTING,)).fetchone():
         merge_nikita_sources(con)
         con.execute("INSERT INTO settings(key,value) VALUES (?,?)", (NIKITA_MERGE_SETTING, _now()))
@@ -174,12 +179,15 @@ def report(con, start: str, end: str) -> dict:
     """Лиды за период по источникам: сколько записали на пробное, пришли, купили."""
     rows = {}
     for r in con.execute(
-            """SELECT s.source_id, s.source, s.trial_booked_at, s.trial_came, s.converted_at, src.name AS sname, ch.name AS cname
+            """SELECT s.source_id, s.source, s.source_comment, s.trial_booked_at, s.trial_came, s.converted_at, src.name AS sname, ch.name AS cname
                FROM students s LEFT JOIN ad_sources src ON src.id=s.source_id LEFT JOIN ad_channels ch ON ch.id=src.channel_id
                WHERE s.created_at BETWEEN ? AND ? AND (s.funnel='sales' OR s.converted_at IS NOT NULL)""",
             (start, end + "T23:59")):
         key = (r["cname"] or "Без канала", r["sname"] or (r["source"] or "Без источника"))
-        x = rows.setdefault(key, {"channel": key[0], "source": key[1], "leads": 0, "trial": 0, "came": 0, "bought": 0})
+        x = rows.setdefault(key, {"channel": key[0], "source": key[1], "leads": 0, "trial": 0, "came": 0, "bought": 0, "comments": {}})
+        if (r["sname"] or "").strip().casefold() == "прочие":
+            comment = r["source_comment"] or "Пояснение не указано"
+            x["comments"][comment] = x["comments"].get(comment, 0) + 1
         x["leads"] += 1
         x["trial"] += bool(r["trial_booked_at"])
         x["came"] += r["trial_came"] == 1
@@ -191,3 +199,17 @@ def report(con, start: str, end: str) -> dict:
         for k in ("leads", "trial", "came", "bought"):
             c[k] += x[k]
     return {"sources": out, "channels": sorted(channels.values(), key=lambda x: -x["leads"])}
+
+
+def source_comment(con, source_id, comment):
+    """Validate the explanation before any card mutation."""
+    from .services import ApiError
+    if not isinstance(comment, str) or len(comment) > 1000:
+        raise ApiError('Пояснение источника должно быть текстом до 1000 символов')
+    comment = comment.strip()
+    row = con.execute('SELECT name FROM ad_sources WHERE id=?', (source_id,)).fetchone() if source_id else None
+    if row and row['name'].strip().casefold() == 'прочие':
+        if not comment:
+            raise ApiError('Укажите, откуда клиент узнал о школе, для источника «Прочие»')
+        return comment
+    return ''

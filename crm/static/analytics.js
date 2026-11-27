@@ -113,7 +113,7 @@ function anSources(box, d) {
     </div>
     <section class="panel"><div class="panel-head">Источники · ${esc(d.month_label)}</div>
       <div class="an-scroll"><table class="tbl an-tbl"><thead><tr><th>Источник</th><th>Лиды</th><th>Пробное</th><th>Пришли</th><th>Купили</th><th>Конверсия</th><th class="r">Траты</th><th class="r">Цена лида</th><th class="r">Цена ученика</th><th class="r">Принесли</th></tr></thead>
-      <tbody>${d.sources.map((x) => `<tr><td><b>${esc(x.source)}</b><div class="small muted">${esc(x.channel)}</div></td><td>${x.leads}</td><td>${x.trial}</td><td>${x.came}</td><td><b>${x.bought}</b></td>
+      <tbody>${d.sources.map((x) => `<tr><td><b>${esc(x.source)}</b>${sourceCommentsHtml(x.comments)}<div class="small muted">${esc(x.channel)}</div></td><td>${x.leads}</td><td>${x.trial}</td><td>${x.came}</td><td><b>${x.bought}</b></td>
         <td class="${anGood(x.conv, 25, 12)}">${anPct(x.conv)}</td><td class="r">${money(x.spend)}</td><td class="r">${money(x.per_lead)}</td><td class="r">${money(x.per_buy)}</td><td class="r">${money(x.revenue)}</td></tr>`).join("")}
       <tr class="an-total"><td>Итого</td><td>${t.leads}</td><td>${t.trial}</td><td>${t.came}</td><td>${t.bought}</td><td>${anPct(t.conv)}</td><td class="r">${money(t.spend)}</td><td></td><td></td><td class="r">${money(t.revenue)}</td></tr></tbody></table></div>
       <div class="small muted" style="margin-top:8px">Лиды, пришедшие в этом месяце. «Принесли»: оплаченные абонементы тех, кто купил впервые в этом месяце</div>

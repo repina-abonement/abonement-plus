@@ -1,14 +1,14 @@
 "use strict";
 /* Абонемент Плюс — рекламные каналы и источники. */
 
-function sourceSelect(name, value, legacy) {
+function sourceSelect(name, value, legacy, comment = "") {
   const ad = S.meta.ad || { channels: [], sources: [] };
   const groups = ad.channels.map((c) => {
     const list = ad.sources.filter((x) => x.channel_id === c.id);
     return list.length ? `<optgroup label="${esc(c.name)}">${list.map((x) => `<option value="${x.id}" ${x.id === value ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</optgroup>` : "";
   }).join("");
   const previous=value&&!ad.sources.some(x=>x.id===value)?`<option value="${value}" selected>${esc(legacy||'Ранее выбранный источник (архив)')}</option>`:'';
-  return `<select ${name.startsWith("f-") ? `id="${name}"` : `name="${name}"`}><option value="">${legacy && !value ? esc(legacy) : "— не указано —"}</option>${previous}${groups}</select>`;
+  return `<select ${name.startsWith("f-") ? `id="${name}"` : `name="${name}"`}><option value="">${legacy && !value ? esc(legacy) : "— не указано —"}</option>${previous}${groups}</select><div data-source-explanation hidden><label>Откуда клиент узнал о школе<input name="source_comment" maxlength="1000" value="${esc(comment)}" placeholder="Например, объявление в чате ЖК Солнечный"></label>${name.startsWith('f-')?'<button type="button" class="btn sm" data-save-source>Сохранить источник</button>':''}</div>`;
 }
 
 async function renderSourceSettings(box) {
@@ -99,6 +99,33 @@ async function renderSourceReport(box, month) {
     ${d.sources.length ? `<div class="table-wrap"><table class="optable"><thead><tr><th>Канал</th><th>Лидов</th><th>Записаны на пробное</th><th>Пришли</th><th>Купили</th><th>Из лида в покупку</th></tr></thead>
       <tbody>${d.channels.map((c) => row(c, `<b>${esc(c.channel)}</b>`)).join("")}</tbody></table></div>
       <details style="margin-top:10px"><summary class="small muted">По каждому источнику</summary><div class="table-wrap"><table class="optable"><thead><tr><th>Источник</th><th>Лидов</th><th>Пробное</th><th>Пришли</th><th>Купили</th><th>Конверсия</th></tr></thead>
-      <tbody>${d.sources.map((x) => row(x, `${esc(x.source)} <span class="small muted">${esc(x.channel)}</span>`)).join("")}</tbody></table></div></details>`
+      <tbody>${d.sources.map((x) => row(x, `${esc(x.source)}${sourceCommentsHtml(x.comments)} <span class="small muted">${esc(x.channel)}</span>`)).join("")}</tbody></table></div></details>`
     : `<div class="small muted">В этом месяце лидов пока нет</div>`}</section>`;
+}
+
+
+function wireSourceExplanation(select, save) {
+  const box = select.parentElement.querySelector('[data-source-explanation]');
+  const input = box.querySelector('input');
+  const sync = () => {
+    const other = (S.meta.ad?.sources || []).find(x => x.id === +select.value)?.name.trim().toLocaleLowerCase() === 'прочие';
+    box.hidden = !other; input.required = other; input.disabled = !other;
+    return other;
+  };
+  select.onchange = () => {
+    if (sync()) input.focus();
+    else if (save) save({source_id: select.value ? +select.value : '', source_comment: ''});
+  };
+  const button = box.querySelector('[data-save-source]');
+  if (button) button.onclick = () => {
+    input.setCustomValidity(input.value.trim() ? '' : 'Укажите, откуда клиент узнал о школе');
+    if (input.reportValidity()) save({source_id: +select.value, source_comment: input.value.trim()});
+  };
+  input.oninput = () => input.setCustomValidity('');
+  sync();
+}
+
+function sourceCommentsHtml(comments) {
+  const items = Object.entries(comments || {});
+  return items.length ? '<ul class="small">' + items.map(([text, count]) => `<li>${esc(text)} · ${count}</li>`).join('') + '</ul>' : '';
 }

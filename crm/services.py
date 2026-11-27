@@ -1250,6 +1250,8 @@ def find_families_by_phone(con, phone: str) -> list[dict]:
 
 
 def create_student(con, data: dict, user) -> int:
+    from . import sources as _src
+    source_note = _src.source_comment(con, data.get("source_id"), data.get("source_comment", ""))
     name = (data.get("name") or "").strip()
     if not name:
         raise ApiError("Укажите имя ребёнка")
@@ -1286,6 +1288,7 @@ def create_student(con, data: dict, user) -> int:
            source, source_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
         (family_id, name, data.get("birth") or "", data.get("group_id") or None, tariff, funnel, stage,
          now_iso(), source_txt, source_id, now_iso())).lastrowid
+    con.execute("UPDATE students SET source_comment=? WHERE id=?", (source_note, sid))
     if funnel == "members" and data.get("group_id"):
         con.execute("INSERT INTO enrollments(student_id, group_id, weekdays, tariff, created_at) VALUES (?,?,?,?,?)",
                     (sid, data["group_id"], "", tariff, now_iso()))
@@ -1299,11 +1302,16 @@ def create_student(con, data: dict, user) -> int:
     return sid
 
 
-UPDATABLE = {"name", "birth", "group_id", "branch_id", "tariff", "trial_at", "source", "source_id", "refusal_reason"}
+UPDATABLE = {"name", "birth", "group_id", "branch_id", "tariff", "trial_at", "source", "source_id", "source_comment", "refusal_reason"}
 
 
 def update_student(con, sid: int, data: dict, user) -> None:
     s = get_student_row(con, sid)
+    if 'source_id' in data or 'source_comment' in data:
+        from . import sources as _src
+        data = dict(data)
+        data['source_comment'] = _src.source_comment(con, data.get('source_id', s.get('source_id')),
+            data.get('source_comment', s.get('source_comment', '') if data.get('source_id', s.get('source_id')) == s.get('source_id') else ''))
     if data.get("trial_at") and data.get("trial_at") != s.get("trial_at") and s["funnel"] == "sales":
         from . import smart
         smart.require(con, sid, "trial")  # без имени, фамилии, даты рождения, имени и телефона родителя на пробное не записать
@@ -1319,7 +1327,7 @@ def update_student(con, sid: int, data: dict, user) -> None:
             except ValueError:
                 raise ApiError("Неверная дата пробного")
         if v == "":
-            v = None if k in ("group_id", "trial_at", "branch_id") else ""
+            v = None if k in ("group_id", "trial_at", "branch_id", "source_id") else ""
         if s.get(k) != v:
             con.execute(f"UPDATE students SET {k} = ? WHERE id = ?", (v, sid))
             changes.append(k)
@@ -1363,7 +1371,7 @@ def update_student(con, sid: int, data: dict, user) -> None:
         from . import tasks as _tasks
         _tasks.ensure_trial_confirm_task(con, sid)  # задача звонка появляется сразу, без ожидания фонового прохода
     names = {"name": "имя", "birth": "дата рождения", "group_id": "группа", "branch_id": "филиал", "tariff": "тариф",
-             "trial_at": "пробное", "source": "источник", "source_id": "источник", "refusal_reason": "причина отказа"}
+             "trial_at": "пробное", "source": "источник", "source_id": "источник", "source_comment": "пояснение источника", "refusal_reason": "причина отказа"}
     if changes:
         log(con, sid, "Изменено: " + ", ".join(names[c] for c in changes), user, "system")
         if "source" in changes or "source_id" in changes:

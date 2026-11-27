@@ -3042,7 +3042,7 @@ async function openStudent(id, options = {}) {
 
     <div class="row"><div class="field"><label>Имя и фамилия</label><div>${esc(displayChildName(s.name))}</div></div><div class="field"><label>Дата рождения</label><div>${s.birth?esc(s.birth.slice(0,10).split('-').reverse().join('.')):'Не указана'}</div></div>${reportedAgeText(s)?`<div class="field"><label>Возраст</label><div><b>${esc(reportedAgeText(s))}</b></div></div>`:''}</div>
     <fieldset data-client-parameters disabled style="border:0;padding:0;margin:0;min-width:0">
-      <div class="field"><label>Рекламный источник</label>${sourceSelect("f-source", s.source_id, s.source)}</div>
+      <div class="field"><label>Рекламный источник</label>${sourceSelect("f-source", s.source_id, s.source, s.source_comment)}</div>
       <div data-client-stage></div>
     </fieldset>
     ${full ? '<button type="button" class="btn sm" data-edit-client-parameters>Редактировать параметры</button>' : ''}
@@ -3115,7 +3115,7 @@ async function openStudent(id, options = {}) {
     try { await api("POST", `/api/students/${id}/enrollments`, { group_id: +$("#en-group").value, tariff: $("#en-tariff").value }); toast("Группа добавлена"); reload(); } catch (e) { fail(e); }
   };
   if ($("#f-trial")) $("#f-trial").onchange = (e) => patch({ trial_at: e.target.value });
-  $("#f-source").onchange = (e) => patch({ source_id: e.target.value ? +e.target.value : "" });
+  wireSourceExplanation($("#f-source"), patch);
   body.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => openStudent(+b.dataset.open)));
   $("#add-sibling").onclick = () => openNewClient({ family_id: s.family_id, family_name: d.family.name });
   loadFamilyComms(s.family_id, d.parents, id, { id, name: s.name, funnel: s.funnel, birth: s.birth, onBooked: reload });
@@ -3484,6 +3484,7 @@ function openNewClient(preset = {}) {
   </form>`);
   let familyId = preset.family_id || null;
   const form = $("#nc");
+  wireSourceExplanation(form.elements.source_id);
   splitChildNameFields(form,"name");
   const phone = form.elements.phone;
   if (phone) phone.onblur = async () => {
