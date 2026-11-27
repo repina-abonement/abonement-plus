@@ -4,7 +4,7 @@ from .services import ApiError, now_iso
 
 VIEWS = frozenset(
     'today sales inbox planner members nodeadline journal schedule coaches team posts payments fiscal '
-    'merch spend staffexpenses dashboard revenue-losses search docs settings'.split()
+    'merch spend staffexpenses dashboard revenue-losses cash-receipts search docs settings'.split()
 )
 TABS = frozenset(('feed', 'abon', 'visits', 'info'))
 KINDS = frozenset(('view', 'card', 'copy', 'copy-selection'))
@@ -39,7 +39,9 @@ def record(con, user, data):
     section = data.get('section')
     if not isinstance(kind, str) or kind not in KINDS or not isinstance(section, str) or section not in VIEWS:
         raise ApiError('Неизвестное действие')
-    permission = {'nodeadline': 'sales', 'revenue-losses': 'dashboard'}.get(section, section)
+    if section == 'cash-receipts' and not may_read(con, user):
+        raise ApiError('Недостаточно прав', 403)
+    permission = {'cash-receipts': 'dashboard', 'nodeadline': 'sales', 'revenue-losses': 'dashboard'}.get(section, section)
     if not perms.can(user, permission):
         raise ApiError('Недостаточно прав', 403)
     tab = data.get('tab')
