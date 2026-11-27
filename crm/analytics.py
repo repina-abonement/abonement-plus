@@ -7,40 +7,20 @@ from __future__ import annotations
 
 from datetime import date
 
-from . import logic, referrals, sources
+from . import dashboard_sales, logic, referrals, sources
 
 
 def _pct(a, b):
     return round(a * 100 / b) if b else None
 
 
-def _holders(con, ym: str, branch_id: int | None = None) -> dict[int, dict]:
-    """student_id -> {group_id, branch_id, revenue}"""
+def _holders(con, ym, branch_id=None):
+    branches = dict(con.execute("SELECT id,branch_id FROM groups"))
     out = {}
-    bonuses = referrals.used(con, ym)
-    for r in con.execute("""SELECT x.id, x.student_id, x.price, COALESCE(e.group_id, s.group_id) AS gid, g.branch_id
-                            FROM subscriptions x JOIN students s ON s.id=x.student_id
-                            LEFT JOIN enrollments e ON e.id=x.enrollment_id LEFT JOIN groups g ON g.id=COALESCE(e.group_id, s.group_id)
-                            WHERE x.month=? AND x.status='paid'""", (ym,)):
-        if branch_id and r["branch_id"] != branch_id:
-            continue
-        h = out.setdefault(r["student_id"], {"group_id": r["gid"], "branch_id": r["branch_id"], "revenue": 0})
-        h["revenue"] += r["price"] - bonuses.get(r["id"], 0)
-    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
-        for r in con.execute("""SELECT h.student_id,h.group_id AS gid,g.branch_id,h.revenue_amount AS price
-                                FROM erp_history_subscriptions h JOIN groups g ON g.id=h.group_id
-                                WHERE h.month=? AND h.revenue_amount IS NOT NULL
-                                  AND NOT EXISTS (SELECT 1 FROM subscriptions x LEFT JOIN enrollments e ON e.id=x.enrollment_id
-                                    WHERE x.student_id=h.student_id AND x.month=h.month AND x.status!='cancelled'
-                                      AND COALESCE(e.group_id,(SELECT group_id FROM students WHERE id=x.student_id))=h.group_id)""", (ym,)):
-            if branch_id and r["branch_id"] != branch_id: continue
-            h = out.setdefault(r["student_id"], {"group_id": r["gid"], "branch_id": r["branch_id"], "revenue": 0})
-            h["revenue"] += r["price"]
-    from . import revenuecarry
-    for row in revenuecarry.adjustments(con,ym,branch_id=branch_id):
-        branch = con.execute("SELECT branch_id FROM groups WHERE id=?",(row['group_id'],)).fetchone()
-        h = out.setdefault(row['student_id'], {"group_id": row['group_id'], "branch_id": branch['branch_id'] if branch else None, "revenue": 0})
-        h['revenue'] += row['amount']
+    for sid, gid, member, value in dashboard_sales.rows(con, ym):
+        if member and (not branch_id or branches.get(gid) == branch_id):
+            h = out.setdefault(sid, {"group_id": gid, "revenue": 0})
+            h["revenue"] += value
     return out
 
 
@@ -56,21 +36,32 @@ def _attendance(con, ym: str) -> dict[int, list[int]]:
 
 def groups_report(con, ym: str, branch_id: int | None = None) -> dict:
     prev = logic.shift_month(ym, -1)
-    h, hp = _holders(con, ym, branch_id), _holders(con, prev, branch_id)
+    from collections import defaultdict
+    kids_by_group, prev_by_group, revenue = defaultdict(set), defaultdict(set), defaultdict(int)
+    for sid, gid, member, value in dashboard_sales.rows(con, ym):
+        revenue[gid] += value
+        if member:
+            kids_by_group[gid].add(sid)
+    for sid, gid, member, _ in dashboard_sales.rows(con, prev):
+        if member:
+            prev_by_group[gid].add(sid)
+    current = set().union(*kids_by_group.values())
     att = _attendance(con, ym)
     coaches = {r[0]: r[1] for r in con.execute("SELECT id, name FROM users")}
     branches = {r[0]: r[1] for r in con.execute("SELECT id, name FROM branches")}
     rows = []
-    for g in con.execute("""SELECT * FROM groups WHERE active=1 AND is_makeup=0""" + (" AND branch_id=?" if branch_id else "")
+    for g in con.execute("""SELECT * FROM groups WHERE is_makeup=0""" + (" AND branch_id=?" if branch_id else "")
                          + " ORDER BY branch_id, weekdays, time", (branch_id,) if branch_id else ()):
-        kids = [sid for sid, x in h.items() if x["group_id"] == g["id"]]
-        was = [sid for sid, x in hp.items() if x["group_id"] == g["id"]]
-        stayed = len(set(was) & set(h))
+        if not g["active"] and g["id"] not in revenue and g["id"] not in prev_by_group:
+            continue
+        kids = kids_by_group[g["id"]]
+        was = prev_by_group[g["id"]]
+        stayed = len(was & current)
         p, a = att.get(g["id"], [0, 0])
         rows.append({"id": g["id"], "name": g["name"], "branch": branches.get(g["branch_id"], ""), "branch_id": g["branch_id"],
                      "coach": coaches.get(g["coach_id"], ""), "coach_id": g["coach_id"], "capacity": g["capacity"],
                      "kids": len(kids), "fill": _pct(len(kids), g["capacity"]),
-                     "revenue": sum(h[s]["revenue"] for s in kids), "prev": len(was),
+                     "revenue": revenue[g["id"]], "prev": len(was),
                      "left": len(was) - stayed, "retention": _pct(stayed, len(was)),
                      "attendance": _pct(p, p + a)})
     br = {}
@@ -83,7 +74,8 @@ def groups_report(con, ym: str, branch_id: int | None = None) -> dict:
         p, a = att.get(r["id"], [0, 0])
         b["present"] += p
         b["total"] += p + a
-    for b in br.values():
+    for bid, b in br.items():
+        b["kids"] = len(set().union(*(kids_by_group[r["id"]] for r in rows if r["branch_id"] == bid)))
         b["fill"] = _pct(b["kids"], b["capacity"])
         b["retention"] = _pct(b["prev"] - b["left"], b["prev"])
         b["attendance"] = _pct(b["present"], b["total"])
@@ -115,18 +107,15 @@ def coaches_report(con, ym: str, branch_id: int | None = None) -> list[dict]:
 def churn_report(con, ym: str, branch_id: int | None = None) -> dict:
     prev, nxt = logic.shift_month(ym, -1), logic.shift_month(ym, 1)
     h, hp = _holders(con, ym, branch_id), _holders(con, prev, branch_id)
-    first = {r[0]: r[1] for r in con.execute("SELECT student_id, MIN(month) FROM subscriptions WHERE status='paid' GROUP BY student_id")}
-    months_paid = {r[0]: (r[1], r[2]) for r in con.execute(
-        "SELECT student_id, COUNT(DISTINCT month), SUM(price) FROM subscriptions WHERE status='paid' GROUP BY student_id")}
-    bonuses = referrals.used(con)
-    for sid, sub_id in con.execute("""SELECT student_id,id FROM subscriptions
-        WHERE id IN (SELECT subscription_id FROM invoice_balance_uses)"""):
-        if sub_id in bonuses:
-            count, amount = months_paid[sid]
-            months_paid[sid] = (count, amount - bonuses[sub_id])
+    first, months_paid = {}, {}
+    for month in dashboard_sales.months(con):
+        for sid, holder in _holders(con, month, branch_id).items():
+            first.setdefault(sid, month)
+            count, amount = months_paid.get(sid, (0, 0))
+            months_paid[sid] = count + 1, amount + holder["revenue"]
     names = {r["id"]: dict(r) for r in con.execute(
         """SELECT s.id, s.name, s.stage, s.refusal_reason, s.family_id, g.name AS grp FROM students s LEFT JOIN groups g ON g.id=s.group_id
-           WHERE s.funnel='members'""")}
+           """)}
     unpaid = {r[0]: r[1] for r in con.execute(
         "SELECT student_id, SUM(price) FROM subscriptions WHERE month=? AND status='invoiced' GROUP BY student_id", (ym,))}
 
@@ -197,12 +186,15 @@ def sources_report(con, ym: str) -> dict:
         names = {}
     by_name = {names.get(k): v for k, v in spend.items()}
     revenue = {}
-    bonuses = referrals.used(con)
-    for r in con.execute("""SELECT COALESCE(src.name, NULLIF(s.source,''), 'Без источника') AS nm, x.id, x.price
-                            FROM students s JOIN subscriptions x ON x.student_id=s.id AND x.status='paid'
-                            LEFT JOIN ad_sources src ON src.id=s.source_id
-                            WHERE s.converted_at BETWEEN ? AND ?""", (a.isoformat(), b.isoformat() + "T23:59")):
-        revenue[r["nm"]] = revenue.get(r["nm"], 0) + r["price"] - bonuses.get(r["id"], 0)
+    cohort = dict(con.execute("""SELECT s.id,COALESCE(src.name,NULLIF(s.source,''),'Без источника')
+        FROM students s LEFT JOIN ad_sources src ON src.id=s.source_id WHERE s.converted_at BETWEEN ? AND ?""",
+        (a.isoformat(), b.isoformat() + "T23:59")))
+    if cohort:
+        for month in dashboard_sales.months(con):
+            for sid, _, _, amount in dashboard_sales.rows(con, month):
+                if sid in cohort:
+                    source = cohort[sid]
+                    revenue[source] = revenue.get(source, 0) + amount
     for x in rep["sources"]:
         x["conv"] = _pct(x["bought"], x["leads"])
         x["spend"] = by_name.get(x["source"], 0)
@@ -242,7 +234,7 @@ def trials_report(con, ym: str, branch_id: int | None = None) -> dict:
     rows = [dict(r) for r in con.execute(
         """SELECT s.id, s.trial_at, s.trial_came, s.converted_at, s.stage, s.funnel, s.refusal_reason,
                   g.id AS gid, g.name AS gname, b.id AS bid, b.name AS branch, u.name AS coach
-           FROM students s JOIN groups g ON g.id=s.group_id JOIN branches b ON b.id=g.branch_id LEFT JOIN users u ON u.id=g.coach_id
+           FROM students s JOIN groups g ON g.id=COALESCE(s.trial_group_id,s.group_id) JOIN branches b ON b.id=g.branch_id LEFT JOIN users u ON u.id=g.coach_id
            WHERE s.trial_at IS NOT NULL AND substr(s.trial_at,1,7)=? AND s.archived=0""" + (" AND b.id=?" if branch_id else ""),
         (ym, branch_id) if branch_id else (ym,))]
     coach_says = {}
@@ -303,9 +295,14 @@ def program_report(con, ym: str, slug: str = "sbornaya") -> dict:
         kids.setdefault(x["student_id"], x["name"])
     paid = [x for x in subs if x["status"] == "paid"]
     bonuses = referrals.used(con, ym)
-    actual = sum(x["price"] - bonuses.get(x["id"], 0) for x in paid)
+    sales = [row for row in dashboard_sales.rows(con, ym) if row[1] in gids]
+    actual = sum(value for _, _, _, value in sales)
+    labeled = dict(con.execute("SELECT id,name FROM students"))
+    holders = {sid for sid, _, member, _ in sales if member}
+    for sid in holders:
+        kids.setdefault(sid, labeled[sid])
     debts = sum(x["price"] for x in subs if x["status"] == "invoiced")
-    with_sub = {x["student_id"] for x in subs}
+    with_sub = {x["student_id"] for x in subs} | holders
     potential = full_pkg * len(kids)
     loss = {"partial": 0, "no_ofp": 0, "discounts": 0, "debts": debts, "not_bought": 0,
             "bonuses": sum(bonuses.get(x["id"], 0) for x in paid)}
@@ -324,10 +321,9 @@ def program_report(con, ym: str, slug: str = "sbornaya") -> dict:
         if sid not in with_sub:
             loss["not_bought"] += full_pkg
     prev = logic.shift_month(ym, -1)
-    prev_paid = {r[0]: r[1] for r in con.execute(
-        f"""SELECT DISTINCT x.student_id, s.name FROM subscriptions x JOIN enrollments e ON e.id=x.enrollment_id JOIN students s ON s.id=x.student_id
-            WHERE e.group_id IN ({q}) AND x.month=? AND x.status='paid'""", (*gids, prev))}
-    paid_ids = {x["student_id"] for x in paid}
+    prev_paid = {sid: labeled[sid] for sid, gid, member, _ in dashboard_sales.rows(con, prev)
+                 if gid in gids and member}
+    paid_ids = holders
     left = [{"id": k, "name": v} for k, v in prev_paid.items() if k not in paid_ids]
     coach = round(actual * p["coach_pct"] / 100)
     rent = n_arena * p["arena_rent"]

@@ -3522,7 +3522,7 @@ def pu_report(con, h, user, body, q):
     ym = q.get("month") or _d.today().isoformat()[:7]
     a, b = logic.month_bounds(ym)
     return pu.report(con, a.isoformat(), b.isoformat(), int(q["branch_id"]) if q.get("branch_id") else None) | {
-        "marks": pu.marks_report(con, a, min(b, _d.today()))}
+        "marks": pu.marks_report(con, a, min(b, _d.today()), int(q["branch_id"]) if q.get("branch_id") else None)}
 
 
 @route("POST", "/api/reviews/{rid}/close", role="admin")

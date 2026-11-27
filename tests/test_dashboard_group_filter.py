@@ -29,6 +29,21 @@ class DashboardGroupFilterTest(unittest.TestCase):
         self.assertEqual(b['funnel_trials'][0][1],1)
         self.assertEqual(a['funnel_trials'][0][1],0)
 
+    def test_card_history_is_scoped_to_sale_group_and_not_counted_twice(self):
+        from crm import analytics, salary
+        for key, group, price in [('same', self.a, 100), ('second', self.b, 100), ('unknown', None, 60)]:
+            self.con.execute("INSERT INTO erp_revenue_history VALUES (?,?,?,'2026-11','Абонемент','','','',?)",
+                             (key, self.sid, '42', price))
+            if group:
+                self.con.execute("INSERT INTO erp_revenue_groups VALUES (?,?)", (key, group))
+        branch = sv.dashboard(self.con, '2026-11', self.bid)['kpi']
+        self.assertEqual((branch['revenue']['value'], branch['holders']['value']), (400, 1))
+        self.assertEqual(sv.dashboard(self.con, '2026-11')['kpi']['revenue']['value'], 460)
+        report = analytics.groups_report(self.con, '2026-11', self.bid)
+        self.assertEqual(report['branches'][0]['kids'], 1)
+        self.assertEqual({g['id']: g['revenue'] for g in report['groups']}, {self.a: 100, self.b: 300})
+        self.assertEqual(salary._revenue(self.con, '2026-11'), {self.a: 100, self.b: 300})
+
     def test_group_must_belong_to_selected_branch(self):
         other=self.con.execute("INSERT INTO branches(name) VALUES ('Other')").lastrowid
         with self.assertRaises(sv.ApiError):sv.dashboard(self.con,'2026-11',other,self.a)

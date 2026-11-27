@@ -31,27 +31,11 @@ def _dates(con, g, ym: str) -> list[str]:
 
 
 def _revenue(con, ym: str) -> dict[int, int]:
-    from . import referrals, revenuecarry
-    from collections import Counter
-    covered = Counter()
+    from . import dashboard_sales
     rev = {}
-    bonuses = referrals.used(con, ym)
-    for r in con.execute("""SELECT x.id,x.student_id,x.kind, COALESCE(e.group_id, s.group_id) AS gid, x.price
-                            FROM subscriptions x JOIN students s ON s.id=x.student_id
-                            LEFT JOIN enrollments e ON e.id=x.enrollment_id
-                            WHERE x.month=? AND x.status='paid'""", (ym,)):
-        if r["gid"]:
-            covered[r["student_id"], r["gid"], r["kind"] == "single", r["price"]] += 1
-            rev[r["gid"]] = rev.get(r["gid"], 0) + r["price"] - bonuses.get(r["id"], 0)
-    for sid, gid, kind, amount in con.execute("""SELECT h.student_id,a.group_id,h.kind,h.amount
-            FROM erp_revenue_history h JOIN erp_revenue_groups a USING(row_key) WHERE h.month=?""", (ym,)):
-        key = sid, gid, kind == "Разовое", amount
-        if covered[key]:
-            covered[key] -= 1
-        else:
-            rev[gid] = rev.get(gid, 0) + amount
-    for row in revenuecarry.adjustments(con,ym):
-        rev[row['group_id']] = rev.get(row['group_id'],0) + row['amount']
+    for _, gid, _, value in dashboard_sales.rows(con, ym):
+        if gid is not None:
+            rev[gid] = rev.get(gid, 0) + value
     return rev
 
 

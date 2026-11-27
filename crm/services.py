@@ -1788,60 +1788,23 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
     if group_id:
         br_sql=" AND (s.group_id=? OR EXISTS (SELECT 1 FROM enrollments ge WHERE ge.student_id=s.id AND ge.group_id=? AND ge.active=1))"
         br_arg=(group_id,group_id)
-    holder_sql=" AND COALESCE(e.group_id,s.group_id)=?" if group_id else (" AND COALESCE(e.group_id,s.group_id) IN (SELECT id FROM groups WHERE branch_id=?)" if branch_id else '')
-    holder_args=(group_id,) if group_id else ((branch_id,) if branch_id else ())
-
-    from collections import Counter
+    holder_args = (group_id or branch_id,) if group_id or branch_id else ()
     from functools import lru_cache
+    from . import dashboard_sales
+    branches = dict(con.execute("SELECT id,branch_id FROM groups"))
 
     @lru_cache(None)
     def card_month(m):
-        from . import referrals
-        bonuses = referrals.used(con, m)
         out = {}
-        other_revenue = 0
-        overlaps = Counter()
-        for sid_, price, sub_id, kind in con.execute(
-                "SELECT s.id, x.price, x.id, x.kind FROM subscriptions x JOIN students s ON s.id = x.student_id "
-                "LEFT JOIN enrollments e ON e.id = x.enrollment_id "
-                "WHERE x.month = ? AND x.status = 'paid'"
-                + holder_sql,
-                (m, *holder_args)):
-            subscription = kind != "single"
-            overlaps[sid_, subscription, price] += 1
-            value = price - bonuses.get(sub_id, 0)
-            if subscription:
-                out.setdefault(sid_, []).append(value)
+        other = 0
+        for sid, gid, member, value in dashboard_sales.rows(con, m):
+            if (group_id and gid != group_id) or (branch_id and branches.get(gid) != branch_id):
+                continue
+            if member:
+                out.setdefault(sid, []).append(value)
             else:
-                other_revenue += value
-        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
-            history_scope = " AND h.group_id=?" if group_id else (" AND g.branch_id=?" if branch_id else "")
-            for sid_, price in con.execute(
-                    """SELECT h.student_id,h.revenue_amount
-                       FROM erp_history_subscriptions h JOIN groups g ON g.id=h.group_id
-                       WHERE h.month=? AND h.revenue_amount IS NOT NULL""" + history_scope + """
-                         AND NOT EXISTS (
-                           SELECT 1 FROM subscriptions x LEFT JOIN enrollments e ON e.id=x.enrollment_id
-                           WHERE x.student_id=h.student_id AND x.month=h.month AND x.status!='cancelled'
-                             AND COALESCE(e.group_id,(SELECT group_id FROM students WHERE id=x.student_id))=h.group_id
-                         )""", (m, *holder_args)):
-                overlaps[sid_, True, price] += 1
-                out.setdefault(sid_, []).append(price)
-        if not branch_id and not group_id:
-            for sid_, kind, amount in con.execute("""SELECT student_id,kind,amount
-                    FROM erp_revenue_history WHERE month=?""", (m,)):
-                subscription = kind.startswith("Абонемент")
-                key = (sid_, subscription, amount)
-                if overlaps[key]:
-                    overlaps[key] -= 1
-                elif subscription:
-                    out.setdefault(sid_, []).append(amount)
-                else:
-                    other_revenue += amount
-        from . import revenuecarry
-        for row in revenuecarry.adjustments(con,m,group_id=group_id,branch_id=branch_id):
-            other_revenue += row['amount']
-        return out, other_revenue
+                other += value
+        return out, other
 
     first_paid = {r[0]: r[1] for r in con.execute(
         "SELECT student_id, MIN(month) FROM subscriptions WHERE status='paid' GROUP BY student_id")}
@@ -1849,10 +1812,9 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
         for sid_, first_month in con.execute(
                 "SELECT student_id,MIN(month) FROM erp_history_subscriptions WHERE revenue_amount IS NOT NULL GROUP BY student_id"):
             first_paid[sid_] = min(first_paid.get(sid_, first_month), first_month)
-    if not branch_id and not group_id:
-        for sid_, first_month in con.execute("""SELECT student_id, MIN(month) FROM erp_revenue_history
+    for sid_, first_month in con.execute("""SELECT student_id, MIN(month) FROM erp_revenue_history
                 WHERE kind LIKE 'Абонемент%' GROUP BY student_id"""):
-            first_paid[sid_] = min(first_paid.get(sid_, first_month), first_month)
+        first_paid[sid_] = min(first_paid.get(sid_, first_month), first_month)
     cache = {}
 
     def month_stats(m):

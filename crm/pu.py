@@ -550,9 +550,9 @@ def report(con, d_from: str, d_to: str, branch_id: int | None = None) -> dict:
     bq = " AND g.branch_id=?" if branch_id else ""
     ba = (branch_id,) if branch_id else ()
     # записано на ПУ: все пробные в периоде (текущие + те, что ушли на этап) — по trial_at учеников и записям пропусков
-    booked = con.execute(f"""SELECT COUNT(*) FROM students s JOIN groups g ON g.id=s.group_id
+    booked = con.execute(f"""SELECT COUNT(*) FROM students s JOIN groups g ON g.id=COALESCE(s.trial_group_id,s.group_id)
                              WHERE s.trial_at BETWEEN ? AND ?{bq}""", (d_from, d_to + "T23:59", *ba)).fetchone()[0]
-    came = con.execute(f"""SELECT COUNT(*) FROM students s JOIN groups g ON g.id=s.group_id
+    came = con.execute(f"""SELECT COUNT(*) FROM students s JOIN groups g ON g.id=COALESCE(s.trial_group_id,s.group_id)
                            WHERE s.trial_at BETWEEN ? AND ? AND s.trial_came=1{bq}""", (d_from, d_to + "T23:59", *ba)).fetchone()[0]
     misses = [dict(r) for r in con.execute(
         f"""SELECT m.*, s.name, s.stage, s.refusal_reason, s.converted_at, s.trial_came, s.trial_at AS cur_trial, g.name AS group_name,
@@ -572,7 +572,7 @@ def report(con, d_from: str, d_to: str, branch_id: int | None = None) -> dict:
         by_group[m["group_name"] or "—"] = by_group.get(m["group_name"] or "—", 0) + 1
     now = _now()
     stuck = []
-    for s in con.execute("""SELECT s.id, s.name, s.family_id FROM students s WHERE s.stage='missed_trial' AND s.archived=0""").fetchall():
+    for s in con.execute("""SELECT s.id, s.name, s.family_id FROM students s LEFT JOIN groups g ON g.id=COALESCE(s.trial_group_id,s.group_id) WHERE s.stage='missed_trial' AND s.archived=0""" + bq, ba).fetchall():
         t = open_task(con, s["family_id"])
         if not t:
             stuck.append({"id": s["id"], "name": s["name"], "problem": "нет задачи"})
@@ -581,8 +581,8 @@ def report(con, d_from: str, d_to: str, branch_id: int | None = None) -> dict:
             stuck.append({"id": s["id"], "name": s["name"], "problem": f"задача просрочена с {t['due_at'][8:10]}.{t['due_at'][5:7]} {t['due_at'][11:16]}",
                           "assignee": u[0] if u else ""})
     for t in con.execute("""SELECT t.assignee_id, u.name, COUNT(*) AS n, SUM(t.status='open' AND t.due_at < ?) AS overdue
-                            FROM tasks t LEFT JOIN users u ON u.id=t.assignee_id WHERE t.kind='rebook' AND t.created_at BETWEEN ? AND ?
-                            GROUP BY t.assignee_id""", (_iso(now), d_from, d_to + "T23:59")):
+                            FROM tasks t LEFT JOIN users u ON u.id=t.assignee_id LEFT JOIN students s ON s.id=t.student_id LEFT JOIN groups g ON g.id=COALESCE(s.trial_group_id,s.group_id) WHERE t.kind='rebook' AND t.created_at BETWEEN ? AND ?
+                            """ + bq + " GROUP BY t.assignee_id", (_iso(now), d_from, d_to + "T23:59", *ba)):
         by_resp[t["name"] or "—"] = {"tasks": t["n"], "overdue": t["overdue"] or 0}
     nm = len(misses)
     return {"from": d_from, "to": d_to, "booked": total_booked, "came": came, "missed": nm, "by_kind": by_kind,
@@ -591,7 +591,7 @@ def report(con, d_from: str, d_to: str, branch_id: int | None = None) -> dict:
             "stuck": stuck, "by_group": by_group, "by_resp": by_resp}
 
 
-def marks_report(con, d_from: date, d_to: date) -> dict:
+def marks_report(con, d_from: date, d_to: date, branch_id=None) -> dict:
     """Отметки в журнале по тренерам и филиалам: вовремя (до 30 минут), с опозданием, не отмечено."""
     from . import closures, services as sv, staff
     now = _now()
@@ -600,6 +600,8 @@ def marks_report(con, d_from: date, d_to: date) -> dict:
     while d <= d_to:
         for p in staff.planned(con, d):
             g = con.execute("SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id WHERE g.id=?", (p["group_id"],)).fetchone()
+            if branch_id and g["branch_id"] != branch_id:
+                continue
             end = _lesson_end(con, g, d)
             if not end or end + timedelta(minutes=30) > now or closures.is_closed(con, g["id"], d):
                 continue
