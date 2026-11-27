@@ -1607,6 +1607,58 @@ async function renderErp(box) {
   };
 }
 
+function erpRevenueSetup(container) {
+  const panel = document.createElement("section");
+  panel.innerHTML = `<h3>Выручка по месяцам за 2022–2026 годы</h3>
+    <label>Файл истории <input type="file" accept=".csv"></label>
+    <button class="btn" disabled>Проверить</button>
+    <button class="btn primary" disabled>Перенести</button>
+    <p aria-live="polite"></p>`;
+  container.prepend(panel);
+  const input = panel.querySelector("input"), [check, apply] = panel.querySelectorAll("button");
+  const out = panel.querySelector("p");
+  let token = null;
+  input.onchange = () => {
+    token = null;
+    check.disabled = !input.files.length;
+    apply.disabled = true;
+    out.textContent = "";
+  };
+  async function run(write) {
+    check.disabled = apply.disabled = input.disabled = true;
+    try {
+      const r = await api("POST", "/api/erp/revenue/" + (write ? "apply" : "plan"),
+        {content: await input.files[0].text(), token});
+      token = r.token;
+      out.textContent = (write ? "Перенесено" : "Готово к переносу") + " записей: " + r.count +
+        " на " + rub(r.amount) + ". Уже в истории: " + r.already + ". Требуют сверки: " + r.missing +
+        (r.ids.length ? ". ERP ID: " + r.ids.join(", ") : "");
+      apply.disabled = write || !r.count;
+    } catch (err) {
+      token = null;
+      out.textContent = err.message;
+    } finally {
+      check.disabled = input.disabled = false;
+    }
+  }
+  check.onclick = () => run(false);
+  apply.onclick = () => run(true);
+}
+
+function erpRevenueCard(rows) {
+  if (!rows?.length) return "";
+  const months = new Map();
+  for (const row of rows) {
+    if (!months.has(row.month)) months.set(row.month, []);
+    months.get(row.month).push(row);
+  }
+  return `<h3>Выручка по месяцам из ERP</h3>
+    <p>Всего за период · ${rub(rows.reduce((sum, x) => sum + x.amount, 0))}</p>
+    ${[...months].map(([month, items]) => `<details><summary>${esc(month)} ·
+      ${rub(items.reduce((sum, x) => sum + x.amount, 0))}</summary>
+      ${items.map(x => `<p>${esc(x.kind)} · ${esc(x.start)} — ${esc(x.end)} · ${rub(x.amount)}</p>`).join("")}</details>`).join("")}`;
+}
+
 function erpOrganizeTools(box) {
   const head = box.querySelector(".erp-page-head");
   if (box.querySelector(".erp-transfer-workspace")) return;
@@ -1637,6 +1689,7 @@ function erpOrganizeTools(box) {
       if (tool) tools.append(tool);
     }
   }
+  erpRevenueSetup(workspace.querySelector("#erp-stage-subscriptions [data-erp-stage-tools]"));
   const cardTools = workspace.querySelector("#erp-stage-cards [data-erp-stage-tools]");
   cardTools.classList.add("erp-card-tools");
   const cardOptions = [
@@ -3007,7 +3060,7 @@ async function openStudent(id, options = {}) {
 
   <div class="section" data-sc="visits" data-title="Посещения и отработки">${clientAttendanceMarkup()}</div>
 
-  <div class="section" data-sc="subs">${saleFull && d.enrollments.some(e=>!e.program_id && e.lesson_kind!=='ofp') ? '<button type="button" class="btn" id="add-previous-sub">Добавить прошлый абонемент</button><div id="previous-sub-form"></div>' : ''}${clientSubscriptionsHtml(d)}</div>
+  <div class="section" data-sc="subs">${saleFull && d.enrollments.some(e=>!e.program_id && e.lesson_kind!=='ofp') ? '<button type="button" class="btn" id="add-previous-sub">Добавить прошлый абонемент</button><div id="previous-sub-form"></div>' : ''}${clientSubscriptionsHtml(d)}${erpRevenueCard(d.erp_revenue)}</div>
   <div class="section" data-sc="balance">${clientBalanceHtml(d)}</div>
 
   <div class="section" data-sc="vac" data-title="🌴 Отпуск">

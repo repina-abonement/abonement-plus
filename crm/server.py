@@ -911,6 +911,19 @@ def erp_verify(con, h, user, body, q):
     return erpimport.verify(con)
 
 
+@route("POST", "/api/erp/revenue/plan", role="admin")
+@route("POST", "/api/erp/revenue/apply", role="admin")
+def erp_revenue_transfer(con, h, user, body, q):
+    from . import erprevenue
+    apply = h.path.split("?")[0].endswith("/apply")
+    if apply and not body.get("token"):
+        raise ApiError("Сначала проверьте файл")
+    try:
+        return erprevenue.transfer(con, body.get("content"), body.get("token") if apply else None)
+    except ValueError as exc:
+        raise ApiError(str(exc))
+
+
 @route("POST", "/api/erp/people/plan", role="admin")
 @route("POST", "/api/erp/people/apply", role="admin")
 def erp_people_transfer(con, h, user, body, q):
@@ -1436,7 +1449,9 @@ def student_get(con, h, user, body, q, sid):
     from . import recents
     recents.remember_if_available(con, user["id"], int(sid))
     from . import subcancel
-    return sv.student_detail(con, int(sid)) | {'can_delete_error':subcancel.can_cancel_error(con,user,persist=False)}
+    history = [dict(row) for row in con.execute("""SELECT month,kind,start,end,amount
+        FROM erp_revenue_history WHERE student_id=? ORDER BY month DESC,start,row_key""", (int(sid),))]
+    return sv.student_detail(con, int(sid)) | {'erp_revenue': history, 'can_delete_error':subcancel.can_cancel_error(con,user,persist=False)}
 
 
 @route("GET", "/api/students/{sid}/error-delete-preview", role="operator")

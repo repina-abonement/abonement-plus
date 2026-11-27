@@ -266,6 +266,11 @@ def check_password(pw: str, stored: str) -> bool:
 
 def init_db(con: sqlite3.Connection):
     con.executescript(SCHEMA)
+    con.execute("""CREATE TABLE IF NOT EXISTS erp_revenue_history (
+        row_key TEXT PRIMARY KEY, student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        erp_id TEXT NOT NULL, month TEXT NOT NULL, kind TEXT NOT NULL, sale TEXT NOT NULL,
+        start TEXT NOT NULL, end TEXT NOT NULL, amount INTEGER NOT NULL)""")
+    con.execute("CREATE INDEX IF NOT EXISTS erp_revenue_student ON erp_revenue_history(student_id,month)")
     cols = {r[1] for r in con.execute("PRAGMA table_info(groups)")}
     if "coach_id" not in cols:
         con.execute("ALTER TABLE groups ADD COLUMN coach_id INTEGER REFERENCES users(id)")
