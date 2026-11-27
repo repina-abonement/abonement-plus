@@ -564,8 +564,8 @@ def apply_unnamed_visitors(con):
 
 
 def apply_confirmed_visitor_contacts(con):
-    """Attach the two owner-confirmed ERP rows to their existing CRM cards."""
-    marker = "confirmed_visitor_contacts_20261127"
+    """Attach the owner-confirmed ERP rows to their existing CRM cards."""
+    marker = "confirmed_visitor_contacts_20261127_v2"
     if con.execute("SELECT 1 FROM settings WHERE key=?", (marker,)).fetchone():
         return "complete"
     upload = con.execute("""SELECT id FROM erp_uploads
@@ -583,6 +583,7 @@ def apply_confirmed_visitor_contacts(con):
     for sid, eid, expected_name, expected_parent, expected_phone in (
         (1427, "78519", "козлов олег", "лилия", "79253884037"),
         (1496, "88401", "дамир маиров", "оксана", "79663753894"),
+        (1358, "92597", "матвей трофимов", "анастасия", "79099794599"),
     ):
         card = con.execute("SELECT * FROM students WHERE id=? AND archived=0", (sid,)).fetchone()
         if not card or len(rows[eid]) != 1:
@@ -608,6 +609,16 @@ def apply_confirmed_visitor_contacts(con):
             empty = [p for p in parents if ei._norm(p["name"]) == expected_parent and not _clean(p["phone"])]
             if len(empty) != 1:
                 continue
+        if sid == 1358:
+            if any(f["id"] != family for f in sv.find_families_by_phone(con, expected_phone)):
+                continue
+            if card["birth"] and card["birth"][:10] != "2020-02-04":
+                continue
+            if not matching:
+                old_phone = [p for p in parents if ei._norm(p["name"]) == expected_parent
+                             and normalize_phone(p["phone"]) == "78909979459"]
+                if len(old_phone) != 1:
+                    continue
         if sid == 1496 and not any(p["phone_norm"] == "79264838328" for p in parents):
             continue
 
@@ -617,6 +628,9 @@ def apply_confirmed_visitor_contacts(con):
                 if sid == 1427:
                     con.execute("UPDATE parents SET phone=?,phone_norm=? WHERE id=?",
                                 (rec["phone"], expected_phone, empty[0]["id"]))
+                elif sid == 1358:
+                    con.execute("UPDATE parents SET phone=?,phone_norm=? WHERE id=?",
+                                ("+" + expected_phone, expected_phone, old_phone[0]["id"]))
                 else:
                     con.execute("""INSERT INTO parents(family_id,name,phone,phone_norm,relation,is_primary)
                         VALUES (?,?,?,?,?,0)""", (family, parent_name, rec["phone"], expected_phone, role))
@@ -633,7 +647,7 @@ def apply_confirmed_visitor_contacts(con):
             raise
         finally:
             con.execute("RELEASE confirmed_visitor_contact")
-    if completed == 2:
+    if completed == 3:
         con.execute("INSERT INTO settings(key,value) VALUES (?, 'complete')", (marker,))
         return "complete"
-    return f"review-required-{completed}-of-2"
+    return f"review-required-{completed}-of-3"
