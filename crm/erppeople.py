@@ -151,7 +151,7 @@ DISTINCT_VISITOR_IDS = {"92940", "132829", "95513", "114710", "108850", "110708"
 VISITOR_PAIRS = (
     ("68349", "99699"), ("100563", "82964"), ("113503", "119677"),
     ("89227", "68726"), ("128139", "98809"), ("122798", "116222"),
-    ("95317", "84213"),
+    ("95317", "84213"), ("99696", "89951"),
 )
 
 
@@ -162,7 +162,10 @@ def _confirmed_pair(con, matcher, rows):
     phones = [normalize_phone(rec.get("phone", "")) for rec in records]
     source_ids = tuple(rec["erp_id"].strip() for rec in records)
     approved_birth = source_ids == ("95317", "84213") and dates == ["2020-07-30", "2020-07-31"]
-    if (names[0] != names[1] or len(names[0]) < 2 or not dates[0]
+    approved_ivan = (source_ids == ("99696", "89951") and names == [("иван",), ("иван",)]
+                     and dates[0] == "2020-06-01" and not dates[1]
+                     and all(phone.endswith("9263467904") for phone in phones))
+    if not approved_ivan and (names[0] != names[1] or len(names[0]) < 2 or not dates[0]
             or (dates[0] != dates[1] and not approved_birth) or not all(phones)):
         raise ValueError("Подтверждённая пара ERP изменилась")
     targets = set()
@@ -518,7 +521,7 @@ def transfer(con, visitors, leads, user, token=None, erp_ids=None, visitor_cards
 
 def apply_confirmed_visitor_pairs(con):
     """Apply only owner-confirmed pairs from the already uploaded register."""
-    marker = "confirmed_visitor_pairs_20261127_v2"
+    marker = "confirmed_visitor_pairs_20261127_v3"
     saved = con.execute("SELECT value FROM settings WHERE key=?", (marker,)).fetchone()
     if saved:
         return saved["value"]
