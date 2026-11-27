@@ -1243,19 +1243,18 @@ function erpLeadImportSetup(box) {
 function erpPeopleSetup(box) {
   box.insertAdjacentHTML("beforeend", `
     <div class="erp-step" id="erp-people">
-      <b>Карточки клиентов, статусы и лиды</b>
+      <b>Карточки посетителей из ERP</b>
       <p class="small muted">Переносятся карточки без счетов и денежных операций. Обязательные поля проверки: имя и фамилия ребёнка, дата рождения, телефон, имя и роль родителя, почта, рекламный источник и комментарий. Уже созданные карточки, в том числе дети из сборной, сопоставляются без дублей: пустые поля дополняются, расхождения показываются для ручной сверки</p>
       <div class="field"><label for="erp-people-visitors">Посетители, включая архив</label><input id="erp-people-visitors" type="file" multiple accept=".xlsx,.csv"></div>
-      <div class="field"><label for="erp-people-leads">Лиды</label><input id="erp-people-leads" type="file" multiple accept=".xlsx,.csv"></div>
       <div class="field"><label for="erp-people-ids">Только указанные ERP ID (необязательно)</label><textarea id="erp-people-ids" rows="2" placeholder="Например: 64928, 65188, 79204"></textarea><div class="small muted">Если поле заполнено, остальные строки полных файлов полностью пропускаются и новые карточки по ним не создаются</div></div>
       <label><input type="checkbox" id="erp-people-create-visitors"> Создать отсутствующие карточки посетителей и дополнить пустые поля существующих</label>
-      <p class="small muted">Для этого режима выберите только выгрузку посетителей и оставьте поле ERP ID пустым. Заполненные статус и филиал сохраняются.</p>
+      <p class="small muted">Для массового переноса оставьте поле ERP ID пустым. Заполненные статус и филиал сохраняются.</p>
       <button class="btn" id="erp-people-plan" disabled>Проверить</button>
       <button class="btn primary" id="erp-people-apply" disabled>Перенести</button>
       <div id="erp-people-out" aria-live="polite"></div>
     </div>`);
   const root = box.querySelector("#erp-people");
-  const visitors = root.querySelector("#erp-people-visitors"), leads = root.querySelector("#erp-people-leads");
+  const visitors = root.querySelector("#erp-people-visitors");
   const createVisitors = root.querySelector("#erp-people-create-visitors");
   const ids = root.querySelector("#erp-people-ids");
   const check = root.querySelector("#erp-people-plan"), apply = root.querySelector("#erp-people-apply");
@@ -1282,17 +1281,17 @@ function erpPeopleSetup(box) {
   function show(report, applied) {
     const n = report.counts, p = report.profile || {}, missing = Object.entries(p.source_missing || {}).filter(([, count]) => count), fill = Object.entries(p.fill || {}).filter(([, count]) => count);
     const filter = report.filter || {};
-    out.innerHTML = `<p>${applied ? "Перенос выполнен. " : ""}Строк посетителей ${n.visitors || 0}, лидов ${n.leads || 0}. Совпадают ${n.same || 0}, обновление статуса ${n.updated || 0}, новые карточки ${n.new || 0}, повторные строки ${n.repeated_rows || 0}</p>
+    out.innerHTML = `<p>${applied ? "Перенос выполнен. " : ""}Строк посетителей: ${n.visitors || 0}. Совпадают ${n.same || 0}, обновление статуса ${n.updated || 0}, новые карточки ${n.new || 0}, повторные строки ${n.repeated_rows || 0}</p>
       ${(filter.requested || []).length ? `<div class="note"><b>Фильтр ERP ID:</b> найдено ${(filter.found || []).length} из ${filter.requested.length}${(filter.missing || []).length ? `. Не найдены: ${filter.missing.map(esc).join(", ")}` : ""}</div>` : ""}
       ${fill.length ? `<div class="note"><b>${applied ? "Дополнены" : "Будут дополнены"} пустые поля</b><ul>${fill.map(([field, count]) => `<li>${esc(field)}: ${count}</li>`).join("")}</ul></div>` : ""}
       ${missing.length ? `<details><summary>Нет значения в исходной ERP: ${missing.reduce((total, [, count]) => total + count, 0)}</summary><ul>${missing.map(([field, count]) => `<li>${esc(field)}: ${count}</li>`).join("")}</ul><p class="small muted">CRM не придумывает отсутствующие сведения. Такие поля нужно заполнить позднее по подтверждённому источнику</p></details>` : ""}
       ${!createVisitors.checked && (p.conflicts || []).length ? `<details open><summary>Расхождения карточки и ERP: ${p.conflicts.length}</summary><ul>${p.conflicts.map((item) => `<li>ERP ID ${esc(item.erp_id)} · ${esc(item.field)}: в CRM «${esc(item.crm)}», в ERP «${esc(item.erp)}». Значение CRM сохранится до ручной сверки</li>`).join("")}</ul></details>` : ""}
       ${report.issues.length ? `<details><summary>Требуют сверки: ${report.issues.length}</summary><ul>${report.issues.map(([row, reason]) => `<li>${esc(row)}: ${esc(reason)}</li>`).join("")}</ul></details>` : ""}`;
   }
-  createVisitors.onchange = visitors.onchange = leads.onchange = ids.oninput = () => {
+  createVisitors.onchange = visitors.onchange = ids.oninput = () => {
     approved = null;
     apply.disabled = true;
-    check.disabled = !visitors.files.length && !leads.files.length;
+    check.disabled = !visitors.files.length;
     out.replaceChildren();
   };
   async function run(applyChanges) {
@@ -1300,11 +1299,11 @@ function erpPeopleSetup(box) {
     if (applyChanges && !approved) return;
     const confirmed = approved;
     approved = null;
-    check.disabled = apply.disabled = visitors.disabled = leads.disabled = ids.disabled = createVisitors.disabled = true;
+    check.disabled = apply.disabled = visitors.disabled = ids.disabled = createVisitors.disabled = true;
     out.textContent = applyChanges ? "Переношу…" : "Проверяю…";
     try {
       const files = applyChanges ? confirmed : {
-        visitors: await uploadSelected(visitors), leads: await uploadSelected(leads),
+        visitors: await uploadSelected(visitors), leads: [],
         erp_ids, visitor_cards: createVisitors.checked,
       };
       const report = await api("POST", `/api/erp/people/${applyChanges ? "apply" : "plan"}`, files);
@@ -1316,7 +1315,7 @@ function erpPeopleSetup(box) {
     } catch (error) {
       out.textContent = error.message;
     } finally {
-      check.disabled = visitors.disabled = leads.disabled = ids.disabled = createVisitors.disabled = false;
+      check.disabled = visitors.disabled = ids.disabled = createVisitors.disabled = false;
     }
   }
   check.onclick = () => run(false);
