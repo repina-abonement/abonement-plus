@@ -1432,26 +1432,27 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
 .trial-offer-months .trial-offer-total { background:color-mix(in srgb,var(--accent) 14%,var(--surface)); }
 .trial-desk-empty { margin:14px 0 0; color:var(--ink-2); }
 .pipeline-hub { margin-top: 16px; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); }
-.pipeline-hub-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 20px 14px; }
-.pipeline-hub-head h2 { margin: 0; font-family: var(--display); font-size: 21px; }
-.pipeline-hub-head p { margin: 3px 0 0; color: var(--ink-2); font-size: 13px; }
-.pipeline-date-filter { display:flex; align-items:flex-end; gap:10px; margin-left:auto; }
-.pipeline-date-filter label { display:grid; gap:4px; color:var(--ink-2); font-size:11px; line-height:1; }
-.pipeline-date-filter input { width:162px; min-height:42px; padding:7px 11px; border:1px solid var(--line); border-radius:11px; background:var(--surface); color:var(--ink); font:inherit; font-size:14px; }
-.pipeline-date-filter>.btn { min-height:42px; padding-inline:16px; }
-.pipeline-task-count { margin-inline-start:4px; font-variant-numeric:tabular-nums; }
-.pipeline-hub-total { display:inline-flex; align-items:center; flex:none; min-height:42px; padding:7px 13px; border-radius:999px; background:var(--surface-2); color:var(--ink-2); font-size:12px; font-weight:700; }
-.pipeline-tabs { display: flex; gap: 4px; overflow-x: auto; padding: 0 14px 12px; scrollbar-width: thin; }
-.pipeline-tab-group { display:flex;align-items:center;flex:0 0 auto;margin:0 4px 0 8px;color:var(--ink-2);font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase; }
-.pipeline-tab-group:first-child { margin-left:0; }
-.pipeline-tab-group:not(:first-child)::before { content:"";width:1px;height:24px;margin-right:12px;background:var(--line); }
-.pipeline-tab { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; min-height: 42px; padding: 8px 12px; border: 1px solid transparent; border-radius: 12px; background: transparent; color: var(--ink-2); cursor: pointer; font: inherit; }
-.pipeline-tab:hover { background: var(--surface-2); color: var(--ink); }
-.pipeline-tab.active { border-color: color-mix(in srgb,var(--accent) 30%,var(--line)); background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
-.pipeline-tab.danger:not(.active) em { background: var(--red-soft); color: var(--red); }
-.pipeline-tab b { font-size: 13px; white-space: nowrap; }
-.pipeline-tab em { display: inline-grid; min-width: 23px; height: 23px; place-items: center; padding: 0 6px; border-radius: 999px; background: var(--surface-2); color: var(--ink); font-size: 11px; font-style: normal; font-weight: 800; }
-.pipeline-tab.active em { background: var(--surface); color: var(--accent); }
+.pipeline-hub-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px 12px; }
+.pipeline-hub-head h2 { margin:0; font-family:var(--display); font-size:21px; }
+.pipeline-date-filter { display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-width:0; }
+.pipeline-date-filter label { display:flex; align-items:center; gap:6px; color:var(--ink-2); font-size:12px; }
+.pipeline-date-filter input { width:137px; min-height:34px; padding:5px 8px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); font:inherit; font-size:13px; }
+.pipeline-date-filter>.btn { min-height:34px; padding-inline:10px; }
+.pipeline-task-count { margin-inline-start:3px; font-variant-numeric:tabular-nums; }
+.pipeline-hub-total { padding:0 4px; color:var(--ink-2); font-size:12px; white-space:nowrap; }
+.pipeline-tabs { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; padding:0 16px 12px; }
+.pipeline-tab-set { min-width:0; display:flex; flex-direction:column; gap:2px; padding:7px; border:1px solid var(--line); border-radius:10px; background:var(--surface-2); }
+.pipeline-tab-group { margin:0 6px 3px; color:var(--ink-2); font-size:11px; font-weight:700; }
+.pipeline-tab { display:flex; align-items:center; justify-content:space-between; gap:6px; width:100%; min-height:32px; padding:4px 6px; border:1px solid transparent; border-radius:7px; background:transparent; color:var(--ink); text-align:left; cursor:pointer; font:inherit; }
+.pipeline-tab:hover { background:var(--surface); }
+.pipeline-tab.active { border-color:color-mix(in srgb,var(--accent) 35%,var(--line)); background:var(--accent-soft); color:var(--accent); }
+.pipeline-tab.danger:not(.active) em { background:var(--red-soft); color:var(--red); }
+.pipeline-tab b { min-width:0; font-size:12px; overflow-wrap:anywhere; }
+.pipeline-tab em { display:inline-grid; flex:none; min-width:22px; height:21px; place-items:center; padding:0 5px; border-radius:6px; background:var(--surface); color:var(--ink); font-size:11px; font-style:normal; font-weight:700; font-variant-numeric:tabular-nums; }
+.pipeline-tab.active em { color:var(--accent); }
+@media (max-width: 950px) {
+  .pipeline-tabs { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
 .pipeline-panels { border-top: 1px solid var(--line); background: color-mix(in srgb,var(--surface-2) 55%,var(--surface)); }
 .pipeline-panel { padding: 16px 18px 18px; }
 .pipeline-panel[hidden] { display: none; }
@@ -1491,14 +1492,9 @@ html[data-festive="sep1"] { --fest-soft: #fdf0dc; --fest-line: #efc993; }
   .trial-offer-months em { grid-row:2; }
   .trial-offer-months strong { grid-column:2; grid-row:1/3; }
   .pipeline-hub { border-radius: 16px; }
-  .pipeline-hub-head { align-items: flex-start; padding: 15px 14px 12px; }
-  .pipeline-hub-head { flex-wrap:wrap; }
-  .pipeline-date-filter { order:3; flex:1 0 100%; flex-wrap:wrap; margin-left:0; gap:8px; }
-  .pipeline-date-filter label { flex:1; min-width:130px; }
-  .pipeline-date-filter input { width:100%; }
-  .pipeline-hub-total { display: none; }
-  .pipeline-tabs { padding: 0 10px 10px; }
-  .pipeline-tab { padding: 7px 10px; }
+  .pipeline-hub-head { padding:12px 10px 10px; }
+  .pipeline-tabs { gap:6px; padding:0 10px 10px; }
+  .pipeline-tab-set { padding:4px; }
   .pipeline-panel { padding: 13px 10px 15px; }
   .pipeline-panel .col { flex-basis: 82vw; }
 }

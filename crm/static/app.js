@@ -2012,9 +2012,20 @@ async function renderWorkdesk(page) {
     { key:"leads-no-date", icon:"📅", label:"Новые лиды без даты", count:noDateLeads.length, html:boardHtml({funnel:"sales",draggable:false,columns:[{key:"lead",title:"Назначить дату задачи",cards:noDateLeads}]}) }
   ];
   if (!pipelineItems.some(item=>item.key===S.deskPipeline)) S.deskPipeline = (newCardsForDate?.columns||[]).some(column=>column.cards.length) ? "new" : "sales";
+  const pipelineGroups = new Map();
+  for (const item of pipelineItems) {
+    const group = item.group || "Очереди";
+    if (!pipelineGroups.has(group)) pipelineGroups.set(group, []);
+    pipelineGroups.get(group).push(item);
+  }
+  const pipelineTab = item => `<button type="button" class="pipeline-tab ${item.key===S.deskPipeline?'active':''} ${item.danger?'danger':''}"
+    data-pipeline-tab="${item.key}" aria-pressed="${item.key===S.deskPipeline}"><b>${esc(item.label)}</b>${item.count!==null?`<em>${item.count}</em>`:''}</button>`;
   const pipelineHub = `<section class="pipeline-hub" aria-label="Работа с клиентами">
-    <div class="pipeline-hub-head"><div><h2>Работа с клиентами</h2><p>Все воронки в одном месте</p></div><div class="pipeline-date-filter" aria-label="Фильтр по дате"><button type="button" class="btn sm ${S.workdeskMode==='today'?'primary':''}" data-pipeline-today>Сегодня${taskCount("today")}</button><button type="button" class="btn sm ${S.workdeskMode==='overdue'?'danger':''}" data-pipeline-overdue>Просрок${taskCount("overdue")}</button><label><span>Дата</span><input type="date" value="${esc(S.workdeskDate)}" data-pipeline-date></label><span class="pipeline-hub-total">${pipelineItems.reduce((sum,item)=>sum+(item.count||0),0)} карточек</span></div></div>
-    <nav class="pipeline-tabs" aria-label="Выберите воронку">${pipelineItems.map((item,index)=>`${item.group && (!index||pipelineItems[index-1].group!==item.group)?`<span class="pipeline-tab-group">${esc(item.group)}</span>`:''}<button type="button" class="pipeline-tab ${item.key===S.deskPipeline?'active':''} ${item.danger?'danger':''}" data-pipeline-tab="${item.key}" aria-selected="${item.key===S.deskPipeline}"><span>${item.icon}</span><b>${esc(item.label)}</b>${item.count!==null?`<em>${item.count}</em>`:''}</button>`).join('')}</nav>
+    <div class="pipeline-hub-head"><h2>Работа с клиентами</h2><div class="pipeline-date-filter" aria-label="Фильтр по дате"><button type="button" class="btn sm ${S.workdeskMode==='today'?'primary':''}" data-pipeline-today>Сегодня${taskCount("today")}</button><button type="button" class="btn sm ${S.workdeskMode==='overdue'?'danger':''}" data-pipeline-overdue>Просрок${taskCount("overdue")}</button><label><span>Дата</span><input type="date" value="${esc(S.workdeskDate)}" data-pipeline-date></label><span class="pipeline-hub-total">${pipelineItems.reduce((sum,item)=>sum+(item.count||0),0)} карточек</span></div></div>
+    <nav class="pipeline-tabs" aria-label="Выберите воронку">${[...pipelineGroups].map(([group, items]) => `
+      <div class="pipeline-tab-set" role="group" aria-label="${esc(group)}">
+        <span class="pipeline-tab-group">${esc(group)}</span>${items.map(pipelineTab).join("")}
+      </div>`).join("")}</nav>
     <div class="pipeline-panels">${pipelineItems.map(item=>`<section class="pipeline-panel" data-pipeline-panel="${item.key}" ${item.key===S.deskPipeline?'':'hidden'}><div class="pipeline-panel-title"><span>${item.icon}</span><h3>${esc(item.label)}</h3>${item.count!==null?`<span class="count">${item.count}</span>`:''}</div>${item.html}</section>`).join('')}</div>
   </section>`;
   const hot = `<section class="now ${u.length ? "" : "calm"}" id="dw-hot">
@@ -2046,7 +2057,7 @@ async function renderWorkdesk(page) {
   if(overdueButton)overdueButton.onclick=()=>{S.workdeskMode='overdue';S.etDay='overdue';render()};
   page.querySelectorAll("[data-pipeline-tab]").forEach(button=>button.onclick=()=>{
     S.deskPipeline=button.dataset.pipelineTab;
-    page.querySelectorAll("[data-pipeline-tab]").forEach(tab=>{const active=tab===button;tab.classList.toggle("active",active);tab.setAttribute("aria-selected",active?"true":"false")});
+    page.querySelectorAll("[data-pipeline-tab]").forEach(tab=>{const active=tab===button;tab.classList.toggle("active",active);tab.setAttribute("aria-pressed",active?"true":"false")});
     page.querySelectorAll("[data-pipeline-panel]").forEach(panel=>panel.hidden=panel.dataset.pipelinePanel!==S.deskPipeline);
     const board=page.querySelector(`[data-pipeline-panel="${S.deskPipeline}"] .board`);if(board)requestAnimationFrame(()=>board.scrollLeft=0);
   });
