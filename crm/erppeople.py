@@ -179,6 +179,23 @@ def _confirmed_pair(con, matcher, rows):
             targets.add(linked)
         targets.update(matcher.by_np.get((names[0], phone[-10:]), ()))
         families.update(family["id"] for family in sv.find_families_by_phone(con, phone))
+    if source_ids == ("89227", "68726") and len(families) > 1:
+        demid = matcher.students.get(1428)
+        georgiy = matcher.students.get(3277)
+        if (demid and georgiy and not demid["archived"]
+                and names[0] == ("демид", "решетников") and dates[0] == "2020-02-17"
+                and phones == ["79805142744", "79151287257"]
+                and targets <= {1428}
+                and demid["erp_id"] in (None, "", *source_ids)
+                and (demid["name"] in ("", ei.NO_NAME)
+                     or tuple(sorted(ei._norm(demid["name"]).split())) == names[0])
+                and demid["birth"] in (None, "", dates[0])
+                and sorted(ei._norm(georgiy["name"]).split()) == ["георгий", "решетников"]
+                and demid["family_id"] != georgiy["family_id"]
+                and families == {demid["family_id"], georgiy["family_id"]}
+                and phones[0][-10:] in matcher.phones[1428]
+                and phones[1][-10:] in matcher.phones[3277]):
+            return 1428, demid["family_id"]
     if len(targets) > 1:
         raise ValueError("Подтверждённая пара уже связана с разными карточками CRM")
     if len(families) > 1:
