@@ -3983,6 +3983,7 @@ class Handler(BaseHTTPRequestHandler):
     maintenance_354 = None
     maintenance_356 = None
     maintenance_356_reset = None
+    visitor_cleanup = None
 
     def log_message(self, fmt, *args):
         if os.environ.get("CRM_QUIET") != "1":
@@ -4005,6 +4006,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("X-CRM-Maintenance-354", self.maintenance_354)
         if self.path == "/" and self.maintenance_356:
             self.send_header("X-CRM-Maintenance-356", self.maintenance_356)
+        if self.path == "/" and self.visitor_cleanup:
+            self.send_header("X-CRM-Visitor-Cleanup", self.visitor_cleanup)
         if self.path == "/" and self.maintenance_356_reset:
             self.send_header("X-CRM-Maintenance-356-Reset", self.maintenance_356_reset)
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -4284,6 +4287,8 @@ def _startup():
         from . import maintenance_356
         Handler.maintenance_356 = maintenance_356.apply(con)
         Handler.maintenance_356_reset = maintenance_356.reset_payment(con)
+        from . import maintenance_visitor_cleanup
+        Handler.visitor_cleanup = maintenance_visitor_cleanup.apply(con)
         con.commit()
         Handler.maintenance_354 = maintenance_result
     fiscal.start_worker(db.connect)
