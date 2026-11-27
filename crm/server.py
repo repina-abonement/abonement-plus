@@ -573,7 +573,7 @@ def activity_history(con, h, user, body, q):
 def meta(con, h, user, body, q):
     user["sip_number"] = con.execute("SELECT sip_number FROM users WHERE id=?", (user["id"],)).fetchone()[0]
     from . import activity
-    user |= {"perms": perms.view_of(user), "title": perms.title(user), "activity_history": activity.may_read(con, user)}
+    user |= {"perms": perms.view_of(user), "title": perms.title(user), "activity_history": activity.may_read(con, user), "cash_receipts": activity.may_read(con, user)}
     if user["role"] == "trainee":
         from datetime import date
         from . import staffdocs
@@ -3120,9 +3120,11 @@ def my_pay_set(con, h, user, body, q):
     return mypay.view(con, user, ym)
 
 
-@route("GET", "/api/cash-receipts", role="dashboard")
+@route("GET", "/api/cash-receipts", role="admin")
 def cash_receipts(con, h, user, body, q):
-    from . import cashreceipts
+    from . import cashreceipts, activity
+    if not activity.may_read(con, user):
+        raise ApiError("Недостаточно прав", 403)
     return mx(cashreceipts.report, con, q.get("month") or sv.today().isoformat()[:7])
 
 

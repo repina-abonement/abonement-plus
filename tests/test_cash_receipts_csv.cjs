@@ -3,7 +3,7 @@ const source=fs.readFileSync('crm/static/app.js','utf8');
 const fn=source.slice(source.indexOf('async function renderCashReceipts('),source.indexOf('async function renderRevenueLosses('));
 let blob,download,button={};const host={isConnected:true,querySelector:()=>button};const form={};
 const totals={received:10800,returned:500,net:10300,pending_received:1350,pending_returned:0};
-const context={S:{meta:{today:'2026-11-27'}},esc:String,rub:String,monthLabel:String,render(){},URLSearchParams,
+const context={S:{user:{cash_receipts:true},meta:{today:'2026-11-27'}},esc:String,rub:String,monthLabel:String,render(){},URLSearchParams,
  api:async()=>({totals,methods:[{...totals,label:'Точка'}],days:[{...totals,date:'2026-11-20'}]}),
  URL:{createObjectURL:b=>(blob=b,'blob:test'),revokeObjectURL(){}},Blob,setTimeout(){},document:{createElement:()=>({click(){download=this.download}})}};
 vm.createContext(context);vm.runInContext(fn,context);

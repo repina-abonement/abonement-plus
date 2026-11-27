@@ -25,6 +25,9 @@ class ActivityHistoryTest(unittest.TestCase):
         for user, status in ((None, 401), ('operator', 403), ('other', 403), ('owner', 200)):
             self.assertEqual(fixture.call('GET', endpoint, actor=user)[0], status)
 
+        for user, status in ((None, 401), ('operator', 403), ('other', 403), ('owner', 200)):
+            self.assertEqual(fixture.call('GET', '/api/cash-receipts?month=2026-11', actor=user)[0], status)
+
         student = fixture.fixture.sid
         result = fixture.call('POST', endpoint, {'kind': 'copy', 'section': 'sales', 'tab': 'abon',
             'student_id': student, 'copy_type': 'payment-link', 'user_id': owner, 'text': 'CLIPBOARD PRIVATE'},

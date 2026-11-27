@@ -456,7 +456,7 @@ const isCoach = () => S.user && S.user.role === "coach";
 const LEVELS = { own: 1, view: 2, full: 3 };
 const can = (sec, lvl = "own") => (LEVELS[((S.user && S.user.perms) || {})[sec]] || 0) >= LEVELS[lvl];
 const isOwner = () => can("settings", "full");
-const visibleViews = () => VIEWS.filter(([k]) => (k === "activity" ? S.user?.activity_history : can(k === "manual" ? "planner" : k === "nodeadline" ? "sales" : ["revenue-losses", "cash-receipts"].includes(k) ? "dashboard" : k)) && (k !== "today" || !isOwner())
+const visibleViews = () => VIEWS.filter(([k]) => (k === "cash-receipts" ? S.user?.cash_receipts : k === "activity" ? S.user?.activity_history : can(k === "manual" ? "planner" : k === "nodeadline" ? "sales" : ["revenue-losses", "cash-receipts"].includes(k) ? "dashboard" : k)) && (k !== "today" || !isOwner())
   && (k !== "manual" || !["coach", "trainee"].includes(S.user.role)))  // тренеру задачи приходят на «Сегодня» и в отчёт, отдельная вкладка не нужна  // руководитель смотрит стол тренера через «Как видит»
   .map(([k, t]) => [k, k === "today" && S.user.coach_nebo_only ? "Мой дашборд" : k === "coaches" && !can("coaches", "view") ? "Мои результаты" : t]);
 const SHORT = { today: "Сегодня", sales: "Стол", inbox: "Чаты", coaches: isCoachShort(), journal: "Журнал" };
@@ -884,6 +884,7 @@ function dashboardMonths() {
 }
 
 async function renderCashReceipts(page) {
+  if (!S.user?.cash_receipts) { page.textContent = "Недостаточно прав"; return; }
   const month = S.cashMonth || S.meta.today.slice(0, 7);
   page.innerHTML = `<section class="panel"><h2>Поступления</h2>
     <p>Деньги учитываются по дате фактической оплаты. Например, оплата в ноябре за декабрь попадёт сюда в ноябрь, а на дашборде в декабрь.</p>
