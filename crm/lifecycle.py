@@ -94,7 +94,7 @@ def _add(con, kind, sid, due, key, title="", note="", group_id=None):
 
 
 def _has_open(con, sid: int, fam: int | None = None) -> bool:
-    return bool(con.execute("SELECT 1 FROM tasks WHERE status='open' AND (student_id=? OR (kind='rebook' AND family_id=?))",
+    return bool(con.execute("SELECT 1 FROM tasks WHERE status='open' AND kind!='erp_visitor_pending' AND (student_id=? OR (kind='rebook' AND family_id=?))",
                             (sid, fam or -1)).fetchone())
 
 

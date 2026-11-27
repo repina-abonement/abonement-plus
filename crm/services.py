@@ -729,7 +729,7 @@ _CARD_SUMMARY_SQL = """SELECT s.id, f.name AS family, p.name AS parent, p.phone,
         FROM students s LEFT JOIN families f ON f.id=s.family_id
         LEFT JOIN parents p ON p.id=(SELECT id FROM parents WHERE family_id=s.family_id ORDER BY is_primary DESC,id LIMIT 1)
         LEFT JOIN groups fallback ON fallback.id=s.group_id
-        LEFT JOIN tasks t ON t.id=(SELECT id FROM tasks WHERE student_id=s.id AND status='open' AND kind!='school_rules'
+        LEFT JOIN tasks t ON t.id=(SELECT id FROM tasks WHERE student_id=s.id AND status='open' AND kind NOT IN ('school_rules','erp_visitor_pending')
             ORDER BY due_at,priority DESC,id LIMIT 1)"""
 
 
@@ -843,7 +843,7 @@ def board(con, funnel: str) -> dict:
         deadlines = {row["student"]: row for row in con.execute("""SELECT s.id AS student,t.due_at,t.title
             FROM students s JOIN tasks t ON t.id=(
               SELECT id FROM (
-                SELECT id,due_at FROM tasks WHERE student_id=s.id AND status='open'
+                SELECT id,due_at FROM tasks WHERE student_id=s.id AND status='open' AND kind!='erp_visitor_pending'
                 UNION ALL
                 SELECT id,due_at FROM tasks WHERE kind='rebook' AND family_id=s.family_id AND status='open'
               ) ORDER BY due_at,id LIMIT 1

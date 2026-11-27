@@ -30,6 +30,7 @@ KINDS = {
     "manual_payment_check": ("Проверить оплату Точки и чек Эвотор", "🧾"),
     "makeup_book": ("Записать на отработку", "🩹"),
     "school_rules": ("Отправить правила школы", "📋"),
+    "erp_visitor_pending": ("Карточка перенесена из ERP — ждём задачи и абонементы", "📥"),
     "client_followup": ("Определить следующий шаг", "🧭"),
     "manual": ("Задача", "✅"),
     "plan": ("Задача", "📌"),
@@ -751,10 +752,49 @@ def ensure_ad_source_tasks(con, now: datetime | None = None) -> int:
     return made
 
 
+def queue_erp_visitor(con, sid):
+    return add_task(
+        con, "erp_visitor_pending", sid, "", auto_key=f"erp-visitor-pending:{sid}",
+        source="erp_visitor_import", shared=True,
+        note="Карточка перенесена из ERP. Задачи и абонементы ещё предстоит перенести и сверить.",
+    )
+
+
+def seed_erp_visitor_queue(con):
+    """Backfill the two visitor files applied before the queue existed."""
+    from . import erpfull
+
+    marker = "erp_visitor_pending_20261126"
+    if con.execute("SELECT 1 FROM settings WHERE key=?", (marker,)).fetchone():
+        return
+    uploads = con.execute("""SELECT filename, MAX(id) AS id FROM erp_uploads
+        WHERE kind='clients' AND filename IN ('Посетители (39).xlsx', 'Посетители (40).xlsx')
+        GROUP BY filename""").fetchall()
+    if len(uploads) != 2:
+        return
+    source_ids = {
+        erpfull._record(file, row).get("erp_id", "").strip()
+        for file in erpfull._files(con, [item["id"] for item in uploads])
+        for row in file["rows"]
+    }
+    for row in con.execute("""SELECT DISTINCT i.student_id FROM erp_full_identities i
+        JOIN students s ON s.id=i.student_id WHERE i.namespace='student' AND s.archived=0
+          AND i.source_id IN (SELECT value FROM json_each(?))""", (erpfull._json(sorted(source_ids)),)):
+        queue_erp_visitor(con, row["student_id"])
+    con.execute("INSERT INTO settings(key,value) VALUES (?, '1')", (marker,))
+
+
+def erp_visitor_pending_cards(con):
+    return [dict(row) for row in con.execute("""SELECT s.id,s.name,t.title AS task_title,t.note AS task_note
+        FROM tasks t JOIN students s ON s.id=t.student_id
+        WHERE t.kind='erp_visitor_pending' AND t.status='open' AND s.archived=0 ORDER BY s.name,s.id""")]
+
+
 def ensure_client_task_coverage(con, now: datetime | None = None) -> int:
     """Every non-archived client has an open next action; normal chain tasks take precedence."""
     now = (now or _now()).replace(second=0, microsecond=0)
     due = now.date().isoformat() + "T23:59"
+    seed_erp_visitor_queue(con)
     made = ensure_ad_source_tasks(con, now)
     for student in con.execute("SELECT id,family_id,funnel,stage FROM students WHERE archived=0 ORDER BY id").fetchall():
         sid = student["id"]
@@ -950,7 +990,7 @@ def my_tasks(con, user: dict, scope: str = "mine") -> dict:
     end_tomorrow = (datetime.combine(date.today() + timedelta(days=1), datetime.max.time())).isoformat(timespec="minutes")
     from . import planner
     boss = planner.can_manage(con, user)
-    where, args = "status='open' AND kind!='school_rules' AND due_at <= ?", [end_tomorrow]
+    where, args = "status='open' AND kind NOT IN ('school_rules','erp_visitor_pending') AND due_at <= ?", [end_tomorrow]
     if scope == "mine" or not boss:
         if user.get("role") in ("admin", "operator"):  # «Перезаписать на ПУ» видят все админы и операторы
             where += " AND (assignee_id=? OR student_id IS NOT NULL OR family_id IS NOT NULL)"
@@ -1146,7 +1186,7 @@ def erp_board(con, day: str = "today", user: dict | None = None) -> dict:
     tomorrow = (today + timedelta(days=1)).isoformat()
     t0 = today.isoformat()
     base = """SELECT t.* FROM tasks t LEFT JOIN users u ON u.id=t.assignee_id
-              WHERE t.status='open' AND t.kind NOT IN ('bday','manual_payment_check','school_rules')
+              WHERE t.status='open' AND t.kind NOT IN ('bday','manual_payment_check','school_rules','erp_visitor_pending')
                 AND NOT (t.kind='plan' AND t.student_id IS NULL AND t.family_id IS NULL AND u.role='offline_pool')
                 AND (t.student_id IS NOT NULL OR t.family_id IS NOT NULL OR u.id IS NULL OR u.role != 'coach')"""
     privacy, visible_ids = _planner_privacy(con, user, "t.") if user is not None else ("", [])

@@ -1878,6 +1878,8 @@ async function renderWorkdesk(page) {
     ...(renewForDate ? [{ group:"Клиенты", key:"renew", icon:"🔁", label:"Продления", count:renewForDate.columns.reduce((sum,column)=>sum+column.cards.length,0), html:`<div id="dw-renew">${boardHtml(renewForDate)}</div>` }] : []),
     ...((paymentsForDate?.columns?.[0]?.cards||[]).length ? [{ group:"Контроль", key:"manual-payments", icon:"🧾", label:"Оплаты Точки", count:paymentsForDate.columns[0].cards.length, danger:true, html:`<div id="dw-manual-payment-checks"><p class="pipeline-note">Нужно подтвердить поступление на расчётный счёт и чек в ОФД</p>${boardHtml(paymentsForDate)}</div>` }] : []),
     ...(erpHtml ? [{ group:"Контроль", key:"tasks", icon:"✅", label:"Прочие задачи", count:erpSection.count, html:`<div id="dw-erptasks-hub">${erpHtml}</div>` }] : []),
+    { key:"erp-visitor-pending", icon:"📥", label:"Карточки из ERP", count:(d.erp_visitor_pending || []).length,
+      html:boardHtml({funnel:"erp-visitor-pending",draggable:false,columns:[{key:"pending",title:"Ждём задачи и абонементы",cards:d.erp_visitor_pending || []}]}) },
     { key:"leads-no-date", icon:"📅", label:"Новые лиды без даты", count:noDateLeads.length, html:boardHtml({funnel:"sales",draggable:false,columns:[{key:"lead",title:"Назначить дату задачи",cards:noDateLeads}]}) }
   ];
   if (!pipelineItems.some(item=>item.key===S.deskPipeline)) S.deskPipeline = (newCardsForDate?.columns||[]).some(column=>column.cards.length) ? "new" : "sales";
@@ -1924,6 +1926,8 @@ async function renderWorkdesk(page) {
   page.querySelectorAll(".dwf").forEach((x) => x.addEventListener("toggle", () => { S.dwOpen[x.dataset.dwk] = x.open; }));
   page.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => { const el = document.getElementById(b.dataset.jump); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }));
   if (page.querySelector(".board")) page.querySelector(".board").scrollLeft = scroll;
+  const erpVisitorBoard=page.querySelector('[data-pipeline-panel="erp-visitor-pending"]');
+  if(erpVisitorBoard)wireBoard(erpVisitorBoard,"erp-visitor-pending",{draggable:false});
   const newCardsBoardElement=page.querySelector("#dw-new-cards");if(newCardsBoardElement)wireBoard(newCardsBoardElement,"new",newCardsForDate);
   const leadsBoardElement=page.querySelector("#dw-leads");if(leadsBoardElement)wireBoard(leadsBoardElement,"sales",leadsForDate);
   const salesBoard=page.querySelector("#dw-sales");if(salesBoard)wireBoard(salesBoard,"sales",salesForDate);

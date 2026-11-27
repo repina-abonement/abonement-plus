@@ -2,7 +2,7 @@
 from collections import Counter, defaultdict
 
 from . import erpfull, erpimport as ei, schedule, services as sv, sources, tasks
-from .db import normalize_phone
+from .db import normalize_phone, now_iso
 
 
 PROFILE_FIELDS = (
@@ -342,5 +342,13 @@ def transfer(con, visitors, leads, user, token=None, erp_ids=None, visitor_cards
                     (namespace, eid, sid))
         if namespace == "student":
             con.execute("UPDATE students SET erp_id=? WHERE id=? AND erp_id=''", (eid, sid))
+        if visitor_cards and not sv.get_student_row(con, sid)["archived"]:
+            tasks.queue_erp_visitor(con, sid)
+    if visitor_cards:
+        con.execute("""UPDATE tasks SET status='cancelled',done_at=?,done_by='CRM',
+            result='Карточка ожидает переноса задач и абонементов ERP'
+            WHERE kind='client_followup' AND source='coverage' AND status='open'
+            AND student_id IN (SELECT student_id FROM tasks WHERE kind='erp_visitor_pending' AND status='open')""",
+            (now_iso(),))
     sv.audit(con, user, "erp.people", erpfull._json(report["counts"]))
     return report
