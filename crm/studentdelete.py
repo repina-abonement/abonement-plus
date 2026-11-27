@@ -5,7 +5,13 @@ import re
 import sqlite3
 from . import services as sv,subcancel
 
-CATEGORIES={'duplicate':'Дубликат','test':'Тестовая карточка','import_error':'Ошибка переноса','entry_error':'Ошибочное создание'}
+CATEGORIES = {
+    'duplicate': 'Дубликат',
+    'test': 'Тестовая карточка',
+    'import_error': 'Ошибка переноса из ERP',
+    'entry_error': 'Ошибочное создание',
+    'other': 'Другое',
+}
 PROTECTED={'subscriptions','payments','attendance','single_visits','erp_trial_visits','pay_links','historical_entries'}
 
 
@@ -60,7 +66,7 @@ def preview(con,sid,user):
             if table in PROTECTED or action!='CASCADE':blockers.append(blocker_summary(table, rows))
     state={'student':student,'relations':relations}
     token=hashlib.sha256(json.dumps(state,sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
-    return {'student_id':sid,'name':student['name'],'token':token,'allowed':not blockers,'blockers':blockers,'state':state}
+    return {'student_id':sid,'name':student['name'],'token':token,'allowed':not blockers,'blockers':blockers,'categories':CATEGORIES,'state':state}
 
 
 def delete(con,sid,user,data):

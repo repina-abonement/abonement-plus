@@ -26,6 +26,15 @@ class ErroneousClientDelete(unittest.TestCase):
         with self.assertRaises(sv.ApiError):studentdelete.delete(self.con,self.sid,self.user,{'token':q['token'],'category':'refused','reason':'Client stopped attending','confirmed_error':True})
         self.assertIsNotNone(self.con.execute('SELECT 1 FROM students WHERE id=?',(self.sid,)).fetchone())
 
+    def test_other_requires_explanation(self):
+        q = studentdelete.preview(self.con,self.sid,self.user)
+        self.assertEqual(q['categories']['other'],'Другое')
+        data = {'token':q['token'],'category':'other','confirmed_error':True}
+        with self.assertRaises(sv.ApiError):
+            studentdelete.delete(self.con,self.sid,self.user,data)
+        self.assertTrue(studentdelete.delete(self.con,self.sid,self.user,
+                        {**data,'reason':'Synthetic erroneous card'})['ok'])
+
     def test_finance_blocks_delete_and_other_operator_denied(self):
         self.con.execute("INSERT INTO payments(student_id,amount,method,paid_at,created_at) VALUES (?,950,'card_branch','2026-11-18','2026-11-18')",(self.sid,))
         q=studentdelete.preview(self.con,self.sid,self.user)
