@@ -1287,7 +1287,7 @@ function erpPeopleSetup(box) {
   function show(report, applied) {
     const n = report.counts, p = report.profile || {}, missing = Object.entries(p.source_missing || {}).filter(([, count]) => count), fill = Object.entries(p.fill || {}).filter(([, count]) => count);
     const filter = report.filter || {};
-    out.innerHTML = `<p>${applied ? "Перенос выполнен. " : ""}Строк посетителей: ${n.visitors || 0}. Совпадают ${n.same || 0}, обновление статуса ${n.updated || 0}, новые карточки ${n.new || 0}, повторные строки ${n.repeated_rows || 0}</p>
+    out.innerHTML = `<p>${applied ? "Перенос выполнен. " : ""}Строк посетителей: ${n.visitors || 0}. Совпадают ${n.same || 0}, обновление статуса ${n.updated || 0}, новые карточки ${n.new || 0}, повторные строки ${n.repeated_rows || 0}${n.excluded ? `, исключены из переноса ${n.excluded}` : ""}</p>
       ${(filter.requested || []).length ? `<div class="note"><b>Фильтр ERP ID:</b> найдено ${(filter.found || []).length} из ${filter.requested.length}${(filter.missing || []).length ? `. Не найдены: ${filter.missing.map(esc).join(", ")}` : ""}</div>` : ""}
       ${fill.length ? `<div class="note"><b>${applied ? "Дополнены" : "Будут дополнены"} пустые поля</b><ul>${fill.map(([field, count]) => `<li>${esc(field)}: ${count}</li>`).join("")}</ul></div>` : ""}
       ${missing.length ? `<details><summary>Нет значения в исходной ERP: ${missing.reduce((total, [, count]) => total + count, 0)}</summary><ul>${missing.map(([field, count]) => `<li>${esc(field)}: ${count}</li>`).join("")}</ul><p class="small muted">CRM не придумывает отсутствующие сведения. Такие поля нужно заполнить позднее по подтверждённому источнику</p></details>` : ""}

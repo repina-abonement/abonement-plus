@@ -141,6 +141,9 @@ def _apply_profile(con, sid, rec, user, visitor_cards=False):
 
 
 # Pairs confirmed by the owner. Each ERP ID remains available for later imports.
+EXCLUDED_VISITOR_IDS = {"62805", "62953"}
+DISTINCT_VISITOR_IDS = {"92940", "132829", "95513", "114710", "108850", "110708"}
+
 VISITOR_PAIRS = (
     ("68349", "99699"), ("100563", "82964"), ("113503", "119677"),
     ("89227", "68726"), ("128139", "98809"), ("122798", "116222"),
@@ -165,8 +168,10 @@ def _confirmed_pair(con, matcher, rows):
             targets.add(linked)
         targets.update(matcher.by_np.get((names[0], phone[-10:]), ()))
         families.update(family["id"] for family in sv.find_families_by_phone(con, phone))
-    if len(targets) > 1 or len(families) > 1:
-        raise ValueError("Подтверждённая пара уже связана с разными карточками или семьями CRM")
+    if len(targets) > 1:
+        raise ValueError("Подтверждённая пара уже связана с разными карточками CRM")
+    if len(families) > 1:
+        raise ValueError("Телефоны подтверждённой пары находятся в разных семьях CRM")
     if targets:
         sid = next(iter(targets))
         card = matcher.students[sid]
@@ -227,6 +232,9 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
                 found_requested.add(eid)
             status = "Новый лид" if lead else row[status_column].strip()
             counts["leads" if lead else "visitors"] += 1
+            if not lead and eid in EXCLUDED_VISITOR_IDS:
+                counts["excluded"] += 1
+                continue
             if not eid or (not status and not visitor_cards):
                 issues.append([where, "Нет ID ERP" if not eid else "Нет статуса в ERP"])
                 continue
@@ -301,7 +309,7 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
                         for candidate_name, candidate_phone in matcher.by_np
                     )
                 else:
-                    ambiguous = bool(names.get(name)) or incoming_names[name] > 1
+                    ambiguous = eid not in DISTINCT_VISITOR_IDS and (bool(names.get(name)) or incoming_names[name] > 1)
                 if not name or not phone or ambiguous:
                     issues.append([where, "Нет имени или телефона либо найден тёзка. Сверьте личность"])
                     continue
@@ -496,12 +504,14 @@ def apply_confirmed_visitor_pairs(con):
     if not upload:
         return "source-not-uploaded"
     user = {"name": "CRM", "role": "admin"}
-    ids = [eid for pair in VISITOR_PAIRS for eid in pair]
-    report, actions = _plan(con, [upload["id"]], [], ids, visitor_cards=True)
-    if set(report["filter"]["found"]) != set(ids):
-        return "source-incomplete"
-    if report["issues"] or len(actions) != len(VISITOR_PAIRS):
-        return "review-required"
-    transfer(con, [upload["id"]], [], user, report["token"], ids, visitor_cards=True)
-    con.execute("INSERT INTO settings(key,value) VALUES (?, 'complete')", (marker,))
-    return "complete"
+    completed = 0
+    for pair in VISITOR_PAIRS:
+        report, actions = _plan(con, [upload["id"]], [], pair, visitor_cards=True)
+        if report["issues"] or len(actions) != 1 or set(report["filter"]["found"]) != set(pair):
+            continue
+        transfer(con, [upload["id"]], [], user, report["token"], pair, visitor_cards=True)
+        completed += 1
+    if completed == len(VISITOR_PAIRS):
+        con.execute("INSERT INTO settings(key,value) VALUES (?, 'complete')", (marker,))
+        return "complete"
+    return f"review-required-{completed}-of-{len(VISITOR_PAIRS)}"
