@@ -37,6 +37,19 @@ def _profile_parent(con, family_id, phone=""):
     ).fetchone()
 
 
+def _parent_name_and_role(name):
+    from .smart import guess_relation
+
+    words = _clean(name).split()
+    if not words:
+        return "", ""
+    for index in (-1, 0):
+        role = guess_relation(words[index].strip("(),:—-"))
+        if role:
+            return " ".join(words[:-1] if index == -1 else words[1:]).strip(" ,:—-"), role
+    return " ".join(words), ""
+
+
 def _profile_preview(con, sid, rec, visitor_cards=False):
     """Describe safe profile enrichment without changing an existing card."""
     from .smart import guess_relation
@@ -45,7 +58,10 @@ def _profile_preview(con, sid, rec, visitor_cards=False):
     source["child_name"] = _clean(ei._split_name(rec))
     source["birth"] = (erpfull._date(rec.get("birth", "")) or "")[:10]
     source["phone"] = _clean(rec.get("phone"))
-    source["relation"] = "" if visitor_cards else guess_relation(source["relation"] or source["parent_name"])
+    if visitor_cards:
+        source["parent_name"], source["relation"] = _parent_name_and_role(source["parent_name"])
+    else:
+        source["relation"] = guess_relation(source["relation"] or source["parent_name"])
     result = {"source": source, "fill": [], "conflicts": [], "missing": [label for key, label in PROFILE_FIELDS if not source[key]]}
     if not sid:
         result["fill"] = [label for key, label in PROFILE_FIELDS if source[key]]
@@ -59,6 +75,10 @@ def _profile_preview(con, sid, rec, visitor_cards=False):
         "relation": _clean(parent.get("relation")), "email": _clean(parent.get("email")),
         "source": _clean(student.get("source")), "comment": "",
     }
+    if visitor_cards:
+        current_name, _role = _parent_name_and_role(current["parent_name"])
+        if current_name:
+            current["parent_name"] = current_name
     if source["comment"]:
         current["comment"] = source["comment"] if con.execute(
             "SELECT 1 FROM history WHERE student_id=? AND kind='note' AND trim(text)=? LIMIT 1", (sid, source["comment"])
@@ -68,7 +88,7 @@ def _profile_preview(con, sid, rec, visitor_cards=False):
             continue
         if key == "phone" and normalize_phone(source[key]) and normalize_phone(current[key]) == normalize_phone(source[key]):
             continue
-        if (visitor_cards and key in {"parent_name", "email"} and normalize_phone(current["phone"])
+        if (visitor_cards and key in {"parent_name", "email", "relation"} and normalize_phone(current["phone"])
                 and normalize_phone(source["phone"]) and normalize_phone(current["phone"]) != normalize_phone(source["phone"])):
             continue
         if not current[key] or (key == "parent_name" and current[key] == "Родитель") or (key == "child_name" and current[key] == ei.NO_NAME):
@@ -248,7 +268,7 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
         preview = _profile_preview(con, sid, rec, visitor_cards)
         fields = PROFILE_FIELDS
         if visitor_cards:
-            fields = tuple((key, label) for key, label in fields if key not in {"relation", "source", "comment"})
+            fields = tuple((key, label) for key, label in fields if key not in {"source", "comment"})
             fields += (("branch", "Филиал"), ("status", "Статус"))
             preview["source"].update(branch=_clean(rec.get("branch")), status=rec["visitor_source_status"])
             if rec["visitor_branch_labels"] or (rec["visitor_branch_id"] and not rec["visitor_existing_branch"]):
@@ -286,7 +306,10 @@ def transfer(con, visitors, leads, user, token=None, erp_ids=None, visitor_cards
             phone = rec.get("phone", "").strip()
             normalized = normalize_phone(phone)
             families = sv.find_families_by_phone(con, phone) if normalized else []
-            parent = rec.get("parent_name", "").strip() or "Родитель"
+            parent = rec.get("parent_name", "").strip()
+            if visitor_cards:
+                parent, _role = _parent_name_and_role(parent)
+            parent = parent or "Родитель"
             family = families[0]["id"] if len(families) == 1 else None
             if not family:
                 family = con.execute("INSERT INTO families(name) VALUES (?)", (parent,)).lastrowid

@@ -22,6 +22,20 @@ class ErpPeopleProfileFieldsTest(unittest.TestCase):
             "99;Петров Пётр;Анна;+7 900 999-88-77;01.10.2026\n"
         ).encode(), "clients")["id"]
 
+    def test_visitor_parent_role_is_imported_separately(self):
+        sid = services.create_student(self.con, {
+            "name": "Иванов Александр", "parent_name": "Ольга", "phone": "79001112233",
+        }, self.user)
+        self.con.execute("UPDATE students SET erp_id='42' WHERE id=?", (sid,))
+        data = ("ID;ФИО посетителя;Статус;Телефон;Имя родителя\n"
+                "42;Иванов Александр;Постоянный посетитель;79001112233;Ольга мама").encode()
+        visitors = [erpimport.upload(self.con, "visitors.csv", data, "clients")["id"]]
+        plan = erppeople.transfer(self.con, visitors, [], self.user, visitor_cards=True)
+        self.assertFalse(plan["profile"]["conflicts"])
+        self.assertEqual(plan["profile"]["fill"]["Роль родителя"], 1)
+        erppeople.transfer(self.con, visitors, [], self.user, plan["token"], visitor_cards=True)
+        self.assertEqual(tuple(self.con.execute("SELECT name,relation FROM parents").fetchone()), ("Ольга", "мама"))
+
     def test_phone_without_plus_matches_existing_phone(self):
         sid = services.create_student(self.con, {
             "name": "Иванов Александр", "parent_name": "Мария", "phone": "79001112233",
