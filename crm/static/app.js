@@ -1190,31 +1190,29 @@ function erpWireFiles(box, d) {
   box.querySelectorAll("[data-udel]").forEach((b) => (b.onclick = async () => { if (!confirm("Убрать этот файл?")) return; await api("DELETE", `/api/erp/uploads/${b.dataset.udel}`).catch(fail); renderErp(box); }));
 }
 
-function erpLeadImportSetup(box, data) {
+function erpLeadImportSetup(box) {
   const root = document.createElement("section");
   root.className = "erp-step";
   root.dataset.erpLeadImport = "1";
   root.innerHTML = `<h3>Импорт лидов из ERP</h3>
     <p>Выберите Excel с лидами. Проверка покажет карточки и филиалы. Перенос добавит недостающие филиалы и задачи.</p>
     <label>Файл лидов <input type="file" accept=".xlsx,.csv" data-lead-file></label>
-    <label>Или выберите загруженный файл <select data-lead-upload><option value="">Выберите файл</option>${data.uploads.filter(f=>f.kind==="clients").map(f=>`<option value="${f.id}">${esc(f.filename)}</option>`).join("")}</select></label>
     <button class="btn" data-lead-preview>Проверить лиды</button>
     <button class="btn primary" data-lead-apply disabled>Перенести лиды</button>
     <div data-lead-result aria-live="polite"></div>`;
   box.querySelector(".erp-page-head").after(root);
-  const file = root.querySelector("[data-lead-file]"), saved = root.querySelector("[data-lead-upload]");
+  const file = root.querySelector("[data-lead-file]");
   const preview = root.querySelector("[data-lead-preview]"), apply = root.querySelector("[data-lead-apply]");
   const output = root.querySelector("[data-lead-result]");
   let approved = null;
   const reset = () => { approved = null; apply.disabled = true; output.textContent = ""; };
-  file.onchange = () => { saved.value = ""; reset(); };
-  saved.onchange = () => { file.value = ""; reset(); };
+  file.onchange = reset;
   const run = async writing => {
-    preview.disabled = apply.disabled = file.disabled = saved.disabled = true;
+    preview.disabled = apply.disabled = file.disabled = true;
     try {
       let body = approved;
       if (!writing) {
-        let id = Number(saved.value);
+        let id;
         if (file.files[0]) {
           const chosen = file.files[0];
           const encoded = await new Promise((resolve,reject) => {
@@ -1236,24 +1234,23 @@ function erpLeadImportSetup(box, data) {
       approved = !writing && branches.every(b=>b.matches.length<=1) && (r.counts.same||r.counts.updated||r.counts.new)
         ? {...body, token:r.token} : null;
     } catch (error) { approved = null; output.textContent = error.message; }
-    finally { preview.disabled = file.disabled = saved.disabled = false; apply.disabled = !approved; }
+    finally { preview.disabled = file.disabled = false; apply.disabled = !approved; }
   };
   preview.onclick = () => run(false);
   apply.onclick = () => run(true);
 }
 
-function erpPeopleSetup(box, data) {
-  const options = data.uploads.map((file) => `<option value="${file.id}">${esc(file.filename)} (${file.count})</option>`).join("");
+function erpPeopleSetup(box) {
   box.insertAdjacentHTML("beforeend", `
     <div class="erp-step" id="erp-people">
       <b>Карточки клиентов, статусы и лиды</b>
       <p class="small muted">Переносятся карточки без счетов и денежных операций. Обязательные поля проверки: имя и фамилия ребёнка, дата рождения, телефон, имя и роль родителя, почта, рекламный источник и комментарий. Уже созданные карточки, в том числе дети из сборной, сопоставляются без дублей: пустые поля дополняются, расхождения показываются для ручной сверки</p>
-      <div class="field"><label for="erp-people-visitors">Посетители, включая архив</label><select id="erp-people-visitors" multiple>${options}</select></div>
-      <div class="field"><label for="erp-people-leads">Лиды</label><select id="erp-people-leads" multiple>${options}</select></div>
+      <div class="field"><label for="erp-people-visitors">Посетители, включая архив</label><input id="erp-people-visitors" type="file" multiple accept=".xlsx,.csv"></div>
+      <div class="field"><label for="erp-people-leads">Лиды</label><input id="erp-people-leads" type="file" multiple accept=".xlsx,.csv"></div>
       <div class="field"><label for="erp-people-ids">Только указанные ERP ID (необязательно)</label><textarea id="erp-people-ids" rows="2" placeholder="Например: 64928, 65188, 79204"></textarea><div class="small muted">Если поле заполнено, остальные строки полных файлов полностью пропускаются и новые карточки по ним не создаются</div></div>
       <label><input type="checkbox" id="erp-people-create-visitors"> Создать отсутствующие карточки посетителей и дополнить пустые поля существующих</label>
       <p class="small muted">Для этого режима выберите только выгрузку посетителей и оставьте поле ERP ID пустым. Заполненные статус и филиал сохраняются.</p>
-      <button class="btn" id="erp-people-plan" ${options ? "" : "disabled"}>Проверить</button>
+      <button class="btn" id="erp-people-plan" disabled>Проверить</button>
       <button class="btn primary" id="erp-people-apply" disabled>Перенести</button>
       <div id="erp-people-out" aria-live="polite"></div>
     </div>`);
@@ -1263,7 +1260,24 @@ function erpPeopleSetup(box, data) {
   const ids = root.querySelector("#erp-people-ids");
   const check = root.querySelector("#erp-people-plan"), apply = root.querySelector("#erp-people-apply");
   const out = root.querySelector("#erp-people-out");
-  const selected = (select) => Array.from(select.selectedOptions, (option) => +option.value);
+  const uploaded = new Map();
+  async function uploadSelected(input) {
+    const ids = [];
+    for (const file of input.files) {
+      if (!uploaded.has(file)) {
+        const data = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(",")[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        const result = await api("POST", "/api/erp/upload", { filename: file.name, data, kind: "clients" });
+        uploaded.set(file, result.id);
+      }
+      ids.push(uploaded.get(file));
+    }
+    return ids;
+  }
   let approved = null;
   function show(report, applied) {
     const n = report.counts, p = report.profile || {}, missing = Object.entries(p.source_missing || {}).filter(([, count]) => count), fill = Object.entries(p.fill || {}).filter(([, count]) => count);
@@ -1275,26 +1289,34 @@ function erpPeopleSetup(box, data) {
       ${!createVisitors.checked && (p.conflicts || []).length ? `<details open><summary>Расхождения карточки и ERP: ${p.conflicts.length}</summary><ul>${p.conflicts.map((item) => `<li>ERP ID ${esc(item.erp_id)} · ${esc(item.field)}: в CRM «${esc(item.crm)}», в ERP «${esc(item.erp)}». Значение CRM сохранится до ручной сверки</li>`).join("")}</ul></details>` : ""}
       ${report.issues.length ? `<details><summary>Требуют сверки: ${report.issues.length}</summary><ul>${report.issues.map(([row, reason]) => `<li>${esc(row)}: ${esc(reason)}</li>`).join("")}</ul></details>` : ""}`;
   }
-  createVisitors.onchange = visitors.onchange = leads.onchange = ids.oninput = () => { approved = null; apply.disabled = true; out.replaceChildren(); };
+  createVisitors.onchange = visitors.onchange = leads.onchange = ids.oninput = () => {
+    approved = null;
+    apply.disabled = true;
+    check.disabled = !visitors.files.length && !leads.files.length;
+    out.replaceChildren();
+  };
   async function run(applyChanges) {
     const erp_ids = ids.value.split(/[^0-9]+/).filter(Boolean);
-    const files = { visitors: selected(visitors), leads: selected(leads), erp_ids, visitor_cards: createVisitors.checked };
     if (applyChanges && !approved) return;
-    if (applyChanges) files.token = approved;
+    const confirmed = approved;
     approved = null;
-    check.disabled = apply.disabled = visitors.disabled = leads.disabled = createVisitors.disabled = true;
+    check.disabled = apply.disabled = visitors.disabled = leads.disabled = ids.disabled = createVisitors.disabled = true;
     out.textContent = applyChanges ? "Переношу…" : "Проверяю…";
     try {
+      const files = applyChanges ? confirmed : {
+        visitors: await uploadSelected(visitors), leads: await uploadSelected(leads),
+        erp_ids, visitor_cards: createVisitors.checked,
+      };
       const report = await api("POST", `/api/erp/people/${applyChanges ? "apply" : "plan"}`, files);
       show(report, applyChanges);
       if (!applyChanges && (report.counts.same || report.counts.updated || report.counts.new)) {
-        approved = report.token;
+        approved = { ...files, token: report.token };
         apply.disabled = false;
       }
     } catch (error) {
       out.textContent = error.message;
     } finally {
-      check.disabled = visitors.disabled = leads.disabled = createVisitors.disabled = false;
+      check.disabled = visitors.disabled = leads.disabled = ids.disabled = createVisitors.disabled = false;
     }
   }
   check.onclick = () => run(false);
@@ -1480,7 +1502,7 @@ async function renderErp(box) {
   // widgets: an old empty-import edge case must never hide the recovery tool.
   if (typeof chatArchiveRestoreSetup === "function") chatArchiveRestoreSetup(box);
   if (typeof erpHistorySetup === "function") erpHistorySetup(box);
-  try { erpLeadImportSetup(box, d); erpPeopleSetup(box, d); } catch (error) { fail(error); }
+  try { erpLeadImportSetup(box); erpPeopleSetup(box); } catch (error) { fail(error); }
   try { erpPriorityPeopleSetup(box); } catch (error) { fail(error); }
   try { erpPriorityHistorySetup(box); } catch (error) { fail(error); }
   try { erpPriorityAttendanceSetup(box); } catch (error) { fail(error); }
