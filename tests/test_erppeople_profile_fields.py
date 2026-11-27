@@ -22,6 +22,17 @@ class ErpPeopleProfileFieldsTest(unittest.TestCase):
             "99;Петров Пётр;Анна;+7 900 999-88-77;01.10.2026\n"
         ).encode(), "clients")["id"]
 
+    def test_phone_without_plus_matches_existing_phone(self):
+        sid = services.create_student(self.con, {
+            "name": "Иванов Александр", "parent_name": "Мария", "phone": "79001112233",
+        }, self.user)
+        self.con.execute("UPDATE students SET erp_id='42' WHERE id=?", (sid,))
+        visitors = [self.upload()]
+        plan = erppeople.transfer(self.con, visitors, [], self.user, visitor_cards=True)
+        self.assertNotIn("Телефон родителя", [item["field"] for item in plan["profile"]["conflicts"]])
+        erppeople.transfer(self.con, visitors, [], self.user, plan["token"], visitor_cards=True)
+        self.assertEqual(self.con.execute("SELECT phone FROM parents").fetchone()[0], "79001112233")
+
     def test_existing_card_is_enriched_without_duplicate_or_finance(self):
         sid = services.create_student(self.con, {
             "name": "Иванов Александр", "parent_name": "Родитель", "phone": "+7 900 111-22-33",
