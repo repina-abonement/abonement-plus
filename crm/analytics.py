@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from . import dashboard_sales, logic, referrals, sources
+from . import dashboard_sales, logic, referrals, sources, sale_locations
 
 
 def _pct(a, b):
@@ -15,10 +15,9 @@ def _pct(a, b):
 
 
 def _holders(con, ym, branch_id=None):
-    branches = dict(con.execute("SELECT id,branch_id FROM groups"))
     out = {}
-    for sid, gid, member, value in dashboard_sales.rows(con, ym):
-        if member and (not branch_id or branches.get(gid) == branch_id):
+    for sid, gid, member, value in dashboard_sales.rows(con, ym, branch_id):
+        if member:
             h = out.setdefault(sid, {"group_id": gid, "revenue": 0})
             h["revenue"] += value
     return out
@@ -38,7 +37,12 @@ def groups_report(con, ym: str, branch_id: int | None = None) -> dict:
     prev = logic.shift_month(ym, -1)
     from collections import defaultdict
     kids_by_group, prev_by_group, revenue = defaultdict(set), defaultdict(set), defaultdict(int)
-    for sid, gid, member, value in dashboard_sales.rows(con, ym):
+    branch_revenue, branch_kids = defaultdict(int), defaultdict(set)
+    for sid, gid, member, value, bid in dashboard_sales.located_rows(con, ym):
+        if bid is not None and (not branch_id or bid == branch_id):
+            branch_revenue[bid] += value
+            if member:
+                branch_kids[bid].add(sid)
         revenue[gid] += value
         if member:
             kids_by_group[gid].add(sid)
@@ -74,8 +78,11 @@ def groups_report(con, ym: str, branch_id: int | None = None) -> dict:
         p, a = att.get(r["id"], [0, 0])
         b["present"] += p
         b["total"] += p + a
+    for bid in branch_revenue.keys() - br.keys():
+        br[bid] = dict(branch=sale_locations.branch_names(con)[bid], groups=0, capacity=0, prev=0, left=0, present=0, total=0)
     for bid, b in br.items():
-        b["kids"] = len(set().union(*(kids_by_group[r["id"]] for r in rows if r["branch_id"] == bid)))
+        b["kids"] = len(branch_kids[bid])
+        b["revenue"] = branch_revenue[bid]
         b["fill"] = _pct(b["kids"], b["capacity"])
         b["retention"] = _pct(b["prev"] - b["left"], b["prev"])
         b["attendance"] = _pct(b["present"], b["total"])

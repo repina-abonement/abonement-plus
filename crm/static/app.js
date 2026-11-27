@@ -875,7 +875,7 @@ function donut(parts) {
 
 function dashboardMonths() {
   const months = [];
-  for (let offset = 3; offset >= -17; offset--) {
+  for (let offset = 3; offset >= (2022 - Number(S.meta.today.slice(0, 4))) * 12 + 8 - Number(S.meta.today.slice(5, 7)); offset--) {
     const dt = new Date(`${S.meta.today.slice(0, 7)}-01T12:00:00`);
     dt.setMonth(dt.getMonth() + offset);
     months.push(isoDate(dt).slice(0, 7));
@@ -985,14 +985,14 @@ async function renderDashboard(page) {
   if (!S.dashMonth) S.dashMonth = S.meta.today.slice(0, 7);
   if (S.dashBranch === undefined) S.dashBranch = "";
   if(S.dashGroup===undefined)S.dashGroup='';
-  const dashGroups=(S.meta.groups||[]).filter(g=>!g.is_makeup&&(!S.dashBranch||String(g.branch_id)===String(S.dashBranch)));
+  const dashGroups=(S.meta.dashboard_groups||S.meta.groups||[]).filter(g=>!g.is_makeup&&(!S.dashBranch||String(g.branch_id)===String(S.dashBranch)));
   if(S.dashGroup&&!dashGroups.some(g=>String(g.id)===String(S.dashGroup)))S.dashGroup='';
   if (!S.dashSeg) S.dashSeg = "count";
   if (S.dashTab && S.dashTab !== "overview") {
     const ms = dashboardMonths();
     page.innerHTML = `<div class="dash-filters">
       <select id="dash-month">${ms.map((x) => `<option value="${x}" ${x === S.dashMonth ? "selected" : ""}>${monthLabel(x)}</option>`).join("")}</select>
-      ${S.dashTab === "sources" || S.dashTab === "program" ? "" : `<select id="dash-branch" data-search-select="off"><option value="">Все филиалы</option>${S.meta.branches.map((b) => `<option value="${b.id}" ${String(b.id) === String(S.dashBranch) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>`}
+      ${S.dashTab === "sources" || S.dashTab === "program" ? "" : `<select id="dash-branch" data-search-select="off"><option value="">Все филиалы</option>${(S.meta.dashboard_branches || S.meta.branches).map((b) => `<option value="${b.id}" ${String(b.id) === String(S.dashBranch) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>`}
       </div>${anTabsHtml()}<div id="an-box"></div>`;
     $("#dash-month").onchange = (e) => { S.dashMonth = e.target.value; render(); };
     if ($("#dash-branch")) $("#dash-branch").onchange = (e) => { S.dashBranch = e.target.value; render(); };
@@ -1008,7 +1008,7 @@ async function renderDashboard(page) {
   page.innerHTML = `
     <div class="dash-filters">
       <select id="dash-month">${months.map((x) => `<option value="${x}" ${x === S.dashMonth ? "selected" : ""}>${monthLabel(x)}</option>`).join("")}</select>
-      <select id="dash-branch" data-search-select="off"><option value="">Все филиалы</option>${S.meta.branches.map((b) => `<option value="${b.id}" ${String(b.id) === String(S.dashBranch) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>
+      <select id="dash-branch" data-search-select="off"><option value="">Все филиалы</option>${(S.meta.dashboard_branches || S.meta.branches).map((b) => `<option value="${b.id}" ${String(b.id) === String(S.dashBranch) ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select>
       <select id="dash-group" data-search-select="off" aria-label="Группа"><option value="">Все группы</option>${dashGroups.map(g=>`<option value="${g.id}" ${String(g.id)===String(S.dashGroup)?'selected':''}>${esc(g.name)}</option>`).join('')}</select>
     </div>
     ${anTabsHtml()}

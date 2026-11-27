@@ -1719,13 +1719,15 @@ def mark_attendance(con, sid: int, group_id: int, day: str, status: str, user) -
 
 
 def meta(con) -> dict:
-    from . import groupterms
+    from . import groupterms, sale_locations
     groups=_rows(con.execute("""SELECT g.*,b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id
         WHERE g.active=1 ORDER BY g.is_makeup,b.id,g.name"""))
     for g in groups:g['fixed_only']=groupterms.fixed_only(con,g['id'])
     return {
         "branches": _rows(con.execute("SELECT * FROM branches WHERE active=1 ORDER BY id")),
         "groups": groups,
+        "dashboard_branches": [{"id": bid, "name": name} for bid, name in sale_locations.branch_names(con).items()],
+        "dashboard_groups": _rows(con.execute("SELECT id,name,branch_id,is_makeup FROM groups ORDER BY name")),
         "sales_stages": [{"key": k, "title": t, "auto": k in AUTO_SALES} for k, t in SALES_STAGES],
         "trial_refusals": TRIAL_REFUSALS,
         "ad": __import__("crm.sources", fromlist=["listing"]).listing(con),
@@ -1791,14 +1793,13 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
     holder_args = (group_id or branch_id,) if group_id or branch_id else ()
     from functools import lru_cache
     from . import dashboard_sales
-    branches = dict(con.execute("SELECT id,branch_id FROM groups"))
 
     @lru_cache(None)
     def card_month(m):
         out = {}
         other = 0
-        for sid, gid, member, value in dashboard_sales.rows(con, m):
-            if (group_id and gid != group_id) or (branch_id and branches.get(gid) != branch_id):
+        for sid, gid, member, value in dashboard_sales.rows(con, m, branch_id or None):
+            if group_id and gid != group_id:
                 continue
             if member:
                 out.setdefault(sid, []).append(value)
