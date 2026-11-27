@@ -1014,7 +1014,7 @@ async function renderDashboard(page) {
     ${anTabsHtml()}
 
     <div class="kpis">
-      ${kpiCard("wallet", "Выручка", `${fmtNum(k.revenue.value)} <small>₽</small>`, k.revenue, d.revenue_from_erp ? '<div class="kpi-note">По выгрузке ERP за месяц занятий</div>' : '')}
+      ${kpiCard("wallet", "Выручка", `${fmtNum(k.revenue.value)} <small>₽</small>`, k.revenue)}
       ${kpiCard("cart", "Уникальных держателей абонементов", fmtNum(k.holders.value), k.holders, `<div class="kpi-note">ребёнок с абонементами в две группы считается один раз</div>`)}
       ${kpiCard("calc", "Средний чек", `${fmtNum(k.avg.value)} <small>₽</small>`, k.avg, `<div class="kpi-note">средняя сумма одного абонемента</div>`)}
       ${kpiCard("pie", "Заполненность", `<span class="fill2"><span><em>по абонементам</em>${k.fill.subs ?? "—"} <small>%</small></span><span><em>по уникальным</em>${k.fill.value ?? "—"} <small>%</small></span></span>`, { vs_month: k.fill.vs_month }, `<div class="kpi-note">${k.fill.subs_count} абонементов и ${k.holders.value} учеников на ${k.seats} мест</div>`)}

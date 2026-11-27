@@ -1791,17 +1791,29 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
     holder_sql=" AND COALESCE(e.group_id,s.group_id)=?" if group_id else (" AND COALESCE(e.group_id,s.group_id) IN (SELECT id FROM groups WHERE branch_id=?)" if branch_id else '')
     holder_args=(group_id,) if group_id else ((branch_id,) if branch_id else ())
 
-    def holders(m):
+    from collections import Counter
+    from functools import lru_cache
+
+    @lru_cache(None)
+    def card_month(m):
         from . import referrals
         bonuses = referrals.used(con, m)
         out = {}
-        for sid_, price, sub_id in con.execute(
-                "SELECT s.id, x.price, x.id FROM subscriptions x JOIN students s ON s.id = x.student_id "
+        other_revenue = 0
+        overlaps = Counter()
+        for sid_, price, sub_id, kind in con.execute(
+                "SELECT s.id, x.price, x.id, x.kind FROM subscriptions x JOIN students s ON s.id = x.student_id "
                 "LEFT JOIN enrollments e ON e.id = x.enrollment_id "
                 "WHERE x.month = ? AND x.status = 'paid'"
                 + holder_sql,
                 (m, *holder_args)):
-            out.setdefault(sid_, []).append(price - bonuses.get(sub_id, 0))
+            subscription = kind != "single"
+            overlaps[sid_, subscription, price] += 1
+            value = price - bonuses.get(sub_id, 0)
+            if subscription:
+                out.setdefault(sid_, []).append(value)
+            else:
+                other_revenue += value
         if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_history_subscriptions'").fetchone():
             history_scope = " AND h.group_id=?" if group_id else (" AND g.branch_id=?" if branch_id else "")
             for sid_, price in con.execute(
@@ -1813,11 +1825,23 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
                            WHERE x.student_id=h.student_id AND x.month=h.month AND x.status!='cancelled'
                              AND COALESCE(e.group_id,(SELECT group_id FROM students WHERE id=x.student_id))=h.group_id
                          )""", (m, *holder_args)):
+                overlaps[sid_, True, price] += 1
                 out.setdefault(sid_, []).append(price)
+        if not branch_id and not group_id:
+            for sid_, kind, amount in con.execute("""SELECT student_id,kind,amount
+                    FROM erp_revenue_history WHERE month=?""", (m,)):
+                subscription = kind.startswith("Абонемент")
+                key = (sid_, subscription, amount)
+                if overlaps[key]:
+                    overlaps[key] -= 1
+                elif subscription:
+                    out.setdefault(sid_, []).append(amount)
+                else:
+                    other_revenue += amount
         from . import revenuecarry
         for row in revenuecarry.adjustments(con,m,group_id=group_id,branch_id=branch_id):
-            out.setdefault(row['student_id'], []).append(row['amount'])
-        return out
+            other_revenue += row['amount']
+        return out, other_revenue
 
     first_paid = {r[0]: r[1] for r in con.execute(
         "SELECT student_id, MIN(month) FROM subscriptions WHERE status='paid' GROUP BY student_id")}
@@ -1825,30 +1849,22 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
         for sid_, first_month in con.execute(
                 "SELECT student_id,MIN(month) FROM erp_history_subscriptions WHERE revenue_amount IS NOT NULL GROUP BY student_id"):
             first_paid[sid_] = min(first_paid.get(sid_, first_month), first_month)
-    # The snapshot describes revenue by service month across all locations.
-    # The upload contains no historical group or branch identifiers.
-    erp_subscription_metrics = {}
-    erp_totals = {}
     if not branch_id and not group_id:
-        erp_subscription_metrics = {row["month"]: row for row in con.execute("SELECT * FROM erp_subscription_months")}
-        erp_totals = dict(con.execute("SELECT month,amount FROM erp_revenue_months"))
+        for sid_, first_month in con.execute("""SELECT student_id, MIN(month) FROM erp_revenue_history
+                WHERE kind LIKE 'Абонемент%' GROUP BY student_id"""):
+            first_paid[sid_] = min(first_paid.get(sid_, first_month), first_month)
     cache = {}
 
     def month_stats(m):
         if m in cache:
             return cache[m]
-        h = holders(m)
-        prev = holders(logic.shift_month(m, -1))
+        h, other_revenue = card_month(m)
+        prev, _ = card_month(logic.shift_month(m, -1))
         revenue = sum(sum(v) for v in h.values())
         n_subs = sum(len(v) for v in h.values())
-        st = {"revenue": erp_totals.get(m, revenue), "holders": len(h), "subs": n_subs, "avg": round(revenue / n_subs) if n_subs else 0,
+        st = {"revenue": revenue + other_revenue, "holders": len(h), "subs": n_subs, "avg": round(revenue / n_subs) if n_subs else 0,
               "conversion": _pct(len(set(h) & set(prev)), len(prev)), "ids": set(h),
               "prices": {k: sum(v) for k, v in h.items()}}
-        metrics = erp_subscription_metrics.get(m)
-        if metrics:
-            count = metrics["subscriptions"]
-            st.update(holders=metrics["holders"], subs=count,
-                      avg=round(metrics["subscription_revenue"] / count) if count else 0)
         cache[m] = st
         return st
 
@@ -1904,7 +1920,7 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
     months = [logic.shift_month(cur, -i) for i in range(11, -1, -1)]
     series = {}
     for key in ("revenue", "holders", "avg", "conversion"):
-        val = lambda m: month_stats(m)[key] if month_stats(m)["holders"] or (key == "revenue" and m in erp_totals) else None
+        val = lambda m: month_stats(m)[key] if month_stats(m)["holders"] or (key == "revenue" and month_stats(m)["revenue"]) else None
         series[key] = {"cur": [val(x) for x in months],
                        "prev": [val(logic.shift_month(x, -12)) for x in months]}
 
@@ -1919,7 +1935,7 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
             at_risk += min(logic.MAX_FLEX_CREDIT, a) * per
 
     return {
-        "month": cur, "month_label": logic.month_label(cur), "revenue_from_erp": cur in erp_totals,
+        "month": cur, "month_label": logic.month_label(cur),
         "kpi": {"revenue": kpi("revenue"), "holders": kpi("holders"), "avg": kpi("avg"),
                 "conversion": kpi("conversion"),
                 "fill": {"value": fill, "subs": fill_subs, "subs_count": c["subs"],
