@@ -17,7 +17,7 @@ def apply(con):
     for card in cards:
         sid = card["id"]
         name, erp_id = TARGETS[sid]
-        if sorted(erpimport._norm(card["name"]).split()) != name:
+        if not card["erp_id"] and sorted(erpimport._norm(card["name"]).split()) != name:
             return "name-mismatch"
         if card["erp_id"] not in ("", None, erp_id):
             return "erp-id-mismatch"
