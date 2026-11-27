@@ -2681,9 +2681,13 @@ function clientSubscriptionsHtml(d) {
   };
   const key=String(d.student?.id||'preview');
   S.subscriptionCalendars=S.subscriptionCalendars||{};
-  const availableYears=[...new Set([d.cur_month.slice(0,4),...d.subscriptions.map(x=>clientSubscriptionMonth(x).slice(0,4))])].sort().reverse();
-  let selected=S.subscriptionCalendars[key];
-  if(!selected||!availableYears.includes(selected.slice(0,4))){selected=d.subscriptions.some(x=>clientSubscriptionMonth(x)===d.cur_month)?d.cur_month:d.subscriptions.map(clientSubscriptionMonth).filter(Boolean).sort().reverse()[0]||d.cur_month;S.subscriptionCalendars[key]=selected}
+  const calendarMonths = subscriptionCalendarMonths(d);
+  const availableYears = [...new Set([d.cur_month, ...calendarMonths].map(month => month.slice(0,4)))].sort().reverse();
+  let selected = S.subscriptionCalendars[key];
+  if (!selected || !availableYears.includes(selected.slice(0,4))) {
+    selected = calendarMonths.includes(d.cur_month) ? d.cur_month : calendarMonths[0] || d.cur_month;
+    S.subscriptionCalendars[key] = selected;
+  }
   const year = selected.slice(0, 4);
   const months = new Map();
   for (const sub of d.subscriptions) {
@@ -2691,26 +2695,40 @@ function clientSubscriptionsHtml(d) {
     if (!months.has(month)) months.set(month, []);
     months.get(month).push(sub);
   }
+  for (const month of calendarMonths) if (!months.has(month)) months.set(month, []);
   const details = Array.from(months, ([month, entries]) => {
     const shown = entries.filter(sub => sub.status !== 'cancelled');
     const cancelled = entries.filter(sub => sub.status === 'cancelled');
+    const revenueRows = (d.erp_revenue || []).filter(row => row.month === month);
     const visible = month === selected;
     return `<div data-sub-detail-month="${esc(month)}" ${visible ? '' : 'hidden'}>
-      ${shown.length ? `<ul data-sub-live-list class="sub-list ${visible ? 'subscription-live-list' : ''}">${shown.map(card).join('')}</ul>` : '<p class="muted small">В этом месяце покупок нет</p>'}
+      ${shown.length ? `<ul data-sub-live-list class="sub-list ${visible ? 'subscription-live-list' : ''}">${shown.map(card).join('')}</ul>` : ''}
+      ${revenueRows.map(row => `<p>${esc(row.kind)} · ${esc(row.start)} — ${esc(row.end)} · ${rub(row.amount)}</p>`).join('')}
       ${cancelled.length ? `<details class="subscription-cancelled-history"><summary>Отменённые покупки · ${cancelled.length}</summary><ul class="sub-list">${cancelled.map(card).join('')}</ul></details>` : ''}
     </div>`;
   }).join('');
   return `<div class="subscription-balance"><div><small>Свободный баланс</small><b>${rub(d.balance.deposit||0)}</b><span>Можно зачесть в оплату</span>${balanceLabelsHtml(d.balance.balance_labels)}</div><div><small>Долг</small><b class="${d.balance.debt?'finance-due':''}">${rub(d.balance.debt||0)}</b><span>Прошлые и текущий месяц</span></div><div><small>Будущие абонементы</small><b>${rub(d.balance.upcoming||0)}</b><span>Осталось оплатить</span></div></div><div class="subscription-year-head"><h3>Абонементы</h3><select id="subscription-year" aria-label="Год абонементов">${availableYears.map(y=>`<option ${y===year?'selected':''}>${y}</option>`).join('')}</select></div><div class="subscription-year-grid">${subscriptionMonthTiles(d,year,selected)}</div><h4 class="subscription-selected-month">${esc(monthLabel(selected))}</h4>${details}<p data-sub-empty class="muted small" ${!months.has(selected)?'':'hidden'}>В этом месяце покупок нет</p>${refundRequestsHtml(d.refund_requests||[])}${subscriptionRefundsHtml(d)}`;
 }
 
+function subscriptionCalendarMonths(d) {
+  return [...new Set([...d.subscriptions.map(clientSubscriptionMonth),
+    ...(d.erp_revenue || []).map(row => row.month)].filter(Boolean))].sort().reverse();
+}
+
 function subscriptionMonthTiles(d, year, selected) {
   return Array.from({length:12},(_,i)=>{
     const month=year+'-'+String(i+1).padStart(2,'0'),all=d.subscriptions.filter(x=>clientSubscriptionMonth(x)===month),live=all.filter(x=>x.status!=='cancelled');
     const financial=live.filter(x=>!x.history_import),historical=live.filter(x=>x.history_import),historicalTotal=historical.reduce((sum,x)=>sum+(Number(x.price)||0),0),historicalLessons=historical.reduce((n,x)=>n+x.lessons,0),total=financial.reduce((sum,x)=>sum+x.price,0),paid=financial.reduce((sum,x)=>sum+clientSubscriptionPaid(x,d.balance),0),left=Math.max(0,total-paid);
-    const state=!all.length?'empty':!live.length?'cancelled':!financial.length&&historical.length?'historical':!left?'paid':paid?'partial':'unpaid';
+    const rows = (d.erp_revenue || []).filter(row => row.month === month);
+    const revenue = rows.reduce((sum, row) => sum + row.amount, 0);
+    const state=rows.length && !financial.length ? 'historical' : !all.length?'empty':!live.length?'cancelled':!financial.length&&historical.length?'historical':!left?'paid':paid?'partial':'unpaid';
     const label={empty:'Нет абонемента',cancelled:'Отменён',historical:'История ERP',paid:'Оплачен',partial:'Частично',unpaid:'Ждёт оплаты'}[state];
     const singleCount=live.filter(x=>x.kind==='single').length,caption=singleCount&&singleCount===live.length?`${singleCount} ${plural(singleCount,'разовое','разовых','разовых')}`:label;
-    return `<button type="button" class="subscription-month ${state} ${month===selected?'selected':''}" data-sub-month="${month}" aria-pressed="${month===selected}"><strong>${esc(MONTHS[i])}</strong><span class="subscription-month-status">${caption}</span>${live.length?historical.length&&!financial.length?`<b>${rub(historicalTotal)}</b><small>${historicalLessons} ${plural(historicalLessons,'занятие','занятия','занятий')} · без счетов и оплат</small>`:`<b>${rub(total)}</b>${left?`<small>Остаток ${rub(left)}</small>`:'<small>Всё оплачено</small>'}`:'<b>—</b><small>&nbsp;</small>'}</button>`;
+    return `<button type="button" class="subscription-month ${state} ${month===selected?'selected':''}" data-sub-month="${month}" aria-pressed="${month===selected}"><strong>${esc(MONTHS[i])}</strong><span class="subscription-month-status">${rows.length && !financial.length ? 'Выручка ERP' : caption}</span>${financial.length
+      ? `<b>Оплачено ${rub(paid)}</b>${left ? `<small>Остаток ${rub(left)}</small>` : ''}${rows.length ? `<small>Выручка ERP · ${rub(revenue)}</small>` : ''}`
+      : rows.length ? `<b>${rub(revenue)}</b>`
+      : historical.length ? `<b>${rub(historicalTotal)}</b><small>${historicalLessons} ${plural(historicalLessons,'занятие','занятия','занятий')} · без счетов и оплат</small>`
+      : '<b>—</b>'}</button>`;
   }).join('');
 }
 
@@ -2741,7 +2759,7 @@ function wireSubscriptionCalendar(root, d) {
     if (button) choose(button.dataset.subMonth);
   };
   year.onchange = () => {
-    const months = d.subscriptions.map(clientSubscriptionMonth)
+    const months = subscriptionCalendarMonths(d)
       .filter(month => month.startsWith(year.value + '-')).sort().reverse();
     const selected = months[0] || year.value + '-01';
     grid.innerHTML = subscriptionMonthTiles(d, year.value, selected);
