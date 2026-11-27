@@ -1193,6 +1193,7 @@ function erpWireFiles(box, d) {
 function erpLeadImportSetup(box, data) {
   const root = document.createElement("section");
   root.className = "erp-step";
+  root.dataset.erpLeadImport = "1";
   root.innerHTML = `<h3>Импорт лидов из ERP</h3>
     <p>Выберите Excel с лидами. Проверка покажет карточки и филиалы. Перенос добавит недостающие филиалы и задачи.</p>
     <label>Файл лидов <input type="file" accept=".xlsx,.csv" data-lead-file></label>
@@ -1364,7 +1365,7 @@ function erpPriorityHistorySetup(box) {
   if (!after || box.querySelector("[data-erp-priority-history]")) return;
   const section = document.createElement("section");
   section.className = "erp-step"; section.dataset.erpPriorityHistory = "1";
-  section.innerHTML = `<div class="erp-step-title"><span class="erp-step-number">3</span><div><h3>Перенести ноябрьскую историю абонементов</h3>
+  section.innerHTML = `<div class="erp-step-title"><div><h3>Ноябрьская история абонементов</h3>
     <p>Добавляет в хронологию даты продажи, группу, период и количество занятий. Оплаты, долг и баланс из ERP не читаются</p></div></div>
     <div class="field"><label for="erp-priority-subs">Проданные абонементы</label><input id="erp-priority-subs" type="file" accept=".xlsx,.csv"><div class="small muted">Выберите один файл, например «Проданные абонементы (5).xlsx»</div></div>
     <div class="field"><label for="erp-priority-history-ids">ERP ID нужных детей</label><textarea id="erp-priority-history-ids" rows="4" placeholder="По одному ID в строке"></textarea></div>
@@ -1579,15 +1580,53 @@ async function renderErp(box) {
 }
 
 function erpOrganizeTools(box) {
-  if (box.querySelector('[data-erp-advanced]')) return;
-  const head=box.querySelector('.erp-page-head'),primary=box.querySelector('#erp-history-transfer'),priority=box.querySelector('[data-erp-priority]'),priorityHistory=box.querySelector('[data-erp-priority-history]'),priorityAttendance=box.querySelector('[data-erp-priority-attendance]');
-  if(!head||!primary)return;
-  const advanced=document.createElement('details');advanced.className='erp-advanced';advanced.dataset.erpAdvanced='1';
-  advanced.innerHTML='<summary><span><b>Другие инструменты переноса</b><small>Карточки, задачи, сверки, восстановление и технические операции</small></span><span aria-hidden="true">⌄</span></summary><div data-erp-advanced-body></div>';
-  const body=advanced.querySelector('[data-erp-advanced-body]');
-  [...box.children].filter(node=>node!==head&&node!==primary&&node!==priority&&node!==priorityHistory&&node!==priorityAttendance).forEach(node=>body.append(node));
-  (priorityAttendance||priorityHistory||priority||primary).after(advanced);
+  const head = box.querySelector(".erp-page-head");
+  if (box.querySelector(".erp-transfer-workspace")) return;
+
+  const workspace = document.createElement("div");
+  workspace.className = "erp-transfer-workspace";
+  const stages = [
+    { key: "cards", label: "Карточки", description: "Карточки посетителей и лидов уже загружали. Здесь можно проверить оставшиеся строки и дополнить карточки.", selectors: ["[data-erp-lead-import]", "#erp-people"] },
+    { key: "subscriptions", label: "Абонементы", description: "Выберите выгрузку проданных абонементов и проверьте, какие записи появятся в истории клиентов.", selectors: ["[data-erp-priority-history]"] },
+    { key: "tasks", label: "Задачи", description: "Загрузите выгрузку задач и проверьте клиента, срок и состояние перед переносом.", selectors: ["#erp-task-transfer"] },
+  ];
+  workspace.innerHTML = `
+    <nav class="erp-transfer-nav" aria-label="Этапы переноса из ERP">
+      ${stages.map(({ key, label }) => `<button type="button" class="btn" data-erp-stage="${key}" aria-controls="erp-stage-${key}">${label}</button>`).join("")}
+    </nav>
+    ${stages.map(({ key, label, description }) => `<section class="erp-transfer-stage" id="erp-stage-${key}" aria-label="${label}" hidden>
+      <p class="muted">${description}</p>
+      <div data-erp-stage-tools></div>
+    </section>`).join("")}
+    <details class="erp-advanced"><summary><span><b>Дополнительные инструменты</b><small>История одного ребёнка, загруженные файлы и прежние операции</small></span><span aria-hidden="true">⌄</span></summary>
+      <div data-erp-advanced-body></div>
+    </details>`;
+  head.after(workspace);
+  for (const { key, selectors } of stages) {
+    const tools = workspace.querySelector(`#erp-stage-${key} [data-erp-stage-tools]`);
+    for (const selector of selectors) {
+      const tool = box.querySelector(selector);
+      if (tool) tools.append(tool);
+    }
+  }
+  const advanced = workspace.querySelector("[data-erp-advanced-body]");
+  for (const node of [...box.children]) {
+    if (node !== head && node !== workspace) advanced.append(node);
+  }
+  const tabs = [...workspace.querySelectorAll("[data-erp-stage]")];
+  function selectStage(key) {
+    S.erpTransferStage = key;
+    for (const tab of tabs) {
+      const active = tab.dataset.erpStage === key;
+      tab.setAttribute("aria-pressed", String(active));
+      tab.classList.toggle("primary", active);
+      workspace.querySelector(`#erp-stage-${tab.dataset.erpStage}`).hidden = !active;
+    }
+  }
+  for (const tab of tabs) tab.onclick = () => selectStage(tab.dataset.erpStage);
+  selectStage(S.erpTransferStage || "subscriptions");
 }
+
 function erpUploadHtml(u, kinds) {
   return `<div class="erp-up" data-up="${u.id}"><div class="row" style="align-items:center;gap:8px"><b style="flex:1">${esc(u.filename)} <span class="muted small">· ${u.count} строк</span></b>
       <select data-ukind="${u.id}" style="flex:0 0 auto;width:auto">${Object.entries(kinds).map(([k, t]) => `<option value="${k}" ${k === u.kind ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>

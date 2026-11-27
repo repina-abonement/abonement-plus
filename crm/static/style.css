@@ -2224,3 +2224,11 @@ html.theme-soft #comms-box .family-chat-feed{background:#182624}html.theme-soft 
 .planner-assignee-form .field{flex:1 1 180px;margin:0;min-width:0}
 
 .subscription-month{touch-action:manipulation}
+
+
+.erp-transfer-workspace{max-width:980px}
+.erp-transfer-nav{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+.erp-transfer-nav .btn{flex:0 1 auto}
+.erp-transfer-stage>p{margin:0 0 12px}
+.erp-transfer-stage .erp-step:first-child{margin-top:0}
+.erp-transfer-workspace>.erp-advanced{margin-top:20px}
