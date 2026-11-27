@@ -70,8 +70,8 @@ def payroll(con, ym: str | None = None, branch_id: int | None = None, coach_id: 
 
     groups_out = []
     sql = """SELECT g.*, b.name AS branch FROM groups g JOIN branches b ON b.id=g.branch_id
-             WHERE (g.active=1 OR g.id IN (SELECT group_id FROM lesson_staff WHERE substr(date,1,7)=?))"""
-    args = [ym]
+             WHERE (g.active=1 OR g.id IN (SELECT group_id FROM lesson_staff WHERE substr(date,1,7)=?) OR g.id IN (SELECT a.group_id FROM erp_revenue_groups a JOIN erp_revenue_history h USING(row_key) WHERE h.month=?))"""
+    args = [ym, ym]
     if branch_id:
         sql += " AND g.branch_id=?"
         args.append(branch_id)
@@ -83,6 +83,9 @@ def payroll(con, ym: str | None = None, branch_id: int | None = None, coach_id: 
             continue
         dates = _dates(con, g, ym)
         if not dates:
+            if rev.get(g["id"]):
+                groups_out.append(dict(id=g["id"], name=g["name"], branch=g["branch"],
+                                       revenue=rev[g["id"]], lessons=0, per_lesson=None, pay=0, makeup=False))
             continue
         r_total = 0 if g["is_makeup"] else rev.get(g["id"], 0)
         per = r_total / len(dates)
@@ -123,7 +126,8 @@ def payroll(con, ym: str | None = None, branch_id: int | None = None, coach_id: 
                                "amount": round(amt), "planned": False})
             p["total"] += amt
         groups_out.append({"id": None, "name": pr["name"] if pr else "Направление", "branch": "", "revenue": r_total,
-                           "lessons": None, "per_lesson": None, "makeup": False, "pay": round(amt)})
+                           "lessons": None, "per_lesson": None, "makeup": False, "pay": round(amt),
+                           "group_breakdown": [{"name": g["name"], "branch": g["branch"], "revenue": rev.get(g["id"], 0)} for g in gs]})
     for f in staff.fines(con, ym):
         if f["user_id"] not in people and coach_id is None and branch_id:
             continue

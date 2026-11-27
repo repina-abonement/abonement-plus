@@ -187,9 +187,9 @@ function payBox(box, d, mine) {
         <div class="kpi-note">${d.revenue ? `${Math.round(100 * d.total / d.revenue)}% от выручки ${rub(d.revenue)}` : ""}</div></div>
     </div>
     <div class="small muted" style="margin:6px 0 12px">Правило: ${pctTxt}. Сборная: процент направления от выручки всех её групп. Штраф за опоздание вычитается после подтверждения. Серые строки посчитаны по расписанию, пока не отмечено, кто вёл тренировку</div>
-    ${d.coaches.map(person).join("") || `<div class="panel muted">Нет начислений</div>`}
-    <section class="panel"><div class="panel-head">По группам</div><div class="an-scroll"><table class="tbl an-tbl"><thead><tr><th>Группа</th><th>Тренировок</th><th class="r">Выручка</th><th class="r">За тренировку</th><th class="r">Тренерам</th></tr></thead>
-    <tbody>${d.groups.map((g) => `<tr><td><b>${esc(g.name)}</b><div class="small muted">${esc(g.branch)}</div></td><td>${g.lessons ?? ""}</td><td class="r">${g.makeup ? "отработки" : rub(g.revenue)}</td><td class="r">${g.per_lesson != null && !g.makeup ? rub(g.per_lesson) : ""}</td><td class="r">${rub(g.pay)}</td></tr>`).join("")}</tbody></table></div></section>`;
+    <section class="panel"><div class="panel-head">Выручка по группам</div><div class="an-scroll"><table class="tbl an-tbl"><thead><tr><th>Группа</th><th>Тренировок</th><th class="r">Выручка</th><th class="r">За тренировку</th><th class="r">Тренерам</th></tr></thead>
+    <tbody>${d.groups.map((g) => `<tr><td><b>${esc(g.name)}</b><div class="small muted">${esc(g.branch)}</div></td><td>${g.lessons ?? ""}</td><td class="r">${g.makeup ? "отработки" : rub(g.revenue)}</td><td class="r">${g.per_lesson != null && !g.makeup ? rub(g.per_lesson) : ""}</td><td class="r">${rub(g.pay)}</td></tr>${(g.group_breakdown || []).map(part => `<tr><td>${esc(part.name)}<div class="small muted">${esc(part.branch)}</div></td><td></td><td class="r">${rub(part.revenue)}</td><td colspan="2" class="small muted">В составе направления</td></tr>`).join("")}`).join("")}</tbody></table></div></section>
+    ${d.coaches.map(person).join("") || `<div class="panel muted">Нет начислений</div>`}`;
 }
 
 /* Конверсия пробных: записано → пришли → купили (в день пробного / позже) */
