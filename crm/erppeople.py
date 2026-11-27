@@ -109,7 +109,7 @@ def _apply_profile(con, sid, rec, user, visitor_cards=False):
     preview = _profile_preview(con, sid, rec, visitor_cards)
     source = preview["source"]
     student = dict(con.execute("SELECT * FROM students WHERE id=?", (sid,)).fetchone())
-    if source["child_name"] and student["name"] == ei.NO_NAME:
+    if source["child_name"] and student["name"] in ("", ei.NO_NAME):
         con.execute("UPDATE students SET name=? WHERE id=?", (source["child_name"], sid))
     if source["birth"] and not student["birth"]:
         con.execute("UPDATE students SET birth=? WHERE id=?", (source["birth"], sid))
@@ -142,6 +142,10 @@ def _apply_profile(con, sid, rec, user, visitor_cards=False):
 
 # Pairs confirmed by the owner. Each ERP ID remains available for later imports.
 EXCLUDED_VISITOR_IDS = {"62805", "62953"}
+UNNAMED_VISITOR_IDS = frozenset("""
+80105 80156 80175 80180 80201 80309 80350 80355
+80356 80358 80371 80906 80922 88747 91885 92198
+""".split())
 DISTINCT_VISITOR_IDS = {"92940", "132829", "95513", "114710", "108850", "110708"}
 
 VISITOR_PAIRS = (
@@ -238,6 +242,12 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
             if not eid or (not status and not visitor_cards):
                 issues.append([where, "Нет ID ERP" if not eid else "Нет статуса в ERP"])
                 continue
+            if visitor_cards and eid in UNNAMED_VISITOR_IDS:
+                if ei._norm(rec["child_name"]) != "лид":
+                    issues.append([where, "Для безымянного лида изменилось имя в ERP"])
+                    continue
+                rec["child_name"] = rec["child_last"] = ""
+                rec["unnamed_visitor"] = True
             candidates[namespace, eid].append((rec, status, where))
 
     pairs = {}
@@ -303,14 +313,16 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
                 phone = normalize_phone(rec.get("phone", ""))
                 given_name_only = (len(name) == 1 and name[0].replace("-", "").isalpha()
                                    and name[0] not in {"лид", "уточнить", "неизвестно", "ребенок", "тест"})
-                if given_name_only:
+                if rec.get("unnamed_visitor"):
+                    ambiguous = incoming_name_phones[name, phone] > 1 or bool(matcher.by_np.get(((), phone[-10:])))
+                elif given_name_only:
                     ambiguous = incoming_name_phones[name, phone] > 1 or any(
                         name[0] in candidate_name and phone[-10:] == candidate_phone
                         for candidate_name, candidate_phone in matcher.by_np
                     )
                 else:
                     ambiguous = eid not in DISTINCT_VISITOR_IDS and (bool(names.get(name)) or incoming_names[name] > 1)
-                if not name or not phone or ambiguous:
+                if (not name and not rec.get("unnamed_visitor")) or not phone or ambiguous:
                     issues.append([where, "Нет имени или телефона либо найден тёзка. Сверьте личность"])
                     continue
             elif not sid and (not lead or reason != "Не найдено однозначное совпадение"):
@@ -331,7 +343,7 @@ def _plan(con, visitors, leads, erp_ids=None, visitor_cards=False):
         current = matcher.students[sid]["erp_status"] if sid else None
         if visitor_cards:
             rec = {key: value for key, value in rec.items()
-                   if key in {"child_name", "birth", "phone", "parent_name", "email", "branch"}}
+                   if key in {"child_name", "birth", "phone", "parent_name", "email", "branch", "unnamed_visitor"}}
             if pair:
                 rec["visitor_pair"] = pair[2] | {"erp_status": pair[3]}
                 rec["visitor_pair_family"] = pair[1]
@@ -417,6 +429,8 @@ def transfer(con, visitors, leads, user, token=None, erp_ids=None, visitor_cards
                 "birth": (erpfull._date(rec.get("birth", "")) or "")[:10],
                 "source": source_name,
             }, user)
+            if rec.get("unnamed_visitor"):
+                con.execute("UPDATE students SET name='' WHERE id=?", (sid,))
             if source_name:
                 con.execute("UPDATE students SET source_id=? WHERE id=?", (sources.ensure_source(con, source_channel, source_name), sid))
             created = erpfull._date(rec.get("created", ""))
@@ -515,3 +529,26 @@ def apply_confirmed_visitor_pairs(con):
         con.execute("INSERT INTO settings(key,value) VALUES (?, 'complete')", (marker,))
         return "complete"
     return f"review-required-{completed}-of-{len(VISITOR_PAIRS)}"
+
+
+def apply_unnamed_visitors(con):
+    """Apply the individually approved rows from the uploaded visitor register."""
+    marker = "unnamed_visitors_20261127"
+    if con.execute("SELECT 1 FROM settings WHERE key=?", (marker,)).fetchone():
+        return "complete"
+    upload = con.execute("""SELECT id FROM erp_uploads
+        WHERE filename='Посетители (41).xlsx' AND kind='clients' ORDER BY id DESC LIMIT 1""").fetchone()
+    if not upload:
+        return "source-not-uploaded"
+    completed = 0
+    user = {"name": "CRM", "role": "admin"}
+    for eid in sorted(UNNAMED_VISITOR_IDS):
+        report, actions = _plan(con, [upload["id"]], [], [eid], visitor_cards=True)
+        if len(actions) != 1:
+            continue
+        transfer(con, [upload["id"]], [], user, report["token"], [eid], visitor_cards=True)
+        completed += 1
+    if completed == len(UNNAMED_VISITOR_IDS):
+        con.execute("INSERT INTO settings(key,value) VALUES (?, 'complete')", (marker,))
+        return "complete"
+    return f"review-required-{completed}-of-{len(UNNAMED_VISITOR_IDS)}"
