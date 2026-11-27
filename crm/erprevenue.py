@@ -20,6 +20,9 @@ def transfer(con, content, token=None):
         links[str(eid)].add(sid)
     existing = dict(con.execute("SELECT row_key,student_id FROM erp_revenue_history"))
     totals = defaultdict(int)
+    holders = defaultdict(set)
+    subscriptions = defaultdict(int)
+    subscription_revenue = defaultdict(int)
     additions = []
     skipped = set()
     missing = already = amount = 0
@@ -30,6 +33,11 @@ def transfer(con, content, token=None):
         totals[month] += int(value)
         key = file + "/" + row
         candidates = links[eid]
+        if kind.startswith("Абонемент"):
+            identity = ("crm", next(iter(candidates))) if len(candidates) == 1 else ("erp", eid)
+            holders[month].add(identity)
+            subscriptions[month] += 1
+            subscription_revenue[month] += int(value)
         if len(candidates) != 1 or (key in existing and existing[key] not in candidates):
             skipped.add(eid)
             missing += 1
@@ -42,10 +50,14 @@ def transfer(con, content, token=None):
         amount += int(value)
     signature = hashlib.sha256(json.dumps(additions).encode()).hexdigest()
     update_totals = dict(con.execute("SELECT month,amount FROM erp_revenue_months")) != totals
+    metrics = [(m, len(holders[m]), subscriptions[m], subscription_revenue[m]) for m in sorted(totals)]
+    saved = [tuple(row) for row in con.execute("SELECT * FROM erp_subscription_months ORDER BY month")]
+    update_totals = update_totals or metrics != saved
     if token is not None:
         if signature != token:
             raise ValueError("Сопоставление изменилось. Повторите проверку")
         if update_totals:
+            con.executemany("INSERT OR REPLACE INTO erp_subscription_months VALUES (?,?,?,?)", metrics)
             con.executemany("INSERT OR REPLACE INTO erp_revenue_months(month,amount) VALUES (?,?)", totals.items())
         con.executemany("""INSERT INTO erp_revenue_history
             (row_key,student_id,erp_id,month,kind,sale,start,end,amount)

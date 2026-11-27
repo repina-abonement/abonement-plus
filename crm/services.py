@@ -1827,8 +1827,10 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
             first_paid[sid_] = min(first_paid.get(sid_, first_month), first_month)
     # The snapshot describes revenue by service month across all locations.
     # The upload contains no historical group or branch identifiers.
+    erp_subscription_metrics = {}
     erp_totals = {}
     if not branch_id and not group_id:
+        erp_subscription_metrics = {row["month"]: row for row in con.execute("SELECT * FROM erp_subscription_months")}
         erp_totals = dict(con.execute("SELECT month,amount FROM erp_revenue_months"))
     cache = {}
 
@@ -1842,6 +1844,11 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
         st = {"revenue": erp_totals.get(m, revenue), "holders": len(h), "subs": n_subs, "avg": round(revenue / n_subs) if n_subs else 0,
               "conversion": _pct(len(set(h) & set(prev)), len(prev)), "ids": set(h),
               "prices": {k: sum(v) for k, v in h.items()}}
+        metrics = erp_subscription_metrics.get(m)
+        if metrics:
+            count = metrics["subscriptions"]
+            st.update(holders=metrics["holders"], subs=count,
+                      avg=round(metrics["subscription_revenue"] / count) if count else 0)
         cache[m] = st
         return st
 
