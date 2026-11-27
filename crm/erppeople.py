@@ -24,7 +24,10 @@ def _historical_lead_branch(label):
 def _matching_branches(con, label):
     def key(value):
         value = ei._norm(value).replace('«', '').replace('»', '')
-        return {'ск арктика': 'арктика', 'трц небо': 'тц небо', 'чоботовская 4с2': 'чоботовская'}.get(value, value)
+        aliases = {'ск арктика': 'арктика', 'трц небо': 'тц небо',
+                   'чоботовская 4с2': 'чоботовская', 'ск западный (чоботовская)': 'чоботовская',
+                   'ск западный': 'чоботовская'}
+        return aliases.get(value, value)
     return [dict(row) for row in con.execute("SELECT id,name,active FROM branches")
             if key(row["name"]) == key(label)]
 

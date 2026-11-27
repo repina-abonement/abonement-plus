@@ -820,17 +820,26 @@ const ICONS = {
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>',
 };
 const icon = (k) => `<svg class="kpi-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
-const delta = (v, label) => v === null || v === undefined
+const delta = (v, label, unit = "%") => v === null || v === undefined
   ? `<div class="delta"><span>${label}</span><b class="muted">—</b></div>`
-  : `<div class="delta"><span>${label}</span><b class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "▲" : "▼"} ${v}%</b></div>`;
+  : `<div class="delta"><span>${label}</span><b class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "▲" : "▼"} ${fmtNum(v)}${unit}</b></div>`;
 
 function kpiCard(ic, title, value, k, extra = "") {
   return `<div class="kpi"><div class="kpi-head">${icon(ic)}<span>${esc(title)}</span></div>
     <div class="kpi-body"><div class="kpi-value">${value}</div>
-    ${k ? `<div class="kpi-deltas">${delta(k.vs_month, "мес. назад")}${k.vs_year !== undefined ? delta(k.vs_year, "год назад") : ""}</div>` : ""}</div>${extra}</div>`;
+    ${k ? `<div class="kpi-deltas">${delta(k.vs_month, "мес. назад", k.deltaUnit)}${k.vs_year !== undefined ? delta(k.vs_year, "год назад", k.deltaUnit) : ""}</div>` : ""}</div>${extra}</div>`;
 }
 
 const formatRate = (value) => Number(value).toLocaleString("ru-RU", { maximumFractionDigits: 1 });
+
+function occupancyCard(k) {
+  const rate = (v) => v == null ? "—" : `${fmtNum(v)} <small>%</small>`;
+  const values = `<span class="fill2"><span><em>по абонементам</em>${rate(k.fill.subs)}</span>
+    <span><em>по уникальным</em>${rate(k.fill.value)}</span></span>`;
+  const seats = k.seats == null ? " · количество мест неизвестно" : ` на ${fmtNum(k.seats)} мест`;
+  return kpiCard("pie", "Заполненность", values, { vs_month: k.fill.vs_month, deltaUnit: " п. п." },
+    `<div class="kpi-note">${fmtNum(k.fill.subs_count)} абонементов и ${fmtNum(k.holders.value)} учеников${seats}</div>`);
+}
 
 function renewalCard(k) {
   const dateLabel = (iso) => esc(birthDisplay(iso));
@@ -1038,9 +1047,9 @@ async function renderDashboard(page) {
       ${kpiCard("wallet", "Выручка", `${fmtNum(k.revenue.value)} <small>₽</small>`, k.revenue)}
       ${kpiCard("cart", "Уникальных держателей абонементов", fmtNum(k.holders.value), k.holders, `<div class="kpi-note">ребёнок с абонементами в две группы считается один раз</div>`)}
       ${kpiCard("calc", "Средний чек", `${fmtNum(k.avg.value)} <small>₽</small>`, k.avg, `<div class="kpi-note">средняя сумма одного абонемента</div>`)}
-      ${kpiCard("pie", "Заполненность", `<span class="fill2"><span><em>по абонементам</em>${k.fill.subs ?? "—"} <small>%</small></span><span><em>по уникальным</em>${k.fill.value ?? "—"} <small>%</small></span></span>`, { vs_month: k.fill.vs_month }, `<div class="kpi-note">${k.fill.subs_count} абонементов и ${k.holders.value} учеников на ${k.seats} мест</div>`)}
+      ${occupancyCard(k)}
       ${renewalCard(k.conversion)}
-      ${kpiCard("user", "Количество мест", `${fmtNum(k.seats)} <small>шт</small>`, null, `<div class="kpi-note">сумма мест во всех группах</div>`)}
+      ${kpiCard("user", "Количество мест", k.seats == null ? "—" : `${fmtNum(k.seats)} <small>шт</small>`, null, `<div class="kpi-note">Места по расписанию CRM в выбранных группах</div>`)}
     </div>
 
     <div class="dash-row2">

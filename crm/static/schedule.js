@@ -329,7 +329,7 @@ async function renderStructure(box, users) {
 }
 
 function groupForm(gid, branchId, d, coaches, done) {
-  const g = gid ? d.branches.flatMap((b) => b.groups).find((x) => x.id === gid) : { weekdays: "", capacity: 12, branch_id: branchId };
+  const g = gid ? d.branches.flatMap((b) => b.groups).find((x) => x.id === gid) : { weekdays: "", branch_id: branchId };
   const days = (g.weekdays || "").split(",").filter(Boolean).map(Number);
   openDrawer(`<h2>${gid ? "Группа" : "Новая группа"}</h2>
     <form class="section" id="gf">
@@ -338,7 +338,7 @@ function groupForm(gid, branchId, d, coaches, done) {
       <div class="field"><label>Дни</label><div class="chips">${WD.map((w, i) => `<button type="button" class="chip day ${days.includes(i) ? "on" : ""}" data-gd="${i}">${w}</button>`).join("")}</div></div>
       <div class="row"><div class="field"><label>Время начала</label><input name="time" type="time" value="${esc(g.time || "")}"></div>
         <div class="field"><label>Возраст</label><input name="age" value="${esc(g.age || "")}" placeholder="4–5"></div>
-        <div class="field"><label>Мест</label><input name="capacity" type="number" min="0" max="200" value="${g.capacity ?? 12}"></div></div>
+        <div class="field"><label>Мест</label><input name="capacity" type="number" min="0" max="200" value="${g.capacity ?? ""}" placeholder="По правилам филиала"></div></div>
       <div id="g-dt"></div>
       ${gid ? `<div class="field"><label>Новые дни и время действуют с</label><input type="date" name="valid_from">
         <div class="small muted">Пусто: меняем сразу. Можно выбрать прошедшую дату. До выбранной даты действует прежнее расписание. Проданные абонементы пересчитываются с месяца изменения</div></div>

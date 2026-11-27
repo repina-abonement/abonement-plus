@@ -15,6 +15,13 @@ def branch_ids(con):
     result = {}
     for i, name in enumerate(sorted({b for b, _ in catalog()["labels"]}), 1):
         candidates = erppeople._matching_branches(con, name)
+        if len(candidates) > 1:
+            # Duplicate branch records can survive a schedule rename. Attribute only
+            # when exactly one candidate owns groups and the others have none.
+            scheduled = [b for b in candidates if con.execute(
+                "SELECT 1 FROM groups WHERE branch_id=? AND is_makeup=0 LIMIT 1", (b["id"],)).fetchone()]
+            if len(scheduled) == 1:
+                candidates = scheduled
         result[name] = candidates[0]["id"] if len(candidates) == 1 else -i
     return result
 

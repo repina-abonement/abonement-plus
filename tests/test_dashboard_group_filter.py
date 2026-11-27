@@ -44,6 +44,21 @@ class DashboardGroupFilterTest(unittest.TestCase):
         self.assertEqual({g['id']: g['revenue'] for g in report['groups']}, {self.a: 100, self.b: 300})
         self.assertEqual(salary._revenue(self.con, '2026-11'), {self.a: 100, self.b: 300})
 
+    def test_renamed_chobotovskaya_uses_schedule_capacity_even_in_empty_groups(self):
+        from crm import analytics, sale_locations, schedule
+        self.con.execute("UPDATE branches SET name='СК «Западный» (Чоботовская)' WHERE id=?", (self.bid,))
+        # The two existing groups represent pre-migration groups with old capacities.
+        self.con.execute("DELETE FROM settings WHERE key='group_capacities_202611'")
+        db.sync_group_capacities(self.con)
+        schedule.save_group(self.con, dict(branch_id=self.bid, name='Третья', weekdays='5', time='12:00'))
+        self.assertEqual(sale_locations.branch_ids(self.con)['Чоботовская 4с2'], self.bid)
+        k = sv.dashboard(self.con, '2026-11', self.bid)['kpi']
+        self.assertEqual((k['seats'], k['fill']['subs'], k['fill']['value']), (36, 6, 3))
+        self.assertEqual(analytics.groups_report(self.con, '2026-11', self.bid)['branches'][0]['capacity'], 36)
+        self.con.execute("UPDATE groups SET capacity=13 WHERE id=?", (self.a,))
+        db.sync_group_capacities(self.con)
+        self.assertEqual(sv.dashboard(self.con, '2026-11', self.bid)['kpi']['seats'], 37)
+
     def test_group_must_belong_to_selected_branch(self):
         other=self.con.execute("INSERT INTO branches(name) VALUES ('Other')").lastrowid
         with self.assertRaises(sv.ApiError):sv.dashboard(self.con,'2026-11',other,self.a)

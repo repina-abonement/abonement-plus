@@ -1790,23 +1790,26 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
     if group_id:
         br_sql=" AND (s.group_id=? OR EXISTS (SELECT 1 FROM enrollments ge WHERE ge.student_id=s.id AND ge.group_id=? AND ge.active=1))"
         br_arg=(group_id,group_id)
-    holder_args = (group_id or branch_id,) if group_id or branch_id else ()
     from functools import lru_cache
-    from . import dashboard_renewals, dashboard_sales
+    from . import dashboard_capacity, dashboard_renewals, dashboard_sales
     renewal = dashboard_renewals.periods(con, today(), branch_id, group_id)
 
     @lru_cache(None)
     def card_month(m):
         out = {}
         other = 0
-        for sid, gid, member, value in dashboard_sales.rows(con, m, branch_id or None):
-            if group_id and gid != group_id:
+        sale_groups, sale_branches = set(), set()
+        for sid, gid, member, value, bid in dashboard_sales.located_rows(con, m):
+            if (group_id and gid != group_id) or (branch_id and bid != branch_id):
                 continue
+            if member or value:
+                sale_groups.add(gid)
+                sale_branches.add(bid)
             if member:
                 out.setdefault(sid, []).append(value)
             else:
                 other += value
-        return out, other
+        return out, other, sale_groups, sale_branches
 
     first_paid = {r[0]: r[1] for r in con.execute(
         "SELECT student_id, MIN(month) FROM subscriptions WHERE status='paid' GROUP BY student_id")}
@@ -1822,7 +1825,7 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
     def month_stats(m):
         if m in cache:
             return cache[m]
-        h, other_revenue = card_month(m)
+        h, other_revenue, _, _ = card_month(m)
         revenue = sum(sum(v) for v in h.values())
         n_subs = sum(len(v) for v in h.values())
         st = {"revenue": revenue + other_revenue, "holders": len(h), "subs": n_subs, "avg": round(revenue / n_subs) if n_subs else 0,
@@ -1831,8 +1834,12 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
         cache[m] = st
         return st
 
-    seats = con.execute("SELECT COALESCE(SUM(capacity), 0) FROM groups WHERE is_makeup = 0 AND active = 1"
-                        + (" AND id=?" if group_id else " AND branch_id = ?" if branch_id else ""), holder_args).fetchone()[0]
+    def seats_for_month(month):
+        _, _, sale_groups, sale_branches = card_month(month)
+        places = dashboard_capacity.group_places(con, month, sale_groups)
+        return dashboard_capacity.total(places, branch_id, group_id, sale_branches)
+
+    seats = seats_for_month(cur)
     c, m1, y1 = (month_stats(cur), month_stats(logic.shift_month(cur, -1)), month_stats(logic.shift_month(cur, -12)))
 
     def kpi(key):
@@ -1840,7 +1847,7 @@ def dashboard(con, ym: str | None = None, branch_id: int | None = None, group_id
                 "vs_year": _change(c[key] or 0, y1[key] or 0)}
 
     fill = _pct(c["holders"], seats)
-    fill_m1 = _pct(m1["holders"], seats)
+    fill_m1 = _pct(m1["holders"], seats_for_month(logic.shift_month(cur, -1)))
     fill_subs = _pct(c["subs"], seats)
 
     # новые / постоянные / вернувшиеся

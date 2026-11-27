@@ -472,8 +472,30 @@ def init_db(con: sqlite3.Connection):
 
     from . import groupnames
     groupnames.init(con)
+    sync_group_capacities(con)
     from . import activity
     activity.init(con)
+
+
+def sync_group_capacities(con):
+    """Apply November roster limits once; later edits belong to the school."""
+    from .group_seats import seats
+    con.execute("SAVEPOINT group_capacities")
+    try:
+        claimed = con.execute("""INSERT OR IGNORE INTO settings(key,value)
+            VALUES ('group_capacities_202611','1')""").rowcount
+        if claimed:
+            groups = con.execute("""SELECT g.*, b.name AS branch FROM groups g
+                JOIN branches b ON b.id=g.branch_id WHERE g.is_makeup=0""").fetchall()
+            for group in groups:
+                value = seats(group["branch"], group, group["capacity"])
+                if value != group["capacity"]:
+                    con.execute("UPDATE groups SET capacity=? WHERE id=?", (value, group["id"]))
+    except Exception:
+        con.execute("ROLLBACK TO group_capacities")
+        raise
+    finally:
+        con.execute("RELEASE group_capacities")
 
 
 def sync_enrollments(con):

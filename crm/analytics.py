@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from . import dashboard_sales, logic, referrals, sources, sale_locations
+from . import dashboard_capacity, dashboard_sales, logic, referrals, sources, sale_locations
 
 
 def _pct(a, b):
@@ -53,18 +53,20 @@ def groups_report(con, ym: str, branch_id: int | None = None) -> dict:
     att = _attendance(con, ym)
     coaches = {r[0]: r[1] for r in con.execute("SELECT id, name FROM users")}
     branches = {r[0]: r[1] for r in con.execute("SELECT id, name FROM branches")}
+    places = dashboard_capacity.group_places(con, ym, set(revenue))
     rows = []
     for g in con.execute("""SELECT * FROM groups WHERE is_makeup=0""" + (" AND branch_id=?" if branch_id else "")
                          + " ORDER BY branch_id, weekdays, time", (branch_id,) if branch_id else ()):
-        if not g["active"] and g["id"] not in revenue and g["id"] not in prev_by_group:
+        if g["id"] not in places and g["id"] not in prev_by_group:
             continue
+        cap = places[g["id"]][1] if g["id"] in places else 0
         kids = kids_by_group[g["id"]]
         was = prev_by_group[g["id"]]
         stayed = len(was & current)
         p, a = att.get(g["id"], [0, 0])
         rows.append({"id": g["id"], "name": g["name"], "branch": branches.get(g["branch_id"], ""), "branch_id": g["branch_id"],
-                     "coach": coaches.get(g["coach_id"], ""), "coach_id": g["coach_id"], "capacity": g["capacity"],
-                     "kids": len(kids), "fill": _pct(len(kids), g["capacity"]),
+                     "coach": coaches.get(g["coach_id"], ""), "coach_id": g["coach_id"], "capacity": cap,
+                     "kids": len(kids), "fill": _pct(len(kids), cap),
                      "revenue": revenue[g["id"]], "prev": len(was),
                      "left": len(was) - stayed, "retention": _pct(stayed, len(was)),
                      "attendance": _pct(p, p + a)})
@@ -79,7 +81,7 @@ def groups_report(con, ym: str, branch_id: int | None = None) -> dict:
         b["present"] += p
         b["total"] += p + a
     for bid in branch_revenue.keys() - br.keys():
-        br[bid] = dict(branch=sale_locations.branch_names(con)[bid], groups=0, capacity=0, prev=0, left=0, present=0, total=0)
+        br[bid] = dict(branch=sale_locations.branch_names(con)[bid], groups=0, capacity=None, prev=0, left=0, present=0, total=0)
     for bid, b in br.items():
         b["kids"] = len(branch_kids[bid])
         b["revenue"] = branch_revenue[bid]

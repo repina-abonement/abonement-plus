@@ -128,7 +128,8 @@ def set_branch_active(con, bid: int, active: bool):
 def save_group(con, data: dict, gid: int | None = None) -> int:
     name = (data.get("name") or "").strip()
     bid = int(data.get("branch_id") or 0)
-    if not con.execute("SELECT 1 FROM branches WHERE id=? AND active=1", (bid,)).fetchone():
+    branch = con.execute("SELECT name FROM branches WHERE id=? AND active=1", (bid,)).fetchone()
+    if not branch:
         raise SchedError("Выберите филиал")
     coach = int(data["coach_id"]) if data.get("coach_id") else None
     if coach and not con.execute("SELECT 1 FROM users WHERE id=? AND role='coach' AND active=1", (coach,)).fetchone():
@@ -136,9 +137,6 @@ def save_group(con, data: dict, gid: int | None = None) -> int:
     asst = int(data["assistant_id"]) if data.get("assistant_id") else None
     if asst and not con.execute("SELECT 1 FROM users WHERE id=? AND role='coach' AND active=1", (asst,)).fetchone():
         raise SchedError("Помощник не найден")
-    cap = int(data.get("capacity") or 12)
-    if not 0 <= cap <= 200:
-        raise SchedError("Неверное число мест")
     days = _days(data.get("weekdays"))
     dts = data.get("day_times") or {}
     if isinstance(dts, str):
@@ -150,6 +148,21 @@ def save_group(con, data: dict, gid: int | None = None) -> int:
     naming.update(data,branch_id=bid,weekdays=days,time=_time(data.get("time")),day_times=",".join(f"{k}={v}" for k,v in sorted(dts.items())))
     if not naming.get("source_name"):naming["source_name"]=name
     name=groupnames.label(con,naming)
+    provided = data.get("capacity")
+    if provided not in (None, ""):
+        try:
+            cap = int(provided)
+        except (TypeError, ValueError):
+            raise SchedError("Неверное число мест") from None
+    elif previous:
+        cap = previous["capacity"]
+    elif data.get("is_makeup"):
+        cap = 12
+    else:
+        from .group_seats import seats
+        cap = seats(branch["name"], naming, 12)
+    if not 0 <= cap <= 200:
+        raise SchedError("Неверное число мест")
     vals = (bid, name, days, _time(data.get("time")), (data.get("age") or "").strip(),
             1 if data.get("is_makeup") else 0, coach, cap, asst, ",".join(f"{k}={v}" for k, v in sorted(dts.items())),
             (data.get("note") or "").strip()[:200])

@@ -13,7 +13,9 @@ function wireAnTabs(page) {
 const anPct = (v) => (v == null ? "—" : v + "%");
 function anFillCell(v, kids, cap) {
   const cls = v == null ? "" : v >= 90 ? "hi" : v < 50 ? "lo" : "";
-  return `<div class="an-fill ${cls}"><span>${kids}/${cap}</span><i><b style="width:${Math.min(100, v || 0)}%"></b></i></div>`;
+  const label = kids == null ? anPct(v) : `${fmtNum(kids)}/${cap == null ? "—" : fmtNum(cap)}`;
+  const bar = v == null ? "" : `<i><b style="width:${Math.min(100, v)}%"></b></i>`;
+  return `<div class="an-fill ${cls}"><span>${label}</span>${bar}</div>`;
 }
 const anGood = (v, good, bad) => (v == null ? "" : v >= good ? "s-good" : v < bad ? "s-bad" : "");
 
@@ -38,16 +40,16 @@ async function renderAnalytics(box) {
 function anGroups(box, d) {
   box.innerHTML = `
     <div class="an-cards">${d.branches.map((b) => `<div class="panel an-card">
-      <div class="an-card-h">${esc(b.branch)}</div>
-      <div class="an-big">${b.kids} <small>из ${b.capacity} мест</small></div>
-      ${anFillCell(b.fill, b.fill + "%", "")}
+      <div class="an-card-h">${esc(b.branch || "Филиал не указан")}</div>
+      <div class="an-big">${b.kids} <small>${b.capacity == null ? "учеников · количество мест неизвестно" : `из ${fmtNum(b.capacity)} мест`}</small></div>
+      ${anFillCell(b.fill)}
       <div class="an-kv"><span>Выручка</span><b>${rub(b.revenue)}</b></div>
       <div class="an-kv"><span>Продлили с прошлого месяца</span><b class="${anGood(b.retention, 90, 80)}">${anPct(b.retention)}</b></div>
       <div class="an-kv"><span>Посещаемость</span><b class="${anGood(b.attendance, 88, 80)}">${anPct(b.attendance)}</b></div>
-      <div class="an-kv"><span>Групп</span><b>${b.groups}</b></div></div>`).join("")}</div>
+      <div class="an-kv"><span>Групп</span><b>${b.groups ?? "—"}</b></div></div>`).join("")}</div>
     <section class="panel"><div class="panel-head">Группы · ${esc(d.month_label)}</div>
       <div class="an-scroll"><table class="tbl an-tbl"><thead><tr><th>Группа</th><th>Тренер</th><th>Учеников</th><th>Продлили</th><th>Посещаемость</th><th>Ушли</th><th class="r">Выручка</th></tr></thead>
-      <tbody>${d.groups.map((g) => `<tr><td><b>${esc(g.name)}</b>${S.dashBranch ? "" : `<div class="small muted">${esc(g.branch)}</div>`}</td><td>${esc(g.coach || "—")}</td>
+      <tbody>${d.groups.map((g) => `<tr><td><b>${esc(g.name)}</b>${S.dashBranch ? "" : `<div class="small muted">${esc(g.branch || "Филиал не указан")}</div>`}</td><td>${esc(g.coach || "—")}</td>
         <td>${anFillCell(g.fill, g.kids, g.capacity)}</td><td class="${anGood(g.retention, 90, 80)}">${anPct(g.retention)}</td>
         <td class="${anGood(g.attendance, 88, 80)}">${anPct(g.attendance)}</td><td>${g.left || ""}</td><td class="r">${rub(g.revenue)}</td></tr>`).join("")}</tbody></table></div>
       <div class="small muted" style="margin-top:8px">Зелёная полоса: группа почти полная (90%+), красная: меньше половины мест. «Продлили»: кто занимался в прошлом месяце и оплатил этот</div>
