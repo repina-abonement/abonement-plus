@@ -5,8 +5,8 @@ S.tasks = { scope: "mine" };
 const AUTO_LABEL = { day_before: "за день", "2h_before": "за 2 часа", after: "после пробного" };
 
 function erpOutcomePicker(t,hidden=true,prefix='') {
-  if(!t.erp_outcomes?.length)return `<div class="task-done" ${hidden?'hidden':''}><input placeholder="Итог: дозвонилась, подтвердили…" data-${prefix}result><button type="button" class="btn sm primary" ${prefix?'data-tok':'data-finish'}>Готово</button></div>`;
-  return `<div class="task-done erp-outcome-picker" ${hidden?'hidden':''}><div class="small"><b>Выберите следующий шаг по цепочке ERP</b></div>${t.erp_outcomes.map((outcome,index)=>`<button type="button" class="erp-outcome-choice" data-${prefix}erp-outcome="${index}" aria-pressed="false"><strong>${esc(outcome)}</strong><small>${outcome==='Закрыть задачу'?'Текущая задача закроется без следующей':`Будет создана следующая задача «${esc(outcome)}»`}</small></button>`).join('')}<div class="erp-transition-comment" data-${prefix}erp-comment-box hidden><label data-${prefix}erp-due-box><b>Дата следующей задачи</b><input type="date" data-${prefix}erp-due></label><label><b>Комментарий к изменению статуса</b><textarea rows="3" maxlength="1000" data-${prefix}erp-comment placeholder="Что произошло и почему выбран этот следующий шаг"></textarea></label><button type="button" class="btn sm primary" data-${prefix}erp-confirm>Подтвердить переход</button><div class="small need-err" data-${prefix}erp-error></div></div></div>`;
+  if(!t.erp_outcomes?.length)return `<div class="task-done" ${hidden?'hidden':''}><input placeholder="Итог: дозвонилась, подтвердили…" data-${prefix}result><button type="button" class="btn sm primary" ${prefix?'data-tok':'data-finish'}>Завершить задачу</button></div>`;
+  return `<div class="task-done erp-outcome-picker" ${hidden?'hidden':''}><div class="small"><b>Выберите, что делать дальше</b></div>${t.erp_outcomes.map((outcome,index)=>`<button type="button" class="erp-outcome-choice" data-${prefix}erp-outcome="${index}" aria-pressed="false"><strong>${esc(outcome)}</strong><small>${outcome==='Закрыть задачу'?'Текущая задача закроется без следующей':`Будет создана следующая задача «${esc(outcome)}»`}</small></button>`).join('')}<div class="erp-transition-comment" data-${prefix}erp-comment-box hidden><label data-${prefix}erp-due-box><b>Дата следующей задачи</b><input type="date" data-${prefix}erp-due></label><label><b>Комментарий к изменению статуса</b><textarea rows="3" maxlength="1000" data-${prefix}erp-comment placeholder="Что произошло и почему выбран этот следующий шаг"></textarea></label><button type="button" class="btn sm primary" data-${prefix}erp-confirm>Завершить и сохранить следующий шаг</button><div class="small need-err" data-${prefix}erp-error></div></div></div>`;
 }
 
 function wireErpOutcome(root,t,id,prefix,onDone) {
@@ -135,7 +135,53 @@ const TASK_ROLE = { admin: "руководитель", operator: "админис
 function renewalReasonHtml(task) {
   return task.renewal_reason ? `<details><summary>Как рассчитан срок</summary><div class="small muted" style="white-space:pre-line">${esc(task.renewal_reason)}</div></details>` : "";
 }
+function taskViewHistory(t) {
+  const events = [];
+  if (t.created_at) events.push({ts:t.created_at,text:'Задача создана',user_name:t.created_by||''});
+  if (t.previous_text) events.push({ts:t.previous_text.changed_at,text:'Изменены название или описание задачи',user_name:t.previous_text.changed_by||''});
+  if (t.done_at) events.push({ts:t.done_at,text:t.status==='cancelled'?'Задача отменена':`Задача завершена${t.result?': '+t.result:''}`,user_name:''});
+  const rows = list => list.map(x=>`<article class="task-view-event"><div class="small muted">${esc(dtWhen(x.ts))}${x.user_name?' · '+esc(x.user_name):''}</div><div class="task-view-text">${esc(x.text)}</div></article>`).join('');
+  return `<section class="task-view-history"><h4>История задачи</h4>${events.length?rows(events.sort((a,b)=>String(b.ts).localeCompare(String(a.ts)))):'<p class="small muted">Записей пока нет</p>'}
+    ${(t.client_history||[]).length?`<h4>Последние события клиента</h4>${rows(t.client_history)}`:''}</section>`;
+}
+
+// All task-card entry points start in read mode. Editing never completes a task.
 function openTaskEdit(t, onDone, focus) {
+  if (!t) return;
+  if (focus === 'assignee') return openTaskEditor(t,onDone,focus);
+  const wrap=document.createElement('div');wrap.className='need-wrap';
+  const active=!t.status||t.status==='open';
+  wrap.innerHTML=`<section class="need-card task-copyable task-view" role="dialog" aria-modal="true" aria-label="Задача">
+    <div class="task-view-head"><h3>${esc(t.icon||'✅')} Задача</h3><button type="button" class="btn sm" data-view-close>Закрыть</button></div>
+    ${t.student?`<p class="small muted">${esc(displayChildName(t.student.name))}${t.student.family?' · семья '+esc(t.student.family):''}</p>`:''}
+    <h3 class="task-view-text">${esc(t.title)}</h3>
+    <p><b>Срок:</b> ${esc(t.client_task?dShort(t.due_at):dtWhen(t.due_at))}${t.priority?' · 🔥 Приоритет':''}</p>
+    <p class="small muted">${t.client_task?'Общая задача для всех администраторов':'Исполнитель: '+esc(t.assignee||'Не назначен')}</p>
+    <div class="task-view-text">${esc(t.note||'Описание не добавлено')}</div>${renewalReasonHtml(t)}
+    ${active?`<div class="task-view-actions"><button type="button" class="btn" data-view-edit>Редактировать задачу</button>
+    ${t.kind==='rebook'?`<button type="button" class="btn primary" data-rebook="${t.id}">Итог звонка</button>`:`<button type="button" class="btn primary" data-view-complete>${t.erp_outcomes?.length?'Завершить и выбрать следующий шаг':'Завершить задачу'}</button>`}</div>
+    <section data-view-completion hidden><h4>${t.erp_outcomes?.length?'Следующий шаг':'Результат выполнения'}</h4>${erpOutcomePicker(t,false,'t')}<button type="button" class="btn sm" data-view-back>Назад к задаче</button><div class="need-err" data-view-error></div></section>`:''}
+    ${taskViewHistory(t)}</section>`;
+  document.body.appendChild(wrap);
+  const completion=wrap.querySelector('[data-view-completion]');
+  let busy=false;
+  const dirty=()=>completion&&!completion.hidden&&[...completion.querySelectorAll('input,textarea')].some(x=>x.value.trim());
+  const close=(force=false)=>{if(busy&&!force)return false;if(!force&&dirty()&&!confirm('Результат задачи ещё не сохранён. Закрыть без сохранения?'))return false;wrap.remove();return true;};
+  wrap.querySelector('[data-view-close]').onclick=()=>close();
+  wrap.onclick=e=>{if(e.target===wrap)close()};
+  wrap.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();close()}};
+  const edit=wrap.querySelector('[data-view-edit]');if(edit)edit.onclick=()=>{if(close())openTaskEditor(t,onDone)};
+  const complete=wrap.querySelector('[data-view-complete]');if(complete)complete.onclick=()=>{if(['single_remind','single_next','single_paid_next'].includes(t.kind)&&typeof singleTaskDialog==='function'){close(true);singleTaskDialog(t,onDone);return;}if(t.kind==='reinvite_pu'&&typeof reinviteDone==='function'){close(true);reinviteDone(t);return;}completion.hidden=false;complete.hidden=true;edit.hidden=true;(completion.querySelector('input,button'))?.focus()};
+  const back=wrap.querySelector('[data-view-back]');if(back)back.onclick=()=>{if(dirty()&&!confirm('Отменить заполнение результата?'))return;close(true);openTaskEdit(t,onDone)};
+  const rebook=wrap.querySelector('[data-rebook]');if(rebook)rebook.addEventListener('click',()=>close(true));
+  const ok=wrap.querySelector('[data-tok]');if(ok)ok.onclick=async()=>{if(busy)return;busy=true;ok.disabled=true;try{
+    await api('POST',`/api/tasks/${t.id}/done`,{result:wrap.querySelector('[data-tresult]').value.trim()});
+    toast('Задача завершена');close(true);onDone&&onDone();
+  }catch(e){busy=false;ok.disabled=false;wrap.querySelector('[data-view-error]').textContent=e.message;}};
+  wireErpOutcome(wrap,t,t.id,'t',()=>{close(true);onDone&&onDone()});
+}
+
+function openTaskEditor(t, onDone, focus) {
   if (!t) return;
   const client=!!(t.client_task||t.student_id||t.student?.id||t.family_id);
   const staff = ((S.meta && S.meta.staff) || []).slice().sort((a, b) => (a.role === "coach") - (b.role === "coach") || a.name.localeCompare(b.name));
@@ -153,17 +199,16 @@ function openTaskEdit(t, onDone, focus) {
     ${t.previous_text?`<button type="button" class="linkish small" data-task-restore>↶ Вернуть предыдущий текст</button>`:''}
     <div class="need-err small"></div>
     <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap"><button class="btn primary" style="flex:1">Сохранить</button>
-      ${t.kind === "rebook" ? `<button type="button" class="btn" data-rebook="${t.id}" data-tclose>Итог звонка</button>` : t.erp_outcomes?.length?'':`<button type="button" class="btn" data-tfinish>Выполнено</button>`}
       <button type="button" class="btn danger" data-task-delete>Удалить</button>
       <button type="button" class="btn" data-tcancelf style="flex:0 0 auto">Отмена</button></div>
-    ${erpOutcomePicker(t,false,'t')}</form>`;
+    </form>`;
   document.body.appendChild(wrap);
   const f = wrap.querySelector("form");
   const original=()=>JSON.stringify({title:f.elements.title.value,note:f.elements.note.value,due:f.elements.due_at.value,assignee:f.elements.assignee_id?.value||'',priority:!!f.elements.priority?.checked});
   const initial=original();
   const close = (force=false) => {if(!force&&original()!==initial&&!confirm('Есть несохранённые изменения. Закрыть задачу и потерять их?'))return false;wrap.remove();return true};
   setTimeout(() => (focus === "assignee" && f.elements.assignee_id ? f.elements.assignee_id : f.elements.title).focus(), 50);
-  wrap.querySelector("[data-tcancelf]").onclick = ()=>close();
+  wrap.querySelector("[data-tcancelf]").onclick = ()=>{if(close())openTaskEdit(t,onDone)};
   wrap.addEventListener("click", (e) => { if (e.target === wrap) close(); });
   const cl = wrap.querySelector("[data-tclose]"); if (cl) cl.addEventListener("click", () => setTimeout(()=>close(), 0));
   wrap.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
@@ -174,14 +219,6 @@ function openTaskEdit(t, onDone, focus) {
     try{await api('DELETE',`/api/tasks/${t.id}`);toast('Задача удалена');close(true);onDone&&onDone()}
     catch(error){button.disabled=false;wrap.querySelector('.need-err').textContent=error.message;fail(error)}
   };
-  const fin = wrap.querySelector("[data-tfinish]");
-  if (fin) fin.onclick = () => { const b = wrap.querySelector(".task-done"); b.hidden = false; b.querySelector("input").focus(); };
-  const ok = wrap.querySelector("[data-tok]");
-  if (ok) ok.onclick = async () => {
-    try { await api("POST", `/api/tasks/${t.id}/done`, { result: wrap.querySelector("[data-tresult]").value }); toast("Задача выполнена"); close(true); onDone && onDone(); }
-    catch (e) { wrap.querySelector(".need-err").textContent = e.message; }
-  };
-  wireErpOutcome(wrap,t,t.id,'t',()=>{close(true);onDone&&onDone()});
   f.onsubmit = async (e) => {
     e.preventDefault();
     const body = { title: f.elements.title.value, due_at: f.elements.due_at.value, note: f.elements.note.value };
@@ -190,7 +227,7 @@ function openTaskEdit(t, onDone, focus) {
     try {
       const r = await api("PATCH", `/api/tasks/${t.id}`, body);
       toast(!client && r.assignee_id !== t.assignee_id ? `Задача передана: ${r.assignee}` : "Задача сохранена");
-      close(true); onDone && onDone();
+      close(true); onDone && onDone(); openTaskEdit(r,onDone);
     } catch (err) { wrap.querySelector(".need-err").textContent = err.message; }
   };
 }
@@ -239,7 +276,6 @@ function wireCardTasks(root, reload, sid) {
   root.querySelectorAll("[data-ctask]").forEach((el) => {
     const open = () => {
       const t = S.taskById[el.dataset.ctask];
-      if (t && ["single_remind", "single_next", "single_paid_next"].includes(t.kind) && typeof singleTaskDialog === "function") return singleTaskDialog(t, reload);
       if (["admin", "operator"].includes(S.user.role)) openTaskEdit(t, reload);
     };
     el.onclick = open; el.onkeydown = (e) => { if (e.key === "Enter") open(); };

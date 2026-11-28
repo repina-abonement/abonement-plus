@@ -2287,3 +2287,16 @@ html.theme-soft #comms-box .family-chat-feed{background:#182624}html.theme-soft 
 .erp-card-check { margin: 12px 0; }
 .erp-card-check input { width: auto; margin: 0; }
 .erp-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+
+/* Task reading, editing and completion are separate actions. */
+.task-view-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-view-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0; }
+.task-view-actions .btn { flex: 1 1 180px; white-space: normal; }
+.task-view-history { border-top: 1px solid var(--line, #dce5df); margin-top: 22px; padding-top: 12px; }
+.task-view-event { padding: 10px 0; border-bottom: 1px solid var(--line, #dce5df); }
+.task-view [data-view-completion] { margin-top: 16px; }
+.task-view .task-done { flex-wrap: wrap; }
+.task-view .task-done input { min-width: 0; flex: 1 1 180px; }
+.task-view-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.task-view-head h3 { margin: 0; }
+.task-view-head .btn { flex: 0 0 auto; }
