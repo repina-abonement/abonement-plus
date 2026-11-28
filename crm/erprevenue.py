@@ -8,6 +8,39 @@ from collections import defaultdict
 DIGEST = "2dee63dec450785aa1b282866b1bcfd43b2f80343df3c37e4839c0ffccb4db0c"
 
 
+# Owner-confirmed full refund of this historical service period. Billing is separate.
+REFUNDED_SALE = ("120486", "Абонемент (стандарт /8)", "07.11.2026", "29.11.2026")
+REFUNDED_MONTH = "2026-11"
+REFUNDED_AMOUNT = 9450
+
+
+def recognized_amount(eid, kind, start, end, amount):
+    if (eid, kind, start, end) == REFUNDED_SALE and amount == REFUNDED_AMOUNT:
+        return 0
+    return amount
+
+
+def correct_refunded_snapshot(con):
+    """Correct the existing snapshot and its two cached totals exactly once."""
+    con.execute("SAVEPOINT refunded_snapshot")
+    try:
+        rows = con.execute("""SELECT row_key, amount FROM erp_revenue_history
+            WHERE erp_id=? AND kind=? AND start=? AND end=? AND month=?""",
+            (*REFUNDED_SALE, REFUNDED_MONTH)).fetchall()
+        if len(rows) == 1 and rows[0][1] == REFUNDED_AMOUNT:
+            con.execute("UPDATE erp_revenue_history SET amount=0 WHERE row_key=?", (rows[0][0],))
+            con.execute("UPDATE erp_revenue_months SET amount=amount-? WHERE month=?",
+                        (REFUNDED_AMOUNT, REFUNDED_MONTH))
+            con.execute("""UPDATE erp_subscription_months
+                SET subscription_revenue=subscription_revenue-? WHERE month=?""",
+                (REFUNDED_AMOUNT, REFUNDED_MONTH))
+    except Exception:
+        con.execute("ROLLBACK TO refunded_snapshot")
+        raise
+    finally:
+        con.execute("RELEASE refunded_snapshot")
+
+
 def transfer(con, content, token=None):
     digest = hashlib.sha256(content.encode()).hexdigest() if isinstance(content, str) else None
     if digest == "4927fc8048ae020e82fbd66f7cb37971f038ef9e3cd8bf97db70d7d22c9629b5":
@@ -33,14 +66,15 @@ def transfer(con, content, token=None):
     next(reader)
     for file, row, eid, kind, sale, start, end, value in reader:
         month = start[6:] + "-" + start[3:5]
-        totals[month] += int(value)
+        value = recognized_amount(eid, kind, start, end, int(value))
+        totals[month] += value
         key = file + "/" + row
         candidates = links[eid]
         if kind.startswith("Абонемент"):
             identity = ("crm", next(iter(candidates))) if len(candidates) == 1 else ("erp", eid)
             holders[month].add(identity)
             subscriptions[month] += 1
-            subscription_revenue[month] += int(value)
+            subscription_revenue[month] += value
         if len(candidates) != 1 or (key in existing and existing[key] not in candidates):
             skipped.add(eid)
             missing += 1
@@ -49,8 +83,8 @@ def transfer(con, content, token=None):
             already += 1
             continue
         sid, = candidates
-        additions.append((key, sid, eid, month, kind, sale, start, end, int(value)))
-        amount += int(value)
+        additions.append((key, sid, eid, month, kind, sale, start, end, value))
+        amount += value
     signature = hashlib.sha256(json.dumps(additions).encode()).hexdigest()
     update_totals = dict(con.execute("SELECT month,amount FROM erp_revenue_months")) != totals
     metrics = [(m, len(holders[m]), subscriptions[m], subscription_revenue[m]) for m in sorted(totals)]
@@ -81,9 +115,10 @@ def assign_november_groups(con, content, token):
         key, eid, branch, label = (row[k] for k in ("Строка", "ERP ID", "Филиал", "Группа"))
         sale = con.execute("""SELECT r.*, a.group_id FROM erp_revenue_history r
             LEFT JOIN erp_revenue_groups a USING(row_key) WHERE r.row_key=? AND r.erp_id=?
-            AND r.month='2026-11' AND r.kind=? AND r.amount=?""",
-            (key, eid, row["Вид"], int(row["Выручка"]))).fetchone()
-        if not sale:
+            AND r.month='2026-11' AND r.kind=?""",
+            (key, eid, row["Вид"])).fetchone()
+        if not sale or sale["amount"] != recognized_amount(
+                eid, sale["kind"], sale["start"], sale["end"], int(row["Выручка"])):
             issues.append(f"{eid} · история продажи не найдена")
             continue
         branches = erppeople._matching_branches(con, branch)

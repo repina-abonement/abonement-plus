@@ -278,6 +278,8 @@ def init_db(con: sqlite3.Connection):
         subscription_revenue INTEGER NOT NULL)""")
     con.execute("CREATE TABLE IF NOT EXISTS erp_revenue_months (month TEXT PRIMARY KEY, amount INTEGER NOT NULL)")
     con.execute("CREATE INDEX IF NOT EXISTS erp_revenue_student ON erp_revenue_history(student_id,month)")
+    from . import erprevenue
+    erprevenue.correct_refunded_snapshot(con)
     cols = {r[1] for r in con.execute("PRAGMA table_info(groups)")}
     if "coach_id" not in cols:
         con.execute("ALTER TABLE groups ADD COLUMN coach_id INTEGER REFERENCES users(id)")
