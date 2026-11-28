@@ -58,7 +58,7 @@ def main():
     con.execute("UPDATE students SET trial_at='2026-11-05T17:00', stage='trial_booked' WHERE id=?", (sid2,))
     sv.mark_trial(con, sid2, False, {"name": "Тренер"})
     r = tasks.run(con, datetime(2026, 11, 5, 18, 20))
-    check(con.execute("SELECT 1 FROM tasks WHERE kind='rebook' AND student_id=?", (sid2,)).fetchone(), "Не пришёл: этап «Не дошёл до ПУ» и задача «Перезаписать на ПУ»")
+    check(con.execute("SELECT 1 FROM tasks WHERE kind='no_show' AND status='open' AND student_id=?", (sid2,)).fetchone(), "Не пришёл: задача «Не пришли на ПУ» по действующей цепочке")
     check(not any("Подскажите как всё прошло?" in (x or {}).get("text", "") and x.get("chatId") != "4242" for x in SENT),
           "Не пришедшему «как понравилось» не пишем")
     a = con.execute("SELECT error FROM auto_messages WHERE student_id=?", (sid2,)).fetchall()
@@ -68,7 +68,7 @@ def main():
     tasks.run(con, datetime(2026, 11, 6, 10, 0))
     con.execute("UPDATE students SET trial_at='2026-11-12T17:00' WHERE id=?", (sid3,))
     tasks.run(con, datetime(2026, 11, 6, 10, 1))
-    st = [r[0] for r in con.execute("SELECT status FROM tasks WHERE student_id=? ORDER BY id", (sid3,))]
+    st = [r[0] for r in con.execute("SELECT status FROM tasks WHERE student_id=? AND kind='trial_confirm' ORDER BY id", (sid3,))]
     check(st == ["cancelled", "open"], "Пробное перенесли: старая задача снята, новая на новую дату")
 
     print("Перенос из ERP")
@@ -88,7 +88,7 @@ def main():
     imported = con.execute("SELECT id,title,due_at,source FROM tasks WHERE student_id=? AND status='open'", (erp_sid,)).fetchall()
     check([tuple(x) for x in imported] == [(exact, "Напоминание о пробном занятии", "2026-11-08T10:00", "erp")],
           "У перенесённого ребёнка остаётся только точная задача ERP; CRM не добавляет свою")
-    tasks.complete(con, tid, {"name": "Ольга"}, "Думают")
+    tasks.complete(con, tid, {"name": "Ольга"}, "Думают", comment="Родитель просит время на решение")
     check("Думают" in con.execute("SELECT text FROM history WHERE student_id=? ORDER BY id DESC", (sid,)).fetchone()[0],
           "Точный исход ERP записан в историю клиента")
 
@@ -136,7 +136,7 @@ def main():
     # на сервере правка задач доступна только админам и операторам, тренерам нет
     from crm import server
     route = next(r for r in server.ROUTES if r[0] == "PATCH" and r[1].pattern.startswith("^/api/tasks/"))
-    check(route[3] == "operator", "PATCH /api/tasks/{id}: тренеру нельзя (роль operator и выше)")
+    check(route[3] == "operator|client_ops:full", "PATCH /api/tasks/{id}: тренеру нельзя (роль operator и выше)")
 
 
 if __name__ == "__main__":

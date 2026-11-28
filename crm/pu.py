@@ -205,8 +205,18 @@ def on_trial_mark(con, sid: int, came: bool, user: dict, now: datetime | None = 
     now = now or _now()
     s = sv.get_student_row(con, sid)
     con.execute("UPDATE students SET trial_marked_at=? WHERE id=?", (_iso(now), sid))
-    if not came and s["stage"] != "missed_trial":
-        _to_stage(con, s, "no_show", "", user, now)
+    if not came:
+        if s["stage"] != "missed_trial":
+            _to_stage(con, s, "no_show", "", user, now)
+        else:
+            # A late explicit absence replaces the provisional missing-mark event.
+            # Keep one active miss and preserve the first actual absence deadline.
+            missing = con.execute("""SELECT id FROM trial_misses WHERE student_id=?
+                AND trial_at=? AND kind='no_mark' AND undone=0 ORDER BY id DESC LIMIT 1""",
+                (sid, s["trial_at"])).fetchone()
+            if missing:
+                con.execute("UPDATE trial_misses SET undone=1 WHERE id=?", (missing["id"],))
+                _to_stage(con, s, "no_show", "", user, now)
     elif came and s["stage"] == "missed_trial":
         last = con.execute("SELECT id, kind FROM trial_misses WHERE student_id=? AND undone=0 ORDER BY id DESC LIMIT 1", (sid,)).fetchone()
         if last and last["kind"] in ("no_mark", "no_show"):
