@@ -73,8 +73,13 @@ def plan(con, eid: int, new_gid: int, start: str, weekdays=None, tariff="fixed")
                             ORDER BY month""", (eid, logic.month_of(d0))).fetchall():
         x = dict(x)
         unit = x["price"] / x["lessons"] if x["lessons"] else x["per_lesson"]
-        keep = [d for d in _dates(con, e["group_id"], old_days, x["month"], vac) if d < d0]
-        new = [d for d in _dates(con, g["id"], nd, x["month"], vac) if d >= d0]
+        # Individually excluded dates belong to the sold subscription, not only
+        # to the child's global vacations. Keep them excluded on both sides.
+        excluded = set(json.loads(x["excluded_dates"] or "[]"))
+        keep = [d for d in _dates(con, e["group_id"], old_days, x["month"], vac)
+                if d < d0 and d.isoformat() not in excluded]
+        new = [d for d in _dates(con, g["id"], nd, x["month"], vac)
+               if d >= d0 and d.isoformat() not in excluded]
         keep_price = round(unit * len(keep)) if keep else 0
         new_price = math.ceil(unit * len(new) - 1e-9)
         months.append({"sub_id": x["id"], "month": x["month"], "label": logic.month_label(x["month"]), "status": x["status"],
