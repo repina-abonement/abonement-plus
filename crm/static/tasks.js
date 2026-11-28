@@ -136,13 +136,21 @@ function renewalReasonHtml(task) {
   return task.renewal_reason ? `<details><summary>Как рассчитан срок</summary><div class="small muted" style="white-space:pre-line">${esc(task.renewal_reason)}</div></details>` : "";
 }
 function taskViewHistory(t) {
-  const events = [];
-  if (t.created_at) events.push({ts:t.created_at,text:'Задача создана',user_name:t.created_by||''});
-  if (t.previous_text) events.push({ts:t.previous_text.changed_at,text:'Изменены название или описание задачи',user_name:t.previous_text.changed_by||''});
-  if (t.done_at) events.push({ts:t.done_at,text:t.status==='cancelled'?'Задача отменена':`Задача завершена${t.result?': '+t.result:''}`,user_name:''});
-  const rows = list => list.map(x=>`<article class="task-view-event"><div class="small muted">${esc(dtWhen(x.ts))}${x.user_name?' · '+esc(x.user_name):''}</div><div class="task-view-text">${esc(x.text)}</div></article>`).join('');
-  return `<section class="task-view-history"><h4>История задачи</h4>${events.length?rows(events.sort((a,b)=>String(b.ts).localeCompare(String(a.ts)))):'<p class="small muted">Записей пока нет</p>'}
-    ${(t.client_history||[]).length?`<h4>Последние события клиента</h4>${rows(t.client_history)}`:''}</section>`;
+  return `<section class="task-view-history"><h4>История работы с клиентом</h4><div data-task-history aria-live="polite">Загрузка истории…</div><button type="button" class="btn sm" data-task-history-more hidden>Показать более ранние записи</button></section>`;
+}
+
+async function loadTaskViewHistory(wrap,t) {
+  const host=wrap.querySelector('[data-task-history]'),more=wrap.querySelector('[data-task-history-more]');
+  let offset=0,loaded=0;
+  const load=async()=>{more.disabled=true;try{
+    const result=await api('GET',`/api/tasks/${t.id}/history?offset=${offset}`);
+    if(!host.isConnected)return;
+    if(offset===0)host.textContent='';
+    for(const row of result.rows||[]){host.insertAdjacentHTML('beforeend',`<article class="task-view-event"><div class="task-view-text">${esc(row.text)}</div><div class="small muted">${esc(row.user_name||'CRM')} · ${esc(dtWhen(row.ts))}</div></article>`);loaded++;}
+    offset=result.next_offset;more.hidden=offset==null;
+    if(!loaded)host.textContent=offset==null?'Записей пока нет':'В этой части истории нет рабочих событий';
+  }catch(e){if(offset===0)host.textContent='Не удалось загрузить историю: '+e.message;more.hidden=false;more.textContent='Повторить загрузку';}finally{more.disabled=false}};
+  more.onclick=load;await load();
 }
 
 // All task-card entry points start in read mode. Editing never completes a task.
@@ -163,6 +171,7 @@ function openTaskEdit(t, onDone, focus) {
     <section data-view-completion hidden><h4>${t.erp_outcomes?.length?'Следующий шаг':'Результат выполнения'}</h4>${erpOutcomePicker(t,false,'t')}<button type="button" class="btn sm" data-view-back>Назад к задаче</button><div class="need-err" data-view-error></div></section>`:''}
     ${taskViewHistory(t)}</section>`;
   document.body.appendChild(wrap);
+  loadTaskViewHistory(wrap,t);
   const completion=wrap.querySelector('[data-view-completion]');
   let busy=false;
   const dirty=()=>completion&&!completion.hidden&&[...completion.querySelectorAll('input,textarea')].some(x=>x.value.trim());

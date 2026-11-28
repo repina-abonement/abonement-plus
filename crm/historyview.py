@@ -116,3 +116,44 @@ def journey(con, student):
         add('next_step',task['created_at'] or task['due_at'],'Следующий шаг',detail)
     order={'lead':0,'trial_booked':10,'trial_attendance':20,'trial_result':30,'next_step':90}
     return sorted(rows,key=lambda row:(row['ts'],order.get(row['key'],50),row['key']))
+
+
+def readable_event(row):
+    """Business event only: never send the raw import payload to a task window."""
+    item = present(row)
+    if item.get('technical_only') or item.get('kind') == 'archived_note':
+        return None
+    text = item.get('display_text') or item.get('text') or ''
+    if re.match(r'^\s*(?:Импорт|Перенос истории|Служебн|Синхронизац|Выгрузка|Архив ERP)', text, re.I):
+        return None
+    from .services import SALES_LABELS
+    for code, label in SALES_LABELS.items():
+        text = re.sub(r'\b' + re.escape(code) + r'\b', label, text)
+    text = re.sub(r'Текущий раздел:\s*\w+;\s*этап:\s*[^.\n]+[.]?', '', text)
+    text = re.sub(r'\b(?:student_id|family_id|task_id|subscription_id|erp_id|source_key)\s*[:=]\s*[^\s;,]+', '', text)
+    text = re.sub(r'(?:Следующий шаг ERP:)', 'Следующий шаг:', text)
+    text = text.strip()
+    if not text:
+        return None
+    return {'id': item.get('id'), 'ts': item.get('ts'),
+            'text': text, 'user_name': item.get('display_author') or item.get('user_name') or 'CRM'}
+
+
+def task_timeline(con, tid, user, offset=0):
+    from . import planner
+    from .services import ApiError
+    task = con.execute('SELECT * FROM tasks WHERE id=?', (tid,)).fetchone()
+    if not task:
+        raise ApiError('Задача не найдена', 404)
+    if not task['student_id']:
+        if not planner.can_view_plan(con, user, task['assignee_id']):
+            raise ApiError('Недостаточно прав', 403)
+        return {'rows': [], 'next_offset': None}
+    offset = max(0, int(offset))
+    rows = con.execute('''SELECT id,ts,kind,text,user_name FROM history
+        WHERE student_id=? AND kind!='archived_note'
+        AND NOT EXISTS (SELECT 1 FROM erp_full_history_corrections c
+            WHERE c.history_id=history.id AND c.assigned_student_id IS NULL)
+        ORDER BY ts DESC,id DESC LIMIT 101 OFFSET ?''', (task['student_id'], offset)).fetchall()
+    return {'rows': [event for row in rows[:100] if (event := readable_event(row))],
+            'next_offset': offset + 100 if len(rows) > 100 else None}

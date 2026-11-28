@@ -3477,6 +3477,12 @@ def tasks_manual(con, h, user, body, q):
     return tasks.manual_board(con, user, q.get("scope", "mine"))
 
 
+@route("GET", "/api/tasks/{tid}/history", role="operator|client_ops:full")
+def task_history(con, h, user, body, q, tid):
+    from . import historyview
+    return mx(historyview.task_timeline, con, int(tid), user, q.get("offset") or 0)
+
+
 @route("PATCH", "/api/tasks/{tid}", role="operator|client_ops:full")
 def task_edit(con, h, user, body, q, tid):
     """Правка задачи: что сделать, срок, заметка, исполнитель. Тренерам нельзя (role=operator)."""
